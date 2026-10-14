@@ -1,0 +1,21 @@
+# 本地配置与密钥
+.env
+*.key
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# 前端
+node_modules/
+frontend/dist/
+
+# 数据与小说原文（测试夹具除外）
+data/
+*.txt
+!backend/tests/fixtures/**/*.txt
+
+.DS_Store

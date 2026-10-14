@@ -1,0 +1,56 @@
+import uuid
+from datetime import datetime
+
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Identity, Integer, String, Text, func
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.models.base import Base, Timestamps, UUIDPk
+
+ROLES = ("default", "chief", "lorekeeper", "writer", "reviewer")
+
+
+class LlmProfile(UUIDPk, Timestamps, Base):
+    """一套模型配置（接口地址 + 模型 + 参数）。"""
+
+    __tablename__ = "llm_profiles"
+
+    name: Mapped[str] = mapped_column(String(100), unique=True)
+    # openai_compatible：OpenAI 兼容接口；demo：内置演示模型，不联网
+    provider: Mapped[str] = mapped_column(String(30), default="openai_compatible")
+    base_url: Mapped[str] = mapped_column(String(500), default="")
+    api_key_encrypted: Mapped[str | None] = mapped_column(Text)
+    model: Mapped[str] = mapped_column(String(200), default="")
+    temperature: Mapped[float] = mapped_column(Float, default=0.8)
+    max_tokens: Mapped[int | None] = mapped_column(Integer)
+    # function_calling / json_mode / json_schema
+    structured_method: Mapped[str] = mapped_column(String(30), default="function_calling")
+    timeout_s: Mapped[int] = mapped_column(Integer, default=300)
+
+
+class RoleAssignment(Base):
+    """编辑部角色 → 模型配置。没有单独分配的角色使用 default。"""
+
+    __tablename__ = "role_assignments"
+
+    role: Mapped[str] = mapped_column(String(30), primary_key=True)
+    profile_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("llm_profiles.id", ondelete="SET NULL"))
+
+
+class LlmCall(Base):
+    """每次模型调用的耗时与用量，供界面展示。"""
+
+    __tablename__ = "llm_calls"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    job_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("jobs.id", ondelete="SET NULL"), index=True)
+    book_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("books.id", ondelete="SET NULL"), index=True)
+    role: Mapped[str] = mapped_column(String(30))
+    profile_name: Mapped[str] = mapped_column(String(100), default="")
+    model: Mapped[str] = mapped_column(String(200), default="")
+    purpose: Mapped[str] = mapped_column(String(100), default="")
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+    ok: Mapped[bool] = mapped_column(Boolean, default=True)
+    error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
