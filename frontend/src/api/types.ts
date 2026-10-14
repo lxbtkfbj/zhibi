@@ -2,12 +2,23 @@ export type JobStatus = 'queued' | 'running' | 'waiting_author' | 'succeeded' | 
 export type BookStatus = 'setting_up' | 'awaiting_approval' | 'ready' | 'writing'
 export type Speaker = 'chief' | 'lorekeeper' | 'writer' | 'reviewer' | 'author' | 'system'
 
+export interface InterviewQuestion {
+  question: string
+  options: string[]
+  recommended: number
+}
+
+/** 等作者处理的内容：setup_questions 动笔前的提问；setup_review 开书方案拍板。 */
+export type Pending =
+  | { kind: 'setup_questions'; questions: InterviewQuestion[] }
+  | { kind: 'setup_review'; round: number; title?: string }
+
 export interface Job {
   id: string
   book_id: string
   kind: string
   status: JobStatus
-  pending: { kind: string; round: number; title?: string } | null
+  pending: Pending | null
   error: string
   created_at: string
   updated_at: string
@@ -23,8 +34,28 @@ export interface Concept {
   selling_points?: string[]
   protagonist_hook?: string
   tone?: string
+  /** 全书计划总字数，单位万字 */
+  target_length?: number
   target_volumes?: number
   chapter_words?: number
+}
+
+export interface Milestone {
+  index: number
+  title: string
+  volume: number
+  event: string
+  change: string
+}
+
+/** 主线骨架：开篇、结局与中间的关键转折。 */
+export interface Spine {
+  core_conflict?: string
+  theme?: string
+  protagonist_arc?: string
+  opening?: string
+  ending?: string
+  milestones?: Milestone[]
 }
 
 export interface BookSummary {
@@ -43,6 +74,7 @@ export interface BookSummary {
 export interface BookDetail extends BookSummary {
   style_reference: string
   concept: Concept
+  spine: Spine
   active_job: Job | null
 }
 
@@ -64,6 +96,8 @@ export interface Volume {
   title: string
   summary: string
   goal: string
+  /** 本卷预计章数（拆剧情单元之前的规划） */
+  chapter_count: number
   status: 'planned' | 'detailed' | 'approved'
   units: PlotUnit[]
 }
@@ -133,7 +167,8 @@ export interface MeetingMessage {
   job_id: string | null
   speaker: Speaker
   speaker_name: string
-  kind: 'speech' | 'artifact' | 'status' | 'decision' | 'error'
+  /** note：作者在编辑部工作时插的话 */
+  kind: 'speech' | 'artifact' | 'status' | 'decision' | 'error' | 'note'
   content: string
   payload: { type: string; data: unknown } | null
   created_at: string | null

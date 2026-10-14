@@ -33,12 +33,13 @@ LOCK_RENEW_S = 20
 GRAPHS: dict[str, tuple[Callable[[], StateGraph], Callable[[dict], dict]]] = {
     "book_setup": (
         book_setup.build_setup_graph,
-        lambda p: book_setup.initial_state(p.get("idea", ""), p.get("style_reference", "")),
+        lambda p: book_setup.initial_state(p.get("idea", ""), p.get("style_reference", ""), bool(p.get("ask"))),
     ),
 }
 
 BOOK_STATUS_WHILE_RUNNING = {"book_setup": "setting_up"}
-BOOK_STATUS_WHILE_WAITING = {"book_setup": "awaiting_approval"}
+# 按等待作者处理的内容决定书的状态：回答动笔前的提问时，方案还没出来
+BOOK_STATUS_WHILE_WAITING = {"setup_review": "awaiting_approval", "setup_questions": "setting_up"}
 
 
 def lock_key(job_id: uuid.UUID | str) -> str:
@@ -148,13 +149,14 @@ async def _run(
         return
 
     if snapshot.interrupts:
+        pending = snapshot.interrupts[0].value
         await _update_job(
             sm,
             redis,
             job_id,
-            BOOK_STATUS_WHILE_WAITING.get(kind),
+            BOOK_STATUS_WHILE_WAITING.get(pending.get("kind", "")),
             status="waiting_author",
-            pending=snapshot.interrupts[0].value,
+            pending=pending,
         )
     else:
         await _update_job(sm, redis, job_id, status="succeeded", pending=None, finished_at=datetime.now(UTC))

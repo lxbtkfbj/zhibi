@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import type { BookStatus, JobStatus, MeetingMessage, Speaker } from '../api/types'
+import type { BookStatus, Job, MeetingMessage, Speaker } from '../api/types'
 
 export const STAGES = [
   { key: 'concept', label: '概念' },
   { key: 'lore', label: '设定' },
+  { key: 'spine', label: '主线' },
   { key: 'outline', label: '大纲' },
   { key: 'critique', label: '审稿' },
   { key: 'approval', label: '拍板' },
@@ -13,21 +14,25 @@ export const STAGES = [
 export type StageKey = (typeof STAGES)[number]['key']
 export type StageState = 'done' | 'current' | 'todo'
 
+const DRAFT_STAGES = ['concept', 'lore', 'spine', 'outline', 'critique']
+
 /** 根据书和任务状态、会议里已交付的产出，算出流程进度。 */
-export function computeStages(book: BookStatus, job: JobStatus | null | undefined, messages: MeetingMessage[]) {
+export function computeStages(book: BookStatus, job: Job | null | undefined, messages: MeetingMessage[]) {
+  const approval = STAGES.findIndex((s) => s.key === 'approval')
   let done = 0
-  if (book === 'ready' || book === 'writing') done = 5
-  else if (job === 'waiting_author' || book === 'awaiting_approval') done = 4
+  if (book === 'ready' || book === 'writing') done = approval + 1
+  else if ((job?.status === 'waiting_author' && job.pending?.kind !== 'setup_questions') || book === 'awaiting_approval') done = approval
   else {
     const lastJob = [...messages].reverse().find((m) => m.job_id)?.job_id
     const delivered = new Set(
       messages.filter((m) => m.kind === 'artifact' && m.job_id === lastJob).map((m) => m.payload?.type),
     )
-    for (const key of ['concept', 'lore', 'outline', 'critique']) {
+    for (const key of DRAFT_STAGES) {
       if (delivered.has(key)) done += 1
       else break
     }
-    done = Math.min(done, 3)
+    // 审稿意见出来后可能还要自动修改一轮，停在审稿这一步
+    done = Math.min(done, DRAFT_STAGES.length - 1)
   }
   return STAGES.map((s, i) => ({ ...s, state: (i < done ? 'done' : i === done ? 'current' : 'todo') as StageState }))
 }

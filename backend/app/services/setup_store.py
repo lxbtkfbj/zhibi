@@ -34,18 +34,17 @@ CHARACTER_FIELDS = (
 UNIT_FIELDS = ("index", "title", "chapter_count", "goal", "conflict", "climax", "outcome", "key_events")
 
 
-async def save_setup(
-    session: AsyncSession,
-    book_id: uuid.UUID,
-    concept: dict[str, Any],
-    lore: dict[str, Any],
-    outline: dict[str, Any],
-) -> None:
-    """开书阶段整体替换：设定库与大纲以本次方案为准（方案本身已包含作者的手动修改）。"""
+async def save_setup(session: AsyncSession, book_id: uuid.UUID, setup: dict[str, dict[str, Any]]) -> None:
+    """开书阶段整体替换：设定库与大纲以本次方案为准（方案本身已包含作者的手动修改）。
+
+    setup 含 concept / lore / spine / outline 四部分，格式与 AI 产出一致。
+    """
     book = await session.get(Book, book_id)
     if book is None:
         raise ValueError("书不存在")
+    concept, lore, outline = setup.get("concept") or {}, setup.get("lore") or {}, setup.get("outline") or {}
     book.concept = concept
+    book.spine = setup.get("spine") or {}
     book.title = concept.get("title") or book.title
     book.genre = concept.get("genre", "")
 
@@ -91,6 +90,7 @@ async def save_setup(
             title=v.get("title", ""),
             summary=v.get("summary", ""),
             goal=v.get("goal", ""),
+            chapter_count=v.get("chapter_count") or 0,
             status="detailed" if is_first and units else "planned",
         )
         session.add(volume)
@@ -111,7 +111,7 @@ async def save_setup(
     await session.flush()
 
 
-async def load_setup(session: AsyncSession, book_id: uuid.UUID) -> tuple[dict, dict, dict]:
+async def load_setup(session: AsyncSession, book_id: uuid.UUID) -> dict[str, dict]:
     """从数据库读出当前方案（含作者的手动修改），格式与 AI 产出一致。"""
     book = await session.get(Book, book_id)
     if book is None:
@@ -168,14 +168,17 @@ async def load_setup(session: AsyncSession, book_id: uuid.UUID) -> tuple[dict, d
         ],
     }
     outline = {
-        "volumes": [{"index": v.index, "title": v.title, "summary": v.summary, "goal": v.goal} for v in volumes],
+        "volumes": [
+            {"index": v.index, "title": v.title, "summary": v.summary, "goal": v.goal, "chapter_count": v.chapter_count}
+            for v in volumes
+        ],
         "first_volume_units": first_units,
         "foreshadowings": [
             {"description": f.description, "plant_plan": f.plant_plan, "payoff_plan": f.payoff_plan}
             for f in foreshadowings
         ],
     }
-    return dict(book.concept or {}), lore, outline
+    return {"concept": dict(book.concept or {}), "lore": lore, "spine": dict(book.spine or {}), "outline": outline}
 
 
 async def snapshot(

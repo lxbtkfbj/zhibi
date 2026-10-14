@@ -19,6 +19,8 @@ class Book(UUIDPk, Timestamps, Base):
     genre: Mapped[str] = mapped_column(String(100), default="")
     # 主编定下的概念：卖点、主角钩子、基调等
     concept: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # 主线骨架：开篇、结局、全书关键转折
+    spine: Mapped[dict] = mapped_column(JSONB, default=dict)
     # setting_up / awaiting_approval / ready / writing
     status: Mapped[str] = mapped_column(String(30), default="setting_up")
 
@@ -36,6 +38,8 @@ class Volume(UUIDPk, Timestamps, Base):
     title: Mapped[str] = mapped_column(String(200))
     summary: Mapped[str] = mapped_column(Text, default="")
     goal: Mapped[str] = mapped_column(Text, default="")
+    # 本卷预计章数（拆剧情单元之前的规划）
+    chapter_count: Mapped[int] = mapped_column(Integer, default=0)
     # planned：只有概要；detailed：已拆剧情单元；approved：作者已批准
     status: Mapped[str] = mapped_column(String(20), default="planned")
 

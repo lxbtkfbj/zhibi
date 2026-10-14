@@ -2,7 +2,7 @@ import clsx from 'clsx'
 import { AlertTriangle, ChevronDown } from 'lucide-react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
-import type { Concept, MeetingMessage, Speaker } from '../../api/types'
+import type { Concept, InterviewQuestion, MeetingMessage, Speaker, Spine } from '../../api/types'
 import { TypingDots } from '../../components/ui'
 import { ROLE_META } from '../../lib/roles'
 import { isFresh, useTypewriter } from '../../lib/team'
@@ -42,10 +42,10 @@ function time(iso: string | null) {
 
 interface LoreData {
   world_entries: { category: string; name: string }[]
-  characters: { name: string; role_type: string }[]
+  characters: { name: string; role_type: string; abilities?: string; goal?: string }[]
 }
 interface OutlineData {
-  volumes: { index: number; title: string; summary: string }[]
+  volumes: { index: number; title: string; summary: string; chapter_count?: number }[]
   first_volume_units: { index: number; title: string; chapter_count: number }[]
 }
 interface CritiqueData {
@@ -54,11 +54,49 @@ interface CritiqueData {
   issues: { target: string; problem: string; suggestion: string; severity: 'high' | 'medium' | 'low' }[]
 }
 
-const TARGET_NAME: Record<string, string> = { concept: '概念', lore: '世界观与人物', outline: '大纲' }
+const TARGET_NAME: Record<string, string> = { concept: '概念', lore: '世界观与人物', spine: '主线骨架', outline: '大纲' }
 const SEVERITY: Record<string, string> = { high: '严重', medium: '中等', low: '轻微' }
 
 function ArtifactBody({ message }: { message: MeetingMessage }) {
   const { type, data } = message.payload ?? { type: '', data: null }
+  if (type === 'questions') {
+    const questions = data as InterviewQuestion[]
+    return (
+      <ol className="space-y-2">
+        {questions.map((q, i) => (
+          <li key={i}>
+            <p className="text-ink">
+              {i + 1}. {q.question}
+            </p>
+            <p className="text-ink-3">{q.options.map((o, j) => (j === q.recommended ? `${o}（推荐）` : o)).join(' / ')}</p>
+          </li>
+        ))}
+      </ol>
+    )
+  }
+  if (type === 'spine') {
+    const sp = data as Spine
+    return (
+      <div className="space-y-2 text-ink-2">
+        <p>
+          <span className="font-medium text-ink">开篇：</span>
+          {sp.opening}
+        </p>
+        <ol className="space-y-1 border-l border-line-2 pl-3">
+          {sp.milestones?.map((m) => (
+            <li key={m.index}>
+              <span className="font-medium text-chief">{m.title}</span>
+              <span className="text-xs text-ink-3">（第{m.volume}卷）</span> {m.event}
+            </li>
+          ))}
+        </ol>
+        <p>
+          <span className="font-medium text-seal">结局：</span>
+          {sp.ending}
+        </p>
+      </div>
+    )
+  }
   if (type === 'concept') {
     const c = data as Concept
     return (
@@ -77,8 +115,15 @@ function ArtifactBody({ message }: { message: MeetingMessage }) {
   }
   if (type === 'lore') {
     const l = data as LoreData
+    const hero = l.characters.find((c) => c.role_type === '主角')
     return (
       <div className="space-y-2">
+        {hero && (
+          <p className="text-ink-2">
+            <span className="font-medium text-ink">主角 {hero.name}</span>
+            {hero.abilities && <>：{hero.abilities}</>}
+          </p>
+        )}
         <div className="flex flex-wrap gap-1.5">
           {l.characters.map((c) => (
             <span key={c.name} className="rounded-full bg-lore-soft px-2.5 py-0.5 text-lore">
@@ -97,7 +142,8 @@ function ArtifactBody({ message }: { message: MeetingMessage }) {
       <div className="space-y-1.5 text-ink-2">
         {o.volumes.map((v) => (
           <p key={v.index}>
-            <span className="font-medium text-ink">第{v.index}卷《{v.title}》</span> {v.summary}
+            <span className="font-medium text-ink">第{v.index}卷《{v.title}》</span>
+            {v.chapter_count ? <span className="text-xs text-ink-3">约 {v.chapter_count} 章</span> : null} {v.summary}
           </p>
         ))}
       </div>
@@ -137,8 +183,11 @@ function ArtifactBody({ message }: { message: MeetingMessage }) {
   return null
 }
 
+// 审稿意见、主线骨架、修改分工这类需要作者留意的，默认展开；提问在页面中间作答，这里收起
+const OPEN_BY_DEFAULT = new Set(['critique', 'spine', 'triage'])
+
 function ArtifactCard({ message }: { message: MeetingMessage }) {
-  const [open, setOpen] = useState(message.payload?.type === 'critique')
+  const [open, setOpen] = useState(OPEN_BY_DEFAULT.has(message.payload?.type ?? ''))
   return (
     <div className="overflow-hidden rounded-xl border border-line bg-card shadow-[var(--shadow-paper)]">
       <button onClick={() => setOpen(!open)} className="flex w-full items-center justify-between gap-2 px-3.5 py-2.5 text-left text-sm">
@@ -201,7 +250,7 @@ function MessageRow({ message, live }: { message: MeetingMessage; live: boolean 
       <div className="flex justify-end gap-2.5">
         <div className="max-w-[85%]">
           <p className="mb-1 text-right text-xs text-ink-3">
-            {message.kind === 'decision' ? '作者拍板' : '作者'} · {time(message.created_at)}
+            {{ decision: '作者拍板', note: '作者插话' }[message.kind as string] ?? '作者'} · {time(message.created_at)}
           </p>
           <div className="rounded-2xl rounded-tr-md bg-ink px-3.5 py-2.5 text-[14px] leading-relaxed whitespace-pre-wrap text-paper-2 shadow-[0_8px_18px_-10px_rgb(38_35_32/0.6)]">
             {message.content}

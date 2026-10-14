@@ -62,7 +62,7 @@ async def create_book(
     book = Book(idea=body.idea.strip(), style_reference=body.style_reference.strip(), source="new", status="setting_up")
     session.add(book)
     await session.flush()
-    job = jobs.new_setup_job(book)
+    job = jobs.new_setup_job(book, ask=body.ask)
     session.add(job)
     await session.commit()
     await session.refresh(book)
@@ -98,6 +98,8 @@ async def update_book(
     if body.concept is not None:
         book.concept = {**(book.concept or {}), **body.concept}
         book.title = book.concept.get("title") or book.title
+    if body.spine is not None:
+        book.spine = {**(book.spine or {}), **body.spine}
     await session.commit()
     await session.refresh(book)
     return await detail(session, book)

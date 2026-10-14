@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { ArrowRight, Feather, Plus, Sparkles, Trash2 } from 'lucide-react'
+import { ArrowRight, Check, Feather, MessageCircleQuestion, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { motion, useReducedMotion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
@@ -7,8 +7,18 @@ import { useBooks, useCreateBook, useDeleteBook, useProfiles } from '../api/hook
 import type { BookSummary } from '../api/types'
 import { BookCover } from '../components/BookCover'
 import { Cloud, Diamond, FretDivider, InkMountains } from '../components/decor'
-import { Badge, Button, ErrorText, Reveal, Skeleton, Spinner } from '../components/ui'
+import { Badge, Button, ErrorText, Modal, Reveal, Skeleton, Spinner } from '../components/ui'
 import { cleanTitle, displayStatus, greeting } from '../lib/status'
+
+const ASK_KEY = 'zhibi:ask-first'
+
+function readAskPref() {
+  try {
+    return localStorage.getItem(ASK_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
 
 const IDEAS = [
   '一个能看见别人剩余寿命的杂役弟子，在吃人的宗门里步步为营',
@@ -18,10 +28,11 @@ const IDEAS = [
   '重生回高考前一晚，这次我只想安安静静当个学渣',
 ]
 
-function Composer() {
+function Composer({ autoFocus, flat }: { autoFocus?: boolean; flat?: boolean }) {
   const [idea, setIdea] = useState('')
   const [style, setStyle] = useState('')
   const [showStyle, setShowStyle] = useState(false)
+  const [ask, setAskState] = useState(readAskPref)
   const [placeholder, setPlaceholder] = useState(0)
   const create = useCreateBook()
   const navigate = useNavigate()
@@ -36,19 +47,32 @@ function Composer() {
   }, [])
 
   useEffect(() => {
-    const focus = () => ref.current?.focus()
-    window.addEventListener('zhibi:new-book', focus)
-    return () => window.removeEventListener('zhibi:new-book', focus)
-  }, [])
+    if (autoFocus) ref.current?.focus()
+  }, [autoFocus])
+
+  const setAsk = (value: boolean) => {
+    setAskState(value)
+    try {
+      localStorage.setItem(ASK_KEY, value ? '1' : '0')
+    } catch {
+      /* 浏览器禁用存储时忽略 */
+    }
+  }
 
   const submit = async () => {
-    if (!ready) return
-    const result = await create.mutateAsync({ idea: idea.trim(), style_reference: style.trim() })
+    // 快捷键会绕过按钮的禁用状态，这里再拦一次，避免重复建书
+    if (!ready || create.isPending) return
+    const result = await create.mutateAsync({ idea: idea.trim(), style_reference: style.trim(), ask })
     navigate(`/books/${result.book.id}`)
   }
 
   return (
-    <div className="paper relative overflow-hidden p-2 transition-shadow focus-within:shadow-[var(--shadow-lift)]">
+    <div
+      className={clsx(
+        'relative overflow-hidden p-2',
+        flat ? 'rounded-2xl bg-card ring-1 ring-line' : 'paper transition-shadow focus-within:shadow-[var(--shadow-lift)]',
+      )}
+    >
       <textarea
         ref={ref}
         value={idea}
@@ -82,6 +106,18 @@ function Composer() {
           <Sparkles className="size-3.5" />
           给我一个灵感
         </button>
+        <button
+          onClick={() => setAsk(!ask)}
+          aria-pressed={ask}
+          title="篇幅、主角名字、金手指、结局……主编动笔前先跟你对一下，免得写完整套方案才发现方向不对"
+          className={clsx(
+            'flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[13px] transition-colors',
+            ask ? 'bg-chief-soft text-chief' : 'text-ink-3 hover:bg-line/50 hover:text-ink',
+          )}
+        >
+          {ask ? <Check className="size-3.5" /> : <MessageCircleQuestion className="size-3.5" />}
+          动笔前先问我
+        </button>
         <span className="ml-auto hidden text-xs text-ink-3 sm:inline">Ctrl + Enter</span>
         <Button variant="seal" size="lg" onClick={submit} loading={create.isPending} disabled={!ready}>
           交给编辑部
@@ -97,6 +133,20 @@ function Composer() {
         <ErrorText error={create.error} />
       </div>
     </div>
+  )
+}
+
+function NewBookDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  return (
+    <Modal open={open} onClose={onClose} title="开一本新书" wide>
+      <p className="mb-4 text-sm leading-relaxed text-ink-2">
+        写下你的点子，一句话就够。编辑部会把它变成一本书的完整方案：概念、世界观与人物、主线骨架和分卷大纲。
+      </p>
+      <Composer autoFocus flat />
+      <p className="mt-3 text-xs leading-relaxed text-ink-3">
+        打开「动笔前先问我」，主编会先问你篇幅、主角、金手指、结局等几件关键的事；编辑部工作时，你也可以随时在右侧插话。
+      </p>
+    </Modal>
   )
 }
 
@@ -167,6 +217,7 @@ function ShelfBook({ book, index }: { book: BookSummary; index: number }) {
 
 export function Home() {
   const { data: books, isLoading, error } = useBooks()
+  const [creating, setCreating] = useState(false)
   const latest = books?.[0]
 
   return (
@@ -189,7 +240,7 @@ export function Home() {
           </Reveal>
           <Reveal delay={0.24}>
             <p className="mt-4 text-center text-[13px] text-ink-3">
-              主编定概念 · 设定师建世界 · 主编写大纲 · 审稿挑刺 —— 最后由你拍板
+              主编定概念 · 设定师建世界 · 主编定主线 · 主编写大纲 · 审稿挑刺 —— 随时插话，最后由你拍板
             </p>
           </Reveal>
         </div>
@@ -223,13 +274,7 @@ export function Home() {
               {books.map((book, i) => (
                 <ShelfBook key={book.id} book={book} index={i} />
               ))}
-              <button
-                onClick={() => {
-                  document.querySelector('.scroll-thin')?.scrollTo({ top: 0, behavior: 'smooth' })
-                  window.dispatchEvent(new Event('zhibi:new-book'))
-                }}
-                className="group flex flex-col items-center"
-              >
+              <button onClick={() => setCreating(true)} className="group flex flex-col items-center">
                 <div className="flex justify-center px-4 pt-6 pb-4">
                   <div className="flex aspect-[3/4] w-[150px] flex-col items-center justify-center gap-2 rounded-[4px] border-2 border-dashed border-line-2 text-ink-3 transition-all duration-300 group-hover:-translate-y-2 group-hover:border-seal/50 group-hover:text-seal">
                     <Plus className="size-7" />
@@ -248,6 +293,7 @@ export function Home() {
           </div>
         )}
       </div>
+      <NewBookDialog open={creating} onClose={() => setCreating(false)} />
     </div>
   )
 }

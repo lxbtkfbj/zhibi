@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { BookMarked, Globe2, LayoutDashboard, Lightbulb, MessagesSquare, Network, ScrollText, Settings2, Users } from 'lucide-react'
+import { BookMarked, Globe2, LayoutDashboard, Lightbulb, MessagesSquare, Network, Route, ScrollText, Settings2, Users } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useBible, useOutline } from '../../api/hooks'
@@ -62,6 +62,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         <div className="space-y-0.5">
           <Item to={base} end icon={<LayoutDashboard className={icon} />} label="概览" onNavigate={onNavigate} />
           <Item to={`${base}/concept`} icon={<Lightbulb className={icon} />} label="书的概念" onNavigate={onNavigate} />
+          <Item to={`${base}/spine`} icon={<Route className={icon} />} label="主线骨架" count={book.spine?.milestones?.length || undefined} onNavigate={onNavigate} />
           <Item to={`${base}/meeting`} icon={<MessagesSquare className={icon} />} label="会议记录" onNavigate={onNavigate} />
         </div>
         {outline && outline.volumes.length > 0 && (
@@ -83,7 +84,8 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             ))}
           </Group>
         )}
-        {bible && bible.characters.length > 0 && (
+        {/* 删光人物后也要能进设定库的其他页面 */}
+        {bible && (book.status !== 'setting_up' || bible.characters.length + bible.world_entries.length > 0) && (
           <Group title="设定库">
             <Item to={`${base}/characters`} icon={<Users className={icon} />} label="人物" count={bible.characters.length} onNavigate={onNavigate} />
             <Item to={`${base}/world`} icon={<Globe2 className={icon} />} label="世界观" count={bible.world_entries.length} onNavigate={onNavigate} />

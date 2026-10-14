@@ -14,7 +14,7 @@ from app.api.deps import SessionDep, get_book, get_redis
 from app.db import get_sessionmaker
 from app.graphs.deps import cancel_key
 from app.models import Book, Job, LlmCall, MeetingMessage
-from app.schemas import Decision, JobOut, MeetingMessageOut, UsageOut
+from app.schemas import Answers, Decision, JobOut, MeetingMessageOut, NoteIn, UsageOut
 from app.services import jobs
 from app.services.meeting import job_dict, message_dict, post_message, publish, stream_key
 
@@ -46,7 +46,7 @@ async def decide(
     job_id: uuid.UUID, body: Decision, session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)
 ) -> JobOut:
     job = await _job(session, job_id)
-    if job.status != "waiting_author":
+    if jobs.pending_kind(job) != "setup_review":
         raise HTTPException(409, "当前没有等待你拍板的内容")
     feedback = body.feedback.strip()
     if body.action == "revise" and not feedback:
@@ -58,6 +58,45 @@ async def decide(
     out = await _set_status(session, redis, job, "queued")
     jobs.enqueue(job.id, {"action": body.action, "feedback": feedback})
     return out
+
+
+@router.post("/jobs/{job_id}/answers", response_model=JobOut)
+async def answer(
+    job_id: uuid.UUID, body: Answers, session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)
+) -> JobOut:
+    """回答主编动笔前的提问。没回答的问题交给编辑部决定。"""
+    job = await _job(session, job_id)
+    if jobs.pending_kind(job) != "setup_questions":
+        raise HTTPException(409, "当前没有需要你回答的问题")
+    questions = (job.pending or {}).get("questions") or []
+    brief = [
+        f"{questions[a.index]['question']}——{a.answer.strip()}"
+        for a in body.answers
+        if a.index < len(questions) and a.answer.strip()
+    ]
+    if body.extra.strip():
+        brief.append(f"补充：{body.extra.strip()}")
+    content = "\n".join(f"· {line}" for line in brief) if brief else "这些都交给编辑部决定。"
+    await post_message(
+        session, redis, book_id=job.book_id, job_id=job.id, speaker="author", kind="decision", content=content
+    )
+    out = await _set_status(session, redis, job, "queued")
+    jobs.enqueue(job.id, {"action": "answer", "brief": brief})
+    return out
+
+
+@router.post("/books/{book_id}/notes", response_model=MeetingMessageOut, status_code=201)
+async def add_note(
+    body: NoteIn, book: Book = Depends(get_book), session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)
+) -> MeetingMessageOut:
+    """编辑部工作时插话：做完手头这一步就会处理，之后每一步都按这句话来。"""
+    job = await jobs.active_job(session, book.id)
+    if job is None or not (job.status in jobs.BUSY_STATUSES or jobs.pending_kind(job) == "setup_questions"):
+        raise HTTPException(409, "编辑部现在没在工作；方案出来后请用「提修改意见」")
+    data = await post_message(
+        session, redis, book_id=book.id, job_id=job.id, speaker="author", kind="note", content=body.content.strip()
+    )
+    return MeetingMessageOut(**data)
 
 
 @router.post("/jobs/{job_id}/resume", response_model=JobOut)

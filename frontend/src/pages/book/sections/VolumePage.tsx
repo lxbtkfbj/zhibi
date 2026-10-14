@@ -78,7 +78,7 @@ export function VolumePage() {
     )
   }
   const [label, tone] = STATUS[volume.status]
-  const chapters = volume.units.reduce((sum, u) => sum + u.chapter_count, 0)
+  const chapters = volume.units.reduce((sum, u) => sum + u.chapter_count, 0) || volume.chapter_count
 
   return (
     <div>
@@ -129,7 +129,9 @@ export function VolumePage() {
       ) : (
         <Card className="px-6 py-10 text-center">
           <p className="font-serif text-lg text-ink-2">这一卷还没有拆成剧情单元</p>
-          <p className="mt-1 text-sm text-ink-3">写到这一卷之前，主编会先把它拆细，再请你拍板。</p>
+          <p className="mt-1 text-sm text-ink-3">
+            {volume.chapter_count > 0 ? `这一卷计划约 ${volume.chapter_count} 章。` : ''}写到这一卷之前，主编会按主线骨架把它拆细，再请你拍板。
+          </p>
         </Card>
       )}
     </div>

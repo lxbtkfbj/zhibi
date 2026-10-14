@@ -77,24 +77,22 @@ export function BookLayout() {
 
   const job = book?.active_job ?? null
   const working = job?.status === 'running' || job?.status === 'queued'
-  const waiting = job?.status === 'waiting_author'
+  const asking = job?.status === 'waiting_author' && job.pending?.kind === 'setup_questions'
+  const waiting = job?.status === 'waiting_author' && !asking
 
-  // 编辑部开始工作或等你拍板时，自动展开编辑部面板
+  // 编辑部开始工作、有问题要问或等你拍板时，自动展开编辑部面板
   const lastStatus = useRef(job?.status)
   useEffect(() => {
-    if (job?.status && job.status !== lastStatus.current && (working || waiting)) setTeamOpenState(true)
+    if (job?.status && job.status !== lastStatus.current && (working || waiting || asking)) setTeamOpenState(true)
     lastStatus.current = job?.status
-  }, [job?.status, working, waiting])
+  }, [job?.status, working, waiting, asking])
 
   const celebrate = useCallback(() => {
     setStamp(true)
     setTimeout(() => setStamp(false), 1600)
   }, [])
 
-  const stages = useMemo(
-    () => (book ? computeStages(book.status, job?.status, messages) : []),
-    [book, job?.status, messages],
-  )
+  const stages = useMemo(() => (book ? computeStages(book.status, job, messages) : []), [book, job, messages])
 
   if (isLoading) {
     return (
@@ -123,7 +121,7 @@ export function BookLayout() {
     )
   }
 
-  const ctx: BookContextValue = { bookId, book, job, messages, connected, working, waiting, teamOpen, setTeamOpen, celebrate }
+  const ctx: BookContextValue = { bookId, book, job, messages, connected, working, waiting, asking, teamOpen, setTeamOpen, celebrate }
 
   return (
     <BookContext.Provider value={ctx}>
@@ -149,7 +147,7 @@ export function BookLayout() {
             aria-label="编辑部"
           >
             <Users className="size-5" />
-            {(working || waiting) && <span className="absolute top-1 right-1 size-2 rounded-full bg-seal" />}
+            {(working || waiting || asking) && <span className="absolute top-1 right-1 size-2 rounded-full bg-seal" />}
           </button>
         </header>
 
@@ -197,7 +195,7 @@ export function BookLayout() {
           )}
         </AnimatePresence>
         <Sheet open={teamSheet} onClose={() => setTeamSheet(false)} title="编辑部">
-          <TeamSheetBody />
+          <TeamSheetBody onNavigate={() => setTeamSheet(false)} />
         </Sheet>
         <StampOverlay show={stamp} />
       </div>

@@ -18,9 +18,28 @@ def format_concept(c: dict[str, Any]) -> str:
             f"核心卖点：\n{_lines(c.get('selling_points', []))}",
             f"主角钩子：{c.get('protagonist_hook', '')}",
             f"基调：{c.get('tone', '')}",
-            f"计划 {c.get('target_volumes', '')} 卷，每章约 {c.get('chapter_words', '')} 字",
+            f"篇幅：{format_length(c)}",
         ]
     )
+
+
+def planned_chapters(c: dict[str, Any]) -> int:
+    """按总字数和每章字数估算全书章数；概念里没有篇幅时返回 0。"""
+    length, words = c.get("target_length"), c.get("chapter_words")
+    if not length or not words:
+        return 0
+    return max(1, round(length * 10000 / words))
+
+
+def format_length(c: dict[str, Any]) -> str:
+    parts = []
+    if c.get("target_length"):
+        parts.append(f"全书约 {c['target_length']} 万字")
+    parts.append(f"计划 {c.get('target_volumes', '')} 卷")
+    parts.append(f"每章约 {c.get('chapter_words', '')} 字")
+    if planned_chapters(c):
+        parts.append(f"合计约 {planned_chapters(c)} 章")
+    return "，".join(parts)
 
 
 def format_character(ch: dict[str, Any]) -> str:
@@ -54,11 +73,33 @@ def format_lore(lore: dict[str, Any]) -> str:
     return f"世界观：\n{world}\n\n人物：\n{characters}\n\n人物关系：\n{relations or '（暂无）'}"
 
 
+def format_spine(spine: dict[str, Any]) -> str:
+    if not spine:
+        return "（暂无）"
+    milestones = "\n".join(
+        f"{m.get('index')}. 【{m.get('title', '')}】（约第{m.get('volume', '?')}卷）{m.get('event', '')}"
+        f"——之后：{m.get('change', '')}"
+        for m in spine.get("milestones", [])
+    )
+    return "\n".join(
+        [
+            f"核心矛盾：{spine.get('core_conflict', '')}",
+            f"主题：{spine.get('theme', '')}",
+            f"主角成长弧：{spine.get('protagonist_arc', '')}",
+            f"开篇：{spine.get('opening', '')}",
+            f"结局：{spine.get('ending', '')}",
+            f"关键转折：\n{milestones or '（暂无）'}",
+        ]
+    )
+
+
 def format_outline(outline: dict[str, Any]) -> str:
     if not outline:
         return "（暂无）"
     volumes = "\n".join(
-        f"第{v.get('index')}卷《{v.get('title')}》：{v.get('summary', '')}（卷末目标：{v.get('goal', '')}）"
+        f"第{v.get('index')}卷《{v.get('title')}》"
+        + (f"约 {v['chapter_count']} 章" if v.get("chapter_count") else "")
+        + f"：{v.get('summary', '')}（卷末目标：{v.get('goal', '')}）"
         for v in outline.get("volumes", [])
     )
     units = "\n\n".join(
@@ -79,6 +120,15 @@ def format_outline(outline: dict[str, Any]) -> str:
         for f in outline.get("foreshadowings", [])
     )
     return f"分卷：\n{volumes}\n\n第一卷剧情单元：\n{units}\n\n伏笔：\n{foreshadowings or '（暂无）'}"
+
+
+def format_requirements(brief: list[str], notes: list[str]) -> str:
+    """作者在动笔前的回答和过程中的插话：每个角色都要看到，并且必须落实。"""
+    lines = [*brief, *notes]
+    if not lines:
+        return ""
+    body = "\n".join(f"- {line}" for line in lines)
+    return f"【作者的要求（必须落实；后面的要求与前面冲突时以后面的为准）】\n{body}"
 
 
 def format_style(style_reference: str) -> str:

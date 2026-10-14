@@ -10,6 +10,7 @@ import { CharactersPage, ForeshadowingPage, RelationsPage, WorldPage } from './p
 import { ConceptPage } from './pages/book/sections/ConceptPage'
 import { MeetingLogPage } from './pages/book/sections/MeetingLogPage'
 import { Overview } from './pages/book/sections/Overview'
+import { SpinePage } from './pages/book/sections/SpinePage'
 import { VolumePage } from './pages/book/sections/VolumePage'
 import { Home } from './pages/Home'
 import { SettingsPage } from './pages/SettingsPage'
@@ -32,6 +33,7 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <Overview /> },
       { path: 'concept', element: <ConceptPage /> },
+      { path: 'spine', element: <SpinePage /> },
       { path: 'volume/:index', element: <VolumePage /> },
       { path: 'characters', element: <CharactersPage /> },
       { path: 'world', element: <WorldPage /> },

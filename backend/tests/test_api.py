@@ -236,3 +236,57 @@ async def test_sse_replays_history_then_streams(client, queued, live_server):
     assert any(m["speaker"] == "reviewer" for m in messages)  # 实时消息
     ids = [m["id"] for m in messages]
     assert ids == sorted(ids) and len(ids) == len(set(ids))
+
+
+async def test_questions_then_note_then_review(client, queued):
+    """动笔前提问 → 作者回答（含补充）→ 作者插话 → 方案出来后插话改走「提修改意见」。"""
+    res = await client.post("/api/books", json={"idea": "一个能看见别人寿命的少年", "ask": True})
+    book_id, job_id = res.json()["book"]["id"], res.json()["job"]["id"]
+    await run_queued(queued)
+
+    job = (await client.get(f"/api/jobs/{job_id}")).json()
+    assert job["status"] == "waiting_author"
+    assert job["pending"]["kind"] == "setup_questions"
+    questions = job["pending"]["questions"]
+    assert (await client.get(f"/api/books/{book_id}")).json()["status"] == "setting_up"
+    # 还没出方案，不能拍板
+    assert (await client.post(f"/api/jobs/{job_id}/decision", json={"action": "approve"})).status_code == 409
+
+    # 回答问题时也可以先插一句
+    res = await client.post(f"/api/books/{book_id}/notes", json={"content": "开局节奏一定要快"})
+    assert res.status_code == 201
+    assert res.json()["kind"] == "note"
+
+    res = await client.post(
+        f"/api/jobs/{job_id}/answers",
+        json={
+            "answers": [{"index": 0, "answer": questions[0]["options"][2]}, {"index": 1, "answer": ""}],
+            "extra": "主角叫云澈",
+        },
+    )
+    assert res.json()["status"] == "queued"
+    assert queued[-1][1]["brief"] == [f"{questions[0]['question']}——{questions[0]['options'][2]}", "补充：主角叫云澈"]
+    assert (await client.post(f"/api/jobs/{job_id}/answers", json={})).status_code == 409  # 已经答过了
+
+    await run_queued(queued)
+    job = (await client.get(f"/api/jobs/{job_id}")).json()
+    assert job["pending"]["kind"] == "setup_review"
+    book = (await client.get(f"/api/books/{book_id}")).json()
+    assert book["status"] == "awaiting_approval"
+    assert book["spine"]["milestones"]
+    outline = (await client.get(f"/api/books/{book_id}/outline")).json()
+    assert outline["volumes"][1]["chapter_count"] == 90
+
+    messages = (await client.get(f"/api/books/{book_id}/meeting")).json()
+    note = next(m for m in messages if m["kind"] == "note")
+    # 插话被主编读到并回应
+    assert any(m["speaker"] == "chief" and m["kind"] == "speech" and m["id"] > note["id"] for m in messages)
+    assert any(m["kind"] == "artifact" and m["payload"]["type"] == "questions" for m in messages)
+    assert any(m["kind"] == "artifact" and m["payload"]["type"] == "spine" for m in messages)
+
+    # 方案出来以后，插话要走「提修改意见」
+    assert (await client.post(f"/api/books/{book_id}/notes", json={"content": "再改改"})).status_code == 409
+
+    res = await client.patch(f"/api/books/{book_id}", json={"spine": {"ending": "作者改的结局"}})
+    assert res.json()["spine"]["ending"] == "作者改的结局"
+    assert res.json()["spine"]["milestones"]

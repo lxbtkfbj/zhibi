@@ -8,7 +8,8 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 4320,
     proxy: {
-      '/api': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      // 可用 ZHIBI_API_URL 指向另一个后端（例如单独的预览实例）
+      '/api': { target: process.env.ZHIBI_API_URL ?? 'http://127.0.0.1:8000', changeOrigin: true },
     },
   },
 })

@@ -1,14 +1,17 @@
-import { useUpdateBook } from '../../../api/hooks'
+import { useOutline, useUpdateBook } from '../../../api/hooks'
 import type { Concept } from '../../../api/types'
 import { EditableList, EditableText } from '../../../components/Editable'
 import { Badge, Card, Reveal } from '../../../components/ui'
+import { totalChapters } from '../../../lib/status'
 import { useBookContext } from '../context'
 import { FieldBlock, Locked, PageHeader } from './common'
 
 export function ConceptPage() {
   const { book, bookId, working } = useBookContext()
   const update = useUpdateBook(bookId)
+  const { data: outline } = useOutline(bookId)
   const concept = book.concept
+  const chapters = totalChapters(concept, outline?.volumes ?? [])
   const save = (patch: Partial<Concept>) => update.mutateAsync({ concept: patch })
 
   if (!concept.title) {
@@ -66,7 +69,8 @@ export function ConceptPage() {
               </FieldBlock>
               <FieldBlock label="篇幅">
                 <span className="text-ink-2">
-                  计划 {concept.target_volumes ?? '-'} 卷，每章约 {concept.chapter_words ?? '-'} 字
+                  {concept.target_length ? `全书约 ${concept.target_length} 万字，` : ''}计划 {concept.target_volumes ?? '-'} 卷，每章约 {concept.chapter_words ?? '-'} 字
+                  {chapters > 0 && `，合计约 ${chapters} 章`}
                 </span>
               </FieldBlock>
             </div>

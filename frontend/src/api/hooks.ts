@@ -10,6 +10,7 @@ import type {
   Job,
   LlmProfile,
   LlmProfileInput,
+  MeetingMessage,
   Outline,
   PlotUnit,
   Relationship,
@@ -42,7 +43,7 @@ export const useHealth = () =>
 export function useCreateBook() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (body: { idea: string; style_reference: string }) =>
+    mutationFn: (body: { idea: string; style_reference: string; ask: boolean }) =>
       post<{ book: BookDetail; job: Job }>('/books', body),
     onSuccess: (data) => {
       qc.setQueryData(keys.book(data.book.id), data.book)
@@ -62,7 +63,9 @@ export function useDeleteBook() {
 export function useUpdateBook(bookId: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (body: Partial<{ title: string; style_reference: string; concept: Record<string, unknown> }>) =>
+    mutationFn: (
+      body: Partial<{ title: string; style_reference: string; concept: Record<string, unknown>; spine: Record<string, unknown> }>,
+    ) =>
       patch<BookDetail>(`/books/${bookId}`, body),
     onSuccess: (data) => {
       qc.setQueryData(keys.book(bookId), data)
@@ -78,7 +81,7 @@ function patchInCache<T extends { id: string }>(list: T[] | undefined, item: T):
 export function useUpdateVolume(bookId: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, ...body }: { id: string } & Partial<Pick<Volume, 'title' | 'summary' | 'goal'>>) =>
+    mutationFn: ({ id, ...body }: { id: string } & Partial<Pick<Volume, 'title' | 'summary' | 'goal' | 'chapter_count'>>) =>
       patch<Volume>(`/volumes/${id}`, body),
     onSuccess: (volume) =>
       qc.setQueryData<Outline>(keys.outline(bookId), (old) =>
@@ -146,6 +149,12 @@ export function useJobActions(bookId: string) {
         post<Job>(`/jobs/${jobId}/decision`, { action, feedback: feedback ?? '' }),
       onSuccess: setJob,
     }),
+    answer: useMutation({
+      mutationFn: ({ jobId, answers, extra }: { jobId: string; answers: { index: number; answer: string }[]; extra: string }) =>
+        post<Job>(`/jobs/${jobId}/answers`, { answers, extra }),
+      onSuccess: setJob,
+    }),
+    note: useMutation({ mutationFn: (content: string) => post<MeetingMessage>(`/books/${bookId}/notes`, { content }) }),
     resume: useMutation({ mutationFn: (jobId: string) => post<Job>(`/jobs/${jobId}/resume`), onSuccess: setJob }),
     cancel: useMutation({ mutationFn: (jobId: string) => post<Job>(`/jobs/${jobId}/cancel`), onSuccess: setJob }),
   }

@@ -1,6 +1,7 @@
 """演示模式：不联网，返回内置的示例内容，用于无 API Key 体验全流程和自动化测试。"""
 
 import asyncio
+import os
 import re
 from collections.abc import AsyncIterator
 
@@ -8,7 +9,8 @@ from pydantic import BaseModel
 
 from app.agents import schemas as s
 
-DELAY_S = 0.3
+# 每次「调用」的耗时；演示时可调大，方便看清编辑部的讨论过程、试试中途插话
+DELAY_S = float(os.environ.get("ZHIBI_DEMO_DELAY", "0.3"))
 
 
 def _idea(user: str) -> str:
@@ -30,9 +32,10 @@ def _concept(user: str) -> s.BookConcept:
         ],
         protagonist_hook="陆远知道每个人还能活多久，却必须装作什么都不知道",
         tone="冷静克制，带一点黑色幽默，节奏紧凑",
+        target_length=100,
         target_volumes=4,
         chapter_words=3000,
-        remark="这本书的钩子我定在「看得见寿元的青灯」上，信息差是最稳的爽点，主角靠脑子赢。",
+        remark="这本书的钩子我定在「看得见寿元的青灯」上，信息差是最稳的爽点，主角靠脑子赢。篇幅先按 100 万字、四卷来规划。",
     )
 
 
@@ -152,7 +155,62 @@ def _lore() -> s.LoreDraft:
                 source="苏晚晴", target="赵乾", kind="对立", description="苏晚晴在执法堂多次查赵乾，都被长老压下"
             ),
         ],
-        remark="力量体系我设计成「突破要烧寿元」，这样青灯看寿元就不只是外挂，而是整个世界的命门。",
+        remark="主角叫陆远，金手指是一盏能照见寿元的青灯，但每次点燃都要烧掉他自己一天寿命；头号反派是宗主厉沧海。力量体系我设计成「突破要烧寿元」，这样青灯就不只是外挂，而是整个世界的命门。",
+    )
+
+
+def _spine() -> s.StorySpine:
+    return s.StorySpine(
+        core_conflict="陆远想活下去并查清父母之死，而整个玄冥宗高层都靠暗中收割寿元续命",
+        theme="命数可以被看见，却不该被买卖",
+        protagonist_arc="从只求自保、事事留三分的杂役，变成愿意为别人的寿元押上自己性命的人",
+        opening="寒冬的杂役院，陆远挨了一顿毒打，老瞎子塞给他一盏旧灯。灯火一亮，他看见打他的人头顶只剩两天寿元——第 3 章那人果然暴毙，陆远第一次意识到自己能看见别人的死期。",
+        ending="宗主厉沧海在突破化神的大典上发动寿元大阵，要抽干全宗弟子续命。陆远点燃燃尽的青灯，把自己剩下的寿元全部还给被收割的人，阵法反噬，宗主坐化。陆远活了下来，却再也看不见任何人的寿元，他和苏晚晴在寒原上重建杂役院。",
+        milestones=[
+            s.Milestone(
+                index=1,
+                title="灯照死期",
+                volume=1,
+                event="陆远捡到青灯，看见跟班只剩两天寿元，跟班暴毙",
+                change="陆远确认青灯为真，同时被执法堂盯上",
+            ),
+            s.Milestone(
+                index=2,
+                title="老瞎子坐化",
+                volume=1,
+                event="青灯的上一任主人老瞎子坐化，留下半句遗言",
+                change="陆远失去唯一的庇护，决定进入外门追查",
+            ),
+            s.Milestone(
+                index=3,
+                title="生死擂",
+                volume=2,
+                event="外门大比上陆远与赵乾正面对决，借寿元信息险胜",
+                change="陆远成名，也暴露在宗门高层视线里",
+            ),
+            s.Milestone(
+                index=4,
+                title="契约印记",
+                volume=3,
+                event="陆远发现左手缺的小指是幼时被取走寿元的契约印记",
+                change="父母之死与宗门交易连成一线，他不再只求自保",
+            ),
+            s.Milestone(
+                index=5,
+                title="宗主的三年",
+                volume=3,
+                event="陆远证实宗主与血河教交易寿元，自己只剩三年可活",
+                change="与苏晚晴结盟，主动对抗宗主",
+            ),
+            s.Milestone(
+                index=6,
+                title="青灯尽",
+                volume=4,
+                event="化神大典上陆远燃尽青灯，以自身寿元反噬大阵",
+                change="宗主坐化，寿元交易终结，陆远失去青灯",
+            ),
+        ],
+        remark="结局我先定了：陆远最后用自己的寿元破掉宗主的大阵，赢了却失去青灯。中间最关键的转折是第三卷发现小指的契约印记，从那以后他不再只求自保。",
     )
 
 
@@ -164,21 +222,28 @@ def _outline() -> s.OutlineDraft:
                 title="杂役",
                 summary="陆远得到青灯，在杂役院和外门之间周旋，借寿元信息差扳倒赵乾的跟班，进入外门。",
                 goal="成为外门弟子，发现宗门里有人在收集寿元",
+                chapter_count=31,
             ),
             s.VolumeDraft(
                 index=2,
                 title="生死擂",
                 summary="外门大比，陆远与赵乾正面冲突，牵出寿元交易的线索。",
                 goal="击败赵乾，与苏晚晴结盟",
+                chapter_count=90,
             ),
             s.VolumeDraft(
-                index=3, title="血河", summary="追查血河教，发现宗主与魔教交易的真相。", goal="揭开父母之死的真相"
+                index=3,
+                title="血河",
+                summary="追查血河教，发现宗主与魔教交易的真相。",
+                goal="揭开父母之死的真相",
+                chapter_count=100,
             ),
             s.VolumeDraft(
                 index=4,
                 title="青灯尽",
                 summary="宗主寿元将尽，孤注一掷；陆远必须在灯芯燃尽前做出选择。",
                 goal="结束寿元交易，付出自己的代价",
+                chapter_count=112,
             ),
         ],
         first_volume_units=[
@@ -258,6 +323,46 @@ def _critique() -> s.SetupCritique:
     )
 
 
+def _interview() -> s.InterviewDraft:
+    return s.InterviewDraft(
+        questions=[
+            s.InterviewQuestion(
+                question="主角叫什么名字？",
+                options=["陆远", "沈青", "顾长生"],
+                recommended=0,
+            ),
+            s.InterviewQuestion(
+                question="主角的金手指想要什么样的？",
+                options=["能看见别人的寿命，但用一次折自己的寿", "能偷走别人的寿命", "每活一天都能预知一件事"],
+                recommended=0,
+            ),
+            s.InterviewQuestion(
+                question="感情线怎么安排？",
+                options=["一位女主，慢热", "感情线很淡，专心搞事业", "暂时不定，看剧情发展"],
+                recommended=0,
+            ),
+            s.InterviewQuestion(
+                question="结局想要什么感觉？",
+                options=["主角赢了，但付出很大代价", "大团圆", "开放式，留点余味"],
+                recommended=0,
+            ),
+        ],
+        remark="动笔前先跟你对几件事：主角叫什么、金手指怎么设计、感情线和结局。这几样定了，后面就不会大改。",
+    )
+
+
+def _absorb(user: str) -> s.RevisionTriage:
+    """演示：插话里提到人物就改设定，否则留给后面的步骤。"""
+    match = re.search(r"【作者刚才的插话】\n(.+?)(\n\n|$)", user, re.S)
+    text = match.group(1).strip().lstrip("- ") if match else ""
+    if any(word in text for word in ("名字", "叫", "主角", "金手指", "人物")):
+        return s.RevisionTriage(
+            lore_instructions=f"按作者的插话修改人物：{text}",
+            remark=f"收到：{text[:40]}。人物已经定了，我让设定师先改一下，后面的步骤跟着同步。",
+        )
+    return s.RevisionTriage(remark=f"收到：{text[:40]}。已完成的部分不受影响，后面的步骤直接按你说的写。")
+
+
 def _triage(user: str) -> s.RevisionTriage:
     feedback = re.search(r"【作者意见】\n(.+?)(\n\n|$)", user, re.S)
     text = feedback.group(1).strip() if feedback else "按审稿意见调整"
@@ -279,12 +384,16 @@ async def respond(schema: type[BaseModel], system: str, user: str) -> BaseModel:
         return _concept(user)
     if schema is s.LoreDraft:
         return _lore()
+    if schema is s.StorySpine:
+        return _spine()
     if schema is s.OutlineDraft:
         return _outline_revised() if revising else _outline()
     if schema is s.SetupCritique:
         return _critique()
+    if schema is s.InterviewDraft:
+        return _interview()
     if schema is s.RevisionTriage:
-        return _triage(user)
+        return _absorb(user) if "【作者刚才的插话】" in user else _triage(user)
     raise NotImplementedError(f"演示模式暂不支持 {schema.__name__}")
 
 

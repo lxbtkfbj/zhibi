@@ -79,12 +79,15 @@ class ModelListOut(BaseModel):
 class BookCreate(BaseModel):
     idea: str = Field(min_length=4, max_length=5000)
     style_reference: str = Field("", max_length=20000)
+    # 动笔前让主编先问几个关键问题（篇幅、主角、金手指、结局……）
+    ask: bool = False
 
 
 class BookPatch(BaseModel):
     title: str | None = Field(None, min_length=1, max_length=200)
     style_reference: str | None = Field(None, max_length=20000)
     concept: dict | None = None
+    spine: dict | None = None
 
 
 class JobOut(ORM):
@@ -116,6 +119,7 @@ class BookSummary(ORM):
 class BookDetail(BookSummary):
     style_reference: str
     concept: dict
+    spine: dict
     active_job: JobOut | None = None
 
 
@@ -155,6 +159,7 @@ class VolumeOut(ORM):
     title: str
     summary: str
     goal: str
+    chapter_count: int
     status: str
     units: list[UnitOut]
 
@@ -163,6 +168,7 @@ class VolumePatch(BaseModel):
     title: str | None = None
     summary: str | None = None
     goal: str | None = None
+    chapter_count: int | None = Field(None, ge=0, le=1000)
 
 
 class OutlineOut(BaseModel):
@@ -283,6 +289,21 @@ class BibleOut(BaseModel):
 class Decision(BaseModel):
     action: Literal["approve", "revise"]
     feedback: str = Field("", max_length=5000)
+
+
+class Answer(BaseModel):
+    # 对应提问的序号；answer 为空表示交给编辑部决定
+    index: int = Field(ge=0)
+    answer: str = Field("", max_length=500)
+
+
+class Answers(BaseModel):
+    answers: list[Answer] = Field(default_factory=list, max_length=20)
+    extra: str = Field("", max_length=5000)
+
+
+class NoteIn(BaseModel):
+    content: str = Field(min_length=1, max_length=5000)
 
 
 class MeetingMessageOut(BaseModel):

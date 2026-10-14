@@ -9,13 +9,17 @@ ACTIVE_STATUSES = ("queued", "running", "waiting_author")
 BUSY_STATUSES = ("queued", "running")
 
 
-def new_setup_job(book: Book) -> Job:
+def new_setup_job(book: Book, ask: bool = False) -> Job:
     return Job(
         book_id=book.id,
         kind="book_setup",
         thread_id=f"setup-{book.id}-{uuid.uuid4().hex[:8]}",
-        params={"idea": book.idea, "style_reference": book.style_reference},
+        params={"idea": book.idea, "style_reference": book.style_reference, "ask": ask},
     )
+
+
+def pending_kind(job: Job) -> str:
+    return (job.pending or {}).get("kind", "") if job.status == "waiting_author" else ""
 
 
 async def active_job(session: AsyncSession, book_id: uuid.UUID) -> Job | None:
