@@ -19,3 +19,6 @@ data/
 !backend/tests/fixtures/**/*.txt
 
 .DS_Store
+
+# 本机工具配置
+.claude/

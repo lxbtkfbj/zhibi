@@ -14,6 +14,7 @@ class ORM(BaseModel):
 # ---------- 模型配置 ----------
 
 StructuredMethod = Literal["function_calling", "json_mode", "json_schema"]
+ReasoningEffort = Literal["", "none", "minimal", "low", "medium", "high"]
 
 
 class ProfileIn(BaseModel):
@@ -26,6 +27,7 @@ class ProfileIn(BaseModel):
     max_tokens: int | None = Field(None, ge=1)
     structured_method: StructuredMethod = "function_calling"
     timeout_s: int = Field(300, ge=10, le=3600)
+    reasoning_effort: ReasoningEffort = ""
 
 
 class ProfilePatch(BaseModel):
@@ -39,6 +41,7 @@ class ProfilePatch(BaseModel):
     max_tokens: int | None = Field(None, ge=1)
     structured_method: StructuredMethod | None = None
     timeout_s: int | None = Field(None, ge=10, le=3600)
+    reasoning_effort: ReasoningEffort | None = None
 
 
 class ProfileOut(ORM):
@@ -51,6 +54,7 @@ class ProfileOut(ORM):
     max_tokens: int | None
     structured_method: str
     timeout_s: int
+    reasoning_effort: str | None
     has_key: bool = False
 
 

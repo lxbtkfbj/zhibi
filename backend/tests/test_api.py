@@ -88,7 +88,12 @@ async def test_profiles_and_roles(client):
 
     res = await client.post(
         "/api/llm/profiles",
-        json={"name": "DeepSeek", "base_url": "https://api.deepseek.com/v1", "model": "deepseek-chat", "api_key": "sk-test-123456"},
+        json={
+            "name": "DeepSeek",
+            "base_url": "https://api.deepseek.com/v1",
+            "model": "deepseek-chat",
+            "api_key": "sk-test-123456",
+        },
     )
     assert res.status_code == 201, res.text
     profile = res.json()
@@ -145,7 +150,9 @@ async def test_new_book_flow(client, queued):
         json={"source_id": hero["id"], "target_id": villain["id"], "kind": "同门"},
     )
     assert res.status_code == 201
-    res = await client.post(f"/api/books/{book_id}/world-entries", json={"category": "物品", "name": "破扫帚", "content": "老瞎子的"})
+    res = await client.post(
+        f"/api/books/{book_id}/world-entries", json={"category": "物品", "name": "破扫帚", "content": "老瞎子的"}
+    )
     assert res.status_code == 201
 
     assert (await client.post(f"/api/jobs/{job_id}/decision", json={"action": "revise"})).status_code == 422

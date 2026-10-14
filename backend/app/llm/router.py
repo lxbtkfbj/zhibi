@@ -6,7 +6,9 @@ import time
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
+import httpx
 import openai
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
@@ -38,6 +40,7 @@ class ResolvedProfile:
     max_tokens: int | None = None
     structured_method: str = "function_calling"
     timeout_s: int = 300
+    reasoning_effort: str | None = None
 
     @classmethod
     def from_row(cls, row: LlmProfile) -> "ResolvedProfile":
@@ -51,13 +54,24 @@ class ResolvedProfile:
             max_tokens=row.max_tokens,
             structured_method=row.structured_method,
             timeout_s=row.timeout_s,
+            reasoning_effort=row.reasoning_effort or None,
         )
 
 
 DEMO_PROFILE = ResolvedProfile(name="演示模式", provider="demo", model="demo")
 
 
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "host.docker.internal"}
+
+
 def build_chat_model(p: ResolvedProfile, *, streaming: bool = False) -> ChatOpenAI:
+    kwargs: dict = {}
+    if p.reasoning_effort:
+        kwargs["reasoning_effort"] = p.reasoning_effort
+    if urlparse(p.base_url).hostname in LOCAL_HOSTS:
+        # 本机模型（如 Ollama）直连，不走系统代理
+        kwargs["http_client"] = httpx.Client(trust_env=False, timeout=p.timeout_s)
+        kwargs["http_async_client"] = httpx.AsyncClient(trust_env=False, timeout=p.timeout_s)
     return ChatOpenAI(
         model=p.model,
         base_url=p.base_url or None,
@@ -68,6 +82,7 @@ def build_chat_model(p: ResolvedProfile, *, streaming: bool = False) -> ChatOpen
         max_retries=2,
         streaming=streaming,
         stream_usage=True,
+        **kwargs,
     )
 
 
@@ -135,49 +150,75 @@ class LLMRouter:
             )
             started = time.monotonic()
             try:
-                parsed, usage = await self._invoke_structured(profile, method, schema, system, prompt_user)
+                outcome = await self._invoke_structured(profile, method, schema, system, prompt_user)
             except openai.BadRequestError as exc:
                 # 部分接口不支持工具调用或 JSON Schema，自动降级为 JSON 模式
+                await self._record(role, profile, purpose, started, 0, 0, ok=False, error=str(exc))
                 if method != "json_mode" and attempt < MAX_PARSE_ATTEMPTS:
                     log.warning("结构化输出方式 %s 不受支持，改用 json_mode：%s", method, exc)
-                    await self._record(role, profile, purpose, started, 0, 0, ok=False, error=str(exc))
                     method = "json_mode"
                     continue
-                await self._record(role, profile, purpose, started, 0, 0, ok=False, error=str(exc))
                 raise LLMError(f"模型接口拒绝了请求：{exc}") from exc
             except (openai.APIError, TimeoutError) as exc:
                 await self._record(role, profile, purpose, started, 0, 0, ok=False, error=str(exc))
                 raise LLMError(f"调用模型失败（{profile.name}）：{exc}") from exc
-            prompt_tokens, completion_tokens = usage
-            if isinstance(parsed, schema):
+            prompt_tokens, completion_tokens = outcome.usage
+            if outcome.parsed is not None:
                 await self._record(role, profile, purpose, started, prompt_tokens, completion_tokens, ok=True)
-                return parsed
-            last_error = str(parsed)[:500]
+                return outcome.parsed
+            last_error = outcome.error[:500]
             await self._record(
                 role, profile, purpose, started, prompt_tokens, completion_tokens, ok=False, error=last_error
             )
+            if outcome.truncated:
+                # 被截断时重试同样的请求没有意义
+                raise LLMError(
+                    f"模型输出被截断（本次输入 {prompt_tokens} token，输出 {completion_tokens} token）："
+                    "上下文窗口或最大输出长度不够。请换用上下文更长的模型，或调大最大输出 token；"
+                    "本地 Ollama 需要调大 num_ctx。"
+                )
+            if method != "json_mode":
+                # 工具调用格式失败后改用 JSON 模式，小模型往往更稳定
+                method = "json_mode"
         raise LLMError(f"模型连续 {MAX_PARSE_ATTEMPTS} 次没有按要求的格式输出：{last_error}")
 
     async def _invoke_structured[T: BaseModel](
         self, profile: ResolvedProfile, method: str, schema: type[T], system: str, user: str
-    ) -> tuple[T | str, tuple[int, int]]:
-        """返回 (解析结果或错误说明, (输入 token, 输出 token))。"""
+    ) -> "Outcome[T]":
         llm = build_chat_model(profile)
         if method == "json_mode":
             raw = await llm.bind(response_format={"type": "json_object"}).ainvoke(
                 [SystemMessage(system + schema_instruction(schema)), HumanMessage(user)]
             )
-            usage = _usage(raw)
+            outcome: Outcome[T] = Outcome(usage=_usage(raw), truncated=_truncated(raw))
             try:
-                return parse_json_output(schema, str(raw.content)), usage
+                outcome.parsed = parse_json_output(schema, str(raw.content))
             except ValueError as exc:
-                return f"{exc}", usage
+                outcome.error = str(exc)
+            return outcome
+
         runnable = llm.with_structured_output(schema, method=method, include_raw=True)
         out = await runnable.ainvoke([SystemMessage(system), HumanMessage(user)])
-        usage = _usage(out["raw"])
+        raw = out["raw"]
+        outcome = Outcome(usage=_usage(raw), truncated=_truncated(raw))
         if out["parsed"] is not None:
-            return out["parsed"], usage
-        return f"{out['parsing_error']}", usage
+            outcome.parsed = out["parsed"]
+            return outcome
+        if out["parsing_error"] is not None:
+            outcome.error = str(out["parsing_error"])
+            return outcome
+        # 没有拿到工具调用：参数 JSON 不完整，或者模型直接用文字回复了 JSON
+        candidates = [str(c.get("args") or "") for c in getattr(raw, "invalid_tool_calls", None) or []]
+        candidates.append(str(raw.content or ""))
+        for text in candidates:
+            try:
+                outcome.parsed = parse_json_output(schema, text)
+                return outcome
+            except ValueError:
+                continue
+        snippet = str(raw.content or "").strip()[:200]
+        outcome.error = f"模型没有按结构化格式输出{('，而是回复了：' + snippet) if snippet else ''}"
+        return outcome
 
     async def stream_text(self, role: str, system: str, user: str, *, purpose: str) -> AsyncIterator[str]:
         """流式生成正文（写手用）。"""
@@ -235,6 +276,19 @@ class LLMRouter:
             await session.commit()
 
 
+@dataclass
+class Outcome[T: BaseModel]:
+    usage: tuple[int, int]
+    truncated: bool = False
+    parsed: T | None = None
+    error: str = ""
+
+
+def _truncated(message) -> bool:
+    meta = getattr(message, "response_metadata", None) or {}
+    return meta.get("finish_reason") == "length"
+
+
 def _usage(message) -> tuple[int, int]:
     meta = getattr(message, "usage_metadata", None) or {}
     return int(meta.get("input_tokens", 0)), int(meta.get("output_tokens", 0))
@@ -244,9 +298,10 @@ async def ping(profile: ResolvedProfile) -> str:
     """测试连接：发一条极短的请求。"""
     if profile.provider == "demo":
         return "演示模式无需联网"
-    llm = build_chat_model(profile).bind(max_tokens=16)
+    llm = build_chat_model(profile).bind(max_tokens=64)
     try:
         reply = await llm.ainvoke([HumanMessage("请只回复：连接成功")])
     except openai.APIError as exc:
         raise LLMError(str(exc)) from exc
-    return str(reply.content)[:200]
+    text = str(reply.content).strip()
+    return text[:200] if text else "连接成功（模型在思考，没有直接回复；可在高级参数里把推理强度设为 none）"

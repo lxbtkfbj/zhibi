@@ -16,6 +16,14 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
+# LangGraph 检查点表由 AsyncPostgresSaver.setup() 自行管理，迁移时忽略
+LANGGRAPH_TABLES = {"checkpoints", "checkpoint_blobs", "checkpoint_writes", "checkpoint_migrations"}
+
+
+def include_object(obj, name, type_, reflected, compare_to) -> bool:
+    table = name if type_ == "table" else getattr(getattr(obj, "table", None), "name", None)
+    return table not in LANGGRAPH_TABLES
+
 
 def database_url() -> str:
     # 测试时可通过 alembic.ini 的 sqlalchemy.url 覆盖
@@ -34,7 +42,9 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
+    context.configure(
+        connection=connection, target_metadata=target_metadata, compare_type=True, include_object=include_object
+    )
     with context.begin_transaction():
         context.run_migrations()
 

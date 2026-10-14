@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+  --font-serif: "Songti SC", "Noto Serif SC", "Source Han Serif SC", "SimSun", serif;
+
+  --color-paper: #f7f2e8;
+  --color-paper-2: #fbf8f1;
+  --color-card: #fffdf8;
+  --color-ink: #1f1d1a;
+  --color-ink-2: #4a4640;
+  --color-ink-3: #8a847a;
+  --color-line: #e6dece;
+  --color-line-2: #d6ccb8;
+
+  --color-seal: #b23a2e;
+  --color-seal-dark: #8e2c22;
+  --color-seal-soft: #f6e3df;
+
+  --color-chief: #3b4a8c;
+  --color-chief-soft: #e7eaf6;
+  --color-lore: #1f7a6d;
+  --color-lore-soft: #e1f2ee;
+  --color-writer: #a3621b;
+  --color-writer-soft: #f7ecdc;
+  --color-reviewer: #b23a2e;
+  --color-reviewer-soft: #f6e3df;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--color-seal-soft);
+}
+
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-2) transparent;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+.typing-dot { animation: pulse-dot 1.2s ease-in-out infinite; }
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes stamp-in {
+  0% { transform: scale(1.6) rotate(-14deg); opacity: 0; }
+  70% { transform: scale(0.95) rotate(-8deg); opacity: 1; }
+  100% { transform: scale(1) rotate(-8deg); opacity: 1; }
+}
+.stamp-in { animation: stamp-in 0.45s ease-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .typing-dot, .stamp-in { animation: none; }
+}
