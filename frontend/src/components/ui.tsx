@@ -145,6 +145,7 @@ export function Modal({
   children,
   footer,
   wide,
+  stableHeight,
 }: {
   open: boolean
   onClose: () => void
@@ -152,6 +153,7 @@ export function Modal({
   children: ReactNode
   footer?: ReactNode
   wide?: boolean
+  stableHeight?: boolean
 }) {
   useEscape(open, onClose)
   return createPortal(
@@ -175,18 +177,19 @@ export function Modal({
             exit={{ opacity: 0, y: 16, scale: 0.98 }}
             transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
             className={clsx(
-              'flex max-h-[92vh] w-full flex-col rounded-t-2xl bg-paper-2 shadow-[var(--shadow-lift)] sm:rounded-2xl',
+              'flex w-full flex-col rounded-t-2xl bg-paper-2 shadow-[var(--shadow-lift)] sm:rounded-2xl',
+              stableHeight ? 'h-[min(92dvh,52rem)] max-h-[92dvh]' : 'max-h-[92vh]',
               wide ? 'sm:max-w-3xl' : 'sm:max-w-xl',
             )}
           >
-            <div className="flex items-center justify-between px-6 pt-5 pb-3">
+            <div className="flex shrink-0 items-center justify-between px-6 pt-5 pb-3">
               <h2 className="font-serif text-xl font-bold">{title}</h2>
               <button onClick={onClose} className="rounded-lg p-1.5 text-ink-3 hover:bg-line/60 hover:text-ink" aria-label="关闭">
                 <X className="size-5" />
               </button>
             </div>
-            <div className="scroll-thin flex-1 overflow-y-auto px-6 pb-5">{children}</div>
-            {footer && <div className="flex justify-end gap-2 border-t border-line px-6 py-3.5">{footer}</div>}
+            <div className={clsx('scroll-thin min-h-0 flex-1 overflow-y-auto px-6 pb-5', stableHeight && '[scrollbar-gutter:stable]')}>{children}</div>
+            {footer && <div className="flex shrink-0 justify-end gap-2 border-t border-line px-6 py-3.5">{footer}</div>}
           </motion.div>
         </motion.div>
       )}

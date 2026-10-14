@@ -1,9 +1,10 @@
-import { CheckCircle2, Pencil, Plug, Plus, Trash2, XCircle } from 'lucide-react'
-import { useState } from 'react'
+import { CheckCircle2, Eye, EyeOff, Pencil, Plug, Plus, Trash2, XCircle } from 'lucide-react'
+import { type ReactNode, useId, useState } from 'react'
 import { useProfileMutations, useProfiles, useRoles } from '../api/hooks'
 import type { LlmProfile, LlmProfileInput, RoleKey } from '../api/types'
 import { Badge, Button, Card, EmptyState, ErrorText, inputClass, Label, Modal, Spinner } from '../components/ui'
 import { Diamond } from '../components/decor'
+import { ModelSelector } from '../components/ModelSelector'
 import { ROLE_KEY_LABEL, ROLE_KEYS } from '../lib/roles'
 
 const PRESETS: { name: string; base_url: string; model: string }[] = [
@@ -27,8 +28,22 @@ const EMPTY: LlmProfileInput = {
   reasoning_effort: '',
 }
 
+const advancedInputClass = `${inputClass} h-11`
+
+function AdvancedField({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
+  return (
+    <label className="block min-w-0">
+      <Label>{title}</Label>
+      {children}
+      {hint && <span className="mt-1.5 block text-xs leading-5 text-ink-3">{hint}</span>}
+    </label>
+  )
+}
+
 function ProfileDialog({ profile, onClose }: { profile: LlmProfile | null; onClose: () => void }) {
   const { create, update } = useProfileMutations()
+  const apiKeyId = useId()
+  const [showApiKey, setShowApiKey] = useState(false)
   const [form, setForm] = useState<LlmProfileInput>(
     profile ? { ...EMPTY, ...profile, api_key: '', reasoning_effort: profile.reasoning_effort ?? '' } : EMPTY,
   )
@@ -45,6 +60,7 @@ function ProfileDialog({ profile, onClose }: { profile: LlmProfile | null; onClo
   return (
     <Modal
       open
+      stableHeight={!isDemo}
       onClose={onClose}
       title={profile ? `修改「${profile.name}」` : '添加模型配置'}
       footer={
@@ -100,59 +116,77 @@ function ProfileDialog({ profile, onClose }: { profile: LlmProfile | null; onClo
               <Label hint="OpenAI 兼容接口，一般以 /v1 结尾">接口地址</Label>
               <input value={form.base_url} onChange={(e) => set('base_url', e.target.value)} className={inputClass} placeholder="https://…/v1" />
             </label>
-            <label className="block">
-              <Label hint={profile?.has_key ? '已保存；留空表示不修改' : '加密保存在本机'}>API Key</Label>
-              <input
-                type="password"
-                value={form.api_key}
-                onChange={(e) => set('api_key', e.target.value)}
-                className={inputClass}
-                placeholder={profile?.has_key ? '••••••••' : 'sk-…'}
-                autoComplete="off"
-              />
-            </label>
-            <label className="block">
-              <Label>模型名</Label>
-              <input value={form.model} onChange={(e) => set('model', e.target.value)} className={inputClass} placeholder="例如 deepseek-chat" />
-            </label>
+            <div>
+              <label htmlFor={apiKeyId}>
+                <Label hint={profile?.has_key ? '已保存不回显；留空表示不修改' : '加密保存在本机'}>API Key</Label>
+              </label>
+              <div className="relative">
+                <input
+                  id={apiKeyId}
+                  type={showApiKey ? 'text' : 'password'}
+                  value={form.api_key}
+                  onChange={(e) => set('api_key', e.target.value)}
+                  className={`${inputClass} h-11 pr-11`}
+                  placeholder={profile?.has_key ? '••••••••' : 'sk-…'}
+                  autoComplete="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                />
+                <button
+                  type="button"
+                  aria-label={showApiKey ? '隐藏 API Key' : '显示 API Key'}
+                  aria-pressed={showApiKey}
+                  aria-controls={apiKeyId}
+                  title={profile?.has_key && !form.api_key ? '已保存的密钥不会回显；只能显示本次输入的密钥' : showApiKey ? '隐藏 API Key' : '显示 API Key'}
+                  disabled={!form.api_key}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => setShowApiKey((visible) => !visible)}
+                  className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-xl text-ink-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-seal disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {showApiKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                </button>
+              </div>
+            </div>
+            <ModelSelector
+              value={form.model}
+              onChange={(value) => set('model', value)}
+              baseUrl={form.base_url}
+              apiKey={form.api_key}
+              profileId={profile?.id}
+            />
             <details className="rounded-lg border border-line px-3 py-2">
               <summary className="cursor-pointer text-sm text-ink-2">高级参数</summary>
-              <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                <label className="block">
-                  <Label hint="越高越有创意">温度</Label>
-                  <input type="number" step={0.1} min={0} max={2} value={form.temperature} onChange={(e) => set('temperature', Number(e.target.value))} className={inputClass} />
-                </label>
-                <label className="block">
-                  <Label hint="留空用模型默认">最大输出 token</Label>
+              <div className="mt-4 grid gap-x-4 gap-y-4 sm:grid-cols-2">
+                <AdvancedField title="温度" hint="越高越有创意">
+                  <input type="number" step={0.1} min={0} max={2} value={form.temperature} onChange={(e) => set('temperature', Number(e.target.value))} className={advancedInputClass} />
+                </AdvancedField>
+                <AdvancedField title="最大输出 token" hint="留空使用模型默认值">
                   <input
                     type="number"
                     value={form.max_tokens ?? ''}
                     onChange={(e) => set('max_tokens', e.target.value ? Number(e.target.value) : null)}
-                    className={inputClass}
+                    className={advancedInputClass}
                   />
-                </label>
-                <label className="block">
-                  <Label hint="不支持时会自动降级">结构化输出方式</Label>
-                  <select value={form.structured_method} onChange={(e) => set('structured_method', e.target.value as LlmProfileInput['structured_method'])} className={inputClass}>
+                </AdvancedField>
+                <AdvancedField title="结构化输出方式" hint="不支持时会自动降级">
+                  <select value={form.structured_method} onChange={(e) => set('structured_method', e.target.value as LlmProfileInput['structured_method'])} className={advancedInputClass}>
                     <option value="function_calling">工具调用（推荐）</option>
                     <option value="json_mode">JSON 模式</option>
                     <option value="json_schema">JSON Schema</option>
                   </select>
-                </label>
-                <label className="block">
-                  <Label hint="思考型模型可调；Ollama 设为 none 关闭思考">推理强度</Label>
-                  <select value={form.reasoning_effort} onChange={(e) => set('reasoning_effort', e.target.value)} className={inputClass}>
+                </AdvancedField>
+                <AdvancedField title="推理强度" hint="思考型模型可调；Ollama 设为 none 关闭思考">
+                  <select value={form.reasoning_effort} onChange={(e) => set('reasoning_effort', e.target.value)} className={advancedInputClass}>
                     <option value="">不设置（模型默认）</option>
                     <option value="none">none（不思考，最快）</option>
                     <option value="low">low</option>
                     <option value="medium">medium</option>
                     <option value="high">high</option>
                   </select>
-                </label>
-                <label className="block">
-                  <Label>超时（秒）</Label>
-                  <input type="number" value={form.timeout_s} onChange={(e) => set('timeout_s', Number(e.target.value))} className={inputClass} />
-                </label>
+                </AdvancedField>
+                <AdvancedField title="超时（秒）">
+                  <input type="number" value={form.timeout_s} onChange={(e) => set('timeout_s', Number(e.target.value))} className={advancedInputClass} />
+                </AdvancedField>
               </div>
             </details>
           </>

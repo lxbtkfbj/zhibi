@@ -6,10 +6,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import SessionDep
-from app.crypto import SecretError, encrypt
+from app.crypto import SecretError, decrypt, encrypt
+from app.llm.discovery import ModelDiscoveryError, fetch_models, normalize_base_url
 from app.llm.router import LLMError, ResolvedProfile, ping
 from app.models import ROLES, LlmProfile, RoleAssignment
-from app.schemas import ProfileIn, ProfileOut, ProfilePatch, TestResult
+from app.schemas import ModelListIn, ModelListOut, ProfileIn, ProfileOut, ProfilePatch, TestResult
 
 router = APIRouter(prefix="/llm", tags=["llm"])
 
@@ -30,6 +31,25 @@ async def _get(session: AsyncSession, profile_id: uuid.UUID) -> LlmProfile:
 def _validate(provider: str, base_url: str, model: str) -> None:
     if provider == "openai_compatible" and (not base_url.strip() or not model.strip()):
         raise HTTPException(422, "请填写接口地址和模型名")
+
+
+@router.post("/models", response_model=ModelListOut)
+async def list_models(body: ModelListIn, session: AsyncSession = SessionDep) -> ModelListOut:
+    try:
+        base_url = normalize_base_url(body.base_url)
+        api_key = body.api_key.strip()
+        if body.profile_id is not None and not api_key:
+            profile = await _get(session, body.profile_id)
+            if profile.api_key_encrypted:
+                # 改地址后必须显式输入 Key，不能将旧配置的凭据发往新的地址。
+                if base_url != profile.base_url.strip().rstrip("/"):
+                    raise HTTPException(422, "接口地址已更改，请重新填写 API Key 后再获取模型列表")
+                api_key = decrypt(profile.api_key_encrypted)
+        return ModelListOut(models=await fetch_models(base_url, api_key))
+    except SecretError as exc:
+        raise HTTPException(422, "已保存的 API Key 无法读取，请重新填写 API Key") from exc
+    except ModelDiscoveryError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
 
 
 @router.get("/profiles", response_model=list[ProfileOut])

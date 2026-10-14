@@ -63,6 +63,16 @@ class TestResult(BaseModel):
     message: str
 
 
+class ModelListIn(BaseModel):
+    base_url: str
+    api_key: str = ""
+    profile_id: uuid.UUID | None = None
+
+
+class ModelListOut(BaseModel):
+    models: list[str]
+
+
 # ---------- 书 ----------
 
 
