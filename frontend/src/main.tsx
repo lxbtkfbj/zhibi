@@ -1,11 +1,17 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MotionConfig } from 'motion/react'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createBrowserRouter, RouterProvider } from 'react-router-dom'
-import { Layout } from './components/Layout'
+import { SiteLayout } from './components/Layout'
 import './index.css'
-import { BookPage } from './pages/BookPage'
-import { Bookshelf } from './pages/Bookshelf'
+import { BookLayout } from './pages/book/BookLayout'
+import { CharactersPage, ForeshadowingPage, RelationsPage, WorldPage } from './pages/book/sections/BiblePages'
+import { ConceptPage } from './pages/book/sections/ConceptPage'
+import { MeetingLogPage } from './pages/book/sections/MeetingLogPage'
+import { Overview } from './pages/book/sections/Overview'
+import { VolumePage } from './pages/book/sections/VolumePage'
+import { Home } from './pages/Home'
 import { SettingsPage } from './pages/SettingsPage'
 
 const queryClient = new QueryClient({
@@ -14,11 +20,24 @@ const queryClient = new QueryClient({
 
 const router = createBrowserRouter([
   {
-    element: <Layout />,
+    element: <SiteLayout />,
     children: [
-      { path: '/', element: <Bookshelf /> },
-      { path: '/books/:bookId', element: <BookPage /> },
+      { path: '/', element: <Home /> },
       { path: '/settings', element: <SettingsPage /> },
+    ],
+  },
+  {
+    path: '/books/:bookId',
+    element: <BookLayout />,
+    children: [
+      { index: true, element: <Overview /> },
+      { path: 'concept', element: <ConceptPage /> },
+      { path: 'volume/:index', element: <VolumePage /> },
+      { path: 'characters', element: <CharactersPage /> },
+      { path: 'world', element: <WorldPage /> },
+      { path: 'relations', element: <RelationsPage /> },
+      { path: 'foreshadowing', element: <ForeshadowingPage /> },
+      { path: 'meeting', element: <MeetingLogPage /> },
     ],
   },
 ])
@@ -26,7 +45,9 @@ const router = createBrowserRouter([
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
+      <MotionConfig reducedMotion="user">
+        <RouterProvider router={router} />
+      </MotionConfig>
     </QueryClientProvider>
   </StrictMode>,
 )

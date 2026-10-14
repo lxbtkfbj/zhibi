@@ -97,6 +97,8 @@ class BookSummary(ORM):
     status: str
     idea: str
     logline: str = ""
+    # 最近一个任务的状态，用来区分「工作中」和「出错了」
+    job_status: str | None = None
     created_at: datetime
     updated_at: datetime
 

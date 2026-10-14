@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { useProfileMutations, useProfiles, useRoles } from '../api/hooks'
 import type { LlmProfile, LlmProfileInput, RoleKey } from '../api/types'
 import { Badge, Button, Card, EmptyState, ErrorText, inputClass, Label, Modal, Spinner } from '../components/ui'
+import { Diamond } from '../components/decor'
 import { ROLE_KEY_LABEL, ROLE_KEYS } from '../lib/roles'
 
 const PRESETS: { name: string; base_url: string; model: string }[] = [
@@ -203,13 +204,17 @@ export function SettingsPage() {
   const [editing, setEditing] = useState<LlmProfile | null | 'new'>(null)
 
   return (
-    <div className="scroll-thin h-full overflow-y-auto">
-      <div className="mx-auto max-w-3xl space-y-8 px-4 py-8 sm:px-6">
+    <div>
+      <div className="mx-auto max-w-3xl space-y-10 px-5 pt-8 pb-20 sm:px-8">
         <section>
-          <div className="mb-3 flex items-end justify-between">
+          <div className="mb-5 flex items-end justify-between gap-4">
             <div>
-              <h1 className="font-serif text-2xl font-bold">模型设置</h1>
-              <p className="mt-1 text-sm text-ink-3">支持任何 OpenAI 兼容接口：DeepSeek、智谱、通义、Kimi、本地 Ollama 等。</p>
+              <p className="mb-2 flex items-center gap-2 text-xs tracking-[0.25em] text-ink-3">
+                <Diamond />
+                设置
+              </p>
+              <h1 className="font-serif text-3xl font-bold">模型设置</h1>
+              <p className="mt-2 text-[15px] text-ink-2">支持任何 OpenAI 兼容接口：DeepSeek、智谱、通义、Kimi、本地 Ollama 等。</p>
             </div>
             <Button variant="primary" onClick={() => setEditing('new')}>
               <Plus className="size-4" />
@@ -231,9 +236,9 @@ export function SettingsPage() {
 
         {profiles && profiles.length > 0 && roles && (
           <section>
-            <h2 className="mb-1 font-serif text-lg font-semibold">编辑部分工</h2>
+            <h2 className="mb-1 font-serif text-xl font-bold">编辑部分工</h2>
             <p className="mb-3 text-sm text-ink-3">每个角色可以用不同的模型，比如写手用文笔好的，审稿用便宜快的。</p>
-            <Card className="divide-y divide-line">
+            <Card className="divide-y divide-line overflow-hidden">
               {ROLE_KEYS.map((role) => (
                 <label key={role} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
                   <span className="text-sm">{ROLE_KEY_LABEL[role]}</span>

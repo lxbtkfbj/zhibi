@@ -1,22 +1,11 @@
 import clsx from 'clsx'
-import { BookOpen, Settings2 } from 'lucide-react'
+import { Settings2 } from 'lucide-react'
+import { useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { useHealth } from '../api/hooks'
+import { Seal } from './decor'
 
-export function Seal({ size = 'md' }: { size?: 'sm' | 'md' }) {
-  return (
-    <span
-      className={clsx(
-        'inline-flex items-center justify-center rounded-md bg-seal font-serif font-bold text-paper-2 shadow-[inset_0_0_0_2px_rgba(255,255,255,0.25)]',
-        size === 'sm' ? 'size-7 text-base' : 'size-9 text-xl',
-      )}
-    >
-      笔
-    </span>
-  )
-}
-
-function HealthDot() {
+export function HealthDot({ compact }: { compact?: boolean }) {
   const { data, isError } = useHealth()
   const ok = data?.status === 'ok' && !isError
   const tip = data
@@ -26,46 +15,62 @@ function HealthDot() {
     : '后端未连接'
   return (
     <span className="flex items-center gap-1.5 text-xs text-ink-3" title={tip}>
-      <span className={clsx('size-2 rounded-full', ok ? 'bg-lore' : 'bg-seal')} />
-      <span className="hidden sm:inline">{ok ? '服务正常' : '服务异常'}</span>
+      <span className="relative flex size-2">
+        {ok && <span className="absolute inline-flex size-full animate-ping rounded-full bg-lore/50 [animation-duration:2.5s]" />}
+        <span className={clsx('relative inline-flex size-2 rounded-full', ok ? 'bg-lore' : 'bg-seal')} />
+      </span>
+      {!compact && <span className="hidden sm:inline">{ok ? '服务正常' : '服务异常'}</span>}
     </span>
+  )
+}
+
+export function Brand() {
+  return (
+    <NavLink to="/" className="group flex items-center gap-3">
+      <Seal size={38} className="transition-transform duration-500 group-hover:-rotate-6" />
+      <span className="flex flex-col leading-tight">
+        <span className="font-serif text-xl font-bold tracking-[0.2em]">执笔</span>
+        <span className="text-[11px] tracking-wider text-ink-3">AI 编辑部 · 长篇小说</span>
+      </span>
+    </NavLink>
   )
 }
 
 const navClass = ({ isActive }: { isActive: boolean }) =>
   clsx(
-    'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm transition-colors',
-    isActive ? 'bg-card text-ink shadow-sm ring-1 ring-line' : 'text-ink-2 hover:text-ink',
+    'relative px-1 py-1 text-[15px] transition-colors',
+    'after:absolute after:inset-x-0 after:-bottom-0.5 after:h-0.5 after:origin-left after:rounded-full after:bg-seal after:transition-transform after:duration-300',
+    isActive ? 'text-ink after:scale-x-100' : 'text-ink-2 after:scale-x-0 hover:text-ink hover:after:scale-x-100',
   )
 
-export function Layout() {
+/** 书房、设置等页面的外框：较高的顶栏，滚动后变为半透明纸色。 */
+export function SiteLayout() {
+  const [scrolled, setScrolled] = useState(false)
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex shrink-0 items-center justify-between gap-4 border-b border-line bg-paper-2/80 px-4 py-2.5 backdrop-blur sm:px-6">
-        <NavLink to="/" className="flex items-center gap-2.5">
-          <Seal />
-          <span className="flex flex-col leading-tight">
-            <span className="font-serif text-lg font-bold tracking-wide">执笔</span>
-            <span className="text-[11px] text-ink-3">AI 编辑部 · 长篇小说创作</span>
-          </span>
-        </NavLink>
-        <nav className="flex items-center gap-1">
-          <NavLink to="/" end className={navClass}>
-            <BookOpen className="size-4" />
-            书架
-          </NavLink>
-          <NavLink to="/settings" className={navClass}>
-            <Settings2 className="size-4" />
-            <span className="hidden sm:inline">模型设置</span>
-          </NavLink>
-          <span className="ml-2">
+    <div className="scroll-thin h-full overflow-y-auto" onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 8)}>
+      <header
+        className={clsx(
+          'sticky top-0 z-30 transition-all duration-300',
+          scrolled ? 'border-b border-line/80 bg-paper/75 backdrop-blur-md' : 'border-b border-transparent',
+        )}
+      >
+        <div className="mx-auto flex h-[72px] max-w-6xl items-center justify-between gap-6 px-5 sm:px-8">
+          <Brand />
+          <nav className="flex items-center gap-6">
+            <NavLink to="/" end className={navClass}>
+              书房
+            </NavLink>
+            <NavLink to="/settings" className={navClass}>
+              <span className="flex items-center gap-1.5">
+                <Settings2 className="size-4" />
+                <span className="hidden sm:inline">模型设置</span>
+              </span>
+            </NavLink>
             <HealthDot />
-          </span>
-        </nav>
+          </nav>
+        </div>
       </header>
-      <main className="min-h-0 flex-1">
-        <Outlet />
-      </main>
+      <Outlet />
     </div>
   )
 }

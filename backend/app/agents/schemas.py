@@ -84,7 +84,7 @@ class LoreDraft(Lenient):
 
 class VolumeDraft(Lenient):
     index: int = Field(ge=1, description="卷序号，从 1 开始")
-    title: str = Field(description="卷名")
+    title: str = Field(description="卷名本身，不要带「第几卷」")
     summary: str = Field(description="本卷剧情概要，150-300 字")
     goal: str = Field(description="本卷结束时主角达成或失去了什么")
 

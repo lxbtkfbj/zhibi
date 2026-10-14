@@ -1,9 +1,11 @@
 import clsx from 'clsx'
 import { X } from 'lucide-react'
+import { animate, AnimatePresence, motion, useInView, useMotionValue, useReducedMotion, useTransform } from 'motion/react'
 import { type ButtonHTMLAttributes, type ReactNode, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import type { Tone } from '../lib/status'
 
-type Variant = 'primary' | 'seal' | 'ghost' | 'outline' | 'danger'
+type Variant = 'primary' | 'seal' | 'ghost' | 'outline' | 'danger' | 'soft'
 
 export function Button({
   variant = 'outline',
@@ -13,22 +15,23 @@ export function Button({
   children,
   disabled,
   ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; size?: 'sm' | 'md'; loading?: boolean }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; size?: 'sm' | 'md' | 'lg'; loading?: boolean }) {
   return (
     <button
       {...rest}
       disabled={disabled || loading}
       className={clsx(
-        'inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition-colors',
+        'press inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl font-medium whitespace-nowrap transition-colors',
         'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-seal',
         'disabled:cursor-not-allowed disabled:opacity-50',
-        size === 'sm' ? 'h-8 px-3 text-sm' : 'h-10 px-4 text-sm',
+        { sm: 'h-8 px-3 text-[13px]', md: 'h-10 px-4 text-sm', lg: 'h-12 px-6 text-[15px]' }[size],
         {
-          primary: 'bg-ink text-paper-2 hover:bg-ink-2',
-          seal: 'bg-seal text-paper-2 hover:bg-seal-dark',
-          ghost: 'text-ink-2 hover:bg-line/60',
-          outline: 'border border-line-2 bg-card text-ink hover:bg-paper-2',
+          primary: 'bg-ink text-paper-2 shadow-[0_6px_16px_-8px_rgb(38_35_32/0.6)] hover:bg-ink-2',
+          seal: 'bg-seal text-paper-2 shadow-[0_8px_20px_-10px_rgb(180_67_46/0.8)] hover:bg-seal-dark',
+          ghost: 'text-ink-2 hover:bg-line/60 hover:text-ink',
+          outline: 'border border-line-2 bg-card text-ink hover:border-ink-3/50 hover:bg-paper-2',
           danger: 'border border-seal/40 bg-card text-seal hover:bg-seal-soft',
+          soft: 'bg-paper-2 text-ink-2 ring-1 ring-line hover:text-ink hover:ring-line-2',
         }[variant],
         className,
       )}
@@ -48,9 +51,9 @@ export function Spinner({ className }: { className?: string }) {
   )
 }
 
-export function TypingDots() {
+export function TypingDots({ className }: { className?: string }) {
   return (
-    <span className="inline-flex gap-0.5" aria-label="进行中">
+    <span className={clsx('inline-flex items-center gap-[3px]', className)} aria-label="进行中">
       <span className="typing-dot size-1 rounded-full bg-current" />
       <span className="typing-dot size-1 rounded-full bg-current" />
       <span className="typing-dot size-1 rounded-full bg-current" />
@@ -58,18 +61,21 @@ export function TypingDots() {
   )
 }
 
-export function Badge({ tone = 'idle', children }: { tone?: 'busy' | 'wait' | 'ok' | 'idle' | 'error'; children: ReactNode }) {
+const TONE_CLASS: Record<Tone, string> = {
+  busy: 'bg-chief-soft text-chief',
+  wait: 'bg-seal-soft text-seal',
+  ok: 'bg-lore-soft text-lore',
+  idle: 'bg-line/70 text-ink-2',
+  error: 'bg-seal text-paper-2',
+}
+
+export function Badge({ tone = 'idle', children, className }: { tone?: Tone; children: ReactNode; className?: string }) {
   return (
     <span
       className={clsx(
-        'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap',
-        {
-          busy: 'bg-chief-soft text-chief',
-          wait: 'bg-seal-soft text-seal',
-          ok: 'bg-lore-soft text-lore',
-          idle: 'bg-line/70 text-ink-2',
-          error: 'bg-seal text-paper-2',
-        }[tone],
+        'inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium whitespace-nowrap',
+        TONE_CLASS[tone],
+        className,
       )}
     >
       {children}
@@ -77,8 +83,59 @@ export function Badge({ tone = 'idle', children }: { tone?: 'busy' | 'wait' | 'o
   )
 }
 
-export function Card({ className, children }: { className?: string; children: ReactNode }) {
-  return <div className={clsx('rounded-xl border border-line bg-card', className)}>{children}</div>
+export function Card({ className, children, hover }: { className?: string; children: ReactNode; hover?: boolean }) {
+  return <div className={clsx('paper', hover && 'lift', className)}>{children}</div>
+}
+
+/** 进入视口时淡入上浮。 */
+export function Reveal({ children, delay = 0, className }: { children: ReactNode; delay?: number; className?: string }) {
+  const reduce = useReducedMotion()
+  return (
+    <motion.div
+      className={className}
+      initial={reduce ? false : { opacity: 0, y: 14 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.55, delay, ease: [0.22, 1, 0.36, 1] }}
+    >
+      {children}
+    </motion.div>
+  )
+}
+
+/** 数字从 0 滚动到目标值。 */
+export function CountUp({ value, className }: { value: number; className?: string }) {
+  const ref = useRef<HTMLSpanElement>(null)
+  const inView = useInView(ref, { once: true })
+  const reduce = useReducedMotion()
+  const count = useMotionValue(0)
+  const rounded = useTransform(count, (v) => Math.round(v).toString())
+  useEffect(() => {
+    if (!inView) return
+    if (reduce) {
+      count.set(value)
+      return
+    }
+    const controls = animate(count, value, { duration: 0.9, ease: [0.22, 1, 0.36, 1] })
+    return () => controls.stop()
+  }, [inView, value, count, reduce])
+  return (
+    <motion.span ref={ref} className={className}>
+      {rounded}
+    </motion.span>
+  )
+}
+
+export function Skeleton({ className }: { className?: string }) {
+  return <div className={clsx('shimmer rounded-lg', className)} />
+}
+
+function useEscape(open: boolean, onClose: () => void) {
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, onClose])
 }
 
 export function Modal({
@@ -96,38 +153,95 @@ export function Modal({
   footer?: ReactNode
   wide?: boolean
 }) {
-  const panel = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
-    window.addEventListener('keydown', onKey)
-    panel.current?.querySelector<HTMLElement>('textarea, input, select')?.focus()
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
-  if (!open) return null
+  useEscape(open, onClose)
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/40 p-0 sm:items-center sm:p-6" onMouseDown={onClose}>
-      <div
-        ref={panel}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        onMouseDown={(e) => e.stopPropagation()}
-        className={clsx(
-          'flex max-h-[92vh] w-full flex-col rounded-t-2xl bg-paper-2 shadow-xl sm:rounded-2xl',
-          wide ? 'sm:max-w-3xl' : 'sm:max-w-xl',
-        )}
-      >
-        <div className="flex items-center justify-between border-b border-line px-5 py-4">
-          <h2 className="font-serif text-lg font-semibold">{title}</h2>
-          <button onClick={onClose} className="rounded-md p-1 text-ink-3 hover:bg-line/60 hover:text-ink" aria-label="关闭">
-            <X className="size-5" />
-          </button>
-        </div>
-        <div className="scroll-thin flex-1 overflow-y-auto px-5 py-4">{children}</div>
-        {footer && <div className="flex justify-end gap-2 border-t border-line px-5 py-3">{footer}</div>}
-      </div>
-    </div>,
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-ink/30 p-0 backdrop-blur-[2px] sm:items-center sm:p-6"
+          onMouseDown={onClose}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+        >
+          <motion.div
+            role="dialog"
+            aria-modal="true"
+            aria-label={title}
+            onMouseDown={(e) => e.stopPropagation()}
+            initial={{ opacity: 0, y: 24, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 16, scale: 0.98 }}
+            transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+            className={clsx(
+              'flex max-h-[92vh] w-full flex-col rounded-t-2xl bg-paper-2 shadow-[var(--shadow-lift)] sm:rounded-2xl',
+              wide ? 'sm:max-w-3xl' : 'sm:max-w-xl',
+            )}
+          >
+            <div className="flex items-center justify-between px-6 pt-5 pb-3">
+              <h2 className="font-serif text-xl font-bold">{title}</h2>
+              <button onClick={onClose} className="rounded-lg p-1.5 text-ink-3 hover:bg-line/60 hover:text-ink" aria-label="关闭">
+                <X className="size-5" />
+              </button>
+            </div>
+            <div className="scroll-thin flex-1 overflow-y-auto px-6 pb-5">{children}</div>
+            {footer && <div className="flex justify-end gap-2 border-t border-line px-6 py-3.5">{footer}</div>}
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>,
+    document.body,
+  )
+}
+
+/** 从右侧滑出的抽屉。 */
+export function Sheet({
+  open,
+  onClose,
+  title,
+  children,
+  footer,
+}: {
+  open: boolean
+  onClose: () => void
+  title: ReactNode
+  children: ReactNode
+  footer?: ReactNode
+}) {
+  useEscape(open, onClose)
+  return createPortal(
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          className="fixed inset-0 z-50 bg-ink/20 backdrop-blur-[1px]"
+          onMouseDown={onClose}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+        >
+          <motion.aside
+            role="dialog"
+            aria-modal="true"
+            onMouseDown={(e) => e.stopPropagation()}
+            initial={{ x: '100%' }}
+            animate={{ x: 0 }}
+            exit={{ x: '100%' }}
+            transition={{ duration: 0.38, ease: [0.22, 1, 0.36, 1] }}
+            className="absolute inset-y-0 right-0 flex w-full max-w-lg flex-col bg-paper-2 shadow-[var(--shadow-panel)]"
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-line px-6 py-4">
+              <div className="min-w-0 font-serif text-xl font-bold">{title}</div>
+              <button onClick={onClose} className="rounded-lg p-1.5 text-ink-3 hover:bg-line/60 hover:text-ink" aria-label="关闭">
+                <X className="size-5" />
+              </button>
+            </div>
+            <div className="scroll-thin flex-1 overflow-y-auto px-6 py-4">{children}</div>
+            {footer && <div className="flex justify-end gap-2 border-t border-line px-6 py-3">{footer}</div>}
+          </motion.aside>
+        </motion.div>
+      )}
+    </AnimatePresence>,
     document.body,
   )
 }
@@ -142,7 +256,7 @@ export function Label({ children, hint }: { children: ReactNode; hint?: ReactNod
 }
 
 export const inputClass =
-  'w-full rounded-lg border border-line-2 bg-card px-3 py-2 text-sm text-ink placeholder:text-ink-3 focus:border-seal focus:outline-none focus:ring-2 focus:ring-seal/15'
+  'w-full rounded-xl border border-line-2 bg-card px-3.5 py-2.5 text-[15px] text-ink placeholder:text-ink-3 transition-shadow focus:border-seal/60 focus:outline-none focus:ring-4 focus:ring-seal/10'
 
 export function ErrorText({ error }: { error: unknown }) {
   if (!error) return null
@@ -154,16 +268,7 @@ export function EmptyState({ icon, title, children }: { icon?: ReactNode; title:
     <div className="flex flex-col items-center justify-center gap-2 px-6 py-16 text-center">
       {icon && <div className="text-ink-3">{icon}</div>}
       <p className="font-serif text-lg text-ink-2">{title}</p>
-      {children && <div className="max-w-sm text-sm text-ink-3">{children}</div>}
-    </div>
-  )
-}
-
-export function SectionTitle({ children, action }: { children: ReactNode; action?: ReactNode }) {
-  return (
-    <div className="mb-3 flex items-center justify-between gap-3">
-      <h3 className="font-serif text-base font-semibold text-ink">{children}</h3>
-      {action}
+      {children && <div className="max-w-sm text-sm leading-relaxed text-ink-3">{children}</div>}
     </div>
   )
 }

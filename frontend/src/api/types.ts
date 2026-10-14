@@ -35,6 +35,7 @@ export interface BookSummary {
   status: BookStatus
   idea: string
   logline: string
+  job_status: JobStatus | null
   created_at: string
   updated_at: string
 }

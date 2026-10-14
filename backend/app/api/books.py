@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import SessionDep, ensure_idle, get_book, get_redis
-from app.models import Book, PlotUnit, Volume
+from app.models import Book, Job, PlotUnit, Volume
 from app.schemas import (
     BookCreate,
     BookCreated,
@@ -27,9 +27,10 @@ from app.services.meeting import post_message
 router = APIRouter(tags=["books"])
 
 
-def summary(book: Book) -> BookSummary:
+def summary(book: Book, job_status: str | None = None) -> BookSummary:
     out = BookSummary.model_validate(book)
     out.logline = (book.concept or {}).get("logline", "")
+    out.job_status = job_status
     return out
 
 
@@ -38,13 +39,20 @@ async def detail(session: AsyncSession, book: Book) -> BookDetail:
     out.logline = (book.concept or {}).get("logline", "")
     job = await jobs.active_job(session, book.id)
     out.active_job = JobOut.model_validate(job) if job else None
+    out.job_status = job.status if job else None
     return out
 
 
 @router.get("/books", response_model=list[BookSummary])
 async def list_books(session: AsyncSession = SessionDep) -> list[BookSummary]:
     rows = (await session.execute(select(Book).order_by(Book.updated_at.desc()))).scalars().all()
-    return [summary(b) for b in rows]
+    latest = (
+        await session.execute(
+            select(Job.book_id, Job.status).distinct(Job.book_id).order_by(Job.book_id, Job.created_at.desc())
+        )
+    ).all()
+    status_by_book = {book_id: status for book_id, status in latest}
+    return [summary(b, status_by_book.get(b.id)) for b in rows]
 
 
 @router.post("/books", response_model=BookCreated, status_code=201)

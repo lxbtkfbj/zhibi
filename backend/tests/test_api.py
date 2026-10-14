@@ -128,6 +128,8 @@ async def test_new_book_flow(client, queued):
     assert res.status_code == 409
 
     await run_queued(queued)
+    listed = (await client.get("/api/books")).json()
+    assert listed[0]["job_status"] == "waiting_author"
     book = (await client.get(f"/api/books/{book_id}")).json()
     assert book["status"] == "awaiting_approval"
     assert book["active_job"]["status"] == "waiting_author"
