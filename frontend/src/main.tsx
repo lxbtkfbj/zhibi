@@ -2,14 +2,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MotionConfig } from 'motion/react'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { createBrowserRouter, RouterProvider } from 'react-router-dom'
+import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom'
 import { SiteLayout } from './components/Layout'
 import './index.css'
 import { BookLayout } from './pages/book/BookLayout'
 import { CharactersPage, ForeshadowingPage, RelationsPage, WorldPage } from './pages/book/sections/BiblePages'
 import { ChapterPage, ContentsPage } from './pages/book/sections/ChapterPages'
 import { ConceptPage } from './pages/book/sections/ConceptPage'
-import { MeetingLogPage } from './pages/book/sections/MeetingLogPage'
 import { Overview } from './pages/book/sections/Overview'
 import { SpinePage } from './pages/book/sections/SpinePage'
 import { ThreadsPage } from './pages/book/sections/ThreadsPage'
@@ -44,7 +43,7 @@ const router = createBrowserRouter([
       { path: 'world', element: <WorldPage /> },
       { path: 'relations', element: <RelationsPage /> },
       { path: 'foreshadowing', element: <ForeshadowingPage /> },
-      { path: 'meeting', element: <MeetingLogPage /> },
+      { path: 'meeting', element: <Navigate to=".." relative="path" replace /> },
     ],
   },
 ])

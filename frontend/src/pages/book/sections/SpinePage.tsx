@@ -62,7 +62,7 @@ export function SpinePage() {
       />
       <Locked locked={working} />
       <Reveal>
-        <Card className="mb-10 grid gap-6 p-6 sm:p-7 md:grid-cols-3">
+        <section className="mb-8 grid gap-6 border-b border-line pb-8 @2xl/manuscript:grid-cols-3">
           <FieldBlock label="核心矛盾">
             <EditableText value={spine.core_conflict ?? ''} onSave={(core_conflict) => save({ core_conflict })} locked={working} multiline />
           </FieldBlock>
@@ -72,12 +72,12 @@ export function SpinePage() {
           <FieldBlock label="主题">
             <EditableText value={spine.theme ?? ''} onSave={(theme) => save({ theme })} locked={working} multiline className="font-serif" />
           </FieldBlock>
-        </Card>
+        </section>
       </Reveal>
 
       <Node marker={endMarker('ink')} delay={0.04}>
         <Card className="p-5">
-          <p className="mb-1.5 text-xs tracking-[0.15em] text-ink-3">开篇</p>
+          <p className="mb-1.5 text-xs tracking-[0.15em] text-ink-2">开篇</p>
           <EditableText value={spine.opening ?? ''} onSave={(opening) => save({ opening })} locked={working} multiline className="text-[15px] leading-relaxed" />
         </Card>
       </Node>
@@ -92,10 +92,10 @@ export function SpinePage() {
           <Card hover className="p-5">
             <div className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <EditableText value={m.title} onSave={(title) => saveMilestone(i, { title })} locked={working} className="font-serif text-lg font-bold" />
-              <span className="text-xs text-ink-3">约第 {m.volume} 卷</span>
+              <span className="text-xs text-ink-2">约第 {m.volume} 卷</span>
             </div>
             <EditableText value={m.event} onSave={(event) => saveMilestone(i, { event })} locked={working} multiline className="text-[15px] leading-relaxed" />
-            <div className="mt-3 flex gap-2 rounded-lg bg-paper-2 px-3 py-2 text-[14px] ring-1 ring-line/80">
+            <div className="mt-4 flex gap-2 border-t border-line pt-3 text-[14px]">
               <Route className="mt-1 size-3.5 shrink-0 text-chief" />
               <EditableText value={m.change} onSave={(change) => saveMilestone(i, { change })} locked={working} multiline className="flex-1 text-ink-2" />
             </div>

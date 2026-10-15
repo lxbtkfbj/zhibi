@@ -7,8 +7,12 @@
   --font-serif: "Noto Serif SC", "Songti SC", "Source Han Serif SC", "SimSun", serif;
 
   /* 宣纸与墨 */
-  --color-paper: #f4efe4;
-  --color-paper-2: #f9f5ec;
+  --color-paper: #f6f1e6;
+  --color-paper-2: #f8f3e9;
+  --color-sidebar: #ece4d4;
+  --color-conversation: #f6f1e6;
+  --color-manuscript: #fffdf8;
+  --color-divider: #e2d8c4;
   --color-card: #fffdf8;
   --color-ink: #262320;
   --color-ink-2: #57514a;
@@ -71,7 +75,7 @@ body {
 .paper {
   background: var(--color-card);
   border: 1px solid var(--color-line);
-  border-radius: 14px;
+  border-radius: 10px;
   box-shadow: var(--shadow-paper);
 }
 .lift {
@@ -136,5 +140,32 @@ body {
   }
   @keyframes blink {
     50% { opacity: 0; }
+  }
+}
+
+/* The manuscript is already a sheet of paper; prose does not need another card. */
+.chapter-page {
+  background: var(--color-manuscript);
+}
+
+/* Keep long model output and editable fields within the narrower manuscript pane. */
+#manuscript-pane {
+  overflow-wrap: anywhere;
+}
+#manuscript-pane button,
+#manuscript-pane a {
+  -webkit-tap-highlight-color: transparent;
+}
+:focus-visible {
+  outline: 2px solid var(--color-seal);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lift, .press {
+    transition: none;
+  }
+  .lift:hover, .press:active {
+    transform: none;
   }
 }

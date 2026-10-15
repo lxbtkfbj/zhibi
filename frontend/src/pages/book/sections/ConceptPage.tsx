@@ -1,7 +1,7 @@
 import { useOutline, useUpdateBook } from '../../../api/hooks'
 import type { Concept } from '../../../api/types'
 import { EditableList, EditableText } from '../../../components/Editable'
-import { Badge, Card, Reveal } from '../../../components/ui'
+import { Badge, Reveal } from '../../../components/ui'
 import { totalChapters } from '../../../lib/status'
 import { useBookContext } from '../context'
 import { FieldBlock, Locked, PageHeader } from './common'
@@ -27,7 +27,7 @@ export function ConceptPage() {
             value={concept.title ?? ''}
             onSave={(title) => update.mutateAsync({ title })}
             locked={working}
-            inputClassName="font-serif text-3xl font-bold"
+            inputClassName="font-serif text-[26px] font-bold"
           />
         }
         subtitle={
@@ -37,14 +37,14 @@ export function ConceptPage() {
               <Badge key={t}>{t}</Badge>
             ))}
             {concept.alt_titles && concept.alt_titles.length > 0 && (
-              <span className="ml-2 text-sm text-ink-3">备选书名：{concept.alt_titles.join(' / ')}</span>
+              <span className="ml-2 text-sm text-ink-2">备选书名：{concept.alt_titles.join(' / ')}</span>
             )}
           </div>
         }
       />
       <Locked locked={working} />
       <Reveal>
-        <Card className="p-7 sm:p-9">
+        <section className="pb-7">
           <FieldBlock label="一句话简介">
             <EditableText
               value={concept.logline ?? ''}
@@ -56,7 +56,7 @@ export function ConceptPage() {
             />
           </FieldBlock>
           <div className="my-7 h-px bg-line" />
-          <div className="grid gap-7 md:grid-cols-2">
+          <div className="grid gap-7 @2xl/manuscript:grid-cols-2">
             <FieldBlock label="核心卖点">
               <EditableList items={concept.selling_points ?? []} onSave={(selling_points) => save({ selling_points })} locked={working} />
             </FieldBlock>
@@ -75,11 +75,11 @@ export function ConceptPage() {
               </FieldBlock>
             </div>
           </div>
-        </Card>
+        </section>
       </Reveal>
       {book.idea && (
         <Reveal delay={0.08}>
-          <p className="mt-6 text-sm leading-relaxed text-ink-3">作者最初的点子：{book.idea}</p>
+          <p className="mt-6 text-sm leading-relaxed text-ink-2">作者最初的点子：{book.idea}</p>
         </Reveal>
       )}
     </div>

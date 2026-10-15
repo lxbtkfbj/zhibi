@@ -18,7 +18,7 @@ export const ROLE_META: Record<Speaker, RoleMeta> = {
     bg: 'bg-chief-soft',
     ring: 'ring-chief/30',
     dot: 'bg-chief',
-    duty: '定方向、写大纲、分派工作',
+    duty: '方向、大纲、章纲',
   },
   lorekeeper: {
     name: '设定师',
@@ -27,7 +27,7 @@ export const ROLE_META: Record<Speaker, RoleMeta> = {
     bg: 'bg-lore-soft',
     ring: 'ring-lore/30',
     dot: 'bg-lore',
-    duty: '管世界观与人物、查矛盾',
+    duty: '人物、世界观、伏笔台账',
   },
   writer: {
     name: '写手',
@@ -36,7 +36,7 @@ export const ROLE_META: Record<Speaker, RoleMeta> = {
     bg: 'bg-writer-soft',
     ring: 'ring-writer/30',
     dot: 'bg-writer',
-    duty: '按细纲写正文',
+    duty: '正文',
   },
   reviewer: {
     name: '审稿',
@@ -45,7 +45,7 @@ export const ROLE_META: Record<Speaker, RoleMeta> = {
     bg: 'bg-reviewer-soft',
     ring: 'ring-reviewer/30',
     dot: 'bg-reviewer',
-    duty: '站在读者角度挑刺',
+    duty: '审稿意见',
   },
   author: { name: '作者', short: '我', text: 'text-paper-2', bg: 'bg-ink', ring: 'ring-ink/30', dot: 'bg-ink', duty: '拍板' },
   system: { name: '系统', short: '·', text: 'text-ink-3', bg: 'bg-line', ring: 'ring-line-2', dot: 'bg-ink-3', duty: '' },

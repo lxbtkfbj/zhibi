@@ -5,7 +5,7 @@ import type { BookDetail, Job, LiveDraft, MeetingMessage } from '../api/types'
 
 const SETTLED = new Set(['waiting_author', 'succeeded', 'failed', 'cancelled'])
 // 写作过程中这些产出一到，就刷新大纲、目录和进度，不必等整轮写完
-const REFRESH_ON = new Set(['volume_plan', 'chapter_plan', 'chapter_draft', 'chapter_polish', 'chapter_materials', 'chapter_final', 'unit_recap', 'volume_recap'])
+const REFRESH_ON = new Set(['concept', 'lore', 'spine', 'threads', 'outline', 'volume_plan', 'chapter_plan', 'chapter_draft', 'chapter_polish', 'chapter_materials', 'chapter_final', 'unit_recap', 'volume_recap'])
 
 /**
  * 会议室实时消息。连接时服务器先补发历史，再推送新消息；
@@ -37,6 +37,8 @@ export function useMeeting(bookId: string) {
       if (message.kind === 'artifact' && REFRESH_ON.has(message.payload?.type ?? '')) {
         for (const key of [keys.chapters(bookId), keys.outline(bookId), keys.book(bookId)]) qc.invalidateQueries({ queryKey: key })
         if (message.payload?.type === 'chapter_final') qc.invalidateQueries({ queryKey: keys.bible(bookId) })
+        if (message.payload?.type === 'lore') qc.invalidateQueries({ queryKey: keys.bible(bookId) })
+        if (message.payload?.type === 'threads') qc.invalidateQueries({ queryKey: keys.threads(bookId) })
       }
     })
     source.addEventListener('draft', (event) => {

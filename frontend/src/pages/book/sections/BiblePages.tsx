@@ -85,7 +85,7 @@ function CharacterSheet({ character, onClose }: { character: Character; onClose:
         {field('能力', 'abilities')}
         {field('想要什么', 'goal')}
         <div className="rounded-xl bg-paper px-4 py-3 ring-1 ring-line">
-          <p className="mb-2 text-xs tracking-[0.15em] text-ink-3">当前状态（随剧情更新）</p>
+          <p className="mb-2 text-xs tracking-[0.15em] text-ink-2">当前状态（随剧情更新）</p>
           <div className="space-y-3">
             {field('位置', 'location')}
             {field('处境', 'condition')}
@@ -132,7 +132,7 @@ export function CharactersPage() {
       />
       <Locked locked={locked} />
       {isLoading && <Skeleton className="h-48" />}
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 @lg/manuscript:grid-cols-2">
         {characters.map((c, i) => {
           const style = ROLE_STYLE[c.role_type] ?? DEFAULT_ROLE
           return (
@@ -146,16 +146,16 @@ export function CharactersPage() {
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-serif text-lg font-bold">
                         {c.name}
-                        {!c.is_alive && <span className="ml-1 text-xs font-normal text-ink-3">（已故）</span>}
+                        {!c.is_alive && <span className="ml-1 text-xs font-normal text-ink-2">（已故）</span>}
                       </p>
-                      <p className="text-xs text-ink-3">{[c.gender, c.age].filter(Boolean).join(' · ')}</p>
+                      <p className="text-xs text-ink-2">{[c.gender, c.age].filter(Boolean).join(' · ')}</p>
                     </div>
                     <Badge tone={style.tone}>{c.role_type}</Badge>
                   </div>
                   <p className="mt-3 line-clamp-2 text-[14px] leading-relaxed text-ink-2">{c.personality}</p>
-                  {c.goal && <p className="mt-2 line-clamp-1 text-[13px] text-ink-3">想要：{c.goal}</p>}
+                  {c.goal && <p className="mt-2 line-clamp-1 text-[14px] text-ink-2">想要：{c.goal}</p>}
                   {(c.location || c.condition) && (
-                    <p className="mt-auto flex items-start gap-1 pt-3 text-xs text-ink-3">
+                    <p className="mt-auto flex items-start gap-1 pt-3 text-xs text-ink-2">
                       <MapPin className="mt-0.5 size-3 shrink-0" />
                       <span className="line-clamp-1">{[c.location, c.condition].filter(Boolean).join('，')}</span>
                     </p>
@@ -206,7 +206,7 @@ export function WorldPage() {
               <span className="text-seal">{CATEGORIES[cat] ?? <BookOpen className="size-4" />}</span>
               {cat}
             </h3>
-            <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid gap-3 @2xl/manuscript:grid-cols-2">
               {items.map((entry, i) => (
                 <Stagger key={entry.id} i={i}>
                   <Card hover className="group h-full p-5">
@@ -215,7 +215,7 @@ export function WorldPage() {
                       {!locked && (
                         <button
                           onClick={() => confirm(`删除「${entry.name}」？`) && remove.mutate(entry.id)}
-                          className="rounded p-1 text-ink-3 opacity-0 transition-opacity group-hover:opacity-100 hover:text-seal"
+                          className="rounded p-1 text-ink-2 opacity-0 transition-opacity group-hover:opacity-100 hover:text-seal"
                           aria-label="删除"
                         >
                           <Trash2 className="size-4" />
@@ -231,7 +231,7 @@ export function WorldPage() {
         ))}
       </div>
       {!locked && (
-        <Card className="mt-8 flex flex-wrap items-center gap-2 p-3">
+        <section className="mt-8 flex flex-wrap items-center gap-2 border-t border-line pt-6">
           <select value={category} onChange={(e) => setCategory(e.target.value)} className={clsx(inputClass, 'w-auto')}>
             {Object.keys(CATEGORIES).map((c) => (
               <option key={c}>{c}</option>
@@ -250,7 +250,7 @@ export function WorldPage() {
             <Plus className="size-4" />
             添加
           </Button>
-        </Card>
+        </section>
       )}
     </div>
   )
@@ -285,7 +285,7 @@ export function RelationsPage() {
                 <span className="h-px flex-1 bg-gradient-to-l from-line-2 to-transparent" />
                 <span className="font-serif text-lg font-bold">{names[r.target_id]}</span>
                 {!locked && (
-                  <button onClick={() => remove.mutate(r.id)} className="rounded p-1 text-ink-3 opacity-0 transition-opacity group-hover:opacity-100 hover:text-seal" aria-label="删除">
+                  <button onClick={() => remove.mutate(r.id)} className="rounded p-1 text-ink-2 opacity-0 transition-opacity group-hover:opacity-100 hover:text-seal" aria-label="删除">
                     <Trash2 className="size-4" />
                   </button>
                 )}
@@ -303,7 +303,7 @@ export function RelationsPage() {
         ))}
       </div>
       {!locked && characters.length >= 2 && (
-        <Card className="mt-6 flex flex-wrap items-center gap-2 p-3">
+        <section className="mt-6 flex flex-wrap items-center gap-2 border-t border-line pt-6">
           <select value={source} onChange={(e) => setSource(e.target.value)} className={clsx(inputClass, 'w-auto')}>
             <option value="">人物 A</option>
             {characters.map((c) => (
@@ -334,7 +334,7 @@ export function RelationsPage() {
             添加
           </Button>
           <ErrorText error={create.error} />
-        </Card>
+        </section>
       )}
     </div>
   )
@@ -381,9 +381,9 @@ export function ForeshadowingPage() {
       <div className="space-y-4">
         {items.map((f, i) => (
           <Stagger key={f.id} i={i}>
-            <Card hover className="group p-5 sm:p-6">
+            <Card hover className="group p-5 @lg/manuscript:p-6">
               <div className="mb-4 flex items-start gap-3">
-                <span className="mt-1 w-10 shrink-0 font-serif text-xl leading-none font-bold text-line-2">F{f.seq || i + 1}</span>
+                <span className="mt-1 w-10 shrink-0 font-serif text-xl leading-none font-bold text-ink-2">F{f.seq || i + 1}</span>
                 <EditableText value={f.description} onSave={(v) => update.mutateAsync({ id: f.id, description: v })} locked={locked} multiline className="flex-1 font-serif text-[17px] font-bold" />
                 {locked ? (
                   <Badge tone={F_STATUS[f.status].tone}>{F_STATUS[f.status].label}</Badge>
@@ -401,7 +401,7 @@ export function ForeshadowingPage() {
                   </select>
                 )}
                 {!locked && (
-                  <button onClick={() => confirm('删除这条伏笔？') && remove.mutate(f.id)} className="rounded p-1 text-ink-3 opacity-0 transition-opacity group-hover:opacity-100 hover:text-seal" aria-label="删除">
+                  <button onClick={() => confirm('删除这条伏笔？') && remove.mutate(f.id)} className="rounded p-1 text-ink-2 opacity-0 transition-opacity group-hover:opacity-100 hover:text-seal" aria-label="删除">
                     <Trash2 className="size-4" />
                   </button>
                 )}
@@ -416,13 +416,13 @@ export function ForeshadowingPage() {
                 )}
                 {f.resolved_chapter && <span className="rounded-full bg-card px-2.5 py-0.5 text-ink-2 ring-1 ring-line">第 {f.resolved_chapter} 章已收</span>}
               </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-xl bg-paper-2 px-4 py-3 ring-1 ring-line/80">
-                  <p className="mb-1 text-xs text-ink-3">怎么埋</p>
+              <div className="grid gap-3 @lg/manuscript:grid-cols-2">
+                <div className="border-t border-line pt-3">
+                  <p className="mb-1 text-xs text-ink-2">怎么埋</p>
                   <EditableText value={f.plant_plan} onSave={(v) => update.mutateAsync({ id: f.id, plant_plan: v })} locked={locked} multiline className="text-[14px]" />
                 </div>
-                <div className="rounded-xl bg-paper-2 px-4 py-3 ring-1 ring-line/80">
-                  <p className="mb-1 text-xs text-ink-3">怎么收</p>
+                <div className="border-t border-line pt-3">
+                  <p className="mb-1 text-xs text-ink-2">怎么收</p>
                   <EditableText value={f.payoff_plan} onSave={(v) => update.mutateAsync({ id: f.id, payoff_plan: v })} locked={locked} multiline className="text-[14px]" />
                 </div>
               </div>

@@ -12,10 +12,12 @@ import uuid
 import httpx
 import pytest
 from redis.asyncio import Redis
+from sqlalchemy import select
 
 from app.config import get_settings
 from app.llm import demo
 from app.main import create_app
+from app.models import Book, Job, MeetingMessage
 from app.services import jobs
 from app.services.job_runner import execute_job
 
@@ -360,3 +362,139 @@ async def test_write_chapters_and_read_them(client, queued):
 async def test_export_needs_final_chapters(client, queued):
     res = await client.post("/api/books", json={"idea": "一个能看见别人寿命的少年"})
     assert (await client.get(f"/api/books/{res.json()['book']['id']}/export.txt")).status_code == 409
+
+
+async def note_book(sessionmaker, kind=None, status="queued", pending=None):
+    """只布置任务状态，不运行模型，隔离插话接口的分流规则。"""
+    async with sessionmaker() as session:
+        book = Book(idea="一个能看见别人寿命的少年", requirements=["已有的作者要求"])
+        session.add(book)
+        await session.flush()
+        job = None
+        if kind:
+            job = Job(
+                book_id=book.id,
+                kind=kind,
+                status=status,
+                pending=pending,
+                thread_id=f"note-{uuid.uuid4()}",
+                params={},
+            )
+            session.add(job)
+        await session.commit()
+        return book.id, job.id if job else None
+
+
+@pytest.mark.parametrize(
+    ("kind", "status", "pending"),
+    [
+        ("book_setup", "queued", None),
+        ("book_setup", "running", None),
+        ("write_book", "queued", None),
+        ("write_book", "running", None),
+        ("book_setup", "waiting_author", {"kind": "setup_questions"}),
+    ],
+)
+async def test_targeted_notes_wait_for_active_reader(client, sessionmaker, kind, status, pending):
+    book_id, job_id = await note_book(sessionmaker, kind, status, pending)
+    response = await client.post(
+        f"/api/books/{book_id}/notes", json={"content": "  苏灵素改成 19 岁  ", "to": "lorekeeper"}
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["job_id"] == str(job_id)
+    assert response.json()["payload"] == {"thread": "lorekeeper"}
+    assert response.json()["content"] == "苏灵素改成 19 岁"
+    async with sessionmaker() as session:
+        assert (await session.get(Book, book_id)).requirements == ["已有的作者要求"]
+        messages = (
+            (await session.execute(select(MeetingMessage).where(MeetingMessage.book_id == book_id))).scalars().all()
+        )
+    assert [(m.speaker, m.kind, m.payload) for m in messages] == [("author", "note", {"thread": "lorekeeper"})]
+
+
+@pytest.mark.parametrize("recipient", [None, "chief", "lorekeeper", "writer", "reviewer"])
+@pytest.mark.parametrize(
+    ("kind", "status"), [(None, "queued"), ("rewrite_chapter", "running"), ("book_setup", "failed")]
+)
+async def test_idle_and_non_reader_notes_are_remembered_immediately(client, sessionmaker, recipient, kind, status):
+    book_id, _ = await note_book(sessionmaker, kind, status)
+    body = {"content": "  节奏再快一点  ", "to": recipient}
+    expected_payload = {"thread": recipient} if recipient else None
+    names = {"chief": "主编", "lorekeeper": "设定师", "writer": "写手", "reviewer": "审稿"}
+    requirement = f"对{names[recipient]}：节奏再快一点" if recipient else "节奏再快一点"
+    for _ in range(2):
+        response = await client.post(f"/api/books/{book_id}/notes", json=body)
+        assert response.status_code == 201, response.text
+        assert response.json()["job_id"] is None
+        assert response.json()["kind"] == "note"
+        assert response.json()["payload"] == expected_payload
+    async with sessionmaker() as session:
+        assert (await session.get(Book, book_id)).requirements == ["已有的作者要求", requirement]
+        messages = (
+            (
+                await session.execute(
+                    select(MeetingMessage).where(MeetingMessage.book_id == book_id).order_by(MeetingMessage.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert len(messages) == 4
+    for note, reply in (messages[:2], messages[2:]):
+        assert note.speaker == "author" and note.content == "节奏再快一点"
+        assert reply.speaker == (recipient or "chief") and reply.kind == "speech"
+        assert reply.content == "记下了，下次开工就照办。"
+        assert note.payload == reply.payload == expected_payload
+
+
+@pytest.mark.parametrize("pending_kind", jobs.DECISION_KINDS)
+@pytest.mark.parametrize("recipient", [None, "lorekeeper"])
+async def test_notes_rejected_at_every_decision_gate(client, sessionmaker, pending_kind, recipient):
+    book_id, _ = await note_book(sessionmaker, "write_book", "waiting_author", {"kind": pending_kind})
+    response = await client.post(f"/api/books/{book_id}/notes", json={"content": "改一下", "to": recipient})
+    assert response.status_code == 409
+    assert response.json()["detail"] == "等你拍板时请直接提意见"
+    async with sessionmaker() as session:
+        assert (await session.get(Book, book_id)).requirements == ["已有的作者要求"]
+        assert (await session.execute(select(MeetingMessage).where(MeetingMessage.book_id == book_id))).first() is None
+
+
+@pytest.mark.parametrize("body", [{"content": "改一下", "to": "author"}, {"content": "  \n  ", "to": "writer"}])
+async def test_notes_reject_invalid_recipient_and_blank_content(client, sessionmaker, body):
+    book_id, _ = await note_book(sessionmaker)
+    assert (await client.post(f"/api/books/{book_id}/notes", json=body)).status_code == 422
+
+
+@pytest.mark.parametrize("duplicate", [False, True])
+async def test_concurrent_idle_notes_preserve_every_requirement(client, sessionmaker, monkeypatch, duplicate):
+    book_id, _ = await note_book(sessionmaker)
+    barrier = asyncio.Barrier(2)
+    original = jobs.active_job
+
+    async def concurrent_read(session, requested_book_id):
+        result = await original(session, requested_book_id)
+        if requested_book_id == book_id:
+            # 两个独立请求先读到相同的旧 requirements，再一起进入追加操作。
+            await barrier.wait()
+        return result
+
+    monkeypatch.setattr(jobs, "active_job", concurrent_read)
+    first = {"content": "开篇更紧凑", "to": "writer"}
+    second = first if duplicate else {"content": "补上人物年龄", "to": "lorekeeper"}
+    responses = await asyncio.wait_for(
+        asyncio.gather(*[client.post(f"/api/books/{book_id}/notes", json=body) for body in (first, second)]),
+        timeout=10,
+    )
+    assert [response.status_code for response in responses] == [201, 201]
+    async with sessionmaker() as session:
+        requirements = (await session.get(Book, book_id)).requirements
+        messages = (
+            (await session.execute(select(MeetingMessage).where(MeetingMessage.book_id == book_id))).scalars().all()
+        )
+    expected = {"已有的作者要求", "对写手：开篇更紧凑"}
+    if not duplicate:
+        expected.add("对设定师：补上人物年龄")
+    assert set(requirements) == expected
+    assert len(requirements) == len(expected)
+    assert sum(message.kind == "note" for message in messages) == 2
+    assert sum(message.kind == "speech" for message in messages) == 2

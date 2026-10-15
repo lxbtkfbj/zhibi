@@ -408,6 +408,7 @@ class Answers(BaseModel):
 
 class NoteIn(BaseModel):
     content: str = Field(min_length=1, max_length=5000)
+    to: Literal["chief", "lorekeeper", "writer", "reviewer"] | None = None
 
 
 class MeetingMessageOut(BaseModel):

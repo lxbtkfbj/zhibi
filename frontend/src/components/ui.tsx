@@ -184,7 +184,7 @@ export function Modal({
           >
             <div className="flex shrink-0 items-center justify-between px-6 pt-5 pb-3">
               <h2 className="font-serif text-xl font-bold">{title}</h2>
-              <button onClick={onClose} className="rounded-lg p-1.5 text-ink-3 hover:bg-line/60 hover:text-ink" aria-label="关闭">
+              <button onClick={onClose} className="rounded-lg p-1.5 text-ink-2 hover:bg-line/60 hover:text-ink" aria-label="关闭">
                 <X className="size-5" />
               </button>
             </div>
@@ -235,7 +235,7 @@ export function Sheet({
           >
             <div className="flex items-center justify-between gap-3 border-b border-line px-6 py-4">
               <div className="min-w-0 font-serif text-xl font-bold">{title}</div>
-              <button onClick={onClose} className="rounded-lg p-1.5 text-ink-3 hover:bg-line/60 hover:text-ink" aria-label="关闭">
+              <button onClick={onClose} className="rounded-lg p-1.5 text-ink-2 hover:bg-line/60 hover:text-ink" aria-label="关闭">
                 <X className="size-5" />
               </button>
             </div>
@@ -253,7 +253,7 @@ export function Label({ children, hint }: { children: ReactNode; hint?: ReactNod
   return (
     <span className="mb-1.5 block text-sm font-medium text-ink-2">
       {children}
-      {hint && <span className="ml-2 font-normal text-ink-3">{hint}</span>}
+      {hint && <span className="ml-2 font-normal text-ink-2">{hint}</span>}
     </span>
   )
 }
@@ -269,9 +269,9 @@ export function ErrorText({ error }: { error: unknown }) {
 export function EmptyState({ icon, title, children }: { icon?: ReactNode; title: string; children?: ReactNode }) {
   return (
     <div className="flex flex-col items-center justify-center gap-2 px-6 py-16 text-center">
-      {icon && <div className="text-ink-3">{icon}</div>}
+      {icon && <div className="text-ink-2">{icon}</div>}
       <p className="font-serif text-lg text-ink-2">{title}</p>
-      {children && <div className="max-w-sm text-sm leading-relaxed text-ink-3">{children}</div>}
+      {children && <div className="max-w-sm text-sm leading-relaxed text-ink-2">{children}</div>}
     </div>
   )
 }

@@ -1,6 +1,8 @@
 export type JobStatus = 'queued' | 'running' | 'waiting_author' | 'succeeded' | 'failed' | 'cancelled'
 export type BookStatus = 'setting_up' | 'awaiting_approval' | 'ready' | 'writing' | 'completed'
 export type Speaker = 'chief' | 'lorekeeper' | 'writer' | 'reviewer' | 'author' | 'system'
+export type TeamRole = Exclude<Speaker, 'author' | 'system'>
+export type Conversation = 'group' | TeamRole
 
 export interface InterviewQuestion {
   question: string
@@ -283,7 +285,7 @@ export interface MeetingMessage {
   /** note：作者在编辑部工作时插的话 */
   kind: 'speech' | 'artifact' | 'status' | 'decision' | 'error' | 'note'
   content: string
-  payload: { type: string; data: unknown } | null
+  payload: { type?: string; data?: unknown; thread?: Speaker } | null
   created_at: string | null
 }
 

@@ -1,5 +1,6 @@
 import { createContext, useContext } from 'react'
-import type { BookDetail, Job, LiveDraft, MeetingMessage } from '../../api/types'
+import type { BookDetail, Conversation, Job, LiveDraft, MeetingMessage, Outline } from '../../api/types'
+import type { WorkspaceTarget } from '../../lib/workspace'
 
 export interface BookContextValue {
   bookId: string
@@ -14,8 +15,15 @@ export interface BookContextValue {
   waiting: boolean
   /** 主编动笔前的提问，等作者回答 */
   asking: boolean
-  teamOpen: boolean
-  setTeamOpen: (open: boolean) => void
+  outline: Outline | undefined
+  conversation: Conversation
+  setConversation: (conversation: Conversation) => void
+  unread: Record<Conversation, number>
+  following: boolean
+  followTarget: WorkspaceTarget | null
+  manualNavigate: (path: string) => void
+  focusComposer: number
+  requestFeedback: () => void
   celebrate: () => void
 }
 

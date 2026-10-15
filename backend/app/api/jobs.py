@@ -17,6 +17,7 @@ from app.models import Book, Job, LlmCall, MeetingMessage
 from app.schemas import Answers, Decision, JobOut, MeetingMessageOut, NoteIn, UsageOut
 from app.services import jobs
 from app.services.meeting import job_dict, message_dict, post_message, publish, stream_key
+from app.services.notes import note_requirement
 
 router = APIRouter(tags=["jobs"])
 
@@ -97,13 +98,41 @@ async def answer(
 async def add_note(
     body: NoteIn, book: Book = Depends(get_book), session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)
 ) -> MeetingMessageOut:
-    """编辑部工作时插话：做完手头这一步就会处理，之后每一步都按这句话来。"""
+    """工作中由流程消费插话；空闲或不读插话的任务中，直接记为下次开工的要求。"""
     job = await jobs.active_job(session, book.id)
-    if job is None or not (job.status in jobs.BUSY_STATUSES or jobs.pending_kind(job) == "setup_questions"):
-        raise HTTPException(409, "编辑部现在没在工作；方案出来后请用「提修改意见」")
-    data = await post_message(
-        session, redis, book_id=book.id, job_id=job.id, speaker="author", kind="note", content=body.content.strip()
+    if job is not None and jobs.pending_kind(job) in jobs.DECISION_KINDS:
+        raise HTTPException(409, "等你拍板时请直接提意见")
+    content = body.content.strip()
+    if not content:
+        raise HTTPException(422, "请写下你的话")
+    payload = {"thread": body.to} if body.to else None
+    deferred = (
+        job is not None
+        and job.kind in ("book_setup", "write_book")
+        and (job.status in jobs.BUSY_STATUSES or jobs.pending_kind(job) == "setup_questions")
     )
+    # 不让失败任务以后恢复时再消费一遍已经立即记下的插话。
+    job_id = job.id if deferred else None
+    if not deferred:
+        # get_book 可能在另一个请求提交前读过这本书；加锁并重新读取，避免同时插话互相覆盖要求。
+        # 锁与下面的 note 消息一起提交，下一位作者请求再接着追加。
+        await session.refresh(book, attribute_names=["requirements"], with_for_update=True)
+        requirement = note_requirement(content, payload)
+        book.requirements = list(dict.fromkeys([*(book.requirements or []), requirement]))
+    data = await post_message(
+        session, redis, book_id=book.id, job_id=job_id, speaker="author", kind="note", content=content, payload=payload
+    )
+    if not deferred:
+        await post_message(
+            session,
+            redis,
+            book_id=book.id,
+            job_id=None,
+            speaker=body.to or "chief",
+            kind="speech",
+            content="记下了，下次开工就照办。",
+            payload=payload,
+        )
     return MeetingMessageOut(**data)
 
 

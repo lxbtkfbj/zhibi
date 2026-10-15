@@ -14,12 +14,12 @@ export function PageHeader({
 }) {
   return (
     <div className="mb-8">
-      <p className="mb-2 flex items-center gap-2 text-xs tracking-[0.25em] text-ink-3">
+      <p className="mb-2 flex items-center gap-2 text-xs tracking-[0.25em] text-ink-2">
         <Diamond />
         {eyebrow}
       </p>
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div className="min-w-0 font-serif text-3xl leading-tight font-bold">{title}</div>
+        <div className="min-w-0 font-serif text-[26px] leading-tight font-bold">{title}</div>
         {action}
       </div>
       {subtitle && <div className="mt-2.5 max-w-2xl text-[15px] leading-relaxed text-ink-2">{subtitle}</div>}
@@ -31,7 +31,7 @@ export function PageHeader({
 export function FieldBlock({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
   return (
     <div className={className}>
-      <p className="mb-1.5 text-xs tracking-[0.15em] text-ink-3">{label}</p>
+      <p className="mb-1.5 text-xs tracking-[0.15em] text-ink-2">{label}</p>
       <div className="text-[15px] leading-relaxed">{children}</div>
     </div>
   )

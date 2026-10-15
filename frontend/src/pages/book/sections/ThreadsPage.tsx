@@ -21,11 +21,11 @@ function ThreadCard({ thread, locked, delay }: { thread: StoryThread; locked: bo
   const saveBeat = (i: number, beat: string) => save({ beats: thread.beats.map((b, j) => (j === i ? { ...b, beat } : b)) })
   return (
     <Reveal delay={delay}>
-      <Card hover className="p-5 sm:p-6">
+      <Card hover className="p-5 @lg/manuscript:p-6">
         <div className="mb-3 flex flex-wrap items-center gap-2.5">
           <span className={clsx('rounded-md px-2 py-0.5 text-xs font-medium', KIND_TONE[thread.kind] ?? 'bg-line/70 text-ink-2')}>{thread.kind}</span>
           <EditableText value={thread.name} onSave={(name) => save({ name })} locked={locked} className="font-serif text-xl font-bold" />
-          {thread.characters.length > 0 && <span className="text-sm text-ink-3">{thread.characters.join('、')}</span>}
+          {thread.characters.length > 0 && <span className="text-sm text-ink-2">{thread.characters.join('、')}</span>}
         </div>
         <EditableText value={thread.summary} onSave={(summary) => save({ summary })} locked={locked} multiline className="text-[15px] leading-relaxed text-ink-2" />
         {thread.beats.length > 0 && (
@@ -33,7 +33,7 @@ function ThreadCard({ thread, locked, delay }: { thread: StoryThread; locked: bo
             {thread.beats.map((b, i) => (
               <li key={i} className="relative">
                 <span className="absolute top-2 -left-[21px] size-2 rounded-full bg-chief" />
-                <p className="text-xs text-ink-3">第 {b.volume} 卷</p>
+                <p className="text-xs text-ink-2">第 {b.volume} 卷</p>
                 <EditableText value={b.beat} onSave={(beat) => saveBeat(i, beat)} locked={locked} multiline className="text-[14px] leading-relaxed" />
               </li>
             ))}

@@ -85,7 +85,7 @@ export function EditableText({ value, onSave, locked, multiline, placeholder = '
             inputClassName,
           )}
         />
-        <div className="mt-1 flex items-center gap-2 text-xs text-ink-3">
+        <div className="mt-1 flex items-center gap-2 text-xs text-ink-2">
           {saving ? <Spinner className="size-3" /> : <Check className="size-3" />}
           {multiline ? 'Ctrl+Enter 保存，Esc 取消' : 'Enter 保存，Esc 取消'}
           {error && <span className="text-seal">{error}</span>}
@@ -154,7 +154,7 @@ export function EditableList({
         <ul className="space-y-1">
           {items.map((item, i) => (
             <li key={i} className="flex gap-2 leading-relaxed">
-              <span className="shrink-0 text-ink-3">{ordered ? `${i + 1}.` : '·'}</span>
+              <span className="shrink-0 text-ink-2">{ordered ? `${i + 1}.` : '·'}</span>
               <span>{item}</span>
             </li>
           ))}
@@ -197,7 +197,7 @@ function EditableTextAutoOpen({ value, onSave, onDone }: { value: string; onSave
         }}
         className="w-full resize-none rounded-md border border-seal/50 bg-card px-2 py-1 leading-relaxed focus:outline-none focus:ring-2 focus:ring-seal/15"
       />
-      <div className="mt-1 flex items-center gap-2 text-xs text-ink-3">
+      <div className="mt-1 flex items-center gap-2 text-xs text-ink-2">
         {saving && <Spinner className="size-3" />}每行一条 · Ctrl+Enter 保存 · Esc 取消
       </div>
     </div>

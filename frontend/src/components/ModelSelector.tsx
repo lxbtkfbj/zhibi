@@ -158,14 +158,14 @@ export function ModelSelector({
               setOpen(!expanded)
               setActive(-1)
             }}
-            className="absolute top-0 right-0 flex h-11 w-11 items-center justify-center rounded-r-xl text-ink-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-seal"
+            className="absolute top-0 right-0 flex h-11 w-11 items-center justify-center rounded-r-xl text-ink-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-seal"
           >
             <ChevronDown className={`size-4 transition-transform ${expanded ? 'rotate-180' : ''}`} />
           </button>
         )}
         {expanded && (
           <div className="mt-2 overflow-hidden rounded-xl border border-line-2 bg-card shadow-[var(--shadow-panel)]">
-            <div className="border-b border-line px-3.5 py-2 text-xs text-ink-3">
+            <div className="border-b border-line px-3.5 py-2 text-xs text-ink-2">
               {query ? `匹配 ${filtered.length} / ${models.length} 个模型` : `共 ${models.length} 个模型`}
             </div>
             <ul ref={list} id={`${id}-list`} role="listbox" aria-label="可用模型" className="scroll-thin max-h-52 overflow-y-auto py-1">
@@ -185,15 +185,15 @@ export function ModelSelector({
                 </li>
               ))}
             </ul>
-            {filtered.length === 0 && <p className="px-3.5 pb-3 pt-1 text-sm text-ink-3">没有匹配的模型，可继续手动填写。</p>}
+            {filtered.length === 0 && <p className="px-3.5 pb-3 pt-1 text-sm text-ink-2">没有匹配的模型，可继续手动填写。</p>}
           </div>
         )}
       </div>
-      <p id={`${id}-hint`} className="mt-1.5 text-xs leading-5 text-ink-3">输入部分名称筛选，也可直接填写完整模型名。</p>
+      <p id={`${id}-hint`} className="mt-1.5 text-xs leading-5 text-ink-2">输入部分名称筛选，也可直接填写完整模型名。</p>
       <div id={`${id}-status`} aria-live="polite" className="min-h-15 text-xs leading-5">
-        {!baseUrl.trim() && <p className="text-ink-3">先填写接口地址，即可获取可用模型。</p>}
-        {loading && <p className="text-ink-3">正在获取模型列表，请稍候…</p>}
-        {current?.status === 'success' && <p className="text-ink-3">{models.length ? `已获取 ${models.length} 个模型` : '接口未返回可用模型，请手动填写模型名。'}</p>}
+        {!baseUrl.trim() && <p className="text-ink-2">先填写接口地址，即可获取可用模型。</p>}
+        {loading && <p className="text-ink-2">正在获取模型列表，请稍候…</p>}
+        {current?.status === 'success' && <p className="text-ink-2">{models.length ? `已获取 ${models.length} 个模型` : '接口未返回可用模型，请手动填写模型名。'}</p>}
         {current?.status === 'error' && <p className="break-words text-seal">{current.message}</p>}
       </div>
     </div>

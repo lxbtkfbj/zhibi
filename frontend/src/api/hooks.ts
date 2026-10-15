@@ -18,6 +18,7 @@ import type {
   Relationship,
   RoleAssignments,
   StoryThread,
+  TeamRole,
   Usage,
   Volume,
   WorldEntry,
@@ -203,7 +204,11 @@ export function useJobActions(bookId: string) {
         post<Job>(`/jobs/${jobId}/answers`, { answers, extra }),
       onSuccess: setJob,
     }),
-    note: useMutation({ mutationFn: (content: string) => post<MeetingMessage>(`/books/${bookId}/notes`, { content }) }),
+    note: useMutation({
+      mutationFn: (body: string | { content: string; to?: TeamRole }) =>
+        post<MeetingMessage>(`/books/${bookId}/notes`, typeof body === 'string' ? { content: body } : body),
+      onSuccess: () => qc.invalidateQueries({ queryKey: keys.book(bookId) }),
+    }),
     /** 按作者的意见重写一章已定稿的章节；后面还有定稿章节时要 confirm。 */
     rewrite: useMutation({
       mutationFn: ({ index, feedback, confirm }: { index: number; feedback: string; confirm: boolean }) =>

@@ -35,7 +35,7 @@ function AdvancedField({ title, hint, children }: { title: string; hint?: string
     <label className="block min-w-0">
       <Label>{title}</Label>
       {children}
-      {hint && <span className="mt-1.5 block text-xs leading-5 text-ink-3">{hint}</span>}
+      {hint && <span className="mt-1.5 block text-xs leading-5 text-ink-2">{hint}</span>}
     </label>
   )
 }
@@ -99,7 +99,7 @@ function ProfileDialog({ profile, onClose }: { profile: LlmProfile | null; onClo
               ))}
               <button
                 onClick={() => setForm({ ...EMPTY, name: '演示模式', provider: 'demo' })}
-                className="rounded-full border border-dashed border-line-2 px-3 py-1 text-xs text-ink-3 hover:text-ink"
+                className="rounded-full border border-dashed border-line-2 px-3 py-1 text-xs text-ink-2 hover:text-ink"
               >
                 演示模式（不联网）
               </button>
@@ -141,7 +141,7 @@ function ProfileDialog({ profile, onClose }: { profile: LlmProfile | null; onClo
                   disabled={!form.api_key}
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => setShowApiKey((visible) => !visible)}
-                  className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-xl text-ink-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-seal disabled:cursor-not-allowed disabled:opacity-40"
+                  className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-xl text-ink-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-seal disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {showApiKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
                 </button>
@@ -207,7 +207,7 @@ function ProfileRow({ profile, onEdit }: { profile: LlmProfile; onEdit: () => vo
           {profile.provider === 'demo' && <Badge>演示</Badge>}
           {profile.provider !== 'demo' && !profile.has_key && <Badge tone="wait">未填 Key</Badge>}
         </p>
-        <p className="truncate text-xs text-ink-3">{profile.provider === 'demo' ? '内置示例内容，不联网' : `${profile.model} · ${profile.base_url}`}</p>
+        <p className="truncate text-xs text-ink-2">{profile.provider === 'demo' ? '内置示例内容，不联网' : `${profile.model} · ${profile.base_url}`}</p>
         {test.data && (
           <p className={`mt-1 flex items-center gap-1 text-xs ${test.data.ok ? 'text-lore' : 'text-seal'}`}>
             {test.data.ok ? <CheckCircle2 className="size-3.5" /> : <XCircle className="size-3.5" />}
@@ -243,7 +243,7 @@ export function SettingsPage() {
         <section>
           <div className="mb-5 flex items-end justify-between gap-4">
             <div>
-              <p className="mb-2 flex items-center gap-2 text-xs tracking-[0.25em] text-ink-3">
+              <p className="mb-2 flex items-center gap-2 text-xs tracking-[0.25em] text-ink-2">
                 <Diamond />
                 设置
               </p>
@@ -257,7 +257,7 @@ export function SettingsPage() {
           </div>
           <Card>
             {isLoading && (
-              <div className="flex justify-center py-10 text-ink-3">
+              <div className="flex justify-center py-10 text-ink-2">
                 <Spinner />
               </div>
             )}
@@ -271,7 +271,7 @@ export function SettingsPage() {
         {profiles && profiles.length > 0 && roles && (
           <section>
             <h2 className="mb-1 font-serif text-xl font-bold">编辑部分工</h2>
-            <p className="mb-3 text-sm text-ink-3">每个角色可以用不同的模型，比如写手用文笔好的，审稿用便宜快的。</p>
+            <p className="mb-3 text-sm text-ink-2">每个角色可以用不同的模型，比如写手用文笔好的，审稿用便宜快的。</p>
             <Card className="divide-y divide-line overflow-hidden">
               {ROLE_KEYS.map((role) => (
                 <label key={role} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">

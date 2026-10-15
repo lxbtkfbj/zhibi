@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import func, select
 
+from app.graphs import book_setup
 from app.graphs.book_setup import ORDER, cascade, intake_node, merge_plan
 from app.llm import demo
 from app.models import (
@@ -21,6 +22,7 @@ from app.models import (
     Volume,
 )
 from app.services.job_runner import execute_job
+from app.services.setup_store import load_setup
 
 
 @pytest.fixture(autouse=True)
@@ -284,7 +286,8 @@ async def test_genre_playbook_goes_into_planning_prompts(sessionmaker, monkeypat
     assert "【题材打法：通用" in prompts["ThreadsDraft"]
 
 
-async def test_note_mid_run_revises_finished_parts(sessionmaker, monkeypatch):
+@pytest.mark.parametrize("thread", [None, "lorekeeper"])
+async def test_note_mid_run_revises_finished_parts(sessionmaker, monkeypatch, thread):
     book_id, job_id = await make_job(sessionmaker)
     prompts: list[tuple[str, str]] = []
     original = demo.respond
@@ -296,7 +299,12 @@ async def test_note_mid_run_revises_finished_parts(sessionmaker, monkeypatch):
             async with sessionmaker() as session:
                 session.add(
                     MeetingMessage(
-                        book_id=book_id, job_id=job_id, speaker="author", kind="note", content="主角名字改成云澈"
+                        book_id=book_id,
+                        job_id=job_id,
+                        speaker="author",
+                        kind="note",
+                        content="主角名字改成云澈",
+                        payload={"thread": thread} if thread else None,
                     )
                 )
                 await session.commit()
@@ -339,7 +347,112 @@ async def test_note_mid_run_revises_finished_parts(sessionmaker, monkeypatch):
             .scalars()
             .all()
         )
-    assert any("云澈" in r for r in replies)  # 主编在会上回应了作者
+        if thread:
+            messages = (
+                (await session.execute(select(MeetingMessage).where(MeetingMessage.job_id == job_id))).scalars().all()
+            )
+            private_replies = [m for m in messages if m.kind == "speech" and m.payload == {"thread": thread}]
+            assert [(m.speaker, m.content) for m in private_replies] == [(thread, "收到，主编已经安排，按你说的改。")]
+            assert "（作者对设定师说）主角名字改成云澈" in (await session.get(Book, book_id)).requirements
+    if thread:
+        for name, user in prompts[3:]:
+            assert "（作者对设定师说）主角名字改成云澈" in user, name
+    else:
+        assert any("云澈" in r for r in replies)  # 主编在会上回应了作者
+
+
+async def test_targeted_note_before_setup_reaches_every_prompt(sessionmaker, monkeypatch):
+    book_id, job_id = await make_job(sessionmaker)
+    async with sessionmaker() as session:
+        book = await session.get(Book, book_id)
+        book.requirements = ["之前记下的要求不能丢"]
+        session.add(
+            MeetingMessage(
+                book_id=book_id,
+                job_id=job_id,
+                speaker="author",
+                kind="note",
+                content="开篇节奏紧凑",
+                payload={"thread": "writer"},
+            )
+        )
+        await session.commit()
+    prompts = []
+    original = demo.respond
+
+    async def capture(schema, system, user):
+        prompts.append(user)
+        return await original(schema, system, user)
+
+    monkeypatch.setattr(demo, "respond", capture)
+    await execute_job(job_id)
+    status, _, error = await job_status(sessionmaker, job_id)
+    assert status == "waiting_author", error
+    assert all("（作者对写手说）开篇节奏紧凑" in user for user in prompts)
+    async with sessionmaker() as session:
+        assert "之前记下的要求不能丢" in (await session.get(Book, book_id)).requirements
+        replies = (await session.execute(select(MeetingMessage).where(MeetingMessage.job_id == job_id))).scalars().all()
+    assert any(
+        m.speaker == "writer" and m.payload == {"thread": "writer"} and m.content == "收到，主编已经安排，按你说的改。"
+        for m in replies
+    )
+
+
+async def test_approval_keeps_late_targeted_note_without_replanning(sessionmaker, monkeypatch):
+    book_id, job_id = await make_job(sessionmaker)
+    original = book_setup.persist_node
+    late_content = "苏灵素改成 19 岁"
+
+    async def insert_last_moment_note(state, runtime):
+        result = await original(state, runtime)
+        # 模拟最终存稿后、任务切换为 waiting_author 前 /notes 已成功接收的插话。
+        async with sessionmaker() as session:
+            assert (await session.get(Job, job_id)).status == "running"
+            session.add(
+                MeetingMessage(
+                    book_id=book_id,
+                    job_id=job_id,
+                    speaker="author",
+                    kind="note",
+                    content=late_content,
+                    payload={"thread": "lorekeeper"},
+                )
+            )
+            await session.commit()
+        return result
+
+    monkeypatch.setattr(book_setup, "persist_node", insert_last_moment_note)
+    await execute_job(job_id)
+    status, pending, error = await job_status(sessionmaker, job_id)
+    assert status == "waiting_author" and pending["kind"] == "setup_review", error
+    async with sessionmaker() as session:
+        before = await load_setup(session, book_id)
+        book = await session.get(Book, book_id)
+        assert late_content not in "\n".join(book.requirements)
+        book.requirements = [*(book.requirements or []), "之前记下的要求"]
+        calls_before = await session.scalar(select(func.count()).select_from(LlmCall).where(LlmCall.job_id == job_id))
+        await session.commit()
+
+    await execute_job(job_id, {"action": "approve"})
+    status, _, error = await job_status(sessionmaker, job_id)
+    assert status == "succeeded", error
+    async with sessionmaker() as session:
+        book = await session.get(Book, book_id)
+        assert book.status == "ready"
+        assert "之前记下的要求" in book.requirements
+        assert f"（作者对设定师说）{late_content}" in book.requirements
+        assert await load_setup(session, book_id) == before
+        calls_after = await session.scalar(select(func.count()).select_from(LlmCall).where(LlmCall.job_id == job_id))
+        assert calls_after == calls_before  # 批准只保存要求，不再调用模型改动已经审阅的稿件。
+        messages = (
+            (await session.execute(select(MeetingMessage).where(MeetingMessage.job_id == job_id))).scalars().all()
+        )
+    replies = [
+        message for message in messages if message.kind == "speech" and message.payload == {"thread": "lorekeeper"}
+    ]
+    assert [(message.speaker, message.content) for message in replies] == [
+        ("lorekeeper", "收到，主编已经安排，按你说的改。")
+    ]
 
 
 async def test_old_checkpoint_gets_new_steps(sessionmaker):

@@ -31,6 +31,7 @@ from app.agents.playbook import pick, playbook_text
 from app.graphs.deps import GraphDeps
 from app.models import Book, MeetingMessage, Volume
 from app.services import setup_store
+from app.services.notes import note_prompt, note_thread
 
 ORDER = ["concept", "lore", "spine", "threads", "outline", "first_volume"]
 TARGET_NAMES = {
@@ -386,14 +387,20 @@ async def critique_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     return {"queue": [], "instructions": {}, "phase": "reviewed"}
 
 
-async def _new_notes(d: GraphDeps, seen: int) -> list[tuple[int, str]]:
+async def _new_notes(d: GraphDeps, seen: int) -> list[tuple[int, str, dict | None]]:
     async with d.sessionmaker() as session:
         rows = await session.execute(
-            select(MeetingMessage.id, MeetingMessage.content)
+            select(MeetingMessage.id, MeetingMessage.content, MeetingMessage.payload)
             .where(MeetingMessage.job_id == d.job_id, MeetingMessage.kind == "note", MeetingMessage.id > seen)
             .order_by(MeetingMessage.id)
         )
-        return [(row.id, row.content) for row in rows]
+        return [(row.id, row.content, row.payload) for row in rows]
+
+
+async def _reply_to_notes(d: GraphDeps, rows: list[tuple[int, str, dict | None]]) -> None:
+    for _, _, payload in rows:
+        if thread := note_thread(payload):
+            await d.emit.say(thread, "收到，主编已经安排，按你说的改。", payload={"thread": thread})
 
 
 async def intake_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
@@ -408,12 +415,14 @@ async def intake_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     rows = await _new_notes(d, state.get("notes_seen", 0))
     if not rows:
         return update
-    fresh = [content for _, content in rows]
+    fresh = [note_prompt(content, payload) for _, content, payload in rows]
     notes = [*(state.get("notes") or []), *fresh]
     update.update(notes=notes, notes_seen=rows[-1][0])
     done = {t: state[t] for t in ORDER if has_part(state, t) and t not in queue}
     if not done:
-        await d.emit.say("chief", "收到，接下来就按你说的写。")
+        if any(not note_thread(payload) for _, _, payload in rows):
+            await d.emit.say("chief", "收到，接下来就按你说的写。")
+        await _reply_to_notes(d, rows)
         return update
 
     await d.check_cancel()
@@ -422,13 +431,15 @@ async def intake_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     result = await editorial.absorb_notes(
         d.llm, done, todo, format_requirements(state.get("brief") or [], notes), fresh
     )
-    await d.emit.say("chief", result.remark)
+    if any(not note_thread(payload) for _, _, payload in rows):
+        await d.emit.say("chief", result.remark)
     raw = {t: text for t, text in result.instructions().items() if t in done}
     if raw:
         extra_queue, extra = cascade(raw)
         queue, instructions = merge_plan(queue, state.get("instructions") or {}, extra_queue, extra)
         await d.emit.artifact("chief", "按作者插话调整", {"type": "triage", "data": extra})
         update.update(queue=queue, instructions=instructions)
+    await _reply_to_notes(d, rows)
     return update
 
 
@@ -440,7 +451,9 @@ async def persist_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
         book = await session.get(Book, d.book_id)
         if book is not None:
             # 作者的回答与插话之后写正文时也要遵守
-            book.requirements = list(dict.fromkeys([*(state.get("brief") or []), *(state.get("notes") or [])]))
+            book.requirements = list(
+                dict.fromkeys([*(book.requirements or []), *(state.get("brief") or []), *(state.get("notes") or [])])
+            )
         await setup_store.snapshot(
             session, d.book_id, d.job_id, state.get("round", 0), "ai", state.get("phase", ""), setup
         )
@@ -454,20 +467,40 @@ async def author_gate_node(state: SetupState, runtime: Runtime[GraphDeps]) -> Co
     decision = interrupt(
         {"kind": "setup_review", "round": state.get("round", 0), "title": (state.get("concept") or {}).get("title", "")}
     )
-    if decision.get("action") == "approve":
-        return Command(goto="finalize")
     d = runtime.context
+    if decision.get("action") == "approve":
+        # 最后一次 intake 到等待拍板之间仍可能收到已被接口接受的插话。
+        # 批准不偷偷改动已审阅的方案；这些新要求留给之后的规划与正文，不能随开书任务结束而丢掉。
+        rows = await _new_notes(d, state.get("notes_seen", 0))
+        if not rows:
+            return Command(goto="finalize")
+        fresh = [note_prompt(content, payload) for _, content, payload in rows]
+        async with d.sessionmaker() as session:
+            book = await session.get(Book, d.book_id)
+            if book is not None:
+                await session.refresh(book, attribute_names=["requirements"], with_for_update=True)
+                book.requirements = list(dict.fromkeys([*(book.requirements or []), *fresh]))
+            await session.commit()
+        if any(not note_thread(payload) for _, _, payload in rows):
+            await d.emit.say("chief", "收到，要求已经记下，之后的规划和章节都会照办。")
+        await _reply_to_notes(d, rows)
+        return Command(
+            goto="finalize", update={"notes": [*(state.get("notes") or []), *fresh], "notes_seen": rows[-1][0]}
+        )
     # 作者可能在网页上手动改过设定和大纲，以数据库里的当前版本为准
     async with d.sessionmaker() as session:
         setup = await setup_store.load_setup(session, d.book_id)
     # 方案定稿前一刻插的话还没人读过，并进这次的意见
     rows = await _new_notes(d, state.get("notes_seen", 0))
-    feedback = "\n".join(x for x in [*(c for _, c in rows), str(decision.get("feedback", "")).strip()] if x)
+    feedback = "\n".join(
+        x for x in [*(note_prompt(c, p) for _, c, p in rows), str(decision.get("feedback", "")).strip()] if x
+    )
     update: dict = {**setup, "feedback": feedback, "round": state.get("round", 0) + 1}
     # 作者的意见之后每一轮都要遵守，不能下一次修改又改回去
     update["notes"] = [*(state.get("notes") or []), *([feedback] if feedback else [])]
     if rows:
         update["notes_seen"] = rows[-1][0]
+        await _reply_to_notes(d, rows)
     return Command(goto="triage", update=update)
 
 

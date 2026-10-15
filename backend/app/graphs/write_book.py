@@ -38,6 +38,7 @@ from app.graphs.deps import GraphDeps
 from app.llm.router import LLMError
 from app.models import Book, Chapter, MeetingMessage, PlotUnit, Volume
 from app.services import setup_store, writing_store
+from app.services.notes import note_requirement, note_thread
 from app.services.writing_context import (
     SENTENCE,
     chapter_blocks,
@@ -217,14 +218,14 @@ async def _next_step(session: AsyncSession, book: Book, state: WriteState) -> di
     return {"step": "done", "reason": "全书写完了！"}
 
 
-async def _new_notes(d: GraphDeps, seen: int) -> list[tuple[int, str]]:
+async def _new_notes(d: GraphDeps, seen: int) -> list[tuple[int, str, dict | None]]:
     async with d.sessionmaker() as session:
         rows = await session.execute(
-            select(MeetingMessage.id, MeetingMessage.content)
+            select(MeetingMessage.id, MeetingMessage.content, MeetingMessage.payload)
             .where(MeetingMessage.job_id == d.job_id, MeetingMessage.kind == "note", MeetingMessage.id > seen)
             .order_by(MeetingMessage.id)
         )
-        return [(row.id, row.content) for row in rows]
+        return [(row.id, row.content, row.payload) for row in rows]
 
 
 async def dispatch_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
@@ -235,11 +236,15 @@ async def dispatch_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
     if rows:
         # 作者的插话记进这本书的要求里，之后的卷纲、章纲和正文都要落实
         async with d.sessionmaker() as session:
-            for _, content in rows:
-                await _requirement(session, d.book_id, content)
+            for _, content, payload in rows:
+                await _requirement(session, d.book_id, note_requirement(content, payload))
             await session.commit()
         update["notes_seen"] = rows[-1][0]
-        await d.emit.say("chief", "收到，从接下来的规划和章节开始照你说的写。")
+        if any(not note_thread(payload) for _, _, payload in rows):
+            await d.emit.say("chief", "收到，从接下来的规划和章节开始照你说的写。")
+        for _, _, payload in rows:
+            if thread := note_thread(payload):
+                await d.emit.say(thread, "收到，已经记下，之后的规划和章节都会照办。", payload={"thread": thread})
     async with d.sessionmaker() as session:
         decision = await decide(session, d.book_id, state)
         await session.commit()

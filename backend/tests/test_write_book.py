@@ -244,7 +244,8 @@ async def test_chapter_stuck_goes_to_author(sessionmaker, monkeypatch):
     assert (await chapters(sessionmaker, book_id))[0].status == "final"
 
 
-async def test_notes_while_writing_become_requirements(sessionmaker, monkeypatch):
+@pytest.mark.parametrize("thread", [None, "lorekeeper"])
+async def test_notes_while_writing_become_requirements(sessionmaker, monkeypatch, thread):
     book_id = await approved_book(sessionmaker)
     job_id = await write_job(sessionmaker, book_id, count=2)
     prompts: list[tuple[str, str]] = []
@@ -257,7 +258,12 @@ async def test_notes_while_writing_become_requirements(sessionmaker, monkeypatch
             async with sessionmaker() as session:
                 session.add(
                     MeetingMessage(
-                        book_id=book_id, job_id=job_id, speaker="author", kind="note", content="苏晚晴早点出场"
+                        book_id=book_id,
+                        job_id=job_id,
+                        speaker="author",
+                        kind="note",
+                        content="苏晚晴早点出场",
+                        payload={"thread": thread} if thread else None,
                     )
                 )
                 await session.commit()
@@ -269,9 +275,16 @@ async def test_notes_while_writing_become_requirements(sessionmaker, monkeypatch
     status, _, error = await job_state(sessionmaker, job_id)
     assert status == "succeeded", error
     assert "苏晚晴早点出场" not in prompts[0][1]
-    assert "苏晚晴早点出场" in prompts[-1][1]  # 下一章开始照办
+    requirement = "对设定师：苏晚晴早点出场" if thread else "苏晚晴早点出场"
+    assert requirement in prompts[-1][1]  # 下一章开始照办
     async with sessionmaker() as session:
-        assert "苏晚晴早点出场" in (await session.get(Book, book_id)).requirements
+        assert requirement in (await session.get(Book, book_id)).requirements
+        if thread:
+            messages = (
+                (await session.execute(select(MeetingMessage).where(MeetingMessage.job_id == job_id))).scalars().all()
+            )
+            replies = [m for m in messages if m.kind == "speech" and m.payload == {"thread": thread}]
+            assert [(m.speaker, m.content) for m in replies] == [(thread, "收到，已经记下，之后的规划和章节都会照办。")]
 
 
 async def artifacts_of(sessionmaker, job_id) -> list[MeetingMessage]:

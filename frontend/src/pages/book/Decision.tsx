@@ -1,6 +1,5 @@
 import clsx from 'clsx'
-import { Check, CirclePause, MessageSquareText, PenLine, RotateCcw, Stamp } from 'lucide-react'
-import { AnimatePresence, motion } from 'motion/react'
+import { Check, CirclePause, PenLine, RotateCcw, Stamp } from 'lucide-react'
 import { useState } from 'react'
 import { useJobActions } from '../../api/hooks'
 import type { InterviewQuestion, Job, WriteUntil } from '../../api/types'
@@ -14,8 +13,10 @@ export function ApproveButton({ job }: { job: Job }) {
   const { decide } = useJobActions(bookId)
   const copy = decisionCopy(job.pending, bookId)
   const approve = async () => {
-    await decide.mutateAsync({ jobId: job.id, action: 'approve' })
-    celebrate()
+    try {
+      await decide.mutateAsync({ jobId: job.id, action: 'approve' })
+      celebrate()
+    } catch { /* ErrorText retains the failure; never stamp an unsuccessful approval. */ }
   }
   return (
     <div>
@@ -65,7 +66,7 @@ export function WritingControls({ compact }: { compact?: boolean }) {
           <PenLine className="size-4" />
           {book.chapters_final ? '继续写' : '开写'}
         </Button>
-        <span className="text-xs text-ink-3">{option.hint}</span>
+        <span className="text-xs text-ink-2">{option.hint}</span>
       </div>
       <ErrorText error={write.error} />
     </div>
@@ -118,7 +119,7 @@ export function InterviewForm({ job, questions }: { job: Job; questions: Intervi
                   >
                     {active && <Check className="size-3.5 shrink-0" />}
                     {option}
-                    {j === q.recommended && <span className={clsx('text-[11px]', active ? 'text-paper-2/70' : 'text-seal')}>推荐</span>}
+                    {j === q.recommended && <span className={clsx('text-xs', active ? 'text-paper-2/70' : 'text-seal')}>推荐</span>}
                   </button>
                 )
               })}
@@ -130,7 +131,7 @@ export function InterviewForm({ job, questions }: { job: Job; questions: Intervi
                 aria-pressed={!!custom[i]}
                 className={clsx(
                   'flex items-center gap-1 rounded-xl border border-dashed px-3 py-[5px] text-[14px] transition-colors',
-                  custom[i] ? 'border-chief/40 bg-chief-soft text-chief' : 'border-line-2 text-ink-3 hover:border-ink-3/50 hover:text-ink',
+                  custom[i] ? 'border-chief/40 bg-chief-soft text-chief' : 'border-line-2 text-ink-2 hover:border-ink-3/50 hover:text-ink',
                 )}
               >
                 <PenLine className="size-3.5" />
@@ -147,12 +148,12 @@ export function InterviewForm({ job, questions }: { job: Job; questions: Intervi
                 className={clsx(inputClass, 'mt-2 ml-5 w-[calc(100%-1.25rem)] py-2')}
               />
             )}
-            {!custom[i] && !picked[i] && <p className="mt-1.5 pl-5 text-xs text-ink-3">交给编辑部决定</p>}
+            {!custom[i] && !picked[i] && <p className="mt-1.5 pl-5 text-xs text-ink-2">交给编辑部决定</p>}
           </li>
         ))}
       </ol>
       <div>
-        <p className="mb-1.5 text-sm font-medium text-ink-2">还有别的要求？<span className="ml-1 font-normal text-ink-3">可选</span></p>
+        <p className="mb-1.5 text-sm font-medium text-ink-2">还有别的要求？<span className="ml-1 font-normal text-ink-2">可选</span></p>
         <textarea
           value={extra}
           onChange={(e) => setExtra(e.target.value)}
@@ -166,84 +167,11 @@ export function InterviewForm({ job, questions }: { job: Job; questions: Intervi
         <Button variant="seal" size="lg" onClick={() => submit()} loading={answer.isPending}>
           就这样，开始写方案
         </Button>
-        <button onClick={() => submit(true)} disabled={answer.isPending} className="text-sm text-ink-3 underline-offset-4 hover:text-ink hover:underline">
+        <button onClick={() => submit(true)} disabled={answer.isPending} className="text-sm text-ink-2 underline-offset-4 hover:text-ink hover:underline">
           都交给编辑部决定
         </button>
       </div>
       <ErrorText error={answer.error} />
-    </div>
-  )
-}
-
-/** 拍板：盖章批准或提修改意见。 */
-export function DecisionControls({ job, compact }: { job: Job; compact?: boolean }) {
-  const { bookId, celebrate } = useBookContext()
-  const { decide } = useJobActions(bookId)
-  const copy = decisionCopy(job.pending, bookId)
-  const [feedback, setFeedback] = useState('')
-  const [writing, setWriting] = useState(false)
-
-  const approve = async () => {
-    await decide.mutateAsync({ jobId: job.id, action: 'approve' })
-    celebrate()
-  }
-  const submit = async () => {
-    await decide.mutateAsync({ jobId: job.id, action: 'revise', feedback: feedback.trim() })
-    setFeedback('')
-    setWriting(false)
-  }
-
-  return (
-    <div>
-      <AnimatePresence mode="wait" initial={false}>
-        {writing ? (
-          <motion.div
-            key="write"
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }}
-            transition={{ duration: 0.2 }}
-            className="space-y-2"
-          >
-            <textarea
-              value={feedback}
-              onChange={(e) => setFeedback(e.target.value)}
-              rows={compact ? 3 : 4}
-              autoFocus
-              placeholder={copy.placeholder}
-              className={inputClass}
-              onKeyDown={(e) => e.key === 'Enter' && (e.ctrlKey || e.metaKey) && feedback.trim() && void submit()}
-            />
-            <div className="flex justify-end gap-2">
-              <Button size="sm" variant="ghost" onClick={() => setWriting(false)}>
-                取消
-              </Button>
-              <Button size="sm" variant="primary" onClick={submit} loading={decide.isPending} disabled={!feedback.trim()}>
-                交给主编
-              </Button>
-            </div>
-          </motion.div>
-        ) : (
-          <motion.div
-            key="buttons"
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }}
-            transition={{ duration: 0.2 }}
-            className="flex flex-wrap gap-2"
-          >
-            <Button variant="seal" size={compact ? 'md' : 'lg'} onClick={approve} loading={decide.isPending}>
-              <Stamp className="size-4" />
-              {copy.approve}
-            </Button>
-            <Button variant="outline" size={compact ? 'md' : 'lg'} onClick={() => setWriting(true)}>
-              <MessageSquareText className="size-4" />
-              提修改意见
-            </Button>
-          </motion.div>
-        )}
-      </AnimatePresence>
-      <ErrorText error={decide.error} />
     </div>
   )
 }
@@ -271,7 +199,7 @@ export function ResumeControls({ job }: { job: Job }) {
   return (
     <div className="space-y-2">
       <p className="text-sm leading-relaxed text-seal">{job.status === 'failed' ? `这一轮出错了：${job.error}` : '任务已停止。'}</p>
-      <p className="text-xs text-ink-3">已经完成的步骤都保存着，继续时从中断的地方接着做，不会重来。</p>
+      <p className="text-xs text-ink-2">已经完成的步骤都保存着，继续时从中断的地方接着做，不会重来。</p>
       <Button size="sm" variant="primary" onClick={() => resume.mutate(job.id)} loading={resume.isPending}>
         <RotateCcw className="size-4" />
         继续

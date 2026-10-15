@@ -2,11 +2,11 @@ import clsx from 'clsx'
 import { AlertTriangle, Check, ChevronDown, X } from 'lucide-react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
 import type { Concept, InterviewQuestion, LiveDraft, MeetingMessage, PlotUnit, Speaker, Spine, StoryThread } from '../../api/types'
 import { TypingDots } from '../../components/ui'
 import { ROLE_META } from '../../lib/roles'
 import { isFresh, useTypewriter } from '../../lib/team'
+import { artifactTarget } from '../../lib/workspace'
 import { useBookContext } from './context'
 
 export function RoleAvatar({
@@ -14,20 +14,18 @@ export function RoleAvatar({
   size = 'md',
   working,
 }: {
-  speaker: Speaker
+  speaker: Speaker | 'group'
   size?: 'sm' | 'md' | 'lg'
   working?: boolean
 }) {
-  const meta = ROLE_META[speaker] ?? ROLE_META.system
+  const meta = speaker === 'group' ? { ...ROLE_META.chief, name: '编辑部群聊', short: '群' } : ROLE_META[speaker] ?? ROLE_META.system
   return (
     <span
       className={clsx(
-        'relative inline-flex shrink-0 items-center justify-center rounded-full font-serif font-bold ring-1',
-        meta.bg,
-        meta.text,
-        meta.ring,
+        'relative inline-flex shrink-0 items-center justify-center rounded-full font-serif font-bold text-white',
+        meta.dot,
         working && 'breath',
-        { sm: 'size-7 text-xs', md: 'size-9 text-sm', lg: 'size-11 text-base' }[size],
+        { sm: 'size-7 text-xs', md: 'size-8 text-sm', lg: 'size-11 text-base' }[size],
       )}
       title={meta.name}
     >
@@ -149,11 +147,11 @@ function TropeTags({ tropes, resolution }: { tropes?: string[]; resolution?: str
   return (
     <span className="mx-1 inline-flex flex-wrap gap-1 align-middle">
       {tropes?.map((t) => (
-        <span key={t} className="rounded bg-chief-soft px-1.5 py-px text-[11px] text-chief">
+        <span key={t} className="rounded bg-chief-soft px-1.5 py-px text-xs text-chief">
           {t}
         </span>
       ))}
-      {resolution && <span className="rounded px-1.5 py-px text-[11px] text-ink-3 ring-1 ring-line">破局·{resolution}</span>}
+      {resolution && <span className="rounded px-1.5 py-px text-xs text-ink-2 ring-1 ring-line">破局·{resolution}</span>}
     </span>
   )
 }
@@ -166,7 +164,7 @@ function UnitList({ units }: { units: UnitBrief[] }) {
           <span className="font-medium text-ink">
             {u.index}. {u.title}
           </span>
-          <span className="text-xs text-ink-3"> 约 {u.chapter_count} 章</span>
+          <span className="text-xs text-ink-2"> 约 {u.chapter_count} 章</span>
           <TropeTags tropes={u.tropes} resolution={u.resolution} /> {u.climax}
         </li>
       ))}
@@ -180,7 +178,7 @@ function PitchScores({ data }: { data: ScoresData }) {
     <div className="space-y-2.5">
       <div className="scroll-thin overflow-x-auto">
         <table className="w-full text-left tabular-nums">
-          <thead className="text-xs whitespace-nowrap text-ink-3">
+          <thead className="text-xs whitespace-nowrap text-ink-2">
             <tr>
               <th className="py-1 pr-2 font-normal">方案</th>
               {SCORE_COLUMNS.map(([key, label]) => (
@@ -199,9 +197,9 @@ function PitchScores({ data }: { data: ScoresData }) {
                   <td className="py-1.5 pr-2">
                     <span className="flex items-center gap-1 whitespace-nowrap">
                       <span className={clsx('font-medium', win ? 'text-seal' : 'text-ink')}>方案{row.pitch}</span>
-                      {win && <span className="rounded-sm border border-seal/40 px-1 text-[11px] leading-4 text-seal">胜出</span>}
+                      {win && <span className="rounded-sm border border-seal/40 px-1 text-xs leading-4 text-seal">胜出</span>}
                     </span>
-                    <span className="block text-xs text-ink-3">{row.name}</span>
+                    <span className="block text-xs text-ink-2">{row.name}</span>
                   </td>
                   {SCORE_COLUMNS.map(([key]) => (
                     <td key={key} className="px-1.5 text-center text-ink-2">
@@ -228,7 +226,7 @@ function PitchScores({ data }: { data: ScoresData }) {
       {data.scores
         .filter((row) => row.comment)
         .map((row) => (
-          <p key={row.pitch} className="text-ink-3">
+          <p key={row.pitch} className="text-ink-2">
             <span className="text-ink-2">方案{row.pitch}：</span>
             {row.comment}
           </p>
@@ -246,20 +244,20 @@ function PitchScores({ data }: { data: ScoresData }) {
 function VolumeAudit({ data }: { data: AuditData }) {
   return (
     <div className="space-y-2">
-      <ul className="grid gap-1.5 sm:grid-cols-2">
+      <ul className="grid gap-1.5 @sm:grid-cols-2">
         {data.checks.map((c) => (
           <li key={c.aspect} className="flex gap-2">
             {c.ok ? <Check className="mt-1 size-3.5 shrink-0 text-lore" /> : <X className="mt-1 size-3.5 shrink-0 text-seal" />}
             <span>
               <span className="font-medium text-ink">{ASPECT_NAME[c.aspect] ?? c.aspect}</span>
-              <span className="text-ink-3"> · {c.comment}</span>
+              <span className="text-ink-2"> · {c.comment}</span>
             </span>
           </li>
         ))}
       </ul>
       {data.issues.map((issue, i) => (
         <div key={i} className="rounded-lg bg-paper px-3 py-2">
-          <p className="text-xs text-ink-3">
+          <p className="text-xs text-ink-2">
             {ASPECT_NAME[issue.aspect] ?? issue.aspect}
             {issue.unit ? ` · 第${issue.unit}单元` : ''} · {SEVERITY[issue.severity]}
           </p>
@@ -271,7 +269,7 @@ function VolumeAudit({ data }: { data: AuditData }) {
   )
 }
 
-function ArtifactBody({ message }: { message: MeetingMessage }) {
+export function ArtifactBody({ message }: { message: MeetingMessage }) {
   const { type, data } = message.payload ?? { type: '', data: null }
   if (type === 'questions') {
     const questions = data as InterviewQuestion[]
@@ -282,7 +280,7 @@ function ArtifactBody({ message }: { message: MeetingMessage }) {
             <p className="text-ink">
               {i + 1}. {q.question}
             </p>
-            <p className="text-ink-3">{q.options.map((o, j) => (j === q.recommended ? `${o}（推荐）` : o)).join(' / ')}</p>
+            <p className="text-ink-2">{q.options.map((o, j) => (j === q.recommended ? `${o}（推荐）` : o)).join(' / ')}</p>
           </li>
         ))}
       </ol>
@@ -300,7 +298,7 @@ function ArtifactBody({ message }: { message: MeetingMessage }) {
           {sp.milestones?.map((m) => (
             <li key={m.index}>
               <span className="font-medium text-chief">{m.title}</span>
-              <span className="text-xs text-ink-3">（第{m.volume}卷）</span> {m.event}
+              <span className="text-xs text-ink-2">（第{m.volume}卷）</span> {m.event}
             </li>
           ))}
         </ol>
@@ -346,7 +344,7 @@ function ArtifactBody({ message }: { message: MeetingMessage }) {
             </span>
           ))}
         </div>
-        <p className="text-ink-3">世界观：{l.world_entries.map((w) => w.name).join('、')}</p>
+        <p className="text-ink-2">世界观：{l.world_entries.map((w) => w.name).join('、')}</p>
       </div>
     )
   }
@@ -357,12 +355,12 @@ function ArtifactBody({ message }: { message: MeetingMessage }) {
         {o.volumes.map((v) => (
           <p key={v.index}>
             <span className="font-medium text-ink">第{v.index}卷《{v.title}》</span>
-            {v.chapter_count ? <span className="text-xs text-ink-3">约 {v.chapter_count} 章</span> : null}
-            {v.stage ? <span className="text-xs text-ink-3"> · {v.stage}</span> : null} {v.summary}
+            {v.chapter_count ? <span className="text-xs text-ink-2">约 {v.chapter_count} 章</span> : null}
+            {v.stage ? <span className="text-xs text-ink-2"> · {v.stage}</span> : null} {v.summary}
           </p>
         ))}
         {o.foreshadowings && o.foreshadowings.length > 0 && (
-          <p className="text-ink-3">
+          <p className="text-ink-2">
             长线伏笔：{o.foreshadowings.map((f) => `F${f.seq}（第${f.plant_volume}卷埋→第${f.payoff_volume}卷收）`).join('、')}
           </p>
         )}
@@ -397,7 +395,7 @@ function ArtifactBody({ message }: { message: MeetingMessage }) {
             <div>
               <p className="font-medium text-ink">{dir.name}</p>
               <p className="text-ink-2">{dir.idea}</p>
-              {dir.difference && <p className="text-xs text-ink-3">{dir.difference}</p>}
+              {dir.difference && <p className="text-xs text-ink-2">{dir.difference}</p>}
             </div>
           </li>
         ))}
@@ -422,7 +420,7 @@ function ArtifactBody({ message }: { message: MeetingMessage }) {
         {c.chapters.map((ch) => (
           <li key={ch.index}>
             <span className="font-medium text-ink">第{ch.index}章 {ch.title}</span>
-            {ch.hook && <span className="text-ink-3"> —— {ch.hook}</span>}
+            {ch.hook && <span className="text-ink-2"> —— {ch.hook}</span>}
           </li>
         ))}
       </ol>
@@ -434,7 +432,7 @@ function ArtifactBody({ message }: { message: MeetingMessage }) {
       <div className="space-y-1.5 text-ink-2">
         <p className="font-serif leading-relaxed">{c.summary ?? `${c.excerpt ?? ''}…`}</p>
         {type === 'chapter_final' && (
-          <p className="text-xs text-ink-3">
+          <p className="text-xs text-ink-2">
             设定库：人物状态更新 {c.characters_updated ?? 0} 处，新人物 {c.characters_created ?? 0} 位，伏笔进展 {c.foreshadowings ?? 0} 条
           </p>
         )}
@@ -445,9 +443,9 @@ function ArtifactBody({ message }: { message: MeetingMessage }) {
     const c = data as MaterialsData
     return (
       <div className="space-y-1.5 text-ink-2">
-        {c.characters.length > 0 && <p><span className="text-ink-3">人物：</span>{c.characters.join('、')}</p>}
-        {c.world.length > 0 && <p><span className="text-ink-3">设定：</span>{c.world.join('、')}</p>}
-        {c.chapters.length > 0 && <p><span className="text-ink-3">回顾前文：</span>{c.chapters.map((i) => `第${i}章`).join('、')}</p>}
+        {c.characters.length > 0 && <p><span className="text-ink-2">人物：</span>{c.characters.join('、')}</p>}
+        {c.world.length > 0 && <p><span className="text-ink-2">设定：</span>{c.world.join('、')}</p>}
+        {c.chapters.length > 0 && <p><span className="text-ink-2">回顾前文：</span>{c.chapters.map((i) => `第${i}章`).join('、')}</p>}
         {c.notes.length > 0 && (
           <ul className="list-inside list-disc space-y-0.5">
             {c.notes.map((n) => (
@@ -481,7 +479,7 @@ function ArtifactBody({ message }: { message: MeetingMessage }) {
         ))}
         {c.issues.map((issue, i) => (
           <div key={i} className="rounded-lg bg-paper px-3 py-2">
-            <p className="text-xs text-ink-3">{SEVERITY[issue.severity]}</p>
+            <p className="text-xs text-ink-2">{SEVERITY[issue.severity]}</p>
             <p className="text-ink">{issue.problem}</p>
             <p className="text-ink-2">→ {issue.suggestion}</p>
           </div>
@@ -498,7 +496,7 @@ function ArtifactBody({ message }: { message: MeetingMessage }) {
         ))}
         {c.issues.map((issue, i) => (
           <div key={i} className="rounded-lg bg-paper px-3 py-2">
-            <p className="text-xs text-ink-3">
+            <p className="text-xs text-ink-2">
               {TARGET_NAME[issue.target]} · {SEVERITY[issue.severity]}
             </p>
             <p className="text-ink">{issue.problem}</p>
@@ -523,29 +521,43 @@ function ArtifactBody({ message }: { message: MeetingMessage }) {
   return null
 }
 
-// 审稿意见、主线骨架、修改分工、比稿结果这类需要作者留意的，默认展开；提问在页面中间作答，这里收起
-const OPEN_BY_DEFAULT = new Set(['critique', 'spine', 'triage', 'threads', 'volume_directions', 'pitch_scores', 'volume_audit'])
-
 function ArtifactCard({ message }: { message: MeetingMessage }) {
-  const [open, setOpen] = useState(OPEN_BY_DEFAULT.has(message.payload?.type ?? ''))
+  const { bookId, outline, manualNavigate } = useBookContext()
+  const [open, setOpen] = useState(false)
+  const reduce = useReducedMotion()
+  const target = artifactTarget(message, bookId, outline)
   return (
-    <div className="overflow-hidden rounded-xl border border-line bg-card shadow-[var(--shadow-paper)]">
-      <button onClick={() => setOpen(!open)} className="flex w-full items-center justify-between gap-2 px-3.5 py-2.5 text-left text-sm">
-        <span className="flex items-center gap-2 font-medium">
-          <span className="h-3.5 w-0.5 rounded-full bg-seal" />
-          {message.content}
-        </span>
-        <ChevronDown className={clsx('size-4 shrink-0 text-ink-3 transition-transform duration-300', open && 'rotate-180')} />
-      </button>
+    <div className="min-w-0 border-l-2 border-seal bg-paper/70">
+      <div className="flex items-start gap-1">
+        <button
+          type="button"
+          onClick={() => target ? manualNavigate(target.path) : setOpen((value) => !value)}
+          className="min-w-0 flex-1 px-3 py-2 text-left hover:bg-paper"
+        >
+          <span className="block text-[13px] font-medium text-ink">{message.content}</span>
+          <span className="mt-1 block text-xs text-seal">{target ? '在右边打开 →' : '查看产出内容'}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setOpen((value) => !value)}
+          aria-expanded={open}
+          aria-label={`${open ? '收起' : '展开'}${message.content}`}
+          title={open ? '收起内容' : '展开内容'}
+          className="m-1 rounded p-2 text-ink-2 hover:bg-paper"
+        >
+          <ChevronDown className={clsx('size-4 transition-transform duration-300', open && 'rotate-180')} />
+        </button>
+      </div>
       <AnimatePresence initial={false}>
         {open && (
           <motion.div
-            initial={{ height: 0, opacity: 0 }}
+            initial={reduce ? false : { height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: reduce ? 0 : 0.28, ease: [0.22, 1, 0.36, 1] }}
+            className="overflow-hidden"
           >
-            <div className="border-t border-line px-3.5 py-3 text-[13px] leading-relaxed">
+            <div className="@container border-t border-divider px-3 py-3 text-sm leading-[1.75] text-ink-2">
               <ArtifactBody message={message} />
             </div>
           </motion.div>
@@ -556,95 +568,127 @@ function ArtifactCard({ message }: { message: MeetingMessage }) {
 }
 
 function Speech({ message }: { message: MeetingMessage }) {
+  const reduce = useReducedMotion()
   const [fresh] = useState(() => isFresh(message.created_at))
-  const { shown, typing } = useTypewriter(message.content, fresh)
-  return (
-    <div className="inline-block rounded-2xl rounded-tl-md bg-card px-3.5 py-2.5 text-[14px] leading-relaxed shadow-[var(--shadow-paper)] ring-1 ring-line">
-      <span className={clsx(typing && 'caret')}>{shown}</span>
-    </div>
-  )
+  const { shown, typing } = useTypewriter(message.content, fresh && !reduce)
+  return <span className={clsx('whitespace-pre-wrap break-words', typing && 'caret')}>{shown}</span>
 }
 
 const DRAFT_MODE: Record<LiveDraft['mode'], string> = { write: '正在写', extend: '字数不够，正在接着写', ending: '正在改写结尾' }
 
-/** 写手正在写的正文：显示最后一小段，跟着推送实时变长。 */
-function LiveDraftRow({ draft }: { draft: LiveDraft }) {
-  const { bookId } = useBookContext()
-  const tail = draft.text.slice(-240)
+/** 正文在右边实时显示，会话只保留短小的同步预览。 */
+function LiveDraftRow({ draft, fromGroup }: { draft: LiveDraft; fromGroup?: boolean }) {
+  const { bookId, manualNavigate } = useBookContext()
+  const tail = draft.text.slice(-160)
   return (
     <div className="flex gap-2.5">
       <RoleAvatar speaker="writer" working />
       <div className="min-w-0 flex-1">
-        <p className="mb-1 text-xs text-ink-3">
-          <span className={clsx('font-medium', ROLE_META.writer.text)}>写手</span> · {DRAFT_MODE[draft.mode]}第{draft.chapter}章《{draft.title}》 ·{' '}
-          {draft.text.replace(/\s/g, '').length} 字
+        <p className="mb-1.5 flex flex-wrap items-center gap-1.5 text-xs text-ink-2">
+          <span className="font-medium text-writer">写手</span>
+          {fromGroup && <GroupTag />}
+          <span>{DRAFT_MODE[draft.mode]}第 {draft.chapter} 章 · {draft.text.replace(/\s/g, '').length} 字</span>
         </p>
-        <div className="rounded-2xl rounded-tl-md bg-card px-3.5 py-2.5 shadow-[var(--shadow-paper)] ring-1 ring-line">
-          <p className="font-serif text-[13.5px] leading-relaxed whitespace-pre-wrap text-ink-2">
-            <span className="caret">
-              {tail.length < draft.text.length && '…'}
-              {tail}
-            </span>
+        <div className="rounded-[2px_12px_12px_12px] border border-divider bg-card px-3 py-2.5">
+          <p className="font-serif text-sm leading-[1.75] whitespace-pre-wrap text-ink">
+            <span className="caret">{tail.length < draft.text.length && '…'}{tail}</span>
           </p>
-          <Link to={`/books/${bookId}/chapter/${draft.chapter}`} className="mt-1.5 inline-block text-xs text-seal hover:underline">
-            在阅读页看全文 →
-          </Link>
+          <button type="button" onClick={() => manualNavigate(`/books/${bookId}/chapter/${draft.chapter}`)} className="mt-2 text-xs text-seal hover:underline">
+            在右边看全文 →
+          </button>
         </div>
       </div>
     </div>
   )
 }
 
-function MessageRow({ message, live }: { message: MeetingMessage; live: boolean }) {
-  const meta = ROLE_META[message.speaker] ?? ROLE_META.system
+function GroupTag() {
+  return <span className="rounded-sm border border-divider px-1 text-xs text-ink-2">群聊</span>
+}
 
-  if (message.kind === 'status') {
-    return (
-      <div className="flex items-center gap-2 py-0.5 pl-12 text-[13px] text-ink-3">
-        <span className={clsx('size-1.5 rounded-full', meta.dot)} />
-        <span>{message.content}</span>
-        {live && <TypingDots className={meta.text} />}
-      </div>
-    )
-  }
+function MessageRow({ message, fromGroup }: { message: MeetingMessage; fromGroup?: boolean }) {
+  const meta = ROLE_META[message.speaker] ?? ROLE_META.system
+  const author = message.speaker === 'author'
   if (message.kind === 'error') {
     return (
-      <div className="ml-12 flex gap-2 rounded-xl border border-seal/30 bg-seal-soft px-3 py-2 text-sm text-seal">
+      <div className="flex gap-2 rounded border border-seal/30 bg-seal-soft px-3 py-2 text-sm text-seal">
         <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-        <span className="break-all">{message.content}</span>
+        <span className="break-words">{message.content}</span>
       </div>
     )
   }
-  if (message.speaker === 'author') {
-    return (
-      <div className="flex justify-end gap-2.5">
-        <div className="max-w-[85%]">
-          <p className="mb-1 text-right text-xs text-ink-3">
-            {{ decision: '作者拍板', note: '作者插话' }[message.kind as string] ?? '作者'} · {time(message.created_at)}
-          </p>
-          <div className="rounded-2xl rounded-tr-md bg-ink px-3.5 py-2.5 text-[14px] leading-relaxed whitespace-pre-wrap text-paper-2 shadow-[0_8px_18px_-10px_rgb(38_35_32/0.6)]">
-            {message.content}
-          </div>
-        </div>
-        <RoleAvatar speaker="author" />
-      </div>
-    )
-  }
-  if (message.kind === 'decision') {
-    return (
-      <div className="flex justify-center py-2">
-        <span className="rounded-full border border-seal/30 bg-seal-soft px-4 py-1 text-xs text-seal">{message.content}</span>
-      </div>
-    )
+  if (message.kind === 'decision' && !author) {
+    return <p className="py-1 text-center text-xs text-ink-2">{message.content}</p>
   }
   return (
-    <div className="flex gap-2.5">
+    <div className={clsx('flex gap-2.5', author && 'flex-row-reverse', fromGroup && 'opacity-80')}>
       <RoleAvatar speaker={message.speaker} />
-      <div className="min-w-0 flex-1">
-        <p className="mb-1 text-xs text-ink-3">
-          <span className={clsx('font-medium', meta.text)}>{meta.name}</span> · {time(message.created_at)}
+      <div className={clsx('min-w-0 max-w-[calc(100%-42px)]', message.kind === 'artifact' && 'flex-1')}>
+        <p className={clsx('mb-1.5 flex flex-wrap items-center gap-1.5 text-xs', author && 'justify-end')}>
+          <span className={clsx('font-medium', author ? 'text-ink-2' : meta.text)}>{author ? '你' : meta.name}</span>
+          {fromGroup && <GroupTag />}
+          <time className="text-ink-3">{time(message.created_at)}</time>
         </p>
-        {message.kind === 'artifact' ? <ArtifactCard message={message} /> : <Speech message={message} />}
+        <div className={clsx(
+          'border border-divider px-3 py-2.5 text-sm leading-[1.75] text-ink',
+          author ? 'rounded-[12px_2px_12px_12px] bg-[#e8dfcc] whitespace-pre-wrap break-words' : 'rounded-[2px_12px_12px_12px] bg-card',
+        )}>
+          {message.kind === 'artifact' ? <ArtifactCard message={message} /> : author ? message.content : <Speech message={message} />}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+type Conversation = 'group' | Exclude<Speaker, 'author' | 'system'>
+type TeamRole = Exclude<Conversation, 'group'>
+
+function threadOf(message: MeetingMessage): TeamRole | null {
+  const thread = message.payload?.thread
+  return thread === 'chief' || thread === 'lorekeeper' || thread === 'writer' || thread === 'reviewer' ? thread : null
+}
+
+interface FeedEntry {
+  message: MeetingMessage
+  statuses?: MeetingMessage[]
+  privateThread?: TeamRole
+  fromGroup?: boolean
+}
+
+function visibleEntries(messages: MeetingMessage[], conversation: Conversation, showGroup: boolean): FeedEntry[] {
+  const entries: FeedEntry[] = []
+  for (const message of messages) {
+    const thread = threadOf(message)
+    if (conversation !== 'group' && thread !== conversation && !(showGroup && !thread && message.speaker === conversation)) continue
+    if (conversation === 'group' && thread) {
+      entries.push({ message, privateThread: thread })
+      continue
+    }
+    const fromGroup = conversation !== 'group' && !thread
+    const previous = entries.at(-1)
+    if (message.kind === 'status') {
+      if (previous?.statuses && previous.fromGroup === fromGroup) previous.statuses.push(message)
+      else entries.push({ message, statuses: [message], fromGroup })
+    } else entries.push({ message, fromGroup })
+  }
+  return entries
+}
+
+function StatusGroup({ messages, live, fromGroup }: { messages: MeetingMessage[]; live: boolean; fromGroup?: boolean }) {
+  const [expanded, setExpanded] = useState(false)
+  const latest = messages[messages.length - 1]
+  return (
+    <div className="space-y-1.5 py-1 text-center text-xs leading-relaxed text-ink-2">
+      {expanded && messages.slice(0, -1).map((message) => <p key={message.id}>{message.content}</p>)}
+      <div className="flex flex-wrap items-center justify-center gap-1.5">
+        {fromGroup && <GroupTag />}
+        <span>{latest.content}</span>
+        {live && <TypingDots />}
+        {messages.length > 1 && (
+          <button type="button" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded} className="underline underline-offset-2 hover:text-ink">
+            {expanded ? '收起' : `展开 ${messages.length} 条`}
+          </button>
+        )}
       </div>
     </div>
   )
@@ -656,52 +700,75 @@ export function MeetingFeed({
   className,
   autoScroll = true,
   draft,
+  conversation = 'group',
+  showGroup = true,
 }: {
   messages: MeetingMessage[]
   working: boolean
   className?: string
   autoScroll?: boolean
-  /** 写手正在写的正文，显示在最后 */
   draft?: LiveDraft | null
+  conversation?: Conversation
+  showGroup?: boolean
 }) {
+  const { setConversation } = useBookContext()
   const scroller = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
   const reduce = useReducedMotion()
+  const entries = visibleEntries(messages, conversation, showGroup)
+  const showWriting = conversation === 'group' || (conversation === 'writer' && showGroup)
+  const writing = working && draft && !draft.done && showWriting ? draft : null
+  const lastEntry = entries.at(-1)
+  const latestStatus = lastEntry?.statuses?.at(-1)
+  const liveStatus = working && !writing && latestStatus?.id === messages.at(-1)?.id
 
-  const writing = working && draft && !draft.done ? draft : null
   useEffect(() => {
-    const el = scroller.current
-    if (el && autoScroll && stick.current) el.scrollTo({ top: el.scrollHeight, behavior: reduce ? 'auto' : 'smooth' })
-  }, [messages.length, autoScroll, reduce, writing?.text.length])
+    const element = scroller.current
+    stick.current = true
+    if (element && autoScroll) element.scrollTo({ top: element.scrollHeight, behavior: 'auto' })
+  }, [conversation, showGroup, autoScroll])
 
-  const lastIndex = messages.length - 1
-  const liveStatus = working && !writing && messages[lastIndex]?.kind === 'status'
+  useEffect(() => {
+    const element = scroller.current
+    if (element && autoScroll && stick.current) element.scrollTo({ top: element.scrollHeight, behavior: reduce ? 'auto' : 'smooth' })
+  }, [messages.length, autoScroll, reduce, writing?.text.length])
 
   return (
     <div
       ref={scroller}
-      onScroll={(e) => {
-        const el = e.currentTarget
-        stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120
+      aria-label={conversation === 'group' ? '编辑部群聊消息' : `${ROLE_META[conversation].name}的会话消息`}
+      onScroll={(event) => {
+        const element = event.currentTarget
+        stick.current = element.scrollHeight - element.scrollTop - element.clientHeight < 120
       }}
-      className={clsx('scroll-thin space-y-3.5 overflow-y-auto', className)}
+      className={clsx('scroll-thin space-y-4 overflow-y-auto', className)}
     >
-      {messages.map((m, i) => (
-        <motion.div
-          key={m.id}
-          initial={reduce || !isFresh(m.created_at, 30) ? false : { opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-        >
-          <MessageRow message={m} live={liveStatus && i === lastIndex} />
-        </motion.div>
-      ))}
-      {writing && <LiveDraftRow draft={writing} />}
-      {working && !liveStatus && !writing && (
-        <div className="flex items-center gap-2 pl-12 text-ink-3">
-          <TypingDots />
+      {entries.length === 0 && !writing && (
+        <div className="px-4 py-12 text-center">
+          <p className="font-serif text-lg text-ink-2">{conversation === 'group' ? '编辑部，等你开口' : `和${ROLE_META[conversation].name}说说你的想法`}</p>
+          <p className="mt-2 text-sm leading-relaxed text-ink-2">{conversation === 'group' ? '讨论和产出会留在这里，书稿在右边展开。' : '点名插话会记入作者要求，并由编辑部在工作时处理。'}</p>
         </div>
       )}
+      {entries.map((entry, index) => (
+        <motion.div
+          key={entry.message.id}
+          initial={reduce || !isFresh(entry.message.created_at, 30) ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: reduce ? 0 : 0.28, ease: [0.22, 1, 0.36, 1] }}
+        >
+          {entry.privateThread ? (
+            <button type="button" onClick={() => setConversation(entry.privateThread!)} title={entry.message.speaker === 'author' ? entry.message.content : undefined} className="block w-full truncate py-1 text-center text-xs leading-relaxed text-ink-2 hover:text-ink hover:underline">
+              {entry.message.speaker === 'author'
+                ? `你私聊了${ROLE_META[entry.privateThread].name}：${entry.message.content.length > 45 ? `${entry.message.content.slice(0, 45)}…` : entry.message.content}`
+                : `${ROLE_META[entry.privateThread].name}回复了你`}
+            </button>
+          ) : entry.statuses ? (
+            <StatusGroup messages={entry.statuses} live={liveStatus && index === entries.length - 1} fromGroup={entry.fromGroup} />
+          ) : <MessageRow message={entry.message} fromGroup={entry.fromGroup} />}
+        </motion.div>
+      ))}
+      {writing && <LiveDraftRow draft={writing} fromGroup={conversation !== 'group'} />}
+      {working && conversation === 'group' && !liveStatus && !writing && <div className="flex justify-center py-2 text-ink-2"><TypingDots /></div>}
     </div>
   )
 }

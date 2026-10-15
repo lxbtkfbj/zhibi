@@ -14,7 +14,7 @@ export function HealthDot({ compact }: { compact?: boolean }) {
         .join('\n')
     : '后端未连接'
   return (
-    <span className="flex items-center gap-1.5 text-xs text-ink-3" title={tip}>
+    <span className="flex items-center gap-1.5 text-xs text-ink-2" title={tip}>
       <span className="relative flex size-2">
         {ok && <span className="absolute inline-flex size-full animate-ping rounded-full bg-lore/50 [animation-duration:2.5s]" />}
         <span className={clsx('relative inline-flex size-2 rounded-full', ok ? 'bg-lore' : 'bg-seal')} />
@@ -30,7 +30,7 @@ export function Brand() {
       <Seal size={38} className="transition-transform duration-500 group-hover:-rotate-6" />
       <span className="flex flex-col leading-tight">
         <span className="font-serif text-xl font-bold tracking-[0.2em]">执笔</span>
-        <span className="text-[11px] tracking-wider text-ink-3">AI 编辑部 · 长篇小说</span>
+        <span className="text-xs tracking-wider text-ink-2">AI 编辑部 · 长篇小说</span>
       </span>
     </NavLink>
   )
