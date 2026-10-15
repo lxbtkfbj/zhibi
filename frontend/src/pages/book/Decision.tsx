@@ -3,14 +3,16 @@ import { Check, CirclePause, MessageSquareText, PenLine, RotateCcw, Stamp } from
 import { AnimatePresence, motion } from 'motion/react'
 import { useState } from 'react'
 import { useJobActions } from '../../api/hooks'
-import type { InterviewQuestion, Job } from '../../api/types'
+import type { InterviewQuestion, Job, WriteUntil } from '../../api/types'
 import { Button, ErrorText, inputClass, TypingDots } from '../../components/ui'
+import { decisionCopy } from '../../lib/decision'
 import { useBookContext } from './context'
 
 /** 只有盖章按钮：编辑部面板里修改意见直接在底部输入框里说。 */
 export function ApproveButton({ job }: { job: Job }) {
   const { bookId, celebrate } = useBookContext()
   const { decide } = useJobActions(bookId)
+  const copy = decisionCopy(job.pending, bookId)
   const approve = async () => {
     await decide.mutateAsync({ jobId: job.id, action: 'approve' })
     celebrate()
@@ -19,9 +21,53 @@ export function ApproveButton({ job }: { job: Job }) {
     <div>
       <Button variant="seal" onClick={approve} loading={decide.isPending && decide.variables?.action === 'approve'}>
         <Stamp className="size-4" />
-        盖章批准
+        {copy.approve}
       </Button>
       <ErrorText error={decide.error} />
+    </div>
+  )
+}
+
+const WRITE_OPTIONS: { key: string; label: string; until: WriteUntil; count: number; hint: string }[] = [
+  { key: '1', label: '写 1 章', until: 'count', count: 1, hint: '先写一章看看' },
+  { key: '3', label: '写 3 章', until: 'count', count: 3, hint: '新书写完前 3 章会请你试读' },
+  { key: '10', label: '写 10 章', until: 'count', count: 10, hint: '中途可以随时插话或停下' },
+  { key: 'volume', label: '写完这一卷', until: 'volume', count: 1, hint: '一卷写完就停，等你看看' },
+  { key: 'book', label: '一直写到完本', until: 'book', count: 1, hint: '每卷开写前仍会请你拍板卷纲' },
+]
+
+/** 开写：选这一轮写多少，编辑部按卷纲和章纲逐章写，写够就停。 */
+export function WritingControls({ compact }: { compact?: boolean }) {
+  const { bookId, book } = useBookContext()
+  const { write } = useJobActions(bookId)
+  const [choice, setChoice] = useState(book.chapters_final === 0 && !book.trial_read_done ? '3' : '10')
+  const option = WRITE_OPTIONS.find((o) => o.key === choice) ?? WRITE_OPTIONS[1]
+  return (
+    <div>
+      <div className={clsx('flex flex-wrap gap-1.5', compact ? 'mb-2.5' : 'mb-3')}>
+        {WRITE_OPTIONS.map((o) => (
+          <button
+            key={o.key}
+            onClick={() => setChoice(o.key)}
+            aria-pressed={choice === o.key}
+            className={clsx(
+              'rounded-xl px-3 py-1.5 ring-1 transition-colors',
+              compact ? 'text-[13px]' : 'text-[14px]',
+              choice === o.key ? 'bg-ink text-paper-2 ring-ink' : 'bg-card text-ink-2 ring-line-2 hover:text-ink hover:ring-ink-3/50',
+            )}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button variant="seal" size={compact ? 'sm' : 'lg'} onClick={() => write.mutate({ until: option.until, count: option.count })} loading={write.isPending}>
+          <PenLine className="size-4" />
+          {book.chapters_final ? '继续写' : '开写'}
+        </Button>
+        <span className="text-xs text-ink-3">{option.hint}</span>
+      </div>
+      <ErrorText error={write.error} />
     </div>
   )
 }
@@ -133,6 +179,7 @@ export function InterviewForm({ job, questions }: { job: Job; questions: Intervi
 export function DecisionControls({ job, compact }: { job: Job; compact?: boolean }) {
   const { bookId, celebrate } = useBookContext()
   const { decide } = useJobActions(bookId)
+  const copy = decisionCopy(job.pending, bookId)
   const [feedback, setFeedback] = useState('')
   const [writing, setWriting] = useState(false)
 
@@ -163,7 +210,7 @@ export function DecisionControls({ job, compact }: { job: Job; compact?: boolean
               onChange={(e) => setFeedback(e.target.value)}
               rows={compact ? 3 : 4}
               autoFocus
-              placeholder="例如：女主出场太晚了，第一单元就让她登场；反派的动机再狠一点。"
+              placeholder={copy.placeholder}
               className={inputClass}
               onKeyDown={(e) => e.key === 'Enter' && (e.ctrlKey || e.metaKey) && feedback.trim() && void submit()}
             />
@@ -187,7 +234,7 @@ export function DecisionControls({ job, compact }: { job: Job; compact?: boolean
           >
             <Button variant="seal" size={compact ? 'md' : 'lg'} onClick={approve} loading={decide.isPending}>
               <Stamp className="size-4" />
-              盖章批准
+              {copy.approve}
             </Button>
             <Button variant="outline" size={compact ? 'md' : 'lg'} onClick={() => setWriting(true)}>
               <MessageSquareText className="size-4" />

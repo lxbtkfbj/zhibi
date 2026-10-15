@@ -58,6 +58,17 @@ def format_character(ch: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
+def format_character_state(ch: dict[str, Any]) -> str:
+    """人物当前状态的简表：规划时用，比完整人物卡短。"""
+    parts = [f"【{ch.get('name', '')}】{ch.get('role_type', '')}"]
+    if ch.get("is_alive") is False:
+        parts.append("已死亡")
+    for label, key in (("位置", "location"), ("状态", "condition"), ("实力", "abilities"), ("目标", "goal")):
+        if ch.get(key):
+            parts.append(f"{label}：{ch[key]}")
+    return "；".join(parts)
+
+
 def format_lore(lore: dict[str, Any]) -> str:
     if not lore:
         return "（暂无）"
@@ -93,40 +104,132 @@ def format_spine(spine: dict[str, Any]) -> str:
     )
 
 
+def format_threads(threads: dict[str, Any] | list[dict[str, Any]], volume: int | None = None) -> str:
+    """线索列表；给了 volume 时只列出这一卷前后的节拍，控制篇幅。"""
+    items = threads.get("threads", []) if isinstance(threads, dict) else threads
+    if not items:
+        return "（暂无）"
+    blocks = []
+    for t in items:
+        beats = t.get("beats", [])
+        if volume is not None:
+            beats = [b for b in beats if abs((b.get("volume") or 0) - volume) <= 1]
+        lines = [f"【{t.get('name', '')}】{t.get('kind', '')}：{t.get('summary', '')}"]
+        if t.get("characters"):
+            lines.append(f"人物：{'、'.join(t['characters'])}")
+        lines += [f"  第{b.get('volume')}卷：{b.get('beat', '')}" for b in beats]
+        blocks.append("\n".join(lines))
+    return "\n".join(blocks)
+
+
+def format_steps(steps: list[dict[str, Any]]) -> str:
+    return "；".join(f"{s.get('thread', '')}——{s.get('beat', '')}" for s in steps if s.get("thread"))
+
+
+def format_volume_card(v: dict[str, Any]) -> str:
+    lines = [
+        f"第{v.get('index')}卷《{v.get('title', '')}》"
+        + (f"约 {v['chapter_count']} 章" if v.get("chapter_count") else "")
+    ]
+    for label, key in (
+        ("舞台", "stage"),
+        ("概要", "summary"),
+        ("卷末目标", "goal"),
+        ("高潮", "climax"),
+        ("主要对手", "antagonist"),
+        ("主角实力", "power_range"),
+    ):
+        if v.get(key):
+            lines.append(f"{label}：{v[key]}")
+    if v.get("thread_beats"):
+        lines.append(f"推进线索：{format_steps(v['thread_beats'])}")
+    if v.get("new_characters"):
+        lines.append(f"新登场：{'、'.join(v['new_characters'])}")
+    return "\n".join(lines)
+
+
+def foreshadow_code(f: dict[str, Any]) -> str:
+    return f"F{f.get('seq')}" if f.get("seq") else "F?"
+
+
+FORESHADOW_STATUS = {"planned": "未埋", "planted": "已埋", "resolved": "已收", "abandoned": "放弃"}
+
+
+def format_foreshadowing(f: dict[str, Any]) -> str:
+    where = []
+    if f.get("plant_volume"):
+        where.append(f"第{f['plant_volume']}卷埋")
+    if f.get("payoff_volume"):
+        where.append(f"第{f['payoff_volume']}卷收")
+    status = FORESHADOW_STATUS.get(f.get("status", "planned"), "")
+    head = f"- {foreshadow_code(f)}［{f.get('span', '中')}·{status}{'·' + '、'.join(where) if where else ''}］"
+    return f"{head}{f.get('description', '')}（埋：{f.get('plant_plan', '')}；收：{f.get('payoff_plan', '')}）"
+
+
+def format_ledger(foreshadowings: list[dict[str, Any]]) -> str:
+    return "\n".join(format_foreshadowing(f) for f in foreshadowings) or "（暂无）"
+
+
 def format_outline(outline: dict[str, Any]) -> str:
+    """全书总纲：分卷卡片 + 伏笔台账。"""
     if not outline:
         return "（暂无）"
-    volumes = "\n".join(
-        f"第{v.get('index')}卷《{v.get('title')}》"
-        + (f"约 {v['chapter_count']} 章" if v.get("chapter_count") else "")
-        + f"：{v.get('summary', '')}（卷末目标：{v.get('goal', '')}）"
-        for v in outline.get("volumes", [])
-    )
-    units = "\n\n".join(
-        "\n".join(
-            [
-                f"单元{u.get('index')}「{u.get('title')}」约 {u.get('chapter_count')} 章",
-                f"目标：{u.get('goal', '')}",
-                f"冲突：{u.get('conflict', '')}",
-                f"高潮：{u.get('climax', '')}",
-                f"结果：{u.get('outcome', '')}",
-                f"关键事件：{' → '.join(u.get('key_events', []))}",
-            ]
+    volumes = "\n\n".join(format_volume_card(v) for v in outline.get("volumes", []))
+    return f"分卷：\n{volumes}\n\n伏笔台账：\n{format_ledger(outline.get('foreshadowings', []))}"
+
+
+def format_unit(u: dict[str, Any]) -> str:
+    lines = [
+        f"单元{u.get('index')}「{u.get('title')}」约 {u.get('chapter_count')} 章",
+        f"目标：{u.get('goal', '')}",
+        f"冲突：{u.get('conflict', '')}",
+        f"高潮：{u.get('climax', '')}",
+        f"结果：{u.get('outcome', '')}",
+        f"关键事件：{' → '.join(u.get('key_events', []))}",
+    ]
+    if u.get("thread_beats"):
+        lines.append(f"推进线索：{format_steps(u['thread_beats'])}")
+    if u.get("foreshadow_actions"):
+        lines.append(
+            "伏笔："
+            + "；".join(
+                f"{a.get('action')}{a.get('ref')} {a.get('detail', '')}".strip() for a in u["foreshadow_actions"]
+            )
         )
-        for u in outline.get("first_volume_units", [])
-    )
-    foreshadowings = "\n".join(
-        f"- {f.get('description')}（埋：{f.get('plant_plan', '')}；收：{f.get('payoff_plan', '')}）"
-        for f in outline.get("foreshadowings", [])
-    )
-    return f"分卷：\n{volumes}\n\n第一卷剧情单元：\n{units}\n\n伏笔：\n{foreshadowings or '（暂无）'}"
+    return "\n".join(lines)
+
+
+def format_units(units: list[dict[str, Any]]) -> str:
+    return "\n\n".join(format_unit(u) for u in units) or "（暂无）"
+
+
+def format_volume_plan(plan: dict[str, Any]) -> str:
+    """卷纲：剧情单元 + 本卷新埋的伏笔。"""
+    if not plan:
+        return "（暂无）"
+    text = format_units(plan.get("units", []))
+    fresh = plan.get("new_foreshadowings") or []
+    if fresh:
+        text += "\n\n本卷新埋的伏笔：\n" + "\n".join(
+            f"- {f.get('description')}（第{f.get('plant_unit')}单元埋；"
+            + (f"第{f['payoff_unit']}单元收" if f.get("payoff_unit") else f"第{f.get('payoff_volume')}卷收")
+            + "）"
+            for f in fresh
+        )
+    return text
+
+
+MAX_REQUIREMENTS = 40
 
 
 def format_requirements(brief: list[str], notes: list[str]) -> str:
     """作者在动笔前的回答和过程中的插话：每个角色都要看到，并且必须落实。"""
-    lines = [*brief, *notes]
+    lines = list(dict.fromkeys(x for x in [*brief, *notes] if x.strip()))
     if not lines:
         return ""
+    if len(lines) > MAX_REQUIREMENTS:
+        # 太多时保留动笔前的回答和最近的意见
+        lines = lines[: MAX_REQUIREMENTS // 4] + lines[-(MAX_REQUIREMENTS - MAX_REQUIREMENTS // 4) :]
     body = "\n".join(f"- {line}" for line in lines)
     return f"【作者的要求（必须落实；后面的要求与前面冲突时以后面的为准）】\n{body}"
 

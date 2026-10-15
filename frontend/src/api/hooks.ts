@@ -4,6 +4,8 @@ import type {
   Bible,
   BookDetail,
   BookSummary,
+  Chapter,
+  ChapterBrief,
   Character,
   Foreshadowing,
   Health,
@@ -15,9 +17,11 @@ import type {
   PlotUnit,
   Relationship,
   RoleAssignments,
+  StoryThread,
   Usage,
   Volume,
   WorldEntry,
+  WriteUntil,
 } from './types'
 
 export const keys = {
@@ -25,6 +29,11 @@ export const keys = {
   book: (id: string) => ['book', id] as const,
   outline: (id: string) => ['outline', id] as const,
   bible: (id: string) => ['bible', id] as const,
+  threads: (id: string) => ['threads', id] as const,
+  /** 前缀：失效时连同按卷筛选的目录、单章一起刷新 */
+  chapters: (id: string) => ['chapters', id] as const,
+  chapterList: (id: string, volume?: number) => ['chapters', id, 'list', volume ?? 'all'] as const,
+  chapter: (id: string, index: number) => ['chapters', id, 'one', index] as const,
   usage: (id: string) => ['usage', id] as const,
   profiles: ['profiles'] as const,
   roles: ['roles'] as const,
@@ -36,6 +45,16 @@ export const useBook = (id: string) => useQuery({ queryKey: keys.book(id), query
 export const useOutline = (id: string) =>
   useQuery({ queryKey: keys.outline(id), queryFn: () => get<Outline>(`/books/${id}/outline`) })
 export const useBible = (id: string) => useQuery({ queryKey: keys.bible(id), queryFn: () => get<Bible>(`/books/${id}/bible`) })
+export const useThreads = (id: string) =>
+  useQuery({ queryKey: keys.threads(id), queryFn: () => get<StoryThread[]>(`/books/${id}/threads`) })
+/** 章节目录；指定 volume 时只列这一卷，并带上章纲。 */
+export const useChapters = (id: string, volume?: number) =>
+  useQuery({
+    queryKey: keys.chapterList(id, volume),
+    queryFn: () => get<ChapterBrief[]>(`/books/${id}/chapters${volume ? `?volume=${volume}` : ''}`),
+  })
+export const useChapter = (id: string, index: number) =>
+  useQuery({ queryKey: keys.chapter(id, index), queryFn: () => get<Chapter>(`/books/${id}/chapters/${index}`), retry: false })
 export const useUsage = (id: string) => useQuery({ queryKey: keys.usage(id), queryFn: () => get<Usage>(`/books/${id}/usage`) })
 export const useHealth = () =>
   useQuery({ queryKey: keys.health, queryFn: () => get<Health>('/health'), refetchInterval: 30_000, retry: false })
@@ -78,10 +97,33 @@ function patchInCache<T extends { id: string }>(list: T[] | undefined, item: T):
   return list?.map((x) => (x.id === item.id ? item : x))
 }
 
+export function useUpdateThread(bookId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, ...body }: { id: string } & Partial<Pick<StoryThread, 'name' | 'summary' | 'characters' | 'beats'>>) =>
+      patch<StoryThread>(`/threads/${id}`, body),
+    onSuccess: (thread) => qc.setQueryData<StoryThread[]>(keys.threads(bookId), (old) => patchInCache(old, thread)),
+  })
+}
+
+export function useUpdateChapter(bookId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ index, ...body }: { index: number; title?: string; content?: string }) =>
+      patch<Chapter>(`/books/${bookId}/chapters/${index}`, body),
+    onSuccess: (chapter) => {
+      qc.setQueryData(keys.chapter(bookId, chapter.index), chapter)
+      qc.invalidateQueries({ queryKey: keys.chapterList(bookId) })
+    },
+  })
+}
+
+type VolumeFields = 'title' | 'stage' | 'summary' | 'goal' | 'climax' | 'antagonist' | 'power_range' | 'chapter_count' | 'new_characters'
+
 export function useUpdateVolume(bookId: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, ...body }: { id: string } & Partial<Pick<Volume, 'title' | 'summary' | 'goal' | 'chapter_count'>>) =>
+    mutationFn: ({ id, ...body }: { id: string } & Partial<Pick<Volume, VolumeFields>>) =>
       patch<Volume>(`/volumes/${id}`, body),
     onSuccess: (volume) =>
       qc.setQueryData<Outline>(keys.outline(bookId), (old) =>
@@ -148,6 +190,13 @@ export function useJobActions(bookId: string) {
       mutationFn: ({ jobId, action, feedback }: { jobId: string; action: 'approve' | 'revise'; feedback?: string }) =>
         post<Job>(`/jobs/${jobId}/decision`, { action, feedback: feedback ?? '' }),
       onSuccess: setJob,
+    }),
+    write: useMutation({
+      mutationFn: (body: { until: WriteUntil; count: number }) => post<Job>(`/books/${bookId}/write`, body),
+      onSuccess: (job) => {
+        qc.setQueryData<BookDetail>(keys.book(bookId), (old) => (old ? { ...old, status: 'writing', active_job: job } : old))
+        qc.invalidateQueries({ queryKey: keys.books })
+      },
     }),
     answer: useMutation({
       mutationFn: ({ jobId, answers, extra }: { jobId: string; answers: { index: number; answer: string }[]; extra: string }) =>

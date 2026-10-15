@@ -2,7 +2,7 @@ import clsx from 'clsx'
 import { AlertTriangle, ChevronDown } from 'lucide-react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
-import type { Concept, InterviewQuestion, MeetingMessage, Speaker, Spine } from '../../api/types'
+import type { Concept, InterviewQuestion, MeetingMessage, PlotUnit, Speaker, Spine, StoryThread } from '../../api/types'
 import { TypingDots } from '../../components/ui'
 import { ROLE_META } from '../../lib/roles'
 import { isFresh, useTypewriter } from '../../lib/team'
@@ -45,8 +45,27 @@ interface LoreData {
   characters: { name: string; role_type: string; abilities?: string; goal?: string }[]
 }
 interface OutlineData {
-  volumes: { index: number; title: string; summary: string; chapter_count?: number }[]
-  first_volume_units: { index: number; title: string; chapter_count: number }[]
+  volumes: { index: number; title: string; summary: string; stage?: string; antagonist?: string; chapter_count?: number }[]
+  foreshadowings?: { seq: number; description: string; plant_volume?: number; payoff_volume?: number }[]
+}
+interface VolumePlanData {
+  volume: number
+  units: Pick<PlotUnit, 'index' | 'title' | 'chapter_count' | 'climax'>[]
+  new_foreshadowings: { seq: number; description: string }[]
+}
+interface ChapterPlanData {
+  unit: string
+  chapters: { index: number; title: string; hook: string }[]
+}
+interface ChapterData {
+  index: number
+  title: string
+  words: number
+  excerpt?: string
+  summary?: string
+  characters_updated?: number
+  characters_created?: number
+  foreshadowings?: number
 }
 interface CritiqueData {
   verdict: 'pass' | 'revise'
@@ -54,7 +73,14 @@ interface CritiqueData {
   issues: { target: string; problem: string; suggestion: string; severity: 'high' | 'medium' | 'low' }[]
 }
 
-const TARGET_NAME: Record<string, string> = { concept: '概念', lore: '世界观与人物', spine: '主线骨架', outline: '大纲' }
+const TARGET_NAME: Record<string, string> = {
+  concept: '概念',
+  lore: '世界观与人物',
+  spine: '主线骨架',
+  threads: '线索',
+  outline: '全书总纲',
+  first_volume: '第一卷卷纲',
+}
 const SEVERITY: Record<string, string> = { high: '严重', medium: '中等', low: '轻微' }
 
 function ArtifactBody({ message }: { message: MeetingMessage }) {
@@ -143,8 +169,85 @@ function ArtifactBody({ message }: { message: MeetingMessage }) {
         {o.volumes.map((v) => (
           <p key={v.index}>
             <span className="font-medium text-ink">第{v.index}卷《{v.title}》</span>
-            {v.chapter_count ? <span className="text-xs text-ink-3">约 {v.chapter_count} 章</span> : null} {v.summary}
+            {v.chapter_count ? <span className="text-xs text-ink-3">约 {v.chapter_count} 章</span> : null}
+            {v.stage ? <span className="text-xs text-ink-3"> · {v.stage}</span> : null} {v.summary}
           </p>
+        ))}
+        {o.foreshadowings && o.foreshadowings.length > 0 && (
+          <p className="text-ink-3">
+            长线伏笔：{o.foreshadowings.map((f) => `F${f.seq}（第${f.plant_volume}卷埋→第${f.payoff_volume}卷收）`).join('、')}
+          </p>
+        )}
+      </div>
+    )
+  }
+  if (type === 'threads') {
+    const t = data as { threads: Pick<StoryThread, 'name' | 'kind' | 'summary'>[] }
+    return (
+      <ul className="space-y-1.5 text-ink-2">
+        {t.threads.map((thread) => (
+          <li key={thread.name}>
+            <span className="mr-1.5 rounded bg-chief-soft px-1.5 py-px text-xs text-chief">{thread.kind}</span>
+            <span className="font-medium text-ink">{thread.name}</span>：{thread.summary}
+          </li>
+        ))}
+      </ul>
+    )
+  }
+  if (type === 'volume_plan') {
+    const v = data as VolumePlanData
+    return (
+      <ol className="space-y-1.5 text-ink-2">
+        {v.units.map((u) => (
+          <li key={u.index}>
+            <span className="font-medium text-ink">
+              {u.index}. {u.title}
+            </span>
+            <span className="text-xs text-ink-3"> 约 {u.chapter_count} 章</span> {u.climax}
+          </li>
+        ))}
+      </ol>
+    )
+  }
+  if (type === 'chapter_plan') {
+    const c = data as ChapterPlanData
+    return (
+      <ol className="space-y-1 text-ink-2">
+        {c.chapters.map((ch) => (
+          <li key={ch.index}>
+            <span className="font-medium text-ink">第{ch.index}章 {ch.title}</span>
+            {ch.hook && <span className="text-ink-3"> —— {ch.hook}</span>}
+          </li>
+        ))}
+      </ol>
+    )
+  }
+  if (type === 'chapter_draft' || type === 'chapter_final') {
+    const c = data as ChapterData
+    return (
+      <div className="space-y-1.5 text-ink-2">
+        <p className="font-serif leading-relaxed">{c.summary ?? `${c.excerpt ?? ''}…`}</p>
+        {type === 'chapter_final' && (
+          <p className="text-xs text-ink-3">
+            设定库：人物状态更新 {c.characters_updated ?? 0} 处，新人物 {c.characters_created ?? 0} 位，伏笔进展 {c.foreshadowings ?? 0} 条
+          </p>
+        )}
+      </div>
+    )
+  }
+  if (type === 'chapter_review') {
+    const c = data as CritiqueData
+    return (
+      <div className="space-y-2">
+        {c.highlights.map((h) => (
+          <p key={h} className="text-lore">✓ {h}</p>
+        ))}
+        {c.issues.map((issue, i) => (
+          <div key={i} className="rounded-lg bg-paper px-3 py-2">
+            <p className="text-xs text-ink-3">{SEVERITY[issue.severity]}</p>
+            <p className="text-ink">{issue.problem}</p>
+            <p className="text-ink-2">→ {issue.suggestion}</p>
+          </div>
         ))}
       </div>
     )
@@ -184,7 +287,7 @@ function ArtifactBody({ message }: { message: MeetingMessage }) {
 }
 
 // 审稿意见、主线骨架、修改分工这类需要作者留意的，默认展开；提问在页面中间作答，这里收起
-const OPEN_BY_DEFAULT = new Set(['critique', 'spine', 'triage'])
+const OPEN_BY_DEFAULT = new Set(['critique', 'spine', 'triage', 'threads'])
 
 function ArtifactCard({ message }: { message: MeetingMessage }) {
   const [open, setOpen] = useState(OPEN_BY_DEFAULT.has(message.payload?.type ?? ''))

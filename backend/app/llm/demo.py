@@ -214,96 +214,333 @@ def _spine() -> s.StorySpine:
     )
 
 
+def _threads() -> s.ThreadsDraft:
+    return s.ThreadsDraft(
+        threads=[
+            s.ThreadDraft(
+                name="主线：青灯与寿元",
+                kind="主线",
+                characters=["陆远", "宗主厉沧海"],
+                summary="陆远靠青灯看见寿元，从自保到揭开玄冥宗收割寿元的真相，最终燃尽青灯破掉寿元大阵。",
+                beats=[
+                    s.ThreadBeat(volume=1, beat="捡到青灯，确认能看见寿元，借信息差活下来并进入外门"),
+                    s.ThreadBeat(volume=2, beat="外门大比中发现有人在比试里偷取败者寿元"),
+                    s.ThreadBeat(volume=3, beat="查到宗主与血河教交易寿元，自己也只剩三年可活"),
+                    s.ThreadBeat(volume=4, beat="化神大典上燃尽青灯，以自身寿元反噬大阵"),
+                ],
+            ),
+            s.ThreadDraft(
+                name="感情线：苏晚晴",
+                kind="感情线",
+                characters=["陆远", "苏晚晴"],
+                summary="从执法堂里的互相怀疑，到并肩查案，再到寒原上一起重建杂役院。",
+                beats=[
+                    s.ThreadBeat(volume=1, beat="执法堂初见，互相怀疑；陆远替她洗清一桩冤案，她欠下人情"),
+                    s.ThreadBeat(volume=2, beat="生死擂前她暗中提醒陆远，两人第一次并肩"),
+                    s.ThreadBeat(volume=3, beat="得知灭门真相后她一度迁怒陆远，又在血河教总坛救下他"),
+                    s.ThreadBeat(volume=4, beat="大典上她守住阵眼，结局与陆远一起离开宗门"),
+                ],
+            ),
+            s.ThreadDraft(
+                name="反派线：玄冥宗高层",
+                kind="反派线",
+                characters=["赵乾", "宗主厉沧海"],
+                summary="从赵乾的跟班，到赵乾本人，再到幕后的宗主，对手一层比一层深。",
+                beats=[
+                    s.ThreadBeat(volume=1, beat="赵乾的跟班欺压陆远，赵乾在考核中设局"),
+                    s.ThreadBeat(volume=2, beat="赵乾在生死擂上被击败，背后长老开始盯上陆远"),
+                    s.ThreadBeat(volume=3, beat="宗主借血河教之手清理知情人，陆远成为目标"),
+                    s.ThreadBeat(volume=4, beat="宗主发动寿元大阵，最终坐化"),
+                ],
+            ),
+            s.ThreadDraft(
+                name="谜团线：父母之死",
+                kind="谜团线",
+                characters=["陆远", "老瞎子"],
+                summary="兽潮、缺失的小指与老瞎子的遗言，一步步指向幼时的寿元契约。",
+                beats=[
+                    s.ThreadBeat(volume=1, beat="老瞎子坐化前留下半句遗言"),
+                    s.ThreadBeat(volume=3, beat="小指的契约印记揭开父母之死与宗门交易的关系"),
+                ],
+            ),
+        ],
+        remark="我把这本书拆成四条线：主线是青灯与寿元，苏晚晴一条感情线，反派从赵乾一路升级到宗主，再加一条父母之死的谜团线。第三卷是几条线的交汇点。",
+    )
+
+
 def _outline() -> s.OutlineDraft:
     return s.OutlineDraft(
         volumes=[
             s.VolumeDraft(
                 index=1,
                 title="杂役",
+                stage="玄冥宗杂役院 → 外门",
                 summary="陆远得到青灯，在杂役院和外门之间周旋，借寿元信息差扳倒赵乾的跟班，进入外门。",
                 goal="成为外门弟子，发现宗门里有人在收集寿元",
+                climax="外门考核中将计就计，让设局者自食其果",
+                antagonist="赵乾和他的跟班：想把陆远这个碍眼的杂役踩死",
+                power_range="炼气一层 → 炼气四层",
+                thread_beats=[
+                    s.ThreadStep(thread="主线：青灯与寿元", beat="捡到青灯并确认其真假"),
+                    s.ThreadStep(thread="感情线：苏晚晴", beat="执法堂初见，她欠下人情"),
+                ],
+                new_characters=["苏晚晴：执法堂弟子"],
                 chapter_count=31,
             ),
             s.VolumeDraft(
                 index=2,
                 title="生死擂",
+                stage="玄冥宗外门",
                 summary="外门大比，陆远与赵乾正面冲突，牵出寿元交易的线索。",
                 goal="击败赵乾，与苏晚晴结盟",
+                climax="生死擂上借寿元信息险胜赵乾",
+                antagonist="赵乾与他背后的长老",
+                power_range="炼气四层 → 筑基初期",
+                thread_beats=[
+                    s.ThreadStep(thread="反派线：玄冥宗高层", beat="击败赵乾，长老开始盯上陆远"),
+                    s.ThreadStep(thread="感情线：苏晚晴", beat="生死擂前两人第一次并肩"),
+                ],
+                new_characters=["周长老：赵乾的祖父"],
                 chapter_count=90,
             ),
             s.VolumeDraft(
                 index=3,
                 title="血河",
+                stage="北境寒原 → 血河教总坛",
                 summary="追查血河教，发现宗主与魔教交易的真相。",
                 goal="揭开父母之死的真相",
+                climax="血河教总坛里，契约印记揭开父母之死",
+                antagonist="血河教与暗中出手的宗主",
+                power_range="筑基初期 → 结丹初期",
+                thread_beats=[
+                    s.ThreadStep(thread="谜团线：父母之死", beat="小指的契约印记揭开真相"),
+                    s.ThreadStep(thread="主线：青灯与寿元", beat="查到宗主交易寿元"),
+                ],
                 chapter_count=100,
             ),
             s.VolumeDraft(
                 index=4,
                 title="青灯尽",
+                stage="玄冥宗主峰",
                 summary="宗主寿元将尽，孤注一掷；陆远必须在灯芯燃尽前做出选择。",
                 goal="结束寿元交易，付出自己的代价",
+                climax="化神大典上燃尽青灯，大阵反噬",
+                antagonist="宗主厉沧海",
+                power_range="结丹初期 → 结丹后期",
+                thread_beats=[s.ThreadStep(thread="主线：青灯与寿元", beat="燃尽青灯破阵")],
                 chapter_count=112,
-            ),
-        ],
-        first_volume_units=[
-            s.PlotUnitDraft(
-                index=1,
-                title="捡灯",
-                chapter_count=6,
-                goal="活过被欺压的杂役日常",
-                conflict="赵乾的跟班克扣口粮并毒打陆远",
-                climax="陆远第一次点燃青灯，看见打他的人只剩两天寿元",
-                outcome="跟班果然暴毙，陆远意识到青灯的真实性，也被执法堂盯上",
-                key_events=["陆远挨打", "老瞎子塞给他一盏旧灯", "灯火照见寿元", "跟班暴毙"],
-            ),
-            s.PlotUnitDraft(
-                index=2,
-                title="执法堂",
-                chapter_count=8,
-                goal="洗清嫌疑",
-                conflict="苏晚晴怀疑陆远与暴毙案有关",
-                climax="陆远利用寿元信息推断出真凶另有其人，当众对质",
-                outcome="苏晚晴欠他一个人情，赵乾开始注意这个杂役",
-                key_events=["被带去执法堂", "暗中观察寿元", "找到中毒证据", "当众对质"],
-            ),
-            s.PlotUnitDraft(
-                index=3,
-                title="老瞎子的七日",
-                chapter_count=7,
-                goal="弄清青灯来历",
-                conflict="老瞎子只剩七日寿元，且不肯多说",
-                climax="老瞎子坐化前留下半句遗言",
-                outcome="陆远得知青灯与宗主有关，决定进入外门",
-                key_events=["追问老瞎子", "老瞎子病重", "坐化与遗言"],
-            ),
-            s.PlotUnitDraft(
-                index=4,
-                title="外门考核",
-                chapter_count=10,
-                goal="通过外门考核",
-                conflict="赵乾在考核中设局",
-                climax="陆远将计就计，借寿元信息让设局者自食其果",
-                outcome="陆远成为外门弟子，发现考核中有人在偷偷收取寿元",
-                key_events=["报名考核", "识破陷阱", "反制", "进入外门"],
             ),
         ],
         foreshadowings=[
             s.ForeshadowingDraft(
-                description="陆远左手缺的小指",
-                plant_plan="第一卷开头随笔带过",
-                payoff_plan="第三卷揭示是幼时被血河教取走的寿元契约印记",
+                description="陆远左手缺的小指，是幼时被血河教取走寿元的契约印记",
+                span="长",
+                plant_plan="第一卷开头随笔带过，读者以为只是旧伤",
+                payoff_plan="第三卷揭示是契约印记，指向父母之死",
+                plant_volume=1,
+                payoff_volume=3,
             ),
             s.ForeshadowingDraft(
                 description="宗主只剩三年寿元",
-                plant_plan="第一卷陆远远远看见宗主时发现",
+                span="长",
+                plant_plan="第一卷陆远远远看见宗主时发现，却不敢声张",
                 payoff_plan="第四卷成为宗主孤注一掷的动机",
+                plant_volume=1,
+                payoff_volume=4,
             ),
             s.ForeshadowingDraft(
-                description="老瞎子的半句遗言", plant_plan="第一卷第三单元结尾", payoff_plan="第三卷补全，指向父母之死"
+                description="老瞎子的半句遗言",
+                span="长",
+                plant_plan="第一卷老瞎子坐化前只说了半句",
+                payoff_plan="第三卷补全，指向父母之死",
+                plant_volume=1,
+                payoff_volume=3,
             ),
         ],
-        remark="第一卷我拆成四个单元，每个单元都有一次靠寿元信息差翻盘的高潮，保证前期节奏不拖。",
+        remark="全书四卷三百多章：舞台从杂役院一路走到宗主峰，对手从跟班升级到宗主。最长的伏笔是陆远缺的那根小指，第一卷埋，第三卷收。",
+    )
+
+
+FIRST_VOLUME_UNITS = [
+    s.PlotUnitDraft(
+        index=1,
+        title="捡灯",
+        chapter_count=6,
+        goal="活过被欺压的杂役日常",
+        conflict="赵乾的跟班克扣口粮并毒打陆远",
+        climax="陆远第一次点燃青灯，看见打他的人只剩两天寿元",
+        outcome="跟班果然暴毙，陆远意识到青灯的真实性，也被执法堂盯上",
+        key_events=["陆远挨打", "老瞎子塞给他一盏旧灯", "灯火照见寿元", "跟班暴毙"],
+        thread_beats=[s.ThreadStep(thread="主线：青灯与寿元", beat="捡到青灯，确认能看见寿元")],
+        foreshadow_actions=[s.ForeshadowStep(ref="F1", action="埋下", detail="挨打时随笔带过缺的小指")],
+    ),
+    s.PlotUnitDraft(
+        index=2,
+        title="执法堂",
+        chapter_count=8,
+        goal="洗清嫌疑",
+        conflict="苏晚晴怀疑陆远与暴毙案有关",
+        climax="陆远利用寿元信息推断出真凶另有其人，当众对质",
+        outcome="苏晚晴欠他一个人情，赵乾开始注意这个杂役",
+        key_events=["被带去执法堂", "暗中观察寿元", "找到中毒证据", "当众对质"],
+        thread_beats=[s.ThreadStep(thread="感情线：苏晚晴", beat="执法堂初见，互相怀疑")],
+        foreshadow_actions=[s.ForeshadowStep(ref="F2", action="埋下", detail="远远看见宗主头顶只剩三年")],
+    ),
+    s.PlotUnitDraft(
+        index=3,
+        title="老瞎子的七日",
+        chapter_count=7,
+        goal="弄清青灯来历",
+        conflict="老瞎子只剩七日寿元，且不肯多说",
+        climax="老瞎子坐化前留下半句遗言",
+        outcome="陆远得知青灯与宗主有关，决定进入外门",
+        key_events=["追问老瞎子", "老瞎子病重", "坐化与遗言"],
+        thread_beats=[s.ThreadStep(thread="谜团线：父母之死", beat="老瞎子留下半句遗言")],
+        foreshadow_actions=[s.ForeshadowStep(ref="F3", action="埋下", detail="遗言只说了半句")],
+    ),
+    s.PlotUnitDraft(
+        index=4,
+        title="外门考核",
+        chapter_count=10,
+        goal="通过外门考核",
+        conflict="赵乾在考核中设局",
+        climax="陆远将计就计，借寿元信息让设局者自食其果",
+        outcome="陆远成为外门弟子，发现考核中有人在偷偷收取寿元",
+        key_events=["报名考核", "识破陷阱", "反制", "进入外门"],
+        thread_beats=[s.ThreadStep(thread="反派线：玄冥宗高层", beat="赵乾在考核中设局")],
+    ),
+]
+
+UNIT_TEMPLATES = [
+    ("暗流", "查清对手的布局", "对手先一步设下圈套", "陆远看穿寿元的异常，反设一局", "对手吃了暗亏，却留下更大的隐患"),
+    ("交锋", "在比试中站稳脚跟", "对手借规则压人", "关键一战以弱胜强", "名声大振，也引来更强的敌人"),
+    ("夜探", "找到交易的证据", "守卫森严，线索真假难辨", "在最后一刻拿到账册", "账册指向一个没想到的人"),
+    ("围杀", "活着走出埋伏", "多方势力同时出手", "借敌人之间的矛盾脱身", "盟友受伤，陆远欠下人情"),
+    ("破局", "扭转被动局面", "对手掌握主动，步步紧逼", "底牌尽出的一场翻盘", "局势反转，主线向前推进一大步"),
+]
+
+
+def _volume_plan(user: str) -> s.VolumePlanDraft:
+    volume = int(_match(r"请为第 (\d+) 卷写「卷纲」", user) or 1)
+    revising = "【修改要求】" in user
+    if volume == 1:
+        units = [u.model_copy(deep=True) for u in FIRST_VOLUME_UNITS]
+        remark = "第一卷我拆成四个单元，每个单元都有一次靠寿元信息差翻盘的高潮，保证前期节奏不拖。"
+        if revising:
+            units[1].chapter_count = 6
+            units[1].key_events.insert(2, "赵乾派人试探陆远")
+            remark = "执法堂单元压到 6 章，中间加了一场赵乾的试探，节奏紧一些了。"
+        return s.VolumePlanDraft(
+            units=units,
+            new_foreshadowings=[
+                s.NewForeshadowing(
+                    description="跟班暴毙前喝过的那碗药被人动过手脚",
+                    span="短",
+                    plant_plan="跟班暴毙时陆远注意到药碗",
+                    payoff_plan="执法堂对质时成为关键证据",
+                    plant_unit=1,
+                    payoff_unit=2,
+                ),
+                s.NewForeshadowing(
+                    description="考核场地里有一座不该存在的聚灵阵",
+                    span="中",
+                    plant_plan="报名时陆远看见阵纹",
+                    payoff_plan="第二卷发现那是收取寿元的阵法",
+                    plant_unit=4,
+                    payoff_unit=0,
+                    payoff_volume=2,
+                ),
+            ],
+            remark=remark,
+        )
+    count = int(_match(r"必须等于本卷预计的 (\d+) 章", user) or 30)
+    n = max(3, round(count / 10))
+    units = []
+    for i in range(n):
+        name, goal, conflict, climax, outcome = UNIT_TEMPLATES[i % len(UNIT_TEMPLATES)]
+        units.append(
+            s.PlotUnitDraft(
+                index=i + 1,
+                title=f"{name}·其{i + 1}",
+                chapter_count=max(3, count // n),
+                goal=goal,
+                conflict=conflict,
+                climax=climax,
+                outcome=outcome,
+                key_events=["起因", "试探", "冲突升级", "高潮", "收尾与钩子"],
+                thread_beats=[s.ThreadStep(thread="主线：青灯与寿元", beat=f"第{volume}卷第{i + 1}段推进")],
+            )
+        )
+    return s.VolumePlanDraft(
+        units=units,
+        new_foreshadowings=[
+            s.NewForeshadowing(
+                description=f"第{volume}卷里一枚来历不明的玉简",
+                span="中",
+                plant_plan="第一个单元里随手捡到",
+                payoff_plan="最后一个单元打开，揭开对手的底牌",
+                plant_unit=1,
+                payoff_unit=n,
+            )
+        ],
+        remark=f"第{volume}卷我拆成 {n} 段，前面蓄势，最后一段是全卷最大的高潮。",
+    )
+
+
+def _chapter_plan(user: str) -> s.ChapterPlanDraft:
+    count = int(_match(r"这个单元共 (\d+) 章", user) or 5)
+    unit_title = _match(r"【本单元】\n单元\d+「(.+?)」", user) or "这一段"
+    actions = re.findall(r"(埋下|提醒|回收)(F\d+)", _section(user, "本单元"))
+    chapters = []
+    for i in range(count):
+        step = ["起", "承", "转", "合"][min(3, i * 4 // max(1, count))]
+        foreshadow = [s.ForeshadowStep(ref=ref, action=act) for act, ref in actions if i == 0]
+        chapters.append(
+            s.ChapterOutlineDraft(
+                title=f"{unit_title}·{step}{i + 1}",
+                goal=f"推进「{unit_title}」的第 {i + 1} 步",
+                scenes=["杂役院的清晨，陆远盘算下一步", "与对手的正面试探", "夜里点燃青灯，看见不该看见的东西"],
+                conflict="对手先发制人，陆远处处受制",
+                cool_point="陆远借寿元信息看穿对方底牌，当场反将一军",
+                hook="灯火里，一个本不该出现的人头顶只剩三天寿元",
+                characters=["陆远", "苏晚晴"] if i % 2 else ["陆远", "赵乾"],
+                foreshadow_actions=foreshadow,
+            )
+        )
+    return s.ChapterPlanDraft(chapters=chapters, remark=f"「{unit_title}」{count} 章：前面蓄势，倒数第二章最燃。")
+
+
+def _review(user: str) -> s.ChapterReview:
+    # 演示：第 2 章初稿退回一次，重写稿通过，便于看到退稿循环
+    if "第 2 章" in user and "（重写稿）" not in user:
+        return s.ChapterReview(
+            verdict="revise",
+            highlights=["开头接得自然"],
+            issues=[
+                s.ChapterIssue(
+                    problem="章纲里的爽点没写出来：陆远看穿底牌那一段一笔带过",
+                    suggestion="把反将一军的过程写成完整的一场戏",
+                    severity="high",
+                )
+            ],
+            remark="这一章最该爽的地方一笔带过了，退回去重写。",
+        )
+    return s.ChapterReview(
+        verdict="pass",
+        highlights=["结尾钩子有力", "寿元信息差用得巧"],
+        issues=[s.ChapterIssue(problem="中段对话略多", suggestion="可以删掉两三句寒暄", severity="low")],
+        remark="能定稿，结尾的钩子让人想点下一章。",
+    )
+
+
+def _digest(user: str) -> s.ChapterDigest:
+    title = _match(r"第 \d+ 章《(.+?)》已经定稿", user) or "本章"
+    marks = re.findall(r"（伏笔·(埋下|提醒|回收)(F\d+)）", _section(user, "正文"))
+    return s.ChapterDigest(
+        summary=f"《{title}》：陆远借青灯看穿对手的底牌，当场反将一军；结尾灯火里出现了一个只剩三天寿元的人。",
+        character_updates=[s.CharacterUpdate(name="陆远", condition="伤势好转，心事更重")],
+        foreshadow_updates=[s.ForeshadowUpdate(ref=ref, action=act) for act, ref in marks],
+        remark=f"《{title}》的变化记好了：陆远的状态更新了一条。",
     )
 
 
@@ -313,7 +550,7 @@ def _critique() -> s.SetupCritique:
         highlights=["寿元信息差的设定和主角性格很搭", "第一卷每个单元都有明确的翻盘点"],
         issues=[
             s.ReviewIssue(
-                target="outline",
+                target="first_volume",
                 problem="第二单元「执法堂」8 章只围绕一个案子，中段容易拖",
                 suggestion="压缩到 6 章，并在中段加入赵乾的试探",
                 severity="medium",
@@ -366,39 +603,69 @@ def _absorb(user: str) -> s.RevisionTriage:
 def _triage(user: str) -> s.RevisionTriage:
     feedback = re.search(r"【作者意见】\n(.+?)(\n\n|$)", user, re.S)
     text = feedback.group(1).strip() if feedback else "按审稿意见调整"
-    return s.RevisionTriage(outline_instructions=text, remark=f"作者的意见我看了：{text[:40]}。主要影响大纲，我来改。")
+    return s.RevisionTriage(
+        first_volume_instructions=text, remark=f"作者的意见我看了：{text[:40]}。主要影响第一卷卷纲，我来改。"
+    )
 
 
-def _outline_revised() -> s.OutlineDraft:
-    draft = _outline()
-    draft.first_volume_units[1].chapter_count = 6
-    draft.first_volume_units[1].key_events.insert(2, "赵乾派人试探陆远")
-    draft.remark = "执法堂单元压到 6 章，中间加了一场赵乾的试探，节奏紧一些了。"
-    return draft
+def _match(pattern: str, text: str) -> str:
+    found = re.search(pattern, text, re.S)
+    return found.group(1).strip() if found else ""
+
+
+def _section(text: str, name: str) -> str:
+    """取出提示词里【name…】这一段的内容。"""
+    found = re.search(rf"【{name}[^】]*】\n(.*?)(?=\n【|\Z)", text, re.S)
+    return found.group(1) if found else ""
 
 
 async def respond(schema: type[BaseModel], system: str, user: str) -> BaseModel:
     await asyncio.sleep(DELAY_S)
-    revising = "【修改要求】" in user or "【审稿意见】" in user
-    if schema is s.BookConcept:
-        return _concept(user)
-    if schema is s.LoreDraft:
-        return _lore()
-    if schema is s.StorySpine:
-        return _spine()
-    if schema is s.OutlineDraft:
-        return _outline_revised() if revising else _outline()
-    if schema is s.SetupCritique:
-        return _critique()
-    if schema is s.InterviewDraft:
-        return _interview()
-    if schema is s.RevisionTriage:
-        return _absorb(user) if "【作者刚才的插话】" in user else _triage(user)
-    raise NotImplementedError(f"演示模式暂不支持 {schema.__name__}")
+    handlers = {
+        s.BookConcept: lambda: _concept(user),
+        s.LoreDraft: _lore,
+        s.StorySpine: _spine,
+        s.ThreadsDraft: _threads,
+        s.OutlineDraft: _outline,
+        s.VolumePlanDraft: lambda: _volume_plan(user),
+        s.SetupCritique: _critique,
+        s.InterviewDraft: _interview,
+        s.RevisionTriage: lambda: _absorb(user) if "【作者刚才的插话】" in user else _triage(user),
+        s.ChapterPlanDraft: lambda: _chapter_plan(user),
+        s.ChapterReview: lambda: _review(user),
+        s.ConsistencyReport: lambda: s.ConsistencyReport(issues=[], remark="对过设定库了，没有矛盾。"),
+        s.ChapterDigest: lambda: _digest(user),
+    }
+    if schema not in handlers:
+        raise NotImplementedError(f"演示模式暂不支持 {schema.__name__}")
+    return handlers[schema]()
+
+
+def _chapter_text(user: str) -> str:
+    """演示正文：按章纲把场景、爽点和钩子串成几段，并标出伏笔动作，供设定师「提取」。"""
+    outline = _section(user, "本章章纲")
+    title = _match(r"请写第 \d+ 章《(.+?)》", user)
+    scenes = re.findall(r"^\d+\. (.+)$", outline, re.M)
+    cool = _match(r"爽点：(.+)", outline)
+    hook = _match(r"结尾钩子：(.+)", outline)
+    marks = "".join(f"（伏笔·{act}{ref}）" for act, ref in re.findall(r"(埋下|提醒|回收)(F\d+)", outline))
+    paragraphs = [
+        f"（演示模式{'·重写稿' if '【上一稿】' in user else ''}）{title}。"
+        + ("（重写稿）" if "【上一稿】" in user else ""),
+        *[f"{scene}。风从寒原上吹下来，陆远把手缩进袖子里，指节冻得发白。他没有说话，只是看着。" for scene in scenes],
+        f"{cool}。那一刻，周围的人都没反应过来，只有他自己知道，这一步他已经算了很久。{marks}",
+        f"{hook}。",
+    ]
+    return "\n\n".join(paragraphs)
 
 
 async def stream_text(system: str, user: str) -> AsyncIterator[str]:
-    text = "（演示模式）夜里的杂役院很静，陆远捂着肋下的伤，借着月光看那盏旧灯。灯芯是青色的，像一截还没长开的竹子。"
-    for i in range(0, len(text), 8):
-        await asyncio.sleep(0.05)
-        yield text[i : i + 8]
+    if "【本章章纲】" in user:
+        text = _chapter_text(user)
+    else:
+        text = (
+            "（演示模式）夜里的杂役院很静，陆远捂着肋下的伤，借着月光看那盏旧灯。灯芯是青色的，像一截还没长开的竹子。"
+        )
+    for i in range(0, len(text), 40):
+        await asyncio.sleep(DELAY_S / 20)
+        yield text[i : i + 40]

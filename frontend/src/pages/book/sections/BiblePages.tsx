@@ -358,7 +358,7 @@ export function ForeshadowingPage() {
       <PageHeader
         eyebrow="设定库"
         title="伏笔"
-        subtitle="埋在哪、什么时候收。写章节时编辑部会跟踪每一条的状态。"
+        subtitle="伏笔台账：每条伏笔有编号和排期，规划每一卷、每个单元时主编按台账安排埋下、提醒和回收；每写完一章，设定师更新它的状态。"
         action={
           !locked && (
             <Button
@@ -383,7 +383,7 @@ export function ForeshadowingPage() {
           <Stagger key={f.id} i={i}>
             <Card hover className="group p-5 sm:p-6">
               <div className="mb-4 flex items-start gap-3">
-                <span className="mt-1 font-serif text-2xl leading-none font-bold text-line-2">{String(i + 1).padStart(2, '0')}</span>
+                <span className="mt-1 w-10 shrink-0 font-serif text-xl leading-none font-bold text-line-2">F{f.seq || i + 1}</span>
                 <EditableText value={f.description} onSave={(v) => update.mutateAsync({ id: f.id, description: v })} locked={locked} multiline className="flex-1 font-serif text-[17px] font-bold" />
                 {locked ? (
                   <Badge tone={F_STATUS[f.status].tone}>{F_STATUS[f.status].label}</Badge>
@@ -405,6 +405,16 @@ export function ForeshadowingPage() {
                     <Trash2 className="size-4" />
                   </button>
                 )}
+              </div>
+              <div className="mb-3 flex flex-wrap gap-1.5 pl-[52px] text-xs">
+                <span className="rounded-full bg-line/70 px-2.5 py-0.5 text-ink-2">{f.span}线</span>
+                {f.plant_volume && <span className="rounded-full bg-lore-soft px-2.5 py-0.5 text-lore">计划第 {f.plant_volume} 卷埋</span>}
+                {f.payoff_volume && <span className="rounded-full bg-seal-soft px-2.5 py-0.5 text-seal">计划第 {f.payoff_volume} 卷收</span>}
+                {f.planted_chapter && <span className="rounded-full bg-card px-2.5 py-0.5 text-ink-2 ring-1 ring-line">第 {f.planted_chapter} 章已埋</span>}
+                {f.hint_chapters.length > 0 && (
+                  <span className="rounded-full bg-card px-2.5 py-0.5 text-ink-2 ring-1 ring-line">提醒于第 {f.hint_chapters.join('、')} 章</span>
+                )}
+                {f.resolved_chapter && <span className="rounded-full bg-card px-2.5 py-0.5 text-ink-2 ring-1 ring-line">第 {f.resolved_chapter} 章已收</span>}
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-xl bg-paper-2 px-4 py-3 ring-1 ring-line/80">

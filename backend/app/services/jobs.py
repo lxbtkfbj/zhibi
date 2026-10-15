@@ -18,6 +18,19 @@ def new_setup_job(book: Book, ask: bool = False) -> Job:
     )
 
 
+def new_write_job(book: Book, until: str, count: int) -> Job:
+    return Job(
+        book_id=book.id,
+        kind="write_book",
+        thread_id=f"write-{book.id}-{uuid.uuid4().hex[:8]}",
+        params={"until": until, "count": count},
+    )
+
+
+# 等作者拍板、可以用「批准 / 提意见」回应的内容
+DECISION_KINDS = ("setup_review", "volume_review", "trial_read", "chapter_stuck")
+
+
 def pending_kind(job: Job) -> str:
     return (job.pending or {}).get("kind", "") if job.status == "waiting_author" else ""
 

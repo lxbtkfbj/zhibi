@@ -6,9 +6,20 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import func, select
 
-from app.graphs.book_setup import cascade, intake_node, merge_plan
+from app.graphs.book_setup import ORDER, cascade, intake_node, merge_plan
 from app.llm import demo
-from app.models import Book, Character, DraftVersion, Job, LlmCall, MeetingMessage, PlotUnit, Volume
+from app.models import (
+    Book,
+    Character,
+    DraftVersion,
+    Foreshadowing,
+    Job,
+    LlmCall,
+    MeetingMessage,
+    PlotUnit,
+    StoryThread,
+    Volume,
+)
 from app.services.job_runner import execute_job
 
 
@@ -40,12 +51,15 @@ async def job_status(sessionmaker, job_id):
 
 
 def test_cascade_rules():
-    assert cascade({"concept": "改书名"})[0] == ["concept", "lore", "spine", "outline"]
-    assert cascade({"lore": "加一个人"})[0] == ["lore", "spine", "outline"]
-    assert cascade({"spine": "结局改成开放式"})[0] == ["spine", "outline"]
-    queue, instructions = cascade({"outline": "压缩第二单元", "lore": " "})
-    assert queue == ["outline"]
-    assert instructions == {"outline": "压缩第二单元"}
+    assert cascade({"concept": "改书名"})[0] == ORDER
+    assert cascade({"lore": "加一个人"})[0] == ["lore", "spine", "threads", "outline", "first_volume"]
+    assert cascade({"threads": "女主早点登场"})[0] == ["threads", "outline", "first_volume"]
+    queue, instructions = cascade({"first_volume": "压缩第二单元", "lore": " "})
+    assert queue == ["first_volume"]
+    assert instructions == {"first_volume": "压缩第二单元"}
+    queue, instructions = cascade({"outline": "第三卷换个舞台"})
+    assert queue == ["outline", "first_volume"]
+    assert instructions["outline"] == "第三卷换个舞台" and instructions["first_volume"]  # 下游自动同步
 
 
 def test_merge_plan_keeps_order_and_combines_instructions():
@@ -80,19 +94,44 @@ async def test_setup_flow_to_approval(sessionmaker):
         # 先定主线骨架（开篇、结局、关键转折），分卷按篇幅分配章数
         assert book.spine["ending"] and len(book.spine["milestones"]) == 6
         assert sum(v.chapter_count for v in volumes) == 333
-        # 审稿要求压缩第二单元，演示模型的修改版是 6 章
-        unit2 = (
-            await session.execute(select(PlotUnit).where(PlotUnit.volume_id == volumes[0].id, PlotUnit.index == 2))
-        ).scalar()
-        assert unit2.chapter_count == 6
+        # 审稿要求压缩第二单元，演示模型的修改版是 6 章；各单元章数之和仍等于第一卷的 31 章
+        units = (
+            (
+                await session.execute(
+                    select(PlotUnit).where(PlotUnit.volume_id == volumes[0].id).order_by(PlotUnit.index)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert units[1].chapter_count == 6
+        assert sum(u.chapter_count for u in units) == volumes[0].chapter_count == 31
+        # 线索、卷卡片与伏笔台账
+        threads = (await session.execute(select(StoryThread).where(StoryThread.book_id == book_id))).scalars().all()
+        assert {t.kind for t in threads} >= {"主线", "感情线", "反派线", "谜团线"}
+        assert volumes[1].antagonist and volumes[1].thread_beats
+        ledger = (
+            (
+                await session.execute(
+                    select(Foreshadowing).where(Foreshadowing.book_id == book_id).order_by(Foreshadowing.seq)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert [f.seq for f in ledger] == [1, 2, 3, 4, 5]
+        assert [f.span for f in ledger[:3]] == ["长", "长", "长"]
+        # 第一卷新埋的伏笔：写进对应单元的伏笔动作
+        assert {"ref": "F4", "action": "回收", "detail": "执法堂对质时成为关键证据"} in units[1].foreshadow_actions
+        assert ledger[4].payoff_volume == 2
         speakers = (
             (await session.execute(select(MeetingMessage.speaker).where(MeetingMessage.book_id == book_id)))
             .scalars()
             .all()
         )
         assert {"chief", "lorekeeper", "reviewer", "system"} <= set(speakers)
-        # 概念、设定、主线骨架、大纲、审稿、自动修改大纲 共 6 次调用；没开提问就不问
-        assert await session.scalar(select(func.count()).select_from(LlmCall).where(LlmCall.job_id == job_id)) == 6
+        # 概念、设定、主线骨架、线索、总纲、第一卷卷纲、审稿、自动修改第一卷卷纲 共 8 次调用；没开提问就不问
+        assert await session.scalar(select(func.count()).select_from(LlmCall).where(LlmCall.job_id == job_id)) == 8
 
     # 作者手动改了主角，再提意见：修改应基于作者改过的版本
     async with sessionmaker() as session:
@@ -100,6 +139,9 @@ async def test_setup_flow_to_approval(sessionmaker):
             await session.execute(select(Character).where(Character.book_id == book_id, Character.name == "陆远"))
         ).scalar()
         hero.goal = "作者改过的目标"
+        hero.notes = "作者的备注"
+        hero.aliases = ["远哥"]
+        hero_id = hero.id
         await session.commit()
 
     await execute_job(job_id, {"action": "revise", "feedback": "第三单元节奏再快一点"})
@@ -111,6 +153,8 @@ async def test_setup_flow_to_approval(sessionmaker):
             await session.execute(select(Character).where(Character.book_id == book_id, Character.name == "陆远"))
         ).scalar()
         assert hero.goal == "作者改过的目标"
+        # 重存方案不会丢掉作者单独维护的字段，人物 ID 也不变
+        assert hero.id == hero_id and hero.notes == "作者的备注" and hero.aliases == ["远哥"]
 
     await execute_job(job_id, {"action": "approve"})
     status, _, _ = await job_status(sessionmaker, job_id)
@@ -133,7 +177,7 @@ async def test_failure_then_resume_from_checkpoint(sessionmaker, monkeypatch):
 
     async def flaky(schema, system, user):
         calls["n"] += 1
-        if calls["n"] == 3:  # 第三次调用（主编写大纲）时模型挂了
+        if calls["n"] == 3:  # 第三次调用（主编定主线骨架）时模型挂了
             raise RuntimeError("模型接口超时")
         return await original(schema, system, user)
 
@@ -182,7 +226,15 @@ async def test_interview_answers_become_requirements(sessionmaker, monkeypatch):
     assert status == "waiting_author", error
     assert pending["kind"] == "setup_review"
     # 作者的回答进入之后每一步的提示词
-    for name in ("BookConcept", "LoreDraft", "StorySpine", "OutlineDraft", "SetupCritique"):
+    for name in (
+        "BookConcept",
+        "LoreDraft",
+        "StorySpine",
+        "ThreadsDraft",
+        "OutlineDraft",
+        "VolumePlanDraft",
+        "SetupCritique",
+    ):
         assert "主角叫什么名字？——云澈" in prompts[name], name
 
 
@@ -210,15 +262,17 @@ async def test_note_mid_run_revises_finished_parts(sessionmaker, monkeypatch):
     assert status == "waiting_author", error
 
     names = [name for name, _ in prompts]
-    # 主线做完后主编读到插话 → 设定师改人物 → 主线同步 → 再写大纲 → 审稿
-    assert names[:8] == [
+    # 主线做完后主编读到插话 → 设定师改人物 → 主线同步 → 再做线索、总纲、第一卷卷纲 → 审稿
+    assert names[:10] == [
         "BookConcept",
         "LoreDraft",
         "StorySpine",
         "RevisionTriage",
         "LoreDraft",
         "StorySpine",
+        "ThreadsDraft",
         "OutlineDraft",
+        "VolumePlanDraft",
         "SetupCritique",
     ]
     assert "主角名字改成云澈" in prompts[4][1] and "【修改要求】" in prompts[4][1]
@@ -242,10 +296,17 @@ async def test_note_mid_run_revises_finished_parts(sessionmaker, monkeypatch):
     assert any("云澈" in r for r in replies)  # 主编在会上回应了作者
 
 
-async def test_old_checkpoint_gets_spine_step(sessionmaker):
-    """旧版流程的检查点没有主线骨架：继续执行时补到大纲之前。"""
+async def test_old_checkpoint_gets_new_steps(sessionmaker):
+    """旧版流程的检查点没有主线骨架、线索和第一卷卷纲：继续执行时补到对应位置。"""
     _, job_id = await make_job(sessionmaker)
     runtime = SimpleNamespace(context=SimpleNamespace(sessionmaker=sessionmaker, job_id=job_id))
     update = await intake_node({"queue": ["lore", "outline"], "concept": {"title": "旧书"}}, runtime)
-    assert update == {"queue": ["lore", "spine", "outline"]}
-    assert await intake_node({"queue": ["outline"], "spine": {"ending": "已有骨架"}}, runtime) == {}
+    assert update == {"queue": ["lore", "spine", "threads", "outline", "first_volume"]}
+    done = {
+        "concept": {"title": "旧书"},
+        "lore": {"characters": []},
+        "spine": {"ending": "已有骨架"},
+        "threads": {"threads": [{"name": "主线"}]},
+        "first_volume": {"units": [{"index": 1}]},
+    }
+    assert await intake_node({"queue": ["outline"], **done}, runtime) == {}

@@ -42,7 +42,10 @@ async def get_bible(book: Book = Depends(get_book), session: AsyncSession = Sess
         characters=[CharacterOut.model_validate(r) for r in await _rows(session, Character, book.id)],
         relationships=[RelationshipOut.model_validate(r) for r in await _rows(session, Relationship, book.id)],
         world_entries=[WorldEntryOut.model_validate(r) for r in await _rows(session, WorldEntry, book.id)],
-        foreshadowings=[ForeshadowingOut.model_validate(r) for r in await _rows(session, Foreshadowing, book.id)],
+        foreshadowings=[
+            ForeshadowingOut.model_validate(r)
+            for r in sorted(await _rows(session, Foreshadowing, book.id), key=lambda f: f.seq)
+        ],
     )
 
 
@@ -119,7 +122,15 @@ async def delete_world_entry(row_id: uuid.UUID, session: AsyncSession = SessionD
 async def create_foreshadowing(
     body: ForeshadowingBase, book: Book = Depends(get_book), session: AsyncSession = SessionDep
 ):
-    return await _create(session, book.id, Foreshadowing, body)
+    await ensure_idle(session, book.id)
+    seq = await session.scalar(
+        select(func.coalesce(func.max(Foreshadowing.seq), 0)).where(Foreshadowing.book_id == book.id)
+    )
+    row = Foreshadowing(book_id=book.id, seq=int(seq or 0) + 1, **body.model_dump())
+    session.add(row)
+    await session.commit()
+    await session.refresh(row)
+    return row
 
 
 @router.patch("/foreshadowings/{row_id}", response_model=ForeshadowingOut)

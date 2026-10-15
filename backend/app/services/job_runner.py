@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import get_settings
 from app.db import make_engine, make_sessionmaker
-from app.graphs import book_setup
+from app.graphs import book_setup, write_book
 from app.graphs.deps import GraphDeps, JobCancelled, cancel_key
 from app.llm.router import LLMError, LLMRouter
 from app.models import Book, Job
@@ -35,11 +35,20 @@ GRAPHS: dict[str, tuple[Callable[[], StateGraph], Callable[[dict], dict]]] = {
         book_setup.build_setup_graph,
         lambda p: book_setup.initial_state(p.get("idea", ""), p.get("style_reference", ""), bool(p.get("ask"))),
     ),
+    "write_book": (write_book.build_write_graph, write_book.initial_state),
 }
 
-BOOK_STATUS_WHILE_RUNNING = {"book_setup": "setting_up"}
+BOOK_STATUS_WHILE_RUNNING = {"book_setup": "setting_up", "write_book": "writing"}
 # 按等待作者处理的内容决定书的状态：回答动笔前的提问时，方案还没出来
-BOOK_STATUS_WHILE_WAITING = {"setup_review": "awaiting_approval", "setup_questions": "setting_up"}
+BOOK_STATUS_WHILE_WAITING = {
+    "setup_review": "awaiting_approval",
+    "setup_questions": "setting_up",
+    "volume_review": "writing",
+    "trial_read": "writing",
+    "chapter_stuck": "writing",
+}
+# 写书循环一章要走好几步，整本书远超 LangGraph 默认的 25 步上限
+RECURSION_LIMIT = 200_000
 
 
 def lock_key(job_id: uuid.UUID | str) -> str:
@@ -123,7 +132,7 @@ async def _run(
         async with AsyncPostgresSaver.from_conn_string(dsn) as saver:
             await saver.setup()
             graph = build_graph().compile(checkpointer=saver)
-            config = {"configurable": {"thread_id": thread_id}}
+            config = {"configurable": {"thread_id": thread_id}, "recursion_limit": RECURSION_LIMIT}
             snapshot = await graph.aget_state(config)
             if resume is not None:
                 graph_input: Any = Command(resume=resume)

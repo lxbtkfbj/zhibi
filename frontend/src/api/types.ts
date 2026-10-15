@@ -1,5 +1,5 @@
 export type JobStatus = 'queued' | 'running' | 'waiting_author' | 'succeeded' | 'failed' | 'cancelled'
-export type BookStatus = 'setting_up' | 'awaiting_approval' | 'ready' | 'writing'
+export type BookStatus = 'setting_up' | 'awaiting_approval' | 'ready' | 'writing' | 'completed'
 export type Speaker = 'chief' | 'lorekeeper' | 'writer' | 'reviewer' | 'author' | 'system'
 
 export interface InterviewQuestion {
@@ -8,10 +8,18 @@ export interface InterviewQuestion {
   recommended: number
 }
 
-/** 等作者处理的内容：setup_questions 动笔前的提问；setup_review 开书方案拍板。 */
+/**
+ * 等作者处理的内容：setup_questions 动笔前的提问；setup_review 开书方案拍板；
+ * volume_review 某一卷的卷纲拍板；trial_read 前几章试读；chapter_stuck 某章重写两次仍未通过。
+ */
 export type Pending =
   | { kind: 'setup_questions'; questions: InterviewQuestion[] }
   | { kind: 'setup_review'; round: number; title?: string }
+  | { kind: 'volume_review'; volume: number; title: string }
+  | { kind: 'trial_read'; chapters: number }
+  | { kind: 'chapter_stuck'; chapter: number; title: string; issues: string[] }
+
+export type DecisionKind = 'setup_review' | 'volume_review' | 'trial_read' | 'chapter_stuck'
 
 export interface Job {
   id: string
@@ -75,7 +83,35 @@ export interface BookDetail extends BookSummary {
   style_reference: string
   concept: Concept
   spine: Spine
+  /** 作者的要求：动笔前的回答、插话、拍板与试读意见 */
+  requirements: string[]
+  trial_read_done: boolean
   active_job: Job | null
+  chapters_final: number
+  words_final: number
+}
+
+/** 线索在某一段（卷或单元）里走到哪一步。 */
+export interface ThreadStep {
+  thread: string
+  beat: string
+}
+
+/** 对伏笔台账的动作，ref 如 F3。 */
+export interface ForeshadowStep {
+  ref: string
+  action: string
+  detail: string
+}
+
+export interface StoryThread {
+  id: string
+  index: number
+  name: string
+  kind: string
+  summary: string
+  characters: string[]
+  beats: { volume: number; beat: string }[]
 }
 
 export interface PlotUnit {
@@ -88,19 +124,73 @@ export interface PlotUnit {
   climax: string
   outcome: string
   key_events: string[]
+  thread_beats: ThreadStep[]
+  foreshadow_actions: ForeshadowStep[]
+  /** planned：还没出章纲；outlined：章纲已出；done：写完 */
+  status: 'planned' | 'outlined' | 'done'
 }
 
 export interface Volume {
   id: string
   index: number
   title: string
+  stage: string
   summary: string
   goal: string
+  climax: string
+  antagonist: string
+  power_range: string
+  thread_beats: ThreadStep[]
+  new_characters: string[]
   /** 本卷预计章数（拆剧情单元之前的规划） */
   chapter_count: number
-  status: 'planned' | 'detailed' | 'approved'
+  /** planned：只有总纲卡片；detailed：卷纲待拍板；approved：已批准；done：已写完 */
+  status: 'planned' | 'detailed' | 'approved' | 'done'
   units: PlotUnit[]
 }
+
+export interface ChapterOutline {
+  title?: string
+  goal?: string
+  scenes?: string[]
+  conflict?: string
+  cool_point?: string
+  hook?: string
+  characters?: string[]
+  foreshadow_actions?: ForeshadowStep[]
+}
+
+export type ChapterStatus = 'planned' | 'drafting' | 'final'
+
+export interface ChapterBrief {
+  id: string
+  index: number
+  title: string
+  volume_id: string | null
+  unit_id: string | null
+  status: ChapterStatus
+  word_count: number
+  summary: string
+  attempts: number
+  outline: ChapterOutline | null
+}
+
+export interface ReviewIssue {
+  problem: string
+  suggestion: string
+  severity: 'high' | 'medium' | 'low'
+}
+
+export interface Chapter extends ChapterBrief {
+  content: string
+  review: {
+    review?: { verdict: 'pass' | 'revise'; highlights: string[]; issues: ReviewIssue[]; remark?: string }
+    consistency?: { issues: ReviewIssue[]; remark?: string }
+  }
+  updated_at: string
+}
+
+export type WriteUntil = 'count' | 'volume' | 'book'
 
 export interface Outline {
   concept: Concept
@@ -146,11 +236,18 @@ export type ForeshadowingStatus = 'planned' | 'planted' | 'resolved' | 'abandone
 
 export interface Foreshadowing {
   id: string
+  /** 书内编号，F{seq} */
+  seq: number
   description: string
+  /** 短：一个单元内收；中：一卷内收；长：跨卷 */
+  span: '短' | '中' | '长'
   plant_plan: string
   payoff_plan: string
+  plant_volume: number | null
+  payoff_volume: number | null
   status: ForeshadowingStatus
   planted_chapter: number | null
+  hint_chapters: number[]
   resolved_chapter: number | null
 }
 

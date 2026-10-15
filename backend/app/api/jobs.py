@@ -20,6 +20,13 @@ from app.services.meeting import job_dict, message_dict, post_message, publish, 
 
 router = APIRouter(tags=["jobs"])
 
+APPROVE_TEXT = {
+    "setup_review": "批准，就按这个方案来。",
+    "volume_review": "批准这一卷的卷纲，开写。",
+    "trial_read": "前几章看过了，继续写。",
+    "chapter_stuck": "这一章就按现在的版本定稿。",
+}
+
 
 async def _job(session: AsyncSession, job_id: uuid.UUID) -> Job:
     job = await session.get(Job, job_id)
@@ -46,12 +53,13 @@ async def decide(
     job_id: uuid.UUID, body: Decision, session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)
 ) -> JobOut:
     job = await _job(session, job_id)
-    if jobs.pending_kind(job) != "setup_review":
+    kind = jobs.pending_kind(job)
+    if kind not in jobs.DECISION_KINDS:
         raise HTTPException(409, "当前没有等待你拍板的内容")
     feedback = body.feedback.strip()
     if body.action == "revise" and not feedback:
         raise HTTPException(422, "请写下修改意见")
-    content = "批准，就按这个方案来。" if body.action == "approve" else feedback
+    content = APPROVE_TEXT[kind] if body.action == "approve" else feedback
     await post_message(
         session, redis, book_id=job.book_id, job_id=job.id, speaker="author", kind="decision", content=content
     )

@@ -120,7 +120,12 @@ class BookDetail(BookSummary):
     style_reference: str
     concept: dict
     spine: dict
+    requirements: list[str] = []
+    trial_read_done: bool = False
     active_job: JobOut | None = None
+    # 写作进度：已定稿章数、总字数
+    chapters_final: int = 0
+    words_final: int = 0
 
 
 class BookCreated(BaseModel):
@@ -129,6 +134,17 @@ class BookCreated(BaseModel):
 
 
 # ---------- 大纲 ----------
+
+
+class ThreadStepOut(BaseModel):
+    thread: str = ""
+    beat: str = ""
+
+
+class ForeshadowStepOut(BaseModel):
+    ref: str = ""
+    action: str = ""
+    detail: str = ""
 
 
 class UnitOut(ORM):
@@ -141,6 +157,9 @@ class UnitOut(ORM):
     climax: str
     outcome: str
     key_events: list[str]
+    thread_beats: list[ThreadStepOut] = []
+    foreshadow_actions: list[ForeshadowStepOut] = []
+    status: str = "planned"
 
 
 class UnitPatch(BaseModel):
@@ -157,8 +176,14 @@ class VolumeOut(ORM):
     id: uuid.UUID
     index: int
     title: str
+    stage: str = ""
     summary: str
     goal: str
+    climax: str = ""
+    antagonist: str = ""
+    power_range: str = ""
+    thread_beats: list[ThreadStepOut] = []
+    new_characters: list[str] = []
     chapter_count: int
     status: str
     units: list[UnitOut]
@@ -166,14 +191,74 @@ class VolumeOut(ORM):
 
 class VolumePatch(BaseModel):
     title: str | None = None
+    stage: str | None = None
     summary: str | None = None
     goal: str | None = None
+    climax: str | None = None
+    antagonist: str | None = None
+    power_range: str | None = None
+    new_characters: list[str] | None = None
     chapter_count: int | None = Field(None, ge=0, le=1000)
 
 
 class OutlineOut(BaseModel):
     concept: dict
     volumes: list[VolumeOut]
+
+
+class ThreadBeatOut(BaseModel):
+    volume: int = 1
+    beat: str = ""
+
+
+class ThreadOut(ORM):
+    id: uuid.UUID
+    index: int
+    name: str
+    kind: str
+    summary: str
+    characters: list[str]
+    beats: list[ThreadBeatOut]
+
+
+class ThreadPatch(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=100)
+    summary: str | None = None
+    characters: list[str] | None = None
+    beats: list[ThreadBeatOut] | None = None
+
+
+# ---------- 章节 ----------
+
+
+class ChapterBrief(ORM):
+    id: uuid.UUID
+    index: int
+    title: str
+    volume_id: uuid.UUID | None
+    unit_id: uuid.UUID | None
+    status: str
+    word_count: int
+    summary: str
+    attempts: int
+    outline: dict | None = None
+
+
+class ChapterOut(ChapterBrief):
+    content: str
+    review: dict
+    updated_at: datetime
+
+
+class ChapterPatch(BaseModel):
+    title: str | None = Field(None, min_length=1, max_length=200)
+    content: str | None = None
+
+
+class WriteRequest(BaseModel):
+    # count：写够 count 章；volume：写完当前这一卷；book：一直写到完本（中间遇到卷纲拍板会停下等你）
+    until: Literal["count", "volume", "book"] = "count"
+    count: int = Field(3, ge=1, le=500)
 
 
 # ---------- 设定库 ----------
@@ -258,21 +343,29 @@ class RelationshipPatch(BaseModel):
 
 class ForeshadowingBase(BaseModel):
     description: str = Field(min_length=1)
+    span: Literal["短", "中", "长"] = "中"
     plant_plan: str = ""
     payoff_plan: str = ""
+    plant_volume: int | None = Field(None, ge=1)
+    payoff_volume: int | None = Field(None, ge=1)
     status: Literal["planned", "planted", "resolved", "abandoned"] = "planned"
 
 
 class ForeshadowingOut(ForeshadowingBase, ORM):
     id: uuid.UUID
+    seq: int
     planted_chapter: int | None
     resolved_chapter: int | None
+    hint_chapters: list[int] = []
 
 
 class ForeshadowingPatch(BaseModel):
     description: str | None = Field(None, min_length=1)
+    span: Literal["短", "中", "长"] | None = None
     plant_plan: str | None = None
     payoff_plan: str | None = None
+    plant_volume: int | None = Field(None, ge=1)
+    payoff_volume: int | None = Field(None, ge=1)
     status: Literal["planned", "planted", "resolved", "abandoned"] | None = None
 
 

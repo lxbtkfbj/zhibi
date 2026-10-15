@@ -8,7 +8,8 @@ import { Button, ErrorText } from '../../components/ui'
 import { ROLE_META } from '../../lib/roles'
 import { TEAM, teamStatus } from '../../lib/team'
 import { useBookContext } from './context'
-import { ApproveButton, ResumeControls, RunningControls } from './Decision'
+import { ApproveButton, ResumeControls, RunningControls, WritingControls } from './Decision'
+import { decisionCopy } from '../../lib/decision'
 import { MeetingFeed, RoleAvatar } from './MeetingFeed'
 
 const WIDTH_KEY = 'zhibi:team-width'
@@ -77,8 +78,17 @@ function Roster({ compact }: { compact?: boolean }) {
 }
 
 function ActionCard({ onNavigate }: { onNavigate?: () => void }) {
-  const { job, waiting, working, asking, bookId } = useBookContext()
-  if (!job) return null
+  const { job, waiting, working, asking, bookId, book } = useBookContext()
+  if (!job || (job.status === 'succeeded' && !waiting)) {
+    if (book.status !== 'ready' && book.status !== 'writing') return null
+    return (
+      <div className="rounded-xl border border-line bg-card p-4 shadow-[var(--shadow-paper)]">
+        <p className="mb-2.5 font-serif text-[15px] font-bold">{book.chapters_final ? `已写到第 ${book.chapters_final} 章` : '方案已定稿，可以开写了'}</p>
+        <WritingControls compact />
+      </div>
+    )
+  }
+  const copy = decisionCopy(job.pending, bookId)
   const questions = job.pending?.kind === 'setup_questions' ? job.pending.questions.length : 0
   return (
     <AnimatePresence mode="wait">
@@ -114,9 +124,17 @@ function ActionCard({ onNavigate }: { onNavigate?: () => void }) {
         >
           <span className="absolute inset-y-0 left-0 w-1 bg-seal" />
           <p className="font-serif text-[15px] font-bold text-seal">
-            开书方案已就绪{job.pending?.kind === 'setup_review' && job.pending.round > 0 ? `（第 ${job.pending.round + 1} 版）` : ''}
+            {copy.title}
+            {job.pending?.kind === 'setup_review' && job.pending.round > 0 ? `（第 ${job.pending.round + 1} 版）` : ''}
           </p>
-          <p className="mt-1 mb-3 text-xs leading-relaxed text-ink-3">目录里可以逐项查看、直接修改。满意就盖章；不满意就在下面直接说，编辑部按你的意见改出新一版。</p>
+          <p className="mt-1 mb-2 text-xs leading-relaxed text-ink-3">{copy.hint}</p>
+          <div className="mb-3 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+            {copy.links.map(([label, to]) => (
+              <Link key={to} to={to} onClick={onNavigate} className="text-ink-2 underline-offset-4 hover:text-ink hover:underline">
+                {label} →
+              </Link>
+            ))}
+          </div>
           <ApproveButton job={job} />
         </motion.div>
       )}
@@ -172,7 +190,7 @@ function NoteComposer() {
   }
 
   const placeholder = waiting
-    ? '哪里不满意直接说，例如：女主第一单元就出场；反派动机再狠一点'
+    ? decisionCopy(job.pending, bookId).placeholder
     : asking
       ? '还有别的要求也可以先说，例如：主角叫云澈'
       : '插句话，例如：主角名字用云澈；金手指改巧妙一点；开局要直接打脸'
@@ -204,7 +222,7 @@ function NoteComposer() {
         {sent
           ? '已送达。编辑部做完手头这一步就处理，之后每一步都按你说的来。'
           : waiting
-            ? 'Enter 发送，Shift + Enter 换行。发送后主编会分派修改，改好再请你拍板。'
+            ? 'Enter 发送，Shift + Enter 换行。发送后编辑部按你的意见处理。'
             : 'Enter 发送，Shift + Enter 换行。不会打断正在写的这一步。'}
       </p>
       <ErrorText error={error} />

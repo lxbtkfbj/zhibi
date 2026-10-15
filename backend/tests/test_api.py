@@ -290,3 +290,43 @@ async def test_questions_then_note_then_review(client, queued):
     res = await client.patch(f"/api/books/{book_id}", json={"spine": {"ending": "作者改的结局"}})
     assert res.json()["spine"]["ending"] == "作者改的结局"
     assert res.json()["spine"]["milestones"]
+
+
+async def test_write_chapters_and_read_them(client, queued):
+    res = await client.post("/api/books", json={"idea": "一个能看见别人寿命的少年"})
+    book_id, job_id = res.json()["book"]["id"], res.json()["job"]["id"]
+    # 方案还没定稿不能开写
+    assert (await client.post(f"/api/books/{book_id}/write", json={"count": 1})).status_code == 409
+    await run_queued(queued)
+    await client.post(f"/api/jobs/{job_id}/decision", json={"action": "approve"})
+    await run_queued(queued)
+
+    threads = (await client.get(f"/api/books/{book_id}/threads")).json()
+    assert threads[0]["kind"] == "主线" and threads[0]["beats"][0]["volume"] == 1
+    res = await client.patch(f"/api/threads/{threads[1]['id']}", json={"summary": "作者改的感情线"})
+    assert res.json()["summary"] == "作者改的感情线"
+    outline = (await client.get(f"/api/books/{book_id}/outline")).json()
+    first = outline["volumes"][0]
+    assert first["status"] == "approved" and first["stage"] and first["units"][0]["thread_beats"]
+
+    res = await client.post(f"/api/books/{book_id}/write", json={"until": "count", "count": 2})
+    assert res.status_code == 201, res.text
+    write_id = res.json()["id"]
+    # 编辑部手上有活时不能再开一轮
+    assert (await client.post(f"/api/books/{book_id}/write", json={"count": 1})).status_code == 409
+    await run_queued(queued)
+    assert (await client.get(f"/api/jobs/{write_id}")).json()["status"] == "succeeded"
+
+    book = (await client.get(f"/api/books/{book_id}")).json()
+    assert book["status"] == "writing"
+    assert book["chapters_final"] == 2 and book["words_final"] > 0
+    listing = (await client.get(f"/api/books/{book_id}/chapters")).json()
+    assert [c["status"] for c in listing] == ["final", "final", "planned", "planned", "planned", "planned"]
+    assert listing[0]["outline"] is None  # 目录不带章纲
+    by_volume = (await client.get(f"/api/books/{book_id}/chapters", params={"volume": 1})).json()
+    assert by_volume[0]["outline"]["hook"]
+    chapter = (await client.get(f"/api/books/{book_id}/chapters/2")).json()
+    assert chapter["content"] and chapter["review"]["review"]["verdict"] == "pass"
+    res = await client.patch(f"/api/books/{book_id}/chapters/2", json={"content": "作者 改过 的正文"})
+    assert res.json()["word_count"] == 7
+    assert (await client.get(f"/api/books/{book_id}/chapters/99")).status_code == 404

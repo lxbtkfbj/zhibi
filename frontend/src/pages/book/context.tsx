@@ -8,7 +8,7 @@ export interface BookContextValue {
   messages: MeetingMessage[]
   connected: boolean
   working: boolean
-  /** 开书方案已出，等作者拍板 */
+  /** 等作者拍板：开书方案、卷纲、试读或卡住的章节 */
   waiting: boolean
   /** 主编动笔前的提问，等作者回答 */
   asking: boolean

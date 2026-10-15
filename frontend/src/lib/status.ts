@@ -11,13 +11,16 @@ export interface DisplayStatus {
 /** 综合书的状态和最近任务的状态，得到界面上显示的状态与下一步动作。 */
 export function displayStatus(book: BookStatus, job: JobStatus | null | undefined): DisplayStatus {
   if (job === 'failed') return { label: '出错了，可继续', tone: 'error', action: '去处理' }
-  if (job === 'cancelled' && book !== 'ready') return { label: '已暂停', tone: 'idle', action: '去继续' }
+  if (job === 'cancelled' && book === 'writing') return { label: '已停笔', tone: 'idle', action: '继续写' }
+  if (job === 'cancelled' && book !== 'ready' && book !== 'completed') return { label: '已暂停', tone: 'idle', action: '去继续' }
+  if ((job === 'queued' || job === 'running') && book === 'writing') return { label: '编辑部写作中', tone: 'busy', action: '去看看' }
   if (job === 'queued' || job === 'running') return { label: '编辑部开会中', tone: 'busy', action: '去看看' }
   // 方案还没出来就在等作者：主编动笔前的提问
   if (job === 'waiting_author' && book === 'setting_up') return { label: '主编有问题问你', tone: 'wait', action: '去回答' }
   if (job === 'waiting_author' || book === 'awaiting_approval') return { label: '等你拍板', tone: 'wait', action: '去拍板' }
-  if (book === 'ready') return { label: '方案已定稿', tone: 'ok', action: '进入工作台' }
-  if (book === 'writing') return { label: '写作中', tone: 'busy', action: '去看看' }
+  if (book === 'ready') return { label: '方案已定稿', tone: 'ok', action: '去开写' }
+  if (book === 'writing') return { label: '连载中', tone: 'ok', action: '继续写' }
+  if (book === 'completed') return { label: '全书完结', tone: 'ok', action: '去读' }
   return { label: '准备中', tone: 'idle', action: '打开' }
 }
 

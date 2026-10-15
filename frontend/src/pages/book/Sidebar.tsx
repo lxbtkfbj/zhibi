@@ -1,8 +1,8 @@
 import clsx from 'clsx'
-import { BookMarked, Globe2, LayoutDashboard, Lightbulb, MessagesSquare, Network, Route, ScrollText, Settings2, Users } from 'lucide-react'
+import { BookMarked, BookOpenText, GitBranch, Globe2, LayoutDashboard, Lightbulb, MessagesSquare, Network, Route, ScrollText, Settings2, Users } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
-import { useBible, useOutline } from '../../api/hooks'
+import { useBible, useOutline, useThreads } from '../../api/hooks'
 import { BookCover } from '../../components/BookCover'
 import { HealthDot } from '../../components/Layout'
 import { cleanTitle, cleanVolumeTitle } from '../../lib/status'
@@ -46,6 +46,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { bookId, book } = useBookContext()
   const { data: outline } = useOutline(bookId)
   const { data: bible } = useBible(bookId)
+  const { data: threads } = useThreads(bookId)
   const base = `/books/${bookId}`
   const icon = 'size-4'
 
@@ -63,6 +64,10 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           <Item to={base} end icon={<LayoutDashboard className={icon} />} label="概览" onNavigate={onNavigate} />
           <Item to={`${base}/concept`} icon={<Lightbulb className={icon} />} label="书的概念" onNavigate={onNavigate} />
           <Item to={`${base}/spine`} icon={<Route className={icon} />} label="主线骨架" count={book.spine?.milestones?.length || undefined} onNavigate={onNavigate} />
+          <Item to={`${base}/threads`} icon={<GitBranch className={icon} />} label="线索" count={threads?.length || undefined} onNavigate={onNavigate} />
+          {book.status !== 'setting_up' && book.status !== 'awaiting_approval' && (
+            <Item to={`${base}/chapters`} icon={<BookOpenText className={icon} />} label="正文" count={book.chapters_final || undefined} onNavigate={onNavigate} />
+          )}
           <Item to={`${base}/meeting`} icon={<MessagesSquare className={icon} />} label="会议记录" onNavigate={onNavigate} />
         </div>
         {outline && outline.volumes.length > 0 && (
@@ -78,7 +83,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                     {cleanVolumeTitle(v.title)}
                   </span>
                 }
-                count={v.units.length || undefined}
+                count={v.status === 'done' ? undefined : v.units.length || undefined}
                 onNavigate={onNavigate}
               />
             ))}

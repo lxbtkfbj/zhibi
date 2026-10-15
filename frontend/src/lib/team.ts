@@ -5,7 +5,9 @@ export const STAGES = [
   { key: 'concept', label: '概念' },
   { key: 'lore', label: '设定' },
   { key: 'spine', label: '主线' },
-  { key: 'outline', label: '大纲' },
+  { key: 'threads', label: '线索' },
+  { key: 'outline', label: '总纲' },
+  { key: 'volume_plan', label: '卷纲' },
   { key: 'critique', label: '审稿' },
   { key: 'approval', label: '拍板' },
   { key: 'writing', label: '写作' },
@@ -14,13 +16,14 @@ export const STAGES = [
 export type StageKey = (typeof STAGES)[number]['key']
 export type StageState = 'done' | 'current' | 'todo'
 
-const DRAFT_STAGES = ['concept', 'lore', 'spine', 'outline', 'critique']
+const DRAFT_STAGES = ['concept', 'lore', 'spine', 'threads', 'outline', 'volume_plan', 'critique']
 
 /** 根据书和任务状态、会议里已交付的产出，算出流程进度。 */
 export function computeStages(book: BookStatus, job: Job | null | undefined, messages: MeetingMessage[]) {
   const approval = STAGES.findIndex((s) => s.key === 'approval')
   let done = 0
-  if (book === 'ready' || book === 'writing') done = approval + 1
+  if (book === 'completed') done = STAGES.length
+  else if (book === 'ready' || book === 'writing') done = approval + 1
   else if ((job?.status === 'waiting_author' && job.pending?.kind !== 'setup_questions') || book === 'awaiting_approval') done = approval
   else {
     const lastJob = [...messages].reverse().find((m) => m.job_id)?.job_id

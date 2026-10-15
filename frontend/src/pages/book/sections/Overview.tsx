@@ -1,4 +1,4 @@
-import { ArrowRight, BookMarked, Flag, Lightbulb, MessageCircleQuestion, PenLine, Route, Users } from 'lucide-react'
+import { ArrowRight, BookMarked, Flag, Lightbulb, MessageCircleQuestion, Route, Users } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useBible, useOutline } from '../../../api/hooks'
 import { Cloud } from '../../../components/decor'
@@ -6,13 +6,15 @@ import { Button, Card, CountUp, Reveal, TypingDots } from '../../../components/u
 import { cleanTitle, cleanVolumeTitle, totalChapters } from '../../../lib/status'
 import { computeStages } from '../../../lib/team'
 import { useBookContext } from '../context'
-import { DecisionControls, InterviewForm, ResumeControls, RunningControls } from '../Decision'
+import { DecisionControls, InterviewForm, ResumeControls, RunningControls, WritingControls } from '../Decision'
+import { decisionCopy } from '../../../lib/decision'
 import { PageHeader } from './common'
 
 function NextStep() {
   const { book, job, waiting, working, messages, setTeamOpen, bookId } = useBookContext()
   const base = `/books/${bookId}`
   const current = computeStages(book.status, job, messages).find((s) => s.state === 'current')
+  const writingPhase = book.status === 'ready' || book.status === 'writing' || book.status === 'completed'
 
   if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_questions') {
     return (
@@ -31,22 +33,23 @@ function NextStep() {
     )
   }
   if (waiting && job) {
+    const copy = decisionCopy(job.pending, bookId)
     return (
       <div className="relative overflow-hidden rounded-2xl border border-seal/25 bg-card p-6 shadow-[var(--shadow-lift)] sm:p-8">
         <span className="absolute inset-y-0 left-0 w-1.5 bg-seal" />
         <Cloud className="pointer-events-none absolute -right-4 -bottom-3 w-44 text-seal/[0.07]" />
-        <p className="mb-1 text-xs tracking-[0.25em] text-seal">下一步 · 拍板</p>
-        <h3 className="font-serif text-2xl font-bold">开书方案已就绪，等你过目</h3>
-        <p className="mt-2 mb-4 text-[15px] leading-relaxed text-ink-2">
-          先看看概念、大纲和人物，觉得哪里不对可以直接改。满意就盖章批准；想让编辑部改，就写下你的意见。
-        </p>
+        <p className="mb-1 text-xs tracking-[0.25em] text-seal">{copy.eyebrow}</p>
+        <h3 className="font-serif text-2xl font-bold">{copy.title}</h3>
+        <p className="mt-2 mb-4 text-[15px] leading-relaxed text-ink-2">{copy.hint}</p>
+        {copy.issues && copy.issues.length > 0 && (
+          <ul className="mb-4 space-y-1.5 rounded-xl bg-paper-2 px-4 py-3 text-[14px] leading-relaxed text-ink-2 ring-1 ring-line/80">
+            {copy.issues.map((issue) => (
+              <li key={issue}>{issue}</li>
+            ))}
+          </ul>
+        )}
         <div className="mb-5 flex flex-wrap gap-2 text-sm">
-          {[
-            ['书的概念', `${base}/concept`],
-            ['主线骨架', `${base}/spine`],
-            ['第一卷大纲', `${base}/volume/1`],
-            ['人物', `${base}/characters`],
-          ].map(([label, to]) => (
+          {copy.links.map(([label, to]) => (
             <Link key={to} to={to} className="group flex items-center gap-1 rounded-full bg-paper-2 px-3 py-1 text-ink-2 ring-1 ring-line hover:text-ink hover:ring-line-2">
               {label}
               <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
@@ -58,15 +61,18 @@ function NextStep() {
     )
   }
   if (working && job) {
+    const last = [...messages].reverse().find((m) => m.kind === 'status' && m.job_id === job.id)
     return (
       <div className="relative overflow-hidden rounded-2xl border border-line bg-card p-6 shadow-[var(--shadow-paper)] sm:p-8">
         <p className="mb-1 text-xs tracking-[0.25em] text-chief">进行中</p>
         <h3 className="flex items-center gap-3 font-serif text-2xl font-bold">
-          编辑部正在讨论「{current?.label ?? '方案'}」
+          {job.kind === 'write_book' ? '编辑部正在写作' : `编辑部正在讨论「${current?.label ?? '方案'}」`}
           <TypingDots className="text-chief" />
         </h3>
         <p className="mt-2 mb-4 text-[15px] leading-relaxed text-ink-2">
-          这一步通常需要几分钟。右侧编辑部在直播讨论过程；想到什么随时在那儿插话，比如「主角叫云澈」，编辑部做完手头这一步就照办。也可以先离开，回来时进度都在。
+          {job.kind === 'write_book'
+            ? `${last ? `${last.content} ` : ''}每一章都会经过写手、审稿和设定师；写好的章节在「正文」里随时可以读。想到什么随时在右侧插话，编辑部写完手头这一步就照办。`
+            : '这一步通常需要几分钟。右侧编辑部在直播讨论过程；想到什么随时在那儿插话，比如「主角叫云澈」，编辑部做完手头这一步就照办。也可以先离开，回来时进度都在。'}
         </p>
         <div className="flex flex-wrap items-center gap-3">
           <Button variant="primary" onClick={() => setTeamOpen(true)}>
@@ -87,25 +93,45 @@ function NextStep() {
       </div>
     )
   }
-  return (
-    <div className="relative overflow-hidden rounded-2xl border border-line bg-card p-6 shadow-[var(--shadow-paper)] sm:p-8">
-      <Cloud className="pointer-events-none absolute -right-4 -bottom-3 w-44 text-lore/[0.08]" />
-      <p className="mb-1 text-xs tracking-[0.25em] text-lore">方案已定稿</p>
-      <h3 className="font-serif text-2xl font-bold">下一步：开写第一章</h3>
-      <p className="mt-2 mb-5 text-[15px] leading-relaxed text-ink-2">
-        编辑部将按第一卷的剧情单元逐章写作。写章节的功能正在开发中（第 2 步），先看看定稿的方案吧。
-      </p>
-      <div className="flex flex-wrap gap-2">
-        <Button variant="primary" disabled>
-          <PenLine className="size-4" />
-          开写第一章（开发中）
-        </Button>
-        <Link to={`${base}/volume/1`}>
-          <Button variant="outline">查看第一卷</Button>
-        </Link>
+  if (book.status === 'completed') {
+    return (
+      <div className="relative overflow-hidden rounded-2xl border border-line bg-card p-6 shadow-[var(--shadow-paper)] sm:p-8">
+        <Cloud className="pointer-events-none absolute -right-4 -bottom-3 w-44 text-lore/[0.08]" />
+        <p className="mb-1 text-xs tracking-[0.25em] text-lore">全书完结</p>
+        <h3 className="font-serif text-2xl font-bold">
+          共 {book.chapters_final} 章，{(book.words_final / 10000).toFixed(1)} 万字
+        </h3>
+        <div className="mt-5">
+          <Link to={`${base}/chapters`}>
+            <Button variant="primary">从头读起</Button>
+          </Link>
+        </div>
       </div>
-    </div>
-  )
+    )
+  }
+  if (writingPhase) {
+    const started = book.chapters_final > 0
+    return (
+      <div className="relative overflow-hidden rounded-2xl border border-line bg-card p-6 shadow-[var(--shadow-paper)] sm:p-8">
+        <Cloud className="pointer-events-none absolute -right-4 -bottom-3 w-44 text-lore/[0.08]" />
+        <p className="mb-1 text-xs tracking-[0.25em] text-lore">{started ? '连载中' : '方案已定稿'}</p>
+        <h3 className="font-serif text-2xl font-bold">{started ? `已写到第 ${book.chapters_final} 章，接着写？` : '下一步：开写第一章'}</h3>
+        <p className="mt-2 mb-5 text-[15px] leading-relaxed text-ink-2">
+          编辑部按卷纲逐个单元出章纲，再逐章写作、审稿、更新设定库。每一卷开写前，主编会先把这一卷拆成剧情单元请你拍板。
+        </p>
+        <WritingControls />
+        {started && (
+          <div className="mt-5 flex flex-wrap gap-2 text-sm">
+            <Link to={`${base}/chapters`} className="group flex items-center gap-1 rounded-full bg-paper-2 px-3 py-1 text-ink-2 ring-1 ring-line hover:text-ink hover:ring-line-2">
+              正文目录
+              <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
+            </Link>
+          </div>
+        )}
+      </div>
+    )
+  }
+  return null
 }
 
 function Stat({ value, label, suffix }: { value: number; label: string; suffix: string }) {
@@ -131,13 +157,22 @@ export function Overview() {
   const chapters = first?.units.reduce((sum, u) => sum + u.chapter_count, 0) || first?.chapter_count || 0
   const total = totalChapters(concept, outline?.volumes ?? [])
   const volumes = outline?.volumes.length ?? 0
+  const writing = book.chapters_final > 0
   const stats = [
-    concept.target_length
-      ? { value: concept.target_length, label: '篇幅', suffix: '万字' }
-      : { value: bible?.foreshadowings.length ?? 0, label: '伏笔', suffix: '条' },
-    total ? { value: total, label: `全书 ${volumes} 卷`, suffix: '章' } : { value: volumes, label: '计划', suffix: '卷' },
-    { value: chapters, label: '第一卷', suffix: '章' },
-    { value: bible?.characters.length ?? 0, label: '主要人物', suffix: '位' },
+    writing
+      ? { value: book.chapters_final, label: '已定稿', suffix: '章' }
+      : concept.target_length
+        ? { value: concept.target_length, label: '篇幅', suffix: '万字' }
+        : { value: bible?.foreshadowings.length ?? 0, label: '伏笔', suffix: '条' },
+    writing
+      ? book.words_final >= 10000
+        ? { value: Math.round(book.words_final / 10000), label: '已写', suffix: '万字' }
+        : { value: book.words_final, label: '已写', suffix: '字' }
+      : total
+        ? { value: total, label: `全书 ${volumes} 卷`, suffix: '章' }
+        : { value: volumes, label: '计划', suffix: '卷' },
+    writing && total ? { value: total, label: `全书 ${volumes} 卷`, suffix: '章' } : { value: chapters, label: '第一卷', suffix: '章' },
+    { value: bible?.characters.length ?? 0, label: '人物', suffix: '位' },
   ]
 
   return (

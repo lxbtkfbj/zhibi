@@ -1,9 +1,11 @@
 """开书流程图。
 
 （可选）主编先问作者几个关键问题 → 主编定概念 → 设定师建设定 → 主编定主线骨架（开篇、结局、关键转折）
-→ 主编写分卷大纲 → 审稿挑刺 →（必要时自动修改一轮）→ 存库 → 作者拍板
+→ 主编做线索规划（主线、感情线、反派线、谜团线、成长线）→ 主编写全书总纲（分卷卡片 + 长线伏笔）
+→ 主编拆第一卷卷纲（剧情单元）→ 审稿挑刺 →（必要时自动修改一轮）→ 存库 → 作者拍板
 作者提意见：主编分派修改 → 对应角色修改 → 存库 → 再次拍板；作者批准：定稿。
 作者随时可以插话：每做完一步，主编先看有没有新的插话，已完成的部分需要改就先改，之后每一步都按插话来写。
+后面各卷的卷纲和每个单元的章纲，在写作流程里写到之前再做（见 write_book）。
 """
 
 from typing import Literal, TypedDict
@@ -14,17 +16,36 @@ from langgraph.types import Command, interrupt
 from sqlalchemy import select
 
 from app.agents import editorial
-from app.agents.context import format_requirements, planned_chapters
+from app.agents.context import (
+    format_character_state,
+    format_concept,
+    format_ledger,
+    format_requirements,
+    format_spine,
+    format_threads,
+    format_volume_card,
+    planned_chapters,
+)
+from app.agents.planning import attach_new_foreshadowings, fit_chapter_counts, relevant_ledger, unit_hint
 from app.graphs.deps import GraphDeps
 from app.models import Book, MeetingMessage, Volume
 from app.services import setup_store
 
-ORDER = ["concept", "lore", "spine", "outline"]
-TARGET_NAMES = {"concept": "概念", "lore": "世界观与人物", "spine": "主线骨架", "outline": "大纲"}
+ORDER = ["concept", "lore", "spine", "threads", "outline", "first_volume"]
+TARGET_NAMES = {
+    "concept": "概念",
+    "lore": "世界观与人物",
+    "spine": "主线骨架",
+    "threads": "线索",
+    "outline": "全书总纲",
+    "first_volume": "第一卷卷纲",
+}
 SYNC_INSTRUCTIONS = {
     "lore": "根据修改后的概念同步调整世界观与人物，保持与新概念一致；不受影响的部分保持原样。",
     "spine": "根据修改后的概念与设定同步检查主线骨架，确保开篇、结局和关键转折与之一致；不受影响的部分保持原样。",
-    "outline": "根据修改后的概念、设定与主线骨架同步检查大纲，确保情节、人物与设定一致；不受影响的部分保持原样。",
+    "threads": "根据修改后的上游内容同步检查线索，确保人物、节拍与之一致；不受影响的部分保持原样。",
+    "outline": "根据修改后的上游内容同步检查全书总纲，确保分卷、线索节拍与伏笔与之一致；不受影响的部分保持原样。",
+    "first_volume": "根据修改后的上游内容同步检查第一卷卷纲，确保剧情单元、线索与伏笔与之一致；不受影响的部分保持原样。",
 }
 
 # 篇幅由系统固定提问：它决定全书章数，作者最需要拍板
@@ -54,8 +75,10 @@ class SetupState(TypedDict, total=False):
     concept: dict
     lore: dict
     spine: dict
+    threads: dict
     outline: dict
-    # 待执行的步骤（concept / lore / spine / outline），依次弹出
+    first_volume: dict
+    # 待执行的步骤（ORDER 中的部分），依次弹出
     queue: list[str]
     # 本轮各部分的修改要求；为空表示从零起草
     instructions: dict[str, str]
@@ -83,8 +106,8 @@ def initial_state(idea: str, style_reference: str = "", ask: bool = False) -> Se
 
 
 def cascade(instructions: dict[str, str]) -> tuple[list[str], dict[str, str]]:
-    """上游改了，下游要跟着同步：改概念 → 后面全部要检查；改设定 → 主线和大纲；改主线 → 大纲。"""
-    targets = {t for t, text in instructions.items() if text.strip()}
+    """上游改了，下游要跟着同步：改概念 → 后面全部要检查；改设定 → 主线及之后；以此类推。"""
+    targets = {t for t, text in instructions.items() if text.strip() and t in ORDER}
     for i, target in enumerate(ORDER):
         if target in targets:
             targets |= set(ORDER[i + 1 :])
@@ -106,8 +129,29 @@ def merge_plan(
     return [t for t in ORDER if t in targets], merged
 
 
+def has_part(state: SetupState, target: str) -> bool:
+    value = state.get(target) or {}
+    if target == "threads":
+        return bool(value.get("threads"))
+    if target == "first_volume":
+        return bool(value.get("units"))
+    return bool(value)
+
+
+def fill_missing_steps(state: SetupState, queue: list[str]) -> list[str]:
+    """旧版流程的检查点或旧书缺少后来新增的步骤（主线骨架、线索、第一卷卷纲）：继续执行时补上。"""
+    if not queue:
+        return queue
+    missing = [t for t in ORDER if t not in queue and not has_part(state, t)]
+    return [t for t in ORDER if t in queue or t in missing]
+
+
 def requirements(state: SetupState) -> str:
     return format_requirements(state.get("brief") or [], state.get("notes") or [])
+
+
+def setup_of(state: SetupState) -> dict[str, dict]:
+    return {k: state.get(k) or {} for k in ORDER}
 
 
 def route_start(state: SetupState) -> str:
@@ -210,40 +254,116 @@ async def spine_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     return _finish(state, "spine", spine)
 
 
+async def threads_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
+    d = runtime.context
+    await d.check_cancel()
+    current, instruction = _revising(state, "threads")
+    await d.emit.status(
+        "chief", "主编正在修改线索…" if instruction else "主编正在做线索规划：主线、感情线、反派线、谜团线…"
+    )
+    result = await editorial.draft_threads(
+        d.llm, state["concept"], state["lore"], state.get("spine") or {}, requirements(state), current, instruction
+    )
+    threads = result.model_dump(exclude={"remark"})
+    for t in threads["threads"]:
+        t["beats"] = sorted(t["beats"], key=lambda b: b["volume"])
+    await d.emit.say("chief", result.remark)
+    kinds = "、".join(dict.fromkeys(t["kind"] for t in threads["threads"]))
+    await d.emit.artifact("chief", f"线索 {len(threads['threads'])} 条：{kinds}", {"type": "threads", "data": threads})
+    return _finish(state, "threads", threads)
+
+
 async def outline_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     d = runtime.context
     await d.check_cancel()
     current, instruction = _revising(state, "outline")
-    await d.emit.status("chief", "主编正在修改大纲…" if instruction else "主编正在写分卷大纲…")
+    await d.emit.status(
+        "chief", "主编正在修改全书总纲…" if instruction else "主编正在写全书总纲：每卷的舞台、对手与线索…"
+    )
     result = await editorial.draft_outline(
-        d.llm, state["concept"], state["lore"], state.get("spine") or {}, requirements(state), current, instruction
+        d.llm,
+        state["concept"],
+        state["lore"],
+        state.get("spine") or {},
+        state.get("threads") or {},
+        requirements(state),
+        current,
+        instruction,
     )
     outline = result.model_dump(exclude={"remark"})
+    # 长线伏笔编号：与当前版本内容相同的沿用原编号，第一卷卷纲引用的编号才不会乱
+    previous = setup_store.ledger_of(setup_of(state))
+    outline["foreshadowings"] = setup_store.assign_seqs(
+        [{**f, "span": "长"} for f in outline["foreshadowings"]], previous
+    )
     await d.emit.say("chief", result.remark)
     total = sum(v.get("chapter_count") or 0 for v in outline["volumes"]) or planned_chapters(state["concept"])
     await d.emit.artifact(
         "chief",
         f"全书 {len(outline['volumes'])} 卷"
         + (f"约 {total} 章" if total else "")
-        + f"，第一卷 {len(outline['first_volume_units'])} 个剧情单元",
+        + f"，长线伏笔 {len(outline['foreshadowings'])} 条",
         {"type": "outline", "data": outline},
     )
     return _finish(state, "outline", outline)
+
+
+def first_volume_blocks(state: SetupState) -> dict[str, str]:
+    """开书时拆第一卷：上下文都来自方案本身。"""
+    volumes = (state.get("outline") or {}).get("volumes") or []
+    card = next((v for v in volumes if v.get("index") == 1), volumes[0] if volumes else {})
+    following = next((v for v in volumes if v.get("index") == 2), None)
+    chapter_count = int(card.get("chapter_count") or 0)
+    lore = state.get("lore") or {}
+    spine = state.get("spine") or {}
+    ledger = setup_store.ledger_of({"outline": state.get("outline") or {}})
+    return {
+        "volume_index": "1",
+        "concept": format_concept(state.get("concept") or {}),
+        "spine": format_spine(spine),
+        "threads": format_threads(state.get("threads") or {}, volume=1),
+        "volume": format_volume_card(card),
+        "neighbors": "上一卷：无（这是第一卷）\n下一卷：" + (format_volume_card(following) if following else "无"),
+        "story_so_far": f"还没开写，这是第一卷。开篇设计：{spine.get('opening', '（暂无）')}",
+        "used_climaxes": "（暂无）",
+        "characters": "\n".join(format_character_state(c) for c in lore.get("characters", [])) or "（暂无）",
+        "ledger": format_ledger(relevant_ledger(ledger, 1)),
+        "requirements": requirements(state),
+        "unit_hint": unit_hint(chapter_count),
+        "chapter_count": str(chapter_count or "若干"),
+    }
+
+
+async def first_volume_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
+    d = runtime.context
+    await d.check_cancel()
+    current, instruction = _revising(state, "first_volume")
+    await d.emit.status(
+        "chief", "主编正在修改第一卷卷纲…" if instruction else "主编正在拆第一卷：剧情单元、线索交织与伏笔…"
+    )
+    blocks = first_volume_blocks(state)
+    result = await editorial.plan_volume(d.llm, blocks, current, instruction, purpose="开书·第一卷卷纲")
+    plan = result.model_dump(exclude={"remark"})
+    target = int(blocks["chapter_count"]) if blocks["chapter_count"].isdigit() else 0
+    units = fit_chapter_counts(plan["units"], target)
+    # 新伏笔接着总纲的长线伏笔编号；修改时内容没变的沿用原编号
+    fresh = setup_store.assign_seqs(plan["new_foreshadowings"], setup_store.ledger_of(setup_of(state)))
+    units, fresh = attach_new_foreshadowings(units, fresh, 1)
+    first_volume = {"units": units, "new_foreshadowings": fresh}
+    await d.emit.say("chief", result.remark)
+    await d.emit.artifact(
+        "chief",
+        f"第一卷拆成 {len(units)} 个剧情单元，新埋伏笔 {len(fresh)} 条",
+        {"type": "volume_plan", "data": {"volume": 1, **first_volume}},
+    )
+    return _finish(state, "first_volume", first_volume)
 
 
 async def critique_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     d = runtime.context
     await d.check_cancel()
     await d.emit.status("reviewer", "审稿正在审阅开书方案…")
-    result = await editorial.critique_setup(
-        d.llm,
-        state["idea"],
-        requirements(state),
-        state["concept"],
-        state["lore"],
-        state.get("spine") or {},
-        state["outline"],
-    )
+    result = await editorial.critique_setup(d.llm, state["idea"], requirements(state), setup_of(state))
     await d.emit.say("reviewer", result.remark)
     await d.emit.artifact("reviewer", "审稿意见", {"type": "critique", "data": result.model_dump(exclude={"remark"})})
 
@@ -274,9 +394,9 @@ async def intake_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     d = runtime.context
     queue = list(state.get("queue") or [])
     update: dict = {}
-    if "outline" in queue and "spine" not in queue and not state.get("spine"):
-        # 旧版流程的检查点没有「主线骨架」这一步：继续执行时补上，大纲才有骨架可依
-        queue.insert(queue.index("outline"), "spine")
+    filled = fill_missing_steps(state, queue)
+    if filled != queue:
+        queue = filled
         update["queue"] = queue
     rows = await _new_notes(d, state.get("notes_seen", 0))
     if not rows:
@@ -284,7 +404,7 @@ async def intake_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     fresh = [content for _, content in rows]
     notes = [*(state.get("notes") or []), *fresh]
     update.update(notes=notes, notes_seen=rows[-1][0])
-    done = {t: state[t] for t in ORDER if state.get(t) and t not in queue}
+    done = {t: state[t] for t in ORDER if has_part(state, t) and t not in queue}
     if not done:
         await d.emit.say("chief", "收到，接下来就按你说的写。")
         return update
@@ -307,9 +427,13 @@ async def intake_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
 
 async def persist_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     d = runtime.context
-    setup = {k: state.get(k) or {} for k in ORDER}
+    setup = setup_of(state)
     async with d.sessionmaker() as session:
         await setup_store.save_setup(session, d.book_id, setup)
+        book = await session.get(Book, d.book_id)
+        if book is not None:
+            # 作者的回答与插话之后写正文时也要遵守
+            book.requirements = list(dict.fromkeys([*(state.get("brief") or []), *(state.get("notes") or [])]))
         await setup_store.snapshot(
             session, d.book_id, d.job_id, state.get("round", 0), "ai", state.get("phase", ""), setup
         )
@@ -344,8 +468,7 @@ async def triage_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     d = runtime.context
     await d.check_cancel()
     await d.emit.status("chief", "主编正在研究作者的意见…")
-    setup = {k: state.get(k) or {} for k in ORDER}
-    result = await editorial.triage_feedback(d.llm, setup, requirements(state), state.get("feedback", ""))
+    result = await editorial.triage_feedback(d.llm, setup_of(state), requirements(state), state.get("feedback", ""))
     await d.emit.say("chief", result.remark)
     queue, instructions = cascade(result.instructions())
     if queue:
@@ -377,7 +500,9 @@ def build_setup_graph() -> StateGraph:
     graph.add_node("concept", concept_node)
     graph.add_node("lore", lore_node)
     graph.add_node("spine", spine_node)
+    graph.add_node("threads", threads_node)
     graph.add_node("outline", outline_node)
+    graph.add_node("first_volume", first_volume_node)
     graph.add_node("critique", critique_node)
     graph.add_node("persist", persist_node)
     graph.add_node("author_gate", author_gate_node)

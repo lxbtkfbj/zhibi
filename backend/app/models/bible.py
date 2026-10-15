@@ -57,13 +57,23 @@ class WorldEntry(UUIDPk, Timestamps, Base):
 
 
 class Foreshadowing(UUIDPk, Timestamps, Base):
+    """伏笔台账：每条伏笔有编号（F1、F2……）、跨度、计划埋下与回收的位置，写作时更新状态。"""
+
     __tablename__ = "foreshadowings"
 
     book_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("books.id", ondelete="CASCADE"), index=True)
+    # 书内编号，提示词里写作 F{seq}
+    seq: Mapped[int] = mapped_column(Integer, default=0)
     description: Mapped[str] = mapped_column(Text)
+    # 短（一个单元内收）/ 中（一卷内收）/ 长（跨卷）
+    span: Mapped[str] = mapped_column(String(10), default="中")
     plant_plan: Mapped[str] = mapped_column(Text, default="")
     payoff_plan: Mapped[str] = mapped_column(Text, default="")
+    plant_volume: Mapped[int | None] = mapped_column(Integer)
+    payoff_volume: Mapped[int | None] = mapped_column(Integer)
     # planned / planted / resolved / abandoned
     status: Mapped[str] = mapped_column(String(20), default="planned")
     planted_chapter: Mapped[int | None] = mapped_column(Integer)
+    # 埋下之后在哪些章节提醒过读者
+    hint_chapters: Mapped[list] = mapped_column(JSONB, default=list)
     resolved_chapter: Mapped[int | None] = mapped_column(Integer)

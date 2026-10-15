@@ -2,24 +2,30 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import SessionDep, ensure_idle, get_book, get_redis
-from app.models import Book, Job, PlotUnit, Volume
+from app.models import Book, Chapter, Job, PlotUnit, StoryThread, Volume
 from app.schemas import (
     BookCreate,
     BookCreated,
     BookDetail,
     BookPatch,
     BookSummary,
+    ChapterBrief,
+    ChapterOut,
+    ChapterPatch,
     JobOut,
     OutlineOut,
+    ThreadOut,
+    ThreadPatch,
     UnitOut,
     UnitPatch,
     VolumeOut,
     VolumePatch,
+    WriteRequest,
 )
 from app.services import jobs
 from app.services.meeting import post_message
@@ -40,6 +46,14 @@ async def detail(session: AsyncSession, book: Book) -> BookDetail:
     job = await jobs.active_job(session, book.id)
     out.active_job = JobOut.model_validate(job) if job else None
     out.job_status = job.status if job else None
+    count, words = (
+        await session.execute(
+            select(func.count(), func.coalesce(func.sum(Chapter.word_count), 0)).where(
+                Chapter.book_id == book.id, Chapter.status == "final"
+            )
+        )
+    ).one()
+    out.chapters_final, out.words_final = int(count), int(words)
     return out
 
 
@@ -157,3 +171,113 @@ async def update_unit(unit_id: uuid.UUID, body: UnitPatch, session: AsyncSession
     await session.commit()
     await session.refresh(unit)
     return UnitOut.model_validate(unit)
+
+
+# ---------- 线索 ----------
+
+
+@router.get("/books/{book_id}/threads", response_model=list[ThreadOut])
+async def list_threads(book: Book = Depends(get_book), session: AsyncSession = SessionDep) -> list[ThreadOut]:
+    rows = (
+        (await session.execute(select(StoryThread).where(StoryThread.book_id == book.id).order_by(StoryThread.index)))
+        .scalars()
+        .all()
+    )
+    return [ThreadOut.model_validate(t) for t in rows]
+
+
+@router.patch("/threads/{thread_id}", response_model=ThreadOut)
+async def update_thread(thread_id: uuid.UUID, body: ThreadPatch, session: AsyncSession = SessionDep) -> ThreadOut:
+    thread = await session.get(StoryThread, thread_id)
+    if thread is None:
+        raise HTTPException(404, "线索不存在")
+    await ensure_idle(session, thread.book_id)
+    for key, value in body.model_dump(exclude_unset=True).items():
+        setattr(thread, key, value)
+    await session.commit()
+    await session.refresh(thread)
+    return ThreadOut.model_validate(thread)
+
+
+# ---------- 章节 ----------
+
+
+@router.get("/books/{book_id}/chapters", response_model=list[ChapterBrief])
+async def list_chapters(
+    book: Book = Depends(get_book), volume: int | None = None, session: AsyncSession = SessionDep
+) -> list[ChapterBrief]:
+    """全书章节目录；指定 volume 时只列这一卷，并带上章纲。"""
+    stmt = select(Chapter).where(Chapter.book_id == book.id).order_by(Chapter.index)
+    if volume is not None:
+        stmt = stmt.join(Volume, Chapter.volume_id == Volume.id).where(Volume.index == volume)
+    rows = (await session.execute(stmt)).scalars().all()
+    out = []
+    for c in rows:
+        brief = ChapterBrief.model_validate(c)
+        brief.outline = c.outline if volume is not None else None
+        out.append(brief)
+    return out
+
+
+async def _chapter(session: AsyncSession, book_id: uuid.UUID, index: int) -> Chapter:
+    chapter = (
+        await session.execute(select(Chapter).where(Chapter.book_id == book_id, Chapter.index == index))
+    ).scalar()
+    if chapter is None:
+        raise HTTPException(404, "这一章还不存在")
+    return chapter
+
+
+@router.get("/books/{book_id}/chapters/{index}", response_model=ChapterOut)
+async def get_chapter(index: int, book: Book = Depends(get_book), session: AsyncSession = SessionDep) -> ChapterOut:
+    return ChapterOut.model_validate(await _chapter(session, book.id, index))
+
+
+@router.patch("/books/{book_id}/chapters/{index}", response_model=ChapterOut)
+async def update_chapter(
+    index: int, body: ChapterPatch, book: Book = Depends(get_book), session: AsyncSession = SessionDep
+) -> ChapterOut:
+    await ensure_idle(session, book.id)
+    chapter = await _chapter(session, book.id, index)
+    if body.title is not None:
+        chapter.title = body.title
+    if body.content is not None:
+        chapter.content = body.content
+        chapter.word_count = len("".join(body.content.split()))
+    await session.commit()
+    await session.refresh(chapter)
+    return ChapterOut.model_validate(chapter)
+
+
+WRITE_LABEL = {"count": "写 {count} 章", "volume": "写完这一卷", "book": "一直写到完本"}
+
+
+@router.post("/books/{book_id}/write", response_model=JobOut, status_code=201)
+async def start_writing(
+    body: WriteRequest,
+    book: Book = Depends(get_book),
+    session: AsyncSession = SessionDep,
+    redis: Redis = Depends(get_redis),
+) -> JobOut:
+    """开写：编辑部按卷纲和章纲逐章写作，写够这一轮就停。"""
+    if book.status not in ("ready", "writing"):
+        raise HTTPException(409, "全书已经写完了" if book.status == "completed" else "开书方案还没定稿")
+    current = await jobs.active_job(session, book.id)
+    if current is not None and current.status in jobs.ACTIVE_STATUSES:
+        raise HTTPException(409, "编辑部手上还有没做完的事，先处理完再开写")
+    job = jobs.new_write_job(book, body.until, body.count)
+    session.add(job)
+    book.status = "writing"
+    await session.commit()
+    await session.refresh(job)
+    await post_message(
+        session,
+        redis,
+        book_id=book.id,
+        job_id=job.id,
+        speaker="author",
+        kind="speech",
+        content=f"开写：{WRITE_LABEL[body.until].format(count=body.count)}。",
+    )
+    jobs.enqueue(job.id)
+    return JobOut.model_validate(job)

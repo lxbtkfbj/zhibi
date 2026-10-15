@@ -130,46 +130,192 @@ class StorySpine(Lenient):
     remark: str = remark_field("结局是什么、中间最关键的一两个转折是什么")
 
 
+ThreadKind = Literal["主线", "感情线", "反派线", "谜团线", "成长线", "其他"]
+
+
+class ThreadBeat(Lenient):
+    volume: int = Field(ge=1, description="这一步落在第几卷")
+    beat: str = Field(description="这条线在这一卷走到哪一步：发生什么、关系或局势变成什么样，30-80 字")
+
+
+class ThreadDraft(Lenient):
+    name: str = Field(description="线索名称，如「主线：太荒遗孤」「感情线：云霓裳」「反派线：天阳神宗」")
+    kind: ThreadKind = Field(description="线索类型")
+    characters: list[str] = Field(default_factory=list, description="这条线的核心人物姓名")
+    summary: str = Field(description="这条线从头到尾讲什么、怎么收尾，50-150 字")
+    beats: list[ThreadBeat] = Field(description="这条线的节拍，按卷的顺序排列；不是每卷都要有，但不能长时间断线")
+
+
+class ThreadsDraft(Lenient):
+    """线索规划：主线之外，感情线、反派线、谜团线、成长线各自有起承转合，再交织进各卷。"""
+
+    threads: list[ThreadDraft] = Field(description="全书线索，4-10 条：一条主线，加上感情线、反派线、谜团线、成长线等")
+    remark: str = remark_field("有哪几条线、它们在哪几卷交汇")
+
+
+class ThreadStep(Lenient):
+    thread: str = Field(description="线索名称（必须是线索列表里的名称）")
+    beat: str = Field(description="这一段让这条线走到哪一步，20-60 字")
+
+
 class VolumeDraft(Lenient):
     index: int = Field(ge=1, description="卷序号，从 1 开始")
     title: str = Field(description="卷名本身，不要带「第几卷」")
+    stage: str = Field(default="", description="本卷的舞台：地图、地点，如「青州 → 万劫谷」")
     summary: str = Field(description="本卷剧情概要，150-300 字")
     goal: str = Field(description="本卷结束时主角达成或失去了什么")
+    climax: str = Field(default="", description="本卷最大的高潮场面，50-100 字")
+    antagonist: str = Field(default="", description="本卷的主要对手及其目的；对手要有自己的谋划，不能降智")
+    power_range: str = Field(default="", description="主角本卷的实力变化，如「炼气三层 → 筑基初期」")
+    thread_beats: list[ThreadStep] = Field(default_factory=list, description="本卷推进哪些线索、各走到哪一步")
+    new_characters: list[str] = Field(default_factory=list, description="本卷新登场的重要人物，写成「姓名：身份」")
     chapter_count: int = Field(default=0, ge=0, le=1000, description="本卷预计章数，各卷之和等于全书计划总章数")
+
+
+ForeshadowSpan = Literal["短", "中", "长"]
+
+
+class ForeshadowingDraft(Lenient):
+    description: str = Field(description="伏笔内容：真相是什么")
+    span: ForeshadowSpan = Field(default="中", description="跨度：短（一个单元内收）/ 中（一卷内收）/ 长（跨卷）")
+    plant_plan: str = Field(description="计划在哪里、以什么方式埋下，读者当时会怎么误解")
+    payoff_plan: str = Field(description="计划在哪里回收，回收时的效果")
+    plant_volume: int = Field(default=1, ge=1, description="在第几卷埋下")
+    payoff_volume: int = Field(default=1, ge=1, description="在第几卷回收")
+
+
+class OutlineDraft(Lenient):
+    """全书总纲：每卷一张卡片，加上跨卷的长线伏笔。各卷的剧情单元写到那一卷之前再拆。"""
+
+    volumes: list[VolumeDraft] = Field(description="全书分卷卡片，卷数与概念里的计划卷数一致")
+    foreshadowings: list[ForeshadowingDraft] = Field(
+        default_factory=list, description="跨卷的长线伏笔，5-12 条，埋下和回收要分布在不同的卷"
+    )
+    remark: str = remark_field("全书多少章、各卷的舞台和对手怎么升级、最长的伏笔埋在哪")
+
+
+ForeshadowAction = Literal["埋下", "提醒", "回收"]
+
+
+class ForeshadowStep(Lenient):
+    ref: str = Field(description="伏笔编号，如 F3（必须是伏笔台账里已有的编号）")
+    action: ForeshadowAction = Field(description="埋下 / 提醒（让读者再想起来）/ 回收")
+    detail: str = Field(default="", description="具体怎么做，20-60 字")
 
 
 class PlotUnitDraft(Lenient):
     index: int = Field(ge=1, description="剧情单元序号，从 1 开始")
     title: str = Field(description="单元标题")
-    chapter_count: int = Field(ge=3, le=40, description="预计章数，通常 5-20")
+    chapter_count: int = Field(ge=3, le=40, description="预计章数，通常 5-15")
     goal: str = Field(description="这一段主角要做成什么")
-    conflict: str = Field(description="阻碍与冲突来自哪里")
-    climax: str = Field(description="高潮场面")
+    conflict: str = Field(description="阻碍与冲突来自哪里；对手怎么谋划")
+    climax: str = Field(description="高潮场面与爽点：主角怎么破局，读者爽在哪里")
     outcome: str = Field(description="结果，以及给下一段留下的钩子")
-    key_events: list[str] = Field(description="按顺序列出 3-6 个关键事件")
-
-
-class ForeshadowingDraft(Lenient):
-    description: str = Field(description="伏笔内容")
-    plant_plan: str = Field(description="计划在哪里、以什么方式埋下")
-    payoff_plan: str = Field(description="计划在哪里回收，回收时的效果")
-
-
-class OutlineDraft(Lenient):
-    volumes: list[VolumeDraft] = Field(description="全书分卷概要，卷数与概念里的计划卷数一致")
-    first_volume_units: list[PlotUnitDraft] = Field(
-        description="第一卷拆成的剧情单元，4-12 个，章数之和等于第一卷的预计章数"
+    key_events: list[str] = Field(description="按顺序列出 4-8 个关键事件")
+    thread_beats: list[ThreadStep] = Field(default_factory=list, description="本单元推进哪些线索，至少一条")
+    foreshadow_actions: list[ForeshadowStep] = Field(
+        default_factory=list, description="本单元对伏笔台账里已有伏笔的动作（埋下、提醒或回收）"
     )
-    foreshadowings: list[ForeshadowingDraft] = Field(default_factory=list, description="全书重要伏笔，3-8 条")
-    remark: str = remark_field("全书多少章、第一卷怎么拆、开篇钩子在哪")
 
 
-SetupTarget = Literal["concept", "lore", "spine", "outline"]
+class NewForeshadowing(ForeshadowingDraft):
+    plant_unit: int = Field(default=1, ge=1, description="在本卷第几个单元埋下")
+    payoff_unit: int = Field(
+        default=0, ge=0, description="在本卷第几个单元回收；跨卷回收填 0，并在 payoff_volume 写明第几卷"
+    )
+
+
+class VolumePlanDraft(Lenient):
+    """卷纲：把一卷拆成剧情单元，并安排本卷的线索节拍与伏笔。"""
+
+    units: list[PlotUnitDraft] = Field(description="本卷的剧情单元，章数之和等于本卷预计章数")
+    new_foreshadowings: list[NewForeshadowing] = Field(
+        default_factory=list, description="本卷新埋的短线、中线伏笔，2-6 条"
+    )
+    remark: str = remark_field("这一卷怎么拆、节奏怎么起伏、最大的爽点在哪")
+
+
+class ChapterOutlineDraft(Lenient):
+    title: str = Field(description="章节标题，不带「第几章」，网文风格，4-12 字")
+    goal: str = Field(description="本章要完成的剧情任务")
+    scenes: list[str] = Field(description="按顺序列出 2-4 个场景：在哪、谁、发生什么")
+    conflict: str = Field(description="本章的冲突或阻碍")
+    cool_point: str = Field(description="本章的爽点或情绪高点：打脸、反转、突破、心动、揭秘……")
+    hook: str = Field(description="结尾钩子：本章停在什么悬念上，让读者想看下一章")
+    characters: list[str] = Field(default_factory=list, description="出场的主要人物姓名")
+    foreshadow_actions: list[ForeshadowStep] = Field(default_factory=list, description="本章对伏笔的动作")
+
+
+class ChapterPlanDraft(Lenient):
+    """章纲：一个剧情单元里每一章写什么。"""
+
+    chapters: list[ChapterOutlineDraft] = Field(description="本单元的每一章，数量等于本单元章数")
+    remark: str = remark_field("这一段的节奏怎么安排、哪一章最燃")
+
+
+Severity = Literal["high", "medium", "low"]
+
+
+class ChapterIssue(Lenient):
+    problem: str = Field(description="具体问题，引用原文位置")
+    suggestion: str = Field(description="怎么改")
+    severity: Severity = Field(description="high：必须重写；medium：影响阅读，应该改；low：小建议")
+
+
+class ChapterReview(Lenient):
+    verdict: Literal["pass", "revise"] = Field(description="pass：可以定稿；revise：必须重写")
+    highlights: list[str] = Field(default_factory=list, description="写得好的地方，1-3 条")
+    issues: list[ChapterIssue] = Field(default_factory=list, description="问题清单，最多 5 条，按严重程度排序")
+    remark: str = remark_field()
+
+
+class ConsistencyReport(Lenient):
+    issues: list[ChapterIssue] = Field(default_factory=list, description="与设定库、前文矛盾的地方；没有矛盾就留空")
+    remark: str = remark_field()
+
+
+class CharacterUpdate(Lenient):
+    name: str = Field(description="人物姓名（必须是设定库里已有的人物）")
+    location: str = Field(default="", description="本章结束时所在位置；没变就留空")
+    condition: str = Field(default="", description="本章结束时的状态，如伤势、处境、心境；没变就留空")
+    abilities: str = Field(default="", description="能力或修为的最新情况；没变就留空")
+    is_alive: bool = Field(default=True, description="本章结束时是否还活着")
+
+
+class NewCharacter(Lenient):
+    name: str = Field(description="姓名")
+    role_type: Literal["主角", "女主", "男主", "配角", "反派", "龙套"] = Field(default="配角", description="角色定位")
+    background: str = Field(default="", description="身份与来历")
+    personality: str = Field(default="", description="性格与说话方式")
+
+
+class ForeshadowUpdate(Lenient):
+    ref: str = Field(description="伏笔编号，如 F3")
+    action: ForeshadowAction = Field(description="本章实际对这条伏笔做了什么")
+
+
+class ChapterDigest(Lenient):
+    """定稿后设定师提取本章带来的变化，程序校验后写进设定库。"""
+
+    summary: str = Field(description="本章摘要，100-200 字，写清发生了什么、结果如何，供后文回顾")
+    character_updates: list[CharacterUpdate] = Field(default_factory=list, description="状态有变化的已有人物")
+    new_characters: list[NewCharacter] = Field(default_factory=list, description="本章新登场、之后还会出现的人物")
+    foreshadow_updates: list[ForeshadowUpdate] = Field(
+        default_factory=list, description="本章实际埋下、提醒或回收的伏笔"
+    )
+    remark: str = remark_field()
+
+
+SETUP_PARTS = ("concept", "lore", "spine", "threads", "outline", "first_volume")
+SetupTarget = Literal["concept", "lore", "spine", "threads", "outline", "first_volume"]
 
 
 class ReviewIssue(Lenient):
     target: SetupTarget = Field(
-        description="问题出在哪部分：concept 概念 / lore 设定与人物 / spine 主线骨架（开篇、结局、关键转折）/ outline 分卷大纲"
+        description=(
+            "问题出在哪部分：concept 概念 / lore 设定与人物 / spine 主线骨架（开篇、结局、关键转折）"
+            "/ threads 线索 / outline 全书总纲（分卷卡片与长线伏笔）/ first_volume 第一卷卷纲（剧情单元）"
+        )
     )
     problem: str = Field(description="具体问题，指出原文位置")
     suggestion: str = Field(description="怎么改")
@@ -191,11 +337,17 @@ class RevisionTriage(Lenient):
     spine_instructions: str = Field(
         default="", description="对主线骨架（开篇、结局、关键转折）的修改要求；不需要改则留空"
     )
-    outline_instructions: str = Field(default="", description="对分卷大纲的修改要求；不需要改则留空")
+    threads_instructions: str = Field(
+        default="", description="对线索（主线、感情线、反派线、谜团线等）的修改要求；不需要改则留空"
+    )
+    outline_instructions: str = Field(
+        default="", description="对全书总纲（分卷卡片、长线伏笔）的修改要求；不需要改则留空"
+    )
+    first_volume_instructions: str = Field(default="", description="对第一卷卷纲（剧情单元）的修改要求；不需要改则留空")
     remark: str = remark_field("你打算怎么落实作者的话")
 
     def instructions(self) -> dict[str, str]:
-        found = {t: getattr(self, f"{t}_instructions", "") for t in ("concept", "lore", "spine", "outline")}
+        found = {t: getattr(self, f"{t}_instructions", "") for t in SETUP_PARTS}
         return {t: text for t, text in found.items() if text.strip()}
 
 

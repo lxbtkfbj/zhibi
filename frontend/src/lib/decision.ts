@@ -1,0 +1,61 @@
+import type { Pending } from '../api/types'
+import { cleanVolumeTitle } from './status'
+
+export interface DecisionCopy {
+  eyebrow: string
+  title: string
+  hint: string
+  approve: string
+  placeholder: string
+  links: [string, string][]
+  issues?: string[]
+}
+
+/** 等作者拍板的几种情况：开书方案、某一卷的卷纲、前几章试读、重写两次仍未通过的章节。 */
+export function decisionCopy(pending: Pending | null | undefined, bookId: string): DecisionCopy {
+  const base = `/books/${bookId}`
+  switch (pending?.kind) {
+    case 'volume_review':
+      return {
+        eyebrow: '下一步 · 卷纲拍板',
+        title: `第${pending.volume}卷《${cleanVolumeTitle(pending.title)}》的卷纲拆好了`,
+        hint: '主编把这一卷拆成了剧情单元，排好了线索和伏笔。哪里不对可以直接在卷纲里改，或者告诉主编怎么改；满意就盖章开写。',
+        approve: '批准开写',
+        placeholder: '例如：第三单元太拖，压缩一下；女主在这一卷多一些戏份',
+        links: [[`第${pending.volume}卷卷纲`, `${base}/volume/${pending.volume}`], ['线索', `${base}/threads`]],
+      }
+    case 'trial_read':
+      return {
+        eyebrow: '下一步 · 试读',
+        title: `前 ${pending.chapters} 章写好了，请你试读`,
+        hint: '读一读开头几章：文风、节奏、人物哪里不对就直接说，之后每一章都照你说的写；满意就让编辑部继续。',
+        approve: '满意，继续写',
+        placeholder: '例如：对话太多，节奏再快一点；主角说话再狠一些',
+        links: [['读第 1 章', `${base}/chapter/1`], ['目录', `${base}/chapters`]],
+      }
+    case 'chapter_stuck':
+      return {
+        eyebrow: '需要你定夺',
+        title: `第${pending.chapter}章《${pending.title}》重写两次仍未通过`,
+        hint: '审稿还有意见没解决。先读一读：觉得能用就直接定稿；想让写手再改，就告诉他怎么改。',
+        approve: '就这样定稿',
+        placeholder: '例如：打斗那段删掉，直接写结果',
+        links: [['读这一章', `${base}/chapter/${pending.chapter}`]],
+        issues: pending.issues,
+      }
+    default:
+      return {
+        eyebrow: '下一步 · 拍板',
+        title: '开书方案已就绪，等你过目',
+        hint: '先看看概念、线索、总纲和第一卷卷纲，觉得哪里不对可以直接改。满意就盖章批准；想让编辑部改，就写下你的意见。',
+        approve: '盖章批准',
+        placeholder: '例如：女主出场太晚了，第一单元就让她登场；反派的动机再狠一点。',
+        links: [
+          ['书的概念', `${base}/concept`],
+          ['线索', `${base}/threads`],
+          ['第一卷卷纲', `${base}/volume/1`],
+          ['人物', `${base}/characters`],
+        ],
+      }
+  }
+}
