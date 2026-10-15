@@ -8,7 +8,7 @@ import { TypingDots } from '../../components/ui'
 import { ROLE_META } from '../../lib/roles'
 import { isFresh, useTypewriter } from '../../lib/team'
 import { artifactTarget } from '../../lib/workspace'
-import { spineArtifactNodes } from '../../lib/storyMap'
+import { directionsArtifact, loreArtifact, outlineArtifact, spineArtifactNodes } from '../../lib/storyMap'
 import { useBookContext } from './context'
 
 export function RoleAvatar({
@@ -42,14 +42,6 @@ function time(iso: string | null) {
 
 // ---------- 产出卡片 ----------
 
-interface LoreData {
-  world_entries: { category: string; name: string }[]
-  characters: { name: string; role_type: string; abilities?: string; goal?: string }[]
-}
-interface OutlineData {
-  volumes: { index: number; title: string; summary: string; stage?: string; antagonist?: string; chapter_count?: number }[]
-  foreshadowings?: { seq: number; description: string; plant_volume?: number; payoff_volume?: number }[]
-}
 type UnitBrief = Pick<PlotUnit, 'index' | 'title' | 'chapter_count' | 'climax'> & Partial<Pick<PlotUnit, 'tropes' | 'resolution'>>
 interface VolumePlanData {
   volume: number
@@ -297,6 +289,8 @@ export function ArtifactBody({ message }: { message: MeetingMessage }) {
             <li key={i}>
               <span className={node.kind === 'ending' ? 'font-medium text-seal' : node.kind === 'opening' ? 'font-medium text-ink' : 'font-medium text-chief'}>{node.title}：</span>
               {node.volume != null && <span className="text-xs text-ink-2">（第{node.volume}卷）</span>} {node.event || '（未定）'}
+              {node.prerequisite && <p className="mt-1 text-xs text-ink-2">之前：{node.prerequisite}</p>}
+              {node.consequence && <p className="mt-1 text-xs text-ink-2">之后：{node.consequence}</p>}
             </li>
           ))}
         </ol>
@@ -321,7 +315,7 @@ export function ArtifactBody({ message }: { message: MeetingMessage }) {
     )
   }
   if (type === 'lore') {
-    const l = data as LoreData
+    const l = loreArtifact(data)
     const hero = l.characters.find((c) => c.role_type === '主角')
     return (
       <div className="space-y-2">
@@ -340,11 +334,13 @@ export function ArtifactBody({ message }: { message: MeetingMessage }) {
           ))}
         </div>
         <p className="text-ink-2">世界观：{l.world_entries.map((w) => w.name).join('、')}</p>
+        {l.anchors.length > 0 && <section className="space-y-1 border-t border-line pt-2"><p className="font-medium text-ink">人物锚点</p>{l.anchors.map((a, i) => <p key={i} className="text-ink-2">{a.node ? `节点 ${a.node}：` : ''}{a.character} · {a.kind}{a.note ? `——${a.note}` : ''}</p>)}</section>}
+        {l.secrets.length > 0 && <section className="space-y-2 border-t border-line pt-2"><p className="font-medium text-ink">信息差</p>{l.secrets.map((s, i) => <div key={i}><p><span className="font-medium text-ink">{s.code}「{s.title}」</span>：{s.truth}</p><p className="text-xs text-ink-2">知情人：{s.knowers.join('、') || '暂无'} · 读者：{s.reader_knows}</p>{s.reveal_plan && <p className="text-xs text-ink-2">揭开计划：{s.reveal_plan}</p>}</div>)}</section>}
       </div>
     )
   }
   if (type === 'outline') {
-    const o = data as OutlineData
+    const o = outlineArtifact(data)
     return (
       <div className="space-y-1.5 text-ink-2">
         {o.volumes.map((v) => (
@@ -352,15 +348,32 @@ export function ArtifactBody({ message }: { message: MeetingMessage }) {
             <span className="font-medium text-ink">第{v.index}卷《{v.title}》</span>
             {v.chapter_count ? <span className="text-xs text-ink-2">约 {v.chapter_count} 章</span> : null}
             {v.stage ? <span className="text-xs text-ink-2"> · {v.stage}</span> : null} {v.summary}
+            {v.target_node ? <span className="block text-xs text-chief">走向：节点 {v.target_node}{v.reaches_node ? '（本卷发生）' : ''}</span> : null}
           </p>
         ))}
         {o.foreshadowings && o.foreshadowings.length > 0 && (
           <p className="text-ink-2">
-            长线伏笔：{o.foreshadowings.map((f) => `F${f.seq}（第${f.plant_volume}卷埋→第${f.payoff_volume}卷收）`).join('、')}
+            长线伏笔：{o.foreshadowings.map((f) => `${f.code || '（待编号）'} ${f.description}${f.plant_volume && f.payoff_volume ? `（第${f.plant_volume}卷埋→第${f.payoff_volume}卷收）` : ''}`).join('、')}
           </p>
         )}
+        {o.expectations.length > 0 && <p className="text-ink-2">长线期待：{o.expectations.map(f => `${f.code || '（待编号）'} ${f.description}${f.plant_volume && f.payoff_volume ? `（第${f.plant_volume}卷立→第${f.payoff_volume}卷兑现）` : ''}`).join('、')}</p>}
       </div>
     )
+  }
+  if (type === 'directions') {
+    const directions = directionsArtifact(data)
+    return <ol className="space-y-4 text-ink-2">{directions.map((direction, i) => <li key={i}>
+      <p className="font-medium text-ink">方向 {i + 1}「{direction.name}」</p>
+      <p>{direction.logline}</p>
+      {direction.protagonist && <p>主角：{direction.protagonist}</p>}
+      {direction.golden_finger && <p>核心优势：{direction.golden_finger}</p>}
+      {direction.opening && <p>开局：{direction.opening}</p>}
+      {direction.selling_points.length > 0 && <p>卖点：{direction.selling_points.join('；')}</p>}
+      {direction.stage_ladder && <p>舞台：{direction.stage_ladder}</p>}
+      {direction.tone && <p>基调：{direction.tone}</p>}
+      {direction.reader && <p>读者：{direction.reader}</p>}
+      {direction.difference && <p className="text-xs">区别：{direction.difference}</p>}
+    </li>)}</ol>
   }
   if (type === 'threads') {
     const t = data as { threads: Pick<StoryThread, 'name' | 'kind' | 'summary'>[] }
@@ -522,7 +535,7 @@ function ArtifactCard({ message }: { message: MeetingMessage }) {
   const reduce = useReducedMotion()
   const target = artifactTarget(message, bookId, outline)
   return (
-    <div className="min-w-0 border-l-2 border-seal bg-paper/70">
+    <div data-testid={`artifact-message-${message.id}`} data-artifact-type={message.payload?.type} className="min-w-0 border-l-2 border-seal bg-paper/70">
       <div className="flex items-start gap-1">
         <button
           type="button"

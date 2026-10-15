@@ -354,7 +354,23 @@ async def test_volume_pitches_then_special_review(sessionmaker, monkeypatch):
     report = artifacts[5].payload["data"]
     assert report["verdict"] == "revise"
     assert {c["aspect"]: c["ok"] for c in report["checks"]}["repetition"] is False  # 程序查出重复，这一项不算过关
-    assert {i["aspect"] for i in report["issues"]} == {"villain", "repetition"}
+    assert {i["aspect"] for i in report["issues"]} == {"villain", "repetition", "foreshadow"}
+    # 新演示总纲还在第二卷排了两条长线伏笔，程序应指出漏排，并在修改稿落实。
+    async with sessionmaker() as session:
+        scheduled = list(
+            await session.scalars(
+                select(Foreshadowing).where(
+                    Foreshadowing.book_id == book_id,
+                    Foreshadowing.kind == "伏笔",
+                    Foreshadowing.description.in_(["药碗上的火漆属于外门库房", "苏家的旧账册还有另一半"]),
+                )
+            )
+        )
+    assert len(scheduled) == 2
+    assert {i["problem"] for i in report["issues"] if i["aspect"] == "foreshadow"} == {
+        f"F{item.seq}「{item.description}」计划在本卷埋下，卷纲里没有安排" for item in scheduled
+    }
+    assert {c["aspect"]: c["ok"] for c in report["checks"]}["foreshadow"] is False
 
     # 存库的是方案 2：融进了方案 3 的感情戏，对手补了后手，重复的套路换掉了
     async with sessionmaker() as session:
@@ -370,6 +386,9 @@ async def test_volume_pitches_then_special_review(sessionmaker, monkeypatch):
     assert units[0].goal == "在比试中站稳脚跟"  # 两轮修改后各字段仍是原样，没有混进别的内容
     assert units[1].key_events == ["起因", "苏晚晴暗中提醒陆远小心长老", "试探", "冲突升级", "高潮", "收尾与钩子"]
     assert units[2].key_events[2] == "对手提前布下假账册当诱饵，陆远将计就计"
+    assert {f"F{item.seq}" for item in scheduled} <= {
+        action["ref"] for unit in units for action in unit.foreshadow_actions if action["action"] == "埋下"
+    }
     assert all(u.tropes and u.resolution for u in units)
     assert all("\n" not in f for u in units for f in (u.goal, u.conflict, u.climax, u.outcome, u.resolution))
 

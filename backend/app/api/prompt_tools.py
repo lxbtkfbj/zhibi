@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import SessionDep
 from app.models import Book, LlmCall, PromptOverride
-from app.prompts import default_content
+from app.prompts import VARIABLE, default_content
 from app.prompts.catalog import CATALOG, entry, validate_content, variables
 from app.services.usage import sum_known, token_sum
 
@@ -46,6 +46,9 @@ async def _last_calls(session: AsyncSession) -> dict:
 
 def _meta(row: tuple, override: PromptOverride | None, last: dict | None) -> dict:
     name, title, group, role, when = row
+    default_variables = variables(name)
+    current = set(VARIABLE.findall(override.content)) if override else {item["name"] for item in default_variables}
+    default = {item["name"] for item in default_variables}
     return {
         "name": name,
         "title": title,
@@ -55,7 +58,9 @@ def _meta(row: tuple, override: PromptOverride | None, last: dict | None) -> dic
         "customized": override is not None,
         "updated_at": override.updated_at if override else None,
         "last_call": last,
-        "variables": variables(name),
+        "variables": default_variables,
+        "default_changed": override is not None and current != default,
+        "new_variables": [item for item in default_variables if item["name"] not in current],
     }
 
 

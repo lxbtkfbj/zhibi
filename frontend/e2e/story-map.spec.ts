@@ -122,9 +122,9 @@ test('任务 1：演示开书、三章续写、节点编辑和术语表真实验
   await expect(page.getByRole('main', { name: '稿件' })).toContainText(nodes[0].event)
   await expect(page.getByRole('main', { name: '稿件' })).toContainText(nodes.at(-1)!.event)
 
-  const bible = await json<{ foreshadowings: { code: string }[]; characters: { name: string }[] }>(request, `/books/${bookId}/bible`)
+  const bible = await json<{ foreshadowings: { code: string; kind: string }[]; characters: { name: string }[] }>(request, `/books/${bookId}/bible`)
   expect(bible.foreshadowings.length).toBeGreaterThan(0)
-  expect(bible.foreshadowings.every((item) => /^F\d+$/.test(item.code))).toBeTruthy()
+  expect(bible.foreshadowings.filter((item) => item.kind === '伏笔').every((item) => /^F\d+$/.test(item.code))).toBeTruthy()
   await page.goto(`/books/${bookId}/foreshadowing`)
   await manuscript(page)
   await expect(page.getByRole('main', { name: '稿件' }).getByText(bible.foreshadowings[0].code, { exact: true })).toBeVisible()

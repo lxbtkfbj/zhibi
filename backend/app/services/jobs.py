@@ -9,12 +9,17 @@ ACTIVE_STATUSES = ("queued", "running", "waiting_author")
 BUSY_STATUSES = ("queued", "running")
 
 
-def new_setup_job(book: Book, ask: bool = False) -> Job:
+def new_setup_job(book: Book, ask: bool = False, mode: str | None = None) -> Job:
     return Job(
         book_id=book.id,
         kind="book_setup",
         thread_id=f"setup-{book.id}-{uuid.uuid4().hex[:8]}",
-        params={"idea": book.idea, "style_reference": book.style_reference, "ask": ask},
+        params={
+            "idea": book.idea,
+            "style_reference": book.style_reference,
+            "ask": ask,
+            "mode": mode or (book.settings or {}).get("setup_mode", "oneshot"),
+        },
     )
 
 
@@ -45,7 +50,7 @@ def new_rewrite_job(book: Book, chapter: Chapter, feedback: str) -> Job:
 
 
 # 等作者拍板、可以用「批准 / 提意见」回应的内容
-DECISION_KINDS = ("setup_review", "volume_review", "trial_read", "chapter_stuck")
+DECISION_KINDS = ("setup_review", "volume_review", "trial_read", "chapter_stuck", "setup_directions", "setup_piece")
 
 
 def pending_kind(job: Job) -> str:

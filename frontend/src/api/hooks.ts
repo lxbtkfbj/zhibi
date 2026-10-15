@@ -18,6 +18,7 @@ import type {
   Relationship,
   RoleAssignments,
   Secret,
+  SetupPiece,
   StoryNode,
   StoryThread,
   TeamRole,
@@ -230,6 +231,16 @@ export function useJobActions(bookId: string) {
   const setJob = (job: Job) =>
     qc.setQueryData<BookDetail>(keys.book(bookId), (old) => (old ? { ...old, active_job: job } : old))
   return {
+    directions: useMutation({
+      mutationFn: ({ jobId, ...body }: { jobId: string; action: 'choose' | 'redo'; choice?: number; mix?: string; length?: string; feedback?: string }) =>
+        post<Job>(`/jobs/${jobId}/directions`, body),
+      onSuccess: setJob,
+    }),
+    piece: useMutation({
+      mutationFn: ({ jobId, ...body }: { jobId: string; action: 'confirm' | 'delegate' | 'revise' | 'candidates' | 'fill' | 'reopen' | 'unlock'; piece: SetupPiece; feedback?: string; node_id?: string; flips?: { topic: string; choice: string }[] }) =>
+        post<Job>(`/jobs/${jobId}/piece`, body),
+      onSuccess: setJob,
+    }),
     decide: useMutation({
       mutationFn: ({ jobId, action, feedback }: { jobId: string; action: 'approve' | 'revise'; feedback?: string }) =>
         post<Job>(`/jobs/${jobId}/decision`, { action, feedback: feedback ?? '' }),

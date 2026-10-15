@@ -15,6 +15,7 @@ from app.agents.context import (
     format_volume_plan,
     planned_chapters,
 )
+from app.agents.glossary import glossary_block
 from app.agents.playbook import playbook_text
 from app.llm.router import LLMRouter
 from app.prompts import render
@@ -32,11 +33,18 @@ async def interview(llm: LLMRouter, idea: str, style: str, requirements: str = "
 
 
 async def draft_concept(
-    llm: LLMRouter, idea: str, style: str, requirements: str, current: dict, instructions: str
+    llm: LLMRouter,
+    idea: str,
+    style: str,
+    requirements: str,
+    current: dict,
+    instructions: str,
+    chosen_direction: str = "",
 ) -> s.BookConcept:
     user = render(
         "setup_concept",
         idea=idea,
+        chosen_direction=chosen_direction,
         requirements=requirements,
         style=format_style(style),
         revision=format_revision("当前概念", format_concept(current), instructions) if current else "",
@@ -44,10 +52,34 @@ async def draft_concept(
     return await llm.structured("chief", s.BookConcept, persona("chief"), user, purpose="开书·概念")
 
 
-async def draft_lore(llm: LLMRouter, concept: dict, requirements: str, current: dict, instructions: str) -> s.LoreDraft:
+async def draft_directions(llm: LLMRouter, idea: str, style: str, requirements: str = "") -> s.BookDirections:
+    user = render(
+        "setup_directions", idea=idea, style=format_style(style), requirements=requirements, glossary=glossary_block()
+    )
+    return await llm.structured("chief", s.BookDirections, persona("chief"), user, purpose="开书·方向")
+
+
+async def draft_node_slot(
+    llm: LLMRouter, concept: dict, spine: dict, slot: str, requirements: str = "", glossary: str | None = None
+) -> s.NodeCandidates:
+    user = render(
+        "setup_node_slot",
+        concept=format_concept(concept),
+        spine=format_spine(spine),
+        slot=slot,
+        requirements=requirements,
+        glossary=glossary if glossary is not None else glossary_block(),
+    )
+    return await llm.structured("chief", s.NodeCandidates, persona("chief"), user, purpose="开书·节点候选与补空位")
+
+
+async def draft_lore(
+    llm: LLMRouter, concept: dict, spine: dict, requirements: str, current: dict, instructions: str
+) -> s.LoreDraft:
     user = render(
         "setup_lore",
         concept=format_concept(concept),
+        spine=format_spine(spine),
         requirements=requirements,
         revision=format_revision("当前设定", format_lore(current), instructions) if current else "",
     )
@@ -55,12 +87,22 @@ async def draft_lore(llm: LLMRouter, concept: dict, requirements: str, current: 
 
 
 async def draft_spine(
-    llm: LLMRouter, concept: dict, lore: dict, requirements: str, current: dict, instructions: str
+    llm: LLMRouter,
+    concept: dict,
+    requirements: str,
+    current: dict,
+    instructions: str,
+    *,
+    playbook: str,
+    glossary: str,
+    legacy_lore: dict | None = None,
 ) -> s.StorySpine:
     user = render(
         "setup_spine",
         concept=format_concept(concept),
-        lore=format_lore(lore),
+        playbook=playbook,
+        glossary=glossary,
+        lore=format_lore(legacy_lore) if legacy_lore else "（设定将在关键节点之后生成）",
         requirements=requirements,
         revision=format_revision("当前主线骨架", format_spine(current), instructions) if current else "",
     )
@@ -72,6 +114,7 @@ async def draft_threads(
     concept: dict,
     lore: dict,
     spine: dict,
+    outline: dict,
     requirements: str,
     current: dict,
     instructions: str,
@@ -82,6 +125,7 @@ async def draft_threads(
         concept=format_concept(concept),
         lore=format_lore(lore),
         spine=format_spine(spine),
+        outline=format_outline(outline),
         playbook=playbook_text(concept, "threads", selection=selection),
         requirements=requirements,
         revision=format_revision("当前线索", format_threads(current), instructions) if current else "",
@@ -94,11 +138,12 @@ async def draft_outline(
     concept: dict,
     lore: dict,
     spine: dict,
-    threads: dict,
     requirements: str,
     current: dict,
     instructions: str,
     selection: str = "auto",
+    glossary: str | None = None,
+    legacy_threads: dict | None = None,
 ) -> s.OutlineDraft:
     chapters = planned_chapters(concept)
     user = render(
@@ -106,7 +151,8 @@ async def draft_outline(
         concept=format_concept(concept),
         lore=format_lore(lore),
         spine=format_spine(spine),
-        threads=format_threads(threads),
+        threads=format_threads(legacy_threads) if legacy_threads else "（线索将在总纲之后生成）",
+        glossary=glossary if glossary is not None else glossary_block(),
         playbook=playbook_text(concept, "outline", selection=selection),
         requirements=requirements,
         chapter_hint=f"（约 {chapters} 章）" if chapters else "",
@@ -154,23 +200,27 @@ async def audit_volume(
 
 
 async def critique_setup(
-    llm: LLMRouter, idea: str, requirements: str, setup: dict[str, dict], selection: str = "auto"
+    llm: LLMRouter, idea: str, requirements: str, setup: dict[str, dict], selection: str = "auto", locked: str = ""
 ) -> s.SetupCritique:
     user = render(
         "setup_critique",
         idea=idea,
         requirements=requirements,
+        locked=locked,
         playbook=playbook_text(setup.get("concept"), "review", selection=selection),
-        **{k: PART_FORMATTERS[k](setup.get(k) or {}) for k in s.SETUP_PARTS},
+        **{k: PART_FORMATTERS[k](setup[k]) if setup.get(k) else "（还没做）" for k in s.SETUP_PARTS},
     )
     return await llm.structured("reviewer", s.SetupCritique, persona("reviewer"), user, purpose="开书·审稿")
 
 
-async def triage_feedback(llm: LLMRouter, setup: dict[str, dict], requirements: str, feedback: str) -> s.RevisionTriage:
+async def triage_feedback(
+    llm: LLMRouter, setup: dict[str, dict], requirements: str, feedback: str, locked: str = ""
+) -> s.RevisionTriage:
     user = render(
         "setup_triage",
         requirements=requirements,
         feedback=feedback,
+        locked=locked,
         **{k: PART_FORMATTERS[k](setup.get(k) or {}) for k in s.SETUP_PARTS},
     )
     return await llm.structured("chief", s.RevisionTriage, persona("chief"), user, purpose="开书·处理作者意见")
@@ -178,24 +228,24 @@ async def triage_feedback(llm: LLMRouter, setup: dict[str, dict], requirements: 
 
 PART_LABELS = {
     "concept": "概念",
-    "lore": "世界观与人物",
-    "spine": "主线骨架",
-    "threads": "线索",
+    "spine": "关键节点",
+    "lore": "世界观、人物与信息差",
     "outline": "全书总纲",
+    "threads": "线索",
     "first_volume": "第一卷卷纲",
 }
 PART_FORMATTERS = {
     "concept": format_concept,
-    "lore": format_lore,
     "spine": format_spine,
-    "threads": format_threads,
+    "lore": format_lore,
     "outline": format_outline,
+    "threads": format_threads,
     "first_volume": format_volume_plan,
 }
 
 
 async def absorb_notes(
-    llm: LLMRouter, done: dict[str, dict], todo: list[str], requirements: str, notes: list[str]
+    llm: LLMRouter, done: dict[str, dict], todo: list[str], requirements: str, notes: list[str], locked: str = ""
 ) -> s.RevisionTriage:
     """作者中途插话：判断已完成的部分要不要跟着改。"""
     user = render(
@@ -203,6 +253,7 @@ async def absorb_notes(
         done="\n\n".join(f"{PART_LABELS[k]}：\n{PART_FORMATTERS[k](v)}" for k, v in done.items()),
         todo="、".join(PART_LABELS[k] for k in todo) or "（没有了，方案马上交给作者）",
         requirements=requirements,
+        locked=locked,
         notes="\n".join(f"- {n}" for n in notes),
     )
     return await llm.structured("chief", s.RevisionTriage, persona("chief"), user, purpose="开书·处理作者插话")

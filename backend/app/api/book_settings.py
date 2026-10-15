@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import SessionDep, get_book, get_redis
 from app.book_settings import BookSettings, compile_rules, default_settings, merge_settings, settings_of
-from app.models import AppSetting, AuthorRequirement, Book
+from app.models import AppSetting, AuthorRequirement, Book, Job
 from app.services import jobs
 from app.services.meeting import post_message
 from app.services.requirements import add_requirement, list_requirements, suppress_legacy_text
@@ -142,6 +142,10 @@ async def patch_settings(
     await session.refresh(book, attribute_names=["settings"], with_for_update=True)
     before = settings_of(book)
     values = validated(before, body)
+    if values["setup_mode"] != before["setup_mode"] and await session.scalar(
+        select(Job.id).where(Job.book_id == book.id, Job.kind == "book_setup").limit(1)
+    ):
+        raise HTTPException(409, "开书任务已经开始，不能切换开书方式")
     book.settings = values
     changed = change_summary(before, values)
     job = await jobs.active_job(session, book.id)

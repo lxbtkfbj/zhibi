@@ -22,18 +22,21 @@ from app.agents.context import (
     format_ledger,
     format_requirements,
     format_reveals,
+    format_secrets,
     format_spine,
     format_style,
+    format_target_node,
     format_threads,
     format_unit,
     format_volume_card,
 )
+from app.agents.glossary import glossary_block
 from app.agents.planning import ref_seq, relevant_ledger, unit_hint
 from app.agents.playbook import pick, usage_text
 from app.book_settings import settings_of
 from app.models import Book, Chapter, Character, PlotUnit, Volume, WorldEntry
 from app.services.requirements import list_requirements
-from app.services.setup_store import load_ledger, load_nodes, load_threads, unit_dict, volume_dict
+from app.services.setup_store import load_ledger, load_nodes, load_secrets, load_threads, unit_dict, volume_dict
 
 RECENT_CHAPTERS = 5
 USED_CLIMAXES = 30
@@ -471,12 +474,32 @@ async def volume_blocks(session: AsyncSession, book: Book, volume: Volume) -> di
     characters = await _characters(session, book.id)
     prior = await prior_units(session, book.id, volume.index)
     playbook = pick(book.concept, settings_of(book)["playbook"])
+    hidden_secrets = [
+        secret for secret in await load_secrets(session, book.id, nodes) if secret.get("status") == "hidden"
+    ]
+
+    def reveal_distance(secret: dict) -> tuple[bool, float, int]:
+        node_index = secret.get("node") or 0
+        if 1 <= node_index <= len(nodes):
+            node = nodes[node_index - 1]
+            planned_volume = node.get("volume")
+            if planned_volume is None and node.get("kind") == "ending":
+                planned_volume = max((item.index for item in volumes), default=volume.index)
+            if planned_volume is not None:
+                return False, abs(planned_volume - volume.index), secret["seq"]
+            return False, float("inf"), secret["seq"]
+        return True, float("inf"), secret["seq"]
+
+    hidden_secrets.sort(key=reveal_distance)
     return {
         "volume_index": str(volume.index),
         "concept": format_concept({**(book.concept or {}), "chapter_words": chapter_words(book)}),
         "spine": format_spine({**(book.spine or {}), "nodes": nodes}),
         "threads": format_threads(await load_threads(session, book.id), volume=volume.index),
         "volume": format_volume_card(volume_dict(volume, nodes)),
+        "target_node": format_target_node(volume_dict(volume, nodes), nodes),
+        "secrets": format_secrets(hidden_secrets[:12]),
+        "glossary": glossary_block(),
         "neighbors": "\n\n".join(neighbors),
         "story_so_far": await story_so_far(session, book, volume.index, before_chapter=first_chapter),
         "used_climaxes": used_climaxes(prior),

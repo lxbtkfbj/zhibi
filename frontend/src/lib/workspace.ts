@@ -18,6 +18,7 @@ export function artifactTarget(message: MeetingMessage, bookId: string, outline?
   const page = (suffix: string, label: string) => ({ path: `${base}${suffix}`, label })
   switch (type) {
     case 'concept': return page('/concept', '书的概念')
+    case 'directions': return page('', '开书方向')
     case 'lore': return page('/characters', '人物设定')
     case 'spine': return page('/spine', '主线骨架')
     case 'threads': return page('/threads', '线索')
@@ -55,7 +56,7 @@ export function pendingTarget(pending: Pending | null | undefined, bookId: strin
   }
 }
 
-const SETUP_OUTPUTS = new Set(['concept', 'lore', 'spine', 'threads', 'outline', 'volume_plan'])
+const SETUP_OUTPUTS = new Set(['directions', 'concept', 'lore', 'spine', 'threads', 'outline', 'volume_plan'])
 const WRITE_OUTPUTS = new Set(['volume_plan', 'volume_directions', 'volume_pitch', 'pitch_scores', 'volume_audit', 'chapter_plan', 'chapter_final'])
 
 export function currentTarget(bookId: string, job: Job | null, messages: MeetingMessage[], draft: LiveDraft | null, outline?: Outline): WorkspaceTarget | null {

@@ -138,13 +138,13 @@ async def test_new_book_flow(client, queued):
     assert book["title"] == "青灯问道"
 
     outline = (await client.get(f"/api/books/{book_id}/outline")).json()
-    assert len(outline["volumes"]) == 4
+    assert len(outline["volumes"]) == 8
     unit = outline["volumes"][0]["units"][0]
     res = await client.patch(f"/api/units/{unit['id']}", json={"title": "作者改的标题"})
     assert res.json()["title"] == "作者改的标题"
 
     bible = (await client.get(f"/api/books/{book_id}/bible")).json()
-    assert len(bible["characters"]) == 5
+    assert len(bible["characters"]) == 6
     hero = next(c for c in bible["characters"] if c["role_type"] == "主角")
     res = await client.patch(f"/api/characters/{hero['id']}", json={"condition": "伤好了"})
     assert res.json()["condition"] == "伤好了"
@@ -279,7 +279,9 @@ async def test_questions_then_note_then_review(client, queued):
     assert any(node["kind"] == "milestone" for node in nodes)
     assert "milestones" not in book["spine"]
     outline = (await client.get(f"/api/books/{book_id}/outline")).json()
-    assert outline["volumes"][1]["chapter_count"] == 90
+    # 选择 200 万字后，演示总纲按新八卷合同分摊篇幅，不再固定沿用旧四卷的 90 章。
+    assert outline["volumes"][1]["chapter_count"] == 83
+    assert sum(v["chapter_count"] for v in outline["volumes"]) == 667
 
     messages = (await client.get(f"/api/books/{book_id}/meeting")).json()
     note = next(m for m in messages if m["kind"] == "note")

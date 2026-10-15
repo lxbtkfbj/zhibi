@@ -29,7 +29,7 @@ const QUICK_PHRASES = {
 /** 每个会话保留自己的草稿；切稿件路由不会重挂载这块区域。 */
 function NoteComposer() {
   const { job, working, waiting, asking, bookId, book, conversation, focusComposer } = useBookContext()
-  const { note, decide } = useJobActions(bookId)
+  const { note, decide, directions, piece } = useJobActions(bookId)
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [sent, setSent] = useState<{ conversation: string; message: string } | null>(null)
   const ref = useRef<HTMLTextAreaElement>(null)
@@ -38,8 +38,8 @@ function NoteComposer() {
   const feedbackPrefix = direct ? `（给${ROLE_META[conversation].name}）` : ''
   const inputLimit = waiting ? 5000 - feedbackPrefix.length : 5000
   const tooLong = text.trim().length > inputLimit
-  const pending = note.isPending || decide.isPending
-  const error = note.error ?? decide.error
+  const pending = note.isPending || decide.isPending || directions.isPending || piece.isPending
+  const error = note.error ?? decide.error ?? directions.error ?? piece.error
   const idle = !working && !waiting && !asking
   const resumable = job?.status === 'failed' || job?.status === 'cancelled'
 
@@ -66,7 +66,11 @@ function NoteComposer() {
     if (!content || pending || tooLong) return
     const sentConversation = conversation
     try {
-      if (waiting && job) {
+      if (waiting && job?.pending?.kind === 'setup_directions') {
+        await directions.mutateAsync({ jobId: job.id, action: 'redo', feedback: `${feedbackPrefix}${content}` })
+      } else if (waiting && job?.pending?.kind === 'setup_piece') {
+        await piece.mutateAsync({ jobId: job.id, action: 'revise', piece: job.pending.piece, feedback: `${feedbackPrefix}${content}` })
+      } else if (waiting && job) {
         await decide.mutateAsync({
           jobId: job.id,
           action: 'revise',
@@ -90,7 +94,9 @@ function NoteComposer() {
   const placeholder = direct
     ? `发消息给${ROLE_META[conversation].name}…`
     : waiting
-      ? decisionCopy(job?.pending, bookId).placeholder
+      ? job?.pending?.kind === 'setup_directions'
+        ? '写下换方向的要求；选择方向与篇幅请通过接口完成'
+        : decisionCopy(job?.pending, bookId).placeholder
       : asking
         ? '还有别的要求也可以先说，例如：主角叫云澈'
         : working

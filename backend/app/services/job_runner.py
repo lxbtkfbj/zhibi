@@ -34,7 +34,9 @@ LOCK_RENEW_S = 20
 GRAPHS: dict[str, tuple[Callable[[], StateGraph], Callable[[dict], dict]]] = {
     "book_setup": (
         book_setup.build_setup_graph,
-        lambda p: book_setup.initial_state(p.get("idea", ""), p.get("style_reference", ""), bool(p.get("ask"))),
+        lambda p: book_setup.initial_state(
+            p.get("idea", ""), p.get("style_reference", ""), bool(p.get("ask")), mode=p.get("mode", "oneshot")
+        ),
     ),
     "write_book": (write_book.build_write_graph, write_book.initial_state),
     "rewrite_chapter": (write_book.build_rewrite_graph, write_book.rewrite_initial_state),
@@ -45,6 +47,8 @@ BOOK_STATUS_WHILE_RUNNING = {"book_setup": "setting_up", "write_book": "writing"
 BOOK_STATUS_WHILE_WAITING = {
     "setup_review": "awaiting_approval",
     "setup_questions": "setting_up",
+    "setup_directions": "setting_up",
+    "setup_piece": "setting_up",
     "volume_review": "writing",
     "trial_read": "writing",
     "chapter_stuck": "writing",

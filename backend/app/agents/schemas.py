@@ -38,6 +38,49 @@ def remark_field(focus: str = "") -> Any:
     )
 
 
+TECHNIQUES_DESC = "用到的技巧名称，只能从【术语表】里选，最多 3 个；没有合适的就留空"
+EDITOR_NOTE_DESC = "编辑批注：这里用了什么技巧、想让读者有什么感受，写给不懂写作技巧的作者看，一两句白话，30-80 字"
+
+
+class AuthorChoice(Lenient):
+    topic: str = Field(description="决定了什么，4-10 字，如「感情线」「开局方式」")
+    chosen: str = Field(description="编辑部现在的选择，20 字以内")
+    alternatives: list[str] = Field(description="作者可以换成的其他选择，1-3 个，每个 20 字以内，彼此有实质差别")
+    why: str = Field(description="为什么这样选，一句白话")
+
+
+def decisions_field() -> Any:
+    return Field(
+        default_factory=list,
+        description="这一步里编辑部替作者做的、作者可能想换的关键决定，最多 3 个；作者已经明确说过的事不要列，没有就留空",
+    )
+
+
+class BookDirection(Lenient):
+    name: str = Field(description="方向名，4-8 字，如「废柴逆袭」「冷面师尊」")
+    logline: str = Field(description="一句话故事，50 字以内：主角是谁、想要什么、最大的阻碍是什么")
+    protagonist: str = Field(description="主角：身份、性格、最抓人的一点，30-60 字")
+    golden_finger: str = Field(description="金手指或核心优势：是什么、怎么用、有什么限制和代价，30-60 字")
+    opening: str = Field(description="开局怎么切入：前 3 章发生什么、核心钩子是什么，40-80 字")
+    selling_points: list[str] = Field(description="2-3 个卖点，具体到读者爽在哪里")
+    stage_ladder: str = Field(description="舞台阶梯：地图怎么一层层往上走，如「青石镇 → 天剑宗 → 中州 → 上界」")
+    tone: str = Field(description="基调，如「热血爽快，偶尔幽默」")
+    reader: str = Field(description="目标读者：男频还是女频、爱看什么、最讨厌什么，一句话")
+    difference: str = Field(description="和其他方向最大的不同，一句话")
+    editor_note: str = Field(default="", description=EDITOR_NOTE_DESC)
+    techniques: list[str] = Field(default_factory=list, description=TECHNIQUES_DESC)
+
+
+class BookDirections(Lenient):
+    """开书前主编先给出几个方向，作者挑一个（也可以混搭）。"""
+
+    directions: list[BookDirection] = Field(
+        description="3 个方向，彼此要有实质差别：主角、金手指、开局、舞台至少两项不同"
+    )
+    recommended: int = Field(default=0, ge=0, description="你推荐的方向序号（从 0 开始）")
+    remark: str = remark_field("推荐哪个方向、为什么")
+
+
 class BookConcept(Lenient):
     title: str = Field(description="书名本身（不带书名号、不带备选），按作者写作规矩里的书名要求来起")
     alt_titles: list[str] = Field(default_factory=list, description="2-3 个备选书名，风格与书名一致")
@@ -55,6 +98,11 @@ class BookConcept(Lenient):
     )
     target_volumes: int = Field(ge=1, le=20, description="计划分几卷：按篇幅定，每卷通常 25-60 万字")
     chapter_words: int = Field(ge=1000, le=8000, description="每章目标字数，通常 2000-4000")
+    stage_ladder: str = Field(
+        default="", description="舞台阶梯：地图怎么一层层往上走，如「青石镇 → 天剑宗 → 中州 → 上界」"
+    )
+    target_reader: str = Field(default="", description="目标读者：男频还是女频、爱看什么、最讨厌什么，一句话")
+    decisions: list[AuthorChoice] = decisions_field()
     remark: str = remark_field("书名、核心卖点和篇幅为什么这样定")
 
     @field_validator("target_length", mode="before")
@@ -89,7 +137,6 @@ class CharacterDraft(Lenient):
     goal: str = Field(description="此人最想要什么")
     location: str = Field(default="", description="故事开始时所在的位置")
     condition: str = Field(default="", description="故事开始时的状态，如伤势、处境")
-    secrets: list[str] = Field(default_factory=list, description="此人隐藏的秘密或掌握的关键信息")
 
 
 class RelationshipDraft(Lenient):
@@ -99,35 +146,81 @@ class RelationshipDraft(Lenient):
     description: str = Field(default="", description="关系的具体情况与张力")
 
 
+AnchorKind = Literal["登场", "确认关系", "翻脸", "高光", "退场", "其他"]
+ReaderKnows = Literal["知道", "不知道", "部分"]
+
+
+class NodeAnchorDraft(Lenient):
+    character: str = Field(description="人物姓名（必须是人物列表里的人）")
+    node: int = Field(ge=1, description="挂在第几个节点（关键节点的序号）")
+    kind: AnchorKind = Field(description="在这个节点前后：登场 / 确认关系 / 翻脸 / 高光 / 退场 / 其他")
+    note: str = Field(default="", description="具体发生什么，20-50 字")
+
+
+class SecretDraft(Lenient):
+    title: str = Field(description="秘密的短名，4-12 字，如「主角的真实修为」")
+    truth: str = Field(description="真相是什么，30-80 字")
+    knowers: list[str] = Field(
+        default_factory=list, description="开书时就知道这件事的人（人物列表里的姓名）；没人知道就留空"
+    )
+    reader_knows: ReaderKnows = Field(
+        description="读者一开始知不知道：知道＝读者看得到、角色看不到，是扮猪吃虎和打脸的燃料；不知道＝悬念，揭开时读者也意外；部分＝读者只知道一角"
+    )
+    reveal_plan: str = Field(description="计划在什么时候、对谁揭开，揭开后局面怎么变，30-80 字")
+    node: int = Field(default=0, ge=0, description="在第几个节点前后揭开；不确定填 0")
+
+
 class LoreDraft(Lenient):
-    world_entries: list[WorldEntryDraft] = Field(description="世界观条目，6-12 条，必须包含力量体系或核心规则")
-    characters: list[CharacterDraft] = Field(description="主要人物，5-10 人，至少包含主角和一个主要反派")
+    world_entries: list[WorldEntryDraft] = Field(
+        description="世界观条目，6-12 条，必须包含力量体系（境界从低到高写清名称）和核心规则"
+    )
+    characters: list[CharacterDraft] = Field(description="主要人物，6-12 人，至少包含主角和一个主要反派")
     relationships: list[RelationshipDraft] = Field(default_factory=list, description="人物之间的重要关系")
-    remark: str = remark_field("主角叫什么、金手指或核心能力是什么、主要反派是谁，方便作者随时插话调整")
+    anchors: list[NodeAnchorDraft] = Field(
+        default_factory=list,
+        description="把重要人物挂到关键节点上：主角团、每位女主、主要对手至少一条「登场」，关键关系变化也要挂上",
+    )
+    secrets: list[SecretDraft] = Field(default_factory=list, description="全书关键的秘密与信息差，4-10 条")
+    decisions: list[AuthorChoice] = decisions_field()
+    remark: str = remark_field("主角叫什么、金手指是什么、主要反派是谁、几位女主各在哪个节点登场")
 
 
-class Milestone(Lenient):
-    index: int = Field(ge=1, description="节点序号，从 1 开始，按时间顺序")
-    title: str = Field(description="节点名称，4-10 字")
+NodeKind = Literal["开篇", "节点", "结局"]
+
+
+class StoryNodeDraft(Lenient):
+    ref: int = Field(default=0, ge=0, description="改写已有节点时填它现在的序号；新增的节点填 0")
+    kind: NodeKind = Field(description="开篇 / 节点 / 结局：第一个必须是开篇，最后一个必须是结局，其余都是节点")
+    title: str = Field(description="节点名称，4-10 字，如「飞升神界」")
     volume: int = Field(ge=1, description="大约发生在第几卷")
-    event: str = Field(description="这个节点发生了什么，50-120 字")
-    change: str = Field(description="这之后主角或局势发生了什么不可逆的变化")
+    event: str = Field(description="发生什么：这件大事本身，具体到人和场面，50-120 字")
+    prerequisite: str = Field(
+        default="",
+        description="之前得先有：要让这件事发生、并让读者觉得合理，前面必须已经具备的实力、关系、仇怨、秘密或局势，30-100 字；开篇可以留空",
+    )
+    consequence: str = Field(
+        description="之后变成：主角和局势发生了哪些回不去的变化（实力、地图、关系、敌人、目标），30-100 字"
+    )
+    editor_note: str = Field(default="", description=EDITOR_NOTE_DESC)
+    techniques: list[str] = Field(default_factory=list, description=TECHNIQUES_DESC)
 
 
-class StorySpine(Lenient):
-    """主线骨架：先定开头和结局，再定中间的关键转折，分卷大纲在骨架上展开。"""
+class StorySpine(Lenient):  # 替换原来的 StorySpine；Milestone 删除（旧数据由 spine_from_legacy 兼容）
+    """主线与关键节点：先定开篇和结局，再定中间改变全局的大事件；分卷在节点之间展开。"""
 
     core_conflict: str = Field(description="贯穿全书的核心矛盾：主角想要什么、最大的阻碍是什么")
     theme: str = Field(description="这本书最终想表达什么，一句话")
     protagonist_arc: str = Field(description="主角的成长弧线：从什么样的人，经历什么，变成什么样的人")
-    opening: str = Field(description="开篇：故事从什么时间、地点、处境切入，前 3 章抛出的核心钩子是什么，100-200 字")
-    ending: str = Field(
-        description="结局：最终高潮怎么打、主线如何收束、主角最终得到和失去了什么、主要伏笔如何回收，150-300 字"
-    )
-    milestones: list[Milestone] = Field(
-        description="从开篇到结局之间的全书关键转折，6-12 个，按顺序排列，均匀分布到各卷；最后一个是最终高潮"
-    )
-    remark: str = remark_field("结局是什么、中间最关键的一两个转折是什么")
+    nodes: list[StoryNodeDraft] = Field(description="从开篇到结局的全部节点，8-14 个（含开篇和结局），按时间顺序")
+    decisions: list[AuthorChoice] = decisions_field()
+    remark: str = remark_field("结局是什么、中间最关键的一两个节点是什么、哪些节点你拿不准")
+
+
+class NodeCandidates(Lenient):
+    """作者要换一个节点或补一个空位时，主编给出的节点。"""
+
+    nodes: list[StoryNodeDraft] = Field(description="按要求的数量给出：候选 3 个，补空位 1 个")
+    remark: str = remark_field("这几个节点分别押在什么上")
 
 
 ThreadKind = Literal["主线", "感情线", "反派线", "谜团线", "成长线", "其他"]
@@ -167,9 +260,14 @@ class VolumeDraft(Lenient):
     climax: str = Field(default="", description="本卷最大的高潮场面，50-100 字")
     antagonist: str = Field(default="", description="本卷的主要对手及其目的；对手要有自己的谋划，不能降智")
     power_range: str = Field(default="", description="主角本卷的实力变化，如「炼气三层 → 筑基初期」")
-    thread_beats: list[ThreadStep] = Field(default_factory=list, description="本卷推进哪些线索、各走到哪一步")
     new_characters: list[str] = Field(default_factory=list, description="本卷新登场的重要人物，写成「姓名：身份」")
     chapter_count: int = Field(default=0, ge=0, le=1000, description="本卷预计章数，各卷之和等于全书计划总章数")
+    target_node: int = Field(
+        ge=1, description="本卷走向第几个节点（关键节点的序号）：这一卷结束时离这个节点更近，或者正好写到它"
+    )
+    reaches_node: bool = Field(default=False, description="这个节点是不是就发生在本卷（作为本卷高潮或卷末）")
+    editor_note: str = Field(default="", description=EDITOR_NOTE_DESC)
+    techniques: list[str] = Field(default_factory=list, description=TECHNIQUES_DESC)
 
 
 ForeshadowSpan = Literal["短", "中", "长"]
@@ -182,6 +280,19 @@ class ForeshadowingDraft(Lenient):
     payoff_plan: str = Field(description="计划在哪里回收，回收时的效果")
     plant_volume: int = Field(default=1, ge=1, description="在第几卷埋下")
     payoff_volume: int = Field(default=1, ge=1, description="在第几卷回收")
+    node: int = Field(default=0, ge=0, description="为第几个节点的「之前得先有」做铺垫；没有就填 0")
+
+
+class ExpectationDraft(Lenient):
+    description: str = Field(description="读者在等什么，一句话，如「三年之约：主角要当众击败退婚的未婚妻」")
+    span: Literal["中", "长"] = Field(default="长", description="跨度：中（一卷内兑现）/ 长（跨卷兑现）")
+    plant_plan: str = Field(
+        description="怎么立起来：谁当着谁、立下什么约定、放出什么狠话或定下什么目标，读者从此在等什么"
+    )
+    payoff_plan: str = Field(description="怎么兑现，以及怎么超出读者的预期（比读者以为的更大、更快，或者换个角度）")
+    plant_volume: int = Field(default=1, ge=1, description="在第几卷立下")
+    payoff_volume: int = Field(default=1, ge=1, description="在第几卷兑现")
+    node: int = Field(default=0, ge=0, description="和第几个节点有关；没有就填 0")
 
 
 class OutlineDraft(Lenient):
@@ -189,17 +300,30 @@ class OutlineDraft(Lenient):
 
     volumes: list[VolumeDraft] = Field(description="全书分卷卡片，卷数与概念里的计划卷数一致")
     foreshadowings: list[ForeshadowingDraft] = Field(
-        default_factory=list, description="跨卷的长线伏笔，5-12 条，埋下和回收要分布在不同的卷"
+        default_factory=list,
+        description="跨卷的长线伏笔，5-12 条，埋下和回收要分布在不同的卷；优先从节点的「之前得先有」倒推",
     )
-    remark: str = remark_field("全书多少章、各卷的舞台和对手怎么升级、最长的伏笔埋在哪")
+    expectations: list[ExpectationDraft] = Field(
+        default_factory=list, description="长线期待，2-6 条：读者明明知道、一直在等的事；立下和兑现至少隔一卷"
+    )
+    decisions: list[AuthorChoice] = decisions_field()
+    remark: str = remark_field("全书多少章、节点之间各分几卷、最长的伏笔和期待埋在哪")
 
 
 ForeshadowAction = Literal["埋下", "提醒", "回收"]
 
 
+class RevealStep(Lenient):
+    ref: str = Field(description="秘密编号，如 S2（必须是信息差表里已有的编号）")
+    to: str = Field(description="揭给谁：人物姓名，或者「读者」「众人」")
+    how: str = Field(description="怎么揭开、揭开后局面怎么变，20-60 字")
+
+
 class ForeshadowStep(Lenient):
-    ref: str = Field(description="伏笔编号，如 F3（必须是伏笔台账里已有的编号）")
-    action: ForeshadowAction = Field(description="埋下 / 提醒（让读者再想起来）/ 回收")
+    ref: str = Field(description="台账编号：伏笔如 F3，期待如 E2（必须是台账里已有的编号）")
+    action: ForeshadowAction = Field(
+        description="埋下 / 提醒（让读者再想起来）/ 回收；对期待来说，埋下就是立下，回收就是兑现"
+    )
     detail: str = Field(default="", description="具体怎么做，20-60 字")
 
 
@@ -214,8 +338,11 @@ class PlotUnitDraft(Lenient):
     key_events: list[str] = Field(description="按顺序列出 4-8 个关键事件")
     thread_beats: list[ThreadStep] = Field(default_factory=list, description="本单元推进哪些线索，至少一条")
     foreshadow_actions: list[ForeshadowStep] = Field(
-        default_factory=list, description="本单元对伏笔台账里已有伏笔的动作（埋下、提醒或回收）"
+        default_factory=list, description="本单元对台账里已有伏笔和期待的动作（埋下、提醒或回收）"
     )
+    reveals: list[RevealStep] = Field(default_factory=list, description="本单元揭开的秘密；没有就留空")
+    editor_note: str = Field(default="", description=EDITOR_NOTE_DESC)
+    techniques: list[str] = Field(default_factory=list, description=TECHNIQUES_DESC)
     tropes: list[str] = Field(
         default_factory=list,
         description="本单元用到的套路：核心套路写在第一个，最多再加一个；用题材打法「套路库」里的名称，如「拍卖会」",
@@ -232,12 +359,35 @@ class NewForeshadowing(ForeshadowingDraft):
     )
 
 
+class NewExpectation(ExpectationDraft):
+    span: Literal["中", "长"] = Field(default="中", description="跨度：中（本卷内兑现）/ 长（跨卷兑现）")
+    plant_unit: int = Field(default=1, ge=1, description="在本卷第几个单元立下")
+    payoff_unit: int = Field(
+        default=0, ge=0, description="在本卷第几个单元兑现；跨卷兑现填 0，并在 payoff_volume 写明第几卷"
+    )
+
+
+class NodeUpdate(Lenient):
+    title: str = Field(description="调整后的节点名称，4-10 字")
+    event: str = Field(description="调整后发生什么，50-120 字")
+    prerequisite: str = Field(description="调整后之前得先有，30-100 字")
+    consequence: str = Field(description="调整后之后变成，30-100 字")
+    reason: str = Field(description="为什么要调整：前文写成了什么样，原来的节点哪里不自然，一两句")
+
+
 class VolumePlanDraft(Lenient):
     """卷纲：把一卷拆成剧情单元，并安排本卷的线索节拍与伏笔。"""
 
     units: list[PlotUnitDraft] = Field(description="本卷的剧情单元，章数之和等于本卷预计章数")
     new_foreshadowings: list[NewForeshadowing] = Field(
         default_factory=list, description="本卷新埋的短线、中线伏笔，2-6 条"
+    )
+    new_expectations: list[NewExpectation] = Field(default_factory=list, description="本卷新立的中线期待，1-3 条")
+    node_update: NodeUpdate | None = Field(
+        default=None, description="本卷走向的节点是暂定、按前文已经写不自然时，提议的调整；不需要调整或节点是铁钉时留空"
+    )
+    node_conflict: str = Field(
+        default="", description="本卷走向的节点是铁钉、但和前文有冲突时，说明冲突在哪；没有冲突就留空"
     )
     remark: str = remark_field("这一卷怎么拆、节奏怎么起伏、最大的爽点在哪")
 
@@ -419,15 +569,14 @@ class ChapterMaterials(Lenient):
     remark: str = remark_field()
 
 
-SETUP_PARTS = ("concept", "lore", "spine", "threads", "outline", "first_volume")
-SetupTarget = Literal["concept", "lore", "spine", "threads", "outline", "first_volume"]
+SETUP_PARTS = ("concept", "spine", "lore", "outline", "threads", "first_volume")
+SetupTarget = Literal["concept", "spine", "lore", "outline", "threads", "first_volume"]
 
 
 class ReviewIssue(Lenient):
     target: SetupTarget = Field(
         description=(
-            "问题出在哪部分：concept 概念 / lore 设定与人物 / spine 主线骨架（开篇、结局、关键转折）"
-            "/ threads 线索 / outline 全书总纲（分卷卡片与长线伏笔）/ first_volume 第一卷卷纲（剧情单元）"
+            "问题出在哪部分：concept 概念 / spine 关键节点 / lore 世界观、人物与信息差 / outline 全书总纲（分卷卡片、长线伏笔与期待）/ threads 线索 / first_volume 第一卷卷纲（剧情单元）"
         )
     )
     problem: str = Field(description="具体问题，指出原文位置")
@@ -442,13 +591,20 @@ class SetupCritique(Lenient):
     remark: str = remark_field()
 
 
+class UnlockRequest(Lenient):
+    target: SetupTarget = Field(
+        description="要解锁的部分：concept 概念 / spine 关键节点 / lore 世界观、人物与信息差 / outline 全书总纲 / threads 线索 / first_volume 第一卷卷纲"
+    )
+    reason: str = Field(description="为什么要解锁、准备怎么改，一两句")
+
+
 class RevisionTriage(Lenient):
     """主编读完意见后，决定改哪些部分、怎么改。"""
 
     concept_instructions: str = Field(default="", description="对概念的修改要求；不需要改则留空")
-    lore_instructions: str = Field(default="", description="对设定与人物的修改要求；不需要改则留空")
+    lore_instructions: str = Field(default="", description="对世界观、人物、人物锚点与信息差的修改要求；不需要改则留空")
     spine_instructions: str = Field(
-        default="", description="对主线骨架（开篇、结局、关键转折）的修改要求；不需要改则留空"
+        default="", description="对关键节点的修改要求：写明改第几个节点、怎么改，不能改铁钉节点；不需要改则留空"
     )
     threads_instructions: str = Field(
         default="", description="对线索（主线、感情线、反派线、谜团线等）的修改要求；不需要改则留空"
@@ -457,6 +613,9 @@ class RevisionTriage(Lenient):
         default="", description="对全书总纲（分卷卡片、长线伏笔）的修改要求；不需要改则留空"
     )
     first_volume_instructions: str = Field(default="", description="对第一卷卷纲（剧情单元）的修改要求；不需要改则留空")
+    unlock_requests: list[UnlockRequest] = Field(
+        default_factory=list, description="作者的话需要改动作者已确认（锁定）的部分时，在这里提出解锁请求；不需要就留空"
+    )
     remark: str = remark_field("你打算怎么落实作者的话")
 
     def instructions(self) -> dict[str, str]:

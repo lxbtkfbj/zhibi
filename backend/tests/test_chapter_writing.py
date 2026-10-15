@@ -147,17 +147,23 @@ async def test_materials_polish_recap_and_recall(sessionmaker, monkeypatch):
     plan = next(u for name, u in structured if name == "ChapterPlanDraft")
     assert "◆ 本卷前面各单元回顾\n单元1「捡灯」：「捡灯」共 6 章" in plan and "◆ 最近几章" in plan
 
-    # 第 7 章回收第 1 章埋下的 F4：写手拿到了第 1 章的原文片段
+    # 第 7 章回收第 1 章埋下的药碗伏笔：F/E 共用编号，按内容定位而不写死序号。
+    async with sessionmaker() as session:
+        poison = (
+            await session.execute(
+                select(Foreshadowing).where(
+                    Foreshadowing.book_id == book_id,
+                    Foreshadowing.kind == "伏笔",
+                    Foreshadowing.description == "跟班暴毙前喝过的那碗药被人动过手脚",
+                )
+            )
+        ).scalar_one()
     write7 = next(u for u in streamed if "请写第 7 章" in u)
     assert "【本章要处理的伏笔】" in write7
-    assert "- 回收F4［已埋］跟班暴毙前喝过的那碗药被人动过手脚" in write7
+    assert f"- 回收F{poison.seq}［已埋］跟班暴毙前喝过的那碗药被人动过手脚" in write7
     assert "第1章《" in write7 and "（埋下）原文：「" in write7 and "跟班暴毙前喝过的那碗药被人动过手脚——" in write7
     assert "单元1「捡灯」：「捡灯」共 6 章" in write7
-    async with sessionmaker() as session:
-        f4 = (
-            await session.execute(select(Foreshadowing).where(Foreshadowing.book_id == book_id, Foreshadowing.seq == 4))
-        ).scalar()
-    assert f4.status == "resolved" and f4.planted_chapter == 1 and f4.resolved_chapter == 7
+    assert poison.status == "resolved" and poison.planted_chapter == 1 and poison.resolved_chapter == 7
 
     # 写的过程实时推给网页：只走 Redis，带着到目前为止的全文，最后一条标记写完
     redis = Redis.from_url(get_settings().redis_url, decode_responses=True)

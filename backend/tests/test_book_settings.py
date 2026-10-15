@@ -135,6 +135,7 @@ def runtime(sessionmaker, book_id, job_id):
             check_cancel=AsyncMock(),
             emit=SimpleNamespace(status=AsyncMock(), say=AsyncMock(), artifact=AsyncMock()),
             llm=SimpleNamespace(),
+            redis=SimpleNamespace(xadd=AsyncMock()),
         )
     )
 

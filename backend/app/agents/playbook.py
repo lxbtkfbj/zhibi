@@ -27,6 +27,7 @@ RULES: list[tuple[str, tuple[tuple[str, ...], ...]]] = [
 
 # 各规划环节取哪几节
 STAGES: dict[str, tuple[str, ...]] = {
+    "nodes": ("总则", "分卷", "线索"),
     "threads": ("总则", "线索", "防重复"),
     "outline": ("总则", "分卷", "套路库", "防重复"),
     "volume": ("总则", "单元", "套路库", "破局手法", "防重复"),

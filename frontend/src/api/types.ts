@@ -10,6 +10,8 @@ export interface InterviewQuestion {
   recommended: number
 }
 
+export type SetupPiece = 'concept' | 'nodes' | 'cast' | 'fill' | 'first_volume'
+
 /**
  * 等作者处理的内容：setup_questions 动笔前的提问；setup_review 开书方案拍板；
  * volume_review 某一卷的卷纲拍板；trial_read 前几章试读；chapter_stuck 某章重写两次仍未通过。
@@ -17,6 +19,8 @@ export interface InterviewQuestion {
 export type Pending =
   | { kind: 'setup_questions'; questions: InterviewQuestion[] }
   | { kind: 'setup_review'; round: number; title?: string }
+  | { kind: 'setup_directions'; directions: { name: string; logline: string }[]; recommended: number; length: InterviewQuestion }
+  | { kind: 'setup_piece'; piece: SetupPiece; round: number; warnings?: string[]; decisions?: { topic: string; chosen: string; alternatives: string[]; why: string }[]; suggestions?: unknown[]; unlock_requests?: unknown[]; candidates?: unknown }
   | { kind: 'volume_review'; volume: number; title: string; issues?: string[] }
   | { kind: 'trial_read'; chapters: number }
   | { kind: 'chapter_stuck'; chapter: number; title: string; issues: string[] }

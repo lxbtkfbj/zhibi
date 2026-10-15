@@ -148,7 +148,7 @@ async def test_demo_structured_logs_original_request_response_and_latest_prompt(
     router = LLMRouter(sessionmaker)
     monkeypatch.setattr(module.demo, "respond", AsyncMock(return_value=Answer(answer="原样回复")))
     system = render("persona_chief", rules=render("rules"))
-    user = render("setup_concept", idea="点子", requirements="规矩", style="", revision="")
+    user = render("setup_concept", idea="点子", chosen_direction="", requirements="规矩", style="", revision="")
     await router.structured("chief", Answer, system, user, purpose="开书·概念")
     call = (await rows(sessionmaker))[0]
     assert call.request["system"] == system and call.request["user"] == user

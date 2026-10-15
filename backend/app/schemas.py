@@ -82,6 +82,7 @@ class BookCreate(BaseModel):
     style_reference: str = Field("", max_length=20000)
     # 动笔前让主编先问几个关键问题（篇幅、主角、金手指、结局……）
     ask: bool = False
+    mode: Literal["puzzle", "oneshot"] | None = None
 
 
 class BookPatch(BaseModel):
@@ -564,6 +565,37 @@ class BibleOut(BaseModel):
 class Decision(BaseModel):
     action: Literal["approve", "revise"]
     feedback: str = Field("", max_length=5000)
+
+
+SetupPiece = Literal["concept", "nodes", "cast", "fill", "first_volume"]
+
+
+class DirectionDecision(BaseModel):
+    action: Literal["choose", "redo"]
+    choice: int | None = Field(None, ge=0)
+    mix: str = Field("", max_length=20000)
+    length: str = Field("", max_length=1000)
+    feedback: str = Field("", max_length=20000)
+
+
+class ChoiceFlip(BaseModel):
+    topic: str = Field(min_length=1, max_length=100)
+    choice: str = Field(min_length=1, max_length=1000)
+
+    @field_validator("topic", "choice")
+    @classmethod
+    def not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("决定和选项不能为空")
+        return value.strip()
+
+
+class PieceDecision(BaseModel):
+    action: Literal["confirm", "delegate", "revise", "candidates", "fill", "reopen", "unlock"]
+    piece: SetupPiece
+    feedback: str = Field("", max_length=20000)
+    node_id: uuid.UUID | None = None
+    flips: list[ChoiceFlip] = Field(default_factory=list, max_length=3)
 
 
 class Answer(BaseModel):

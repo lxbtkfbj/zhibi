@@ -2,6 +2,7 @@
 
 import uuid
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import func, select
@@ -54,13 +55,13 @@ async def job_status(sessionmaker, job_id):
 
 def test_cascade_rules():
     assert cascade({"concept": "改书名"})[0] == ORDER
-    assert cascade({"lore": "加一个人"})[0] == ["lore", "spine", "threads", "outline", "first_volume"]
-    assert cascade({"threads": "女主早点登场"})[0] == ["threads", "outline", "first_volume"]
+    assert cascade({"lore": "加一个人"})[0] == ["lore", "outline", "threads", "first_volume"]
+    assert cascade({"threads": "女主早点登场"})[0] == ["threads", "first_volume"]
     queue, instructions = cascade({"first_volume": "压缩第二单元", "lore": " "})
     assert queue == ["first_volume"]
     assert instructions == {"first_volume": "压缩第二单元"}
     queue, instructions = cascade({"outline": "第三卷换个舞台"})
-    assert queue == ["outline", "first_volume"]
+    assert queue == ["outline", "threads", "first_volume"]
     assert instructions["outline"] == "第三卷换个舞台" and instructions["first_volume"]  # 下游自动同步
 
 
@@ -85,18 +86,18 @@ async def test_setup_flow_to_approval(sessionmaker):
         assert book.title == "青灯问道"
         assert book.status == "awaiting_approval"
         assert (
-            await session.scalar(select(func.count()).select_from(Character).where(Character.book_id == book_id)) == 5
+            await session.scalar(select(func.count()).select_from(Character).where(Character.book_id == book_id)) == 6
         )
         volumes = (
             (await session.execute(select(Volume).where(Volume.book_id == book_id).order_by(Volume.index)))
             .scalars()
             .all()
         )
-        assert [v.status for v in volumes] == ["detailed", "planned", "planned", "planned"]
+        assert [v.status for v in volumes] == ["detailed", *(["planned"] * 7)]
         # 先定主线骨架（开篇、结局、关键转折），分卷按篇幅分配章数
         nodes = await load_nodes(session, book_id)
         assert nodes[0]["kind"] == "opening" and nodes[-1]["kind"] == "ending"
-        assert nodes[-1]["event"] and sum(n["kind"] == "milestone" for n in nodes) == 6
+        assert nodes[-1]["event"] and sum(n["kind"] == "milestone" for n in nodes) == 7
         assert not ({"opening", "ending", "milestones", "nodes"} & book.spine.keys())
         assert sum(v.chapter_count for v in volumes) == 333
         # 审稿要求压缩第二单元，演示模型的修改版是 6 章；各单元章数之和仍等于第一卷的 31 章
@@ -124,11 +125,16 @@ async def test_setup_flow_to_approval(sessionmaker):
             .scalars()
             .all()
         )
-        assert [f.seq for f in ledger] == [1, 2, 3, 4, 5]
+        assert [f.seq for f in ledger] == list(range(1, len(ledger) + 1))
+        assert len([f for f in ledger if f.kind == "伏笔" and f.span == "长"]) == 5
+        assert len([f for f in ledger if f.kind == "期待" and f.span == "长"]) == 2
         assert [f.span for f in ledger[:3]] == ["长", "长", "长"]
         # 第一卷新埋的伏笔：写进对应单元的伏笔动作
-        assert {"ref": "F4", "action": "回收", "detail": "执法堂对质时成为关键证据"} in units[1].foreshadow_actions
-        assert ledger[4].payoff_volume == 2
+        short = [f for f in ledger if f.kind == "伏笔" and f.span != "长"]
+        assert {"ref": f"F{short[0].seq}", "action": "回收", "detail": "执法堂对质时成为关键证据"} in units[
+            1
+        ].foreshadow_actions
+        assert short[1].payoff_volume == 2
         speakers = (
             (await session.execute(select(MeetingMessage.speaker).where(MeetingMessage.book_id == book_id)))
             .scalars()
@@ -182,7 +188,7 @@ async def test_failure_then_resume_from_checkpoint(sessionmaker, monkeypatch):
 
     async def flaky(schema, system, user):
         calls["n"] += 1
-        if calls["n"] == 3:  # 第三次调用（主编定主线骨架）时模型挂了
+        if calls["n"] == 3:  # 新顺序第三次调用（设定师建人物）时模型挂了
             raise RuntimeError("模型接口超时")
         return await original(schema, system, user)
 
@@ -192,7 +198,7 @@ async def test_failure_then_resume_from_checkpoint(sessionmaker, monkeypatch):
     assert status == "failed"
     assert "模型接口超时" in error
 
-    await execute_job(job_id)  # 点「继续」：从检查点接着跑，不重做概念和设定
+    await execute_job(job_id)  # 点「继续」：从检查点接着跑，不重做已完成的概念和节点
     status, _, error = await job_status(sessionmaker, job_id)
     assert status == "waiting_author", error
     async with sessionmaker() as session:
@@ -202,7 +208,8 @@ async def test_failure_then_resume_from_checkpoint(sessionmaker, monkeypatch):
             .all()
         )
     assert purposes.count("开书·概念") == 1
-    assert purposes.count("开书·设定") == 1
+    assert purposes.count("开书·主线骨架") == 1
+    assert purposes.count("开书·设定") == 2  # 失败调用也留记录；只重试尚未完成的设定步骤。
 
 
 async def test_interview_answers_become_requirements(sessionmaker, monkeypatch):
@@ -297,8 +304,8 @@ async def test_note_mid_run_revises_finished_parts(sessionmaker, monkeypatch, th
 
     async def interject(schema, system, user):
         prompts.append((schema.__name__, user))
-        if schema.__name__ == "StorySpine" and len(prompts) == 3:
-            # 设定已经做完、主编正在定主线时，作者插了一句话
+        if schema.__name__ == "LoreDraft" and len(prompts) == 3:
+            # 节点已经完成、设定师正在建人物时，作者插了一句话
             async with sessionmaker() as session:
                 session.add(
                     MeetingMessage(
@@ -319,21 +326,20 @@ async def test_note_mid_run_revises_finished_parts(sessionmaker, monkeypatch, th
     assert status == "waiting_author", error
 
     names = [name for name, _ in prompts]
-    # 主线做完后主编读到插话 → 设定师改人物 → 主线同步 → 再做线索、总纲、第一卷卷纲 → 审稿
-    assert names[:10] == [
+    # 设定做完后读到插话 → 改人物 → 总纲、线索、第一卷同步；已经在上游的节点不重做。
+    assert names[:9] == [
         "BookConcept",
-        "LoreDraft",
         "StorySpine",
+        "LoreDraft",
         "RevisionTriage",
         "LoreDraft",
-        "StorySpine",
-        "ThreadsDraft",
         "OutlineDraft",
+        "ThreadsDraft",
         "VolumePlanDraft",
         "SetupCritique",
     ]
     assert "主角名字改成云澈" in prompts[4][1] and "【修改要求】" in prompts[4][1]
-    assert "【修改要求】" in prompts[5][1]  # 主线跟着同步，而不是从零重写
+    assert names.count("StorySpine") == 1
     for name, user in prompts[6:]:
         assert "主角名字改成云澈" in user, name  # 之后每一步都带着作者的话
     async with sessionmaker() as session:
@@ -458,12 +464,13 @@ async def test_approval_keeps_late_targeted_note_without_replanning(sessionmaker
     ]
 
 
-async def test_old_checkpoint_gets_new_steps(sessionmaker):
+async def test_old_checkpoint_gets_new_steps(sessionmaker, monkeypatch):
     """旧版流程的检查点没有主线骨架、线索和第一卷卷纲：继续执行时补到对应位置。"""
     _, job_id = await make_job(sessionmaker)
     runtime = SimpleNamespace(context=SimpleNamespace(sessionmaker=sessionmaker, job_id=job_id))
+    monkeypatch.setattr(book_setup, "mark_progress", AsyncMock())
     update = await intake_node({"queue": ["lore", "outline"], "concept": {"title": "旧书"}}, runtime)
-    assert update == {"queue": ["lore", "spine", "threads", "outline", "first_volume"]}
+    assert update["queue"] == ["spine", "lore", "outline", "threads", "first_volume"]
     done = {
         "concept": {"title": "旧书"},
         "lore": {"characters": []},
@@ -471,4 +478,4 @@ async def test_old_checkpoint_gets_new_steps(sessionmaker):
         "threads": {"threads": [{"name": "主线"}]},
         "first_volume": {"units": [{"index": 1}]},
     }
-    assert await intake_node({"queue": ["outline"], **done}, runtime) == {}
+    assert "queue" not in await intake_node({"queue": ["outline"], **done}, runtime)

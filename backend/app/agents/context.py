@@ -316,6 +316,67 @@ def format_direction(d: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def format_direction_choice(direction: dict[str, Any] | None) -> str:
+    if not direction:
+        return ""
+    lines = [
+        "【作者选定的方向】",
+        f"方向「{direction.get('name', '')}」：{direction.get('logline', '')}",
+        f"主角：{direction.get('protagonist', '')}",
+        f"金手指：{direction.get('golden_finger', '')}",
+        f"开局：{direction.get('opening', '')}",
+        f"卖点：{'；'.join(direction.get('selling_points') or [])}",
+        f"舞台阶梯：{direction.get('stage_ladder', '')}",
+        f"基调：{direction.get('tone', '')}",
+        f"目标读者：{direction.get('reader', '')}",
+    ]
+    if direction.get("mix"):
+        lines.extend(["", "【作者的混搭要求】", direction["mix"]])
+    return "\n".join(lines)
+
+
+def format_target_node(volume: dict[str, Any], nodes: list[dict[str, Any]]) -> str:
+    target = volume.get("target_node") or 0
+    if not isinstance(target, int) or not 1 <= target <= len(nodes):
+        return "（本卷没有标走向的节点，按本卷卡片规划）"
+    node = nodes[target - 1]
+    status = {"pinned": "铁钉", "pencil": "暂定", "empty": "留空"}.get(node.get("status", "pencil"), "暂定")
+    arrival = (
+        "本卷就要写到它，作为卷末高潮"
+        if volume.get("reaches_node")
+        else "本卷还写不到它：卷末要让它的「之前得先有」更进一步"
+    )
+    lines = [
+        f"节点 {target}「{node.get('title', '')}」［{status}］——{arrival}",
+        f"发生什么：{node.get('event', '')}",
+        f"之前得先有：{node.get('prerequisite', '')}",
+        f"之后变成：{node.get('consequence', '')}",
+    ]
+    if target < len(nodes):
+        following = nodes[target]
+        lines.append(f"再下一个节点：节点 {target + 1}「{following.get('title', '')}」：{following.get('event', '')}")
+    return "\n".join(lines)
+
+
+def format_locked(state: dict[str, Any]) -> str:
+    from app.agents.setup_puzzle import PIECE_NAMES, PIECE_ORDER
+    from app.services.setup_store import spine_from_legacy
+
+    nodes = spine_from_legacy(state.get("spine") or {}).get("nodes") or []
+    pinned = [
+        f"节点 {index}「{node.get('title', '')}」"
+        for index, node in enumerate(nodes, 1)
+        if node.get("status") == "pinned"
+    ]
+    confirmed = [PIECE_NAMES[piece] for piece in PIECE_ORDER if (state.get("pieces") or {}).get(piece) == "confirmed"]
+    if state.get("mode", "oneshot") == "puzzle" and confirmed:
+        result = "【作者已确认（锁定）的部分】" + "、".join(confirmed)
+        if pinned:
+            result += "\n其中铁钉节点：" + "、".join(pinned)
+        return result
+    return "【作者钉死的节点】" + "、".join(pinned) + "（铁钉，不能改）" if pinned else ""
+
+
 def format_pitches(pitches: list[dict[str, Any]]) -> str:
     """比稿：每份方案的方向和完整卷纲。"""
     return "\n\n".join(

@@ -13,8 +13,8 @@ from sse_starlette.sse import EventSourceResponse
 from app.api.deps import SessionDep, get_book, get_redis
 from app.db import get_sessionmaker
 from app.graphs.deps import cancel_key
-from app.models import Book, Job, LlmCall, MeetingMessage
-from app.schemas import Answers, Decision, JobOut, MeetingMessageOut, NoteIn, UsageOut
+from app.models import Book, Job, LlmCall, MeetingMessage, StoryNode
+from app.schemas import Answers, Decision, DirectionDecision, JobOut, MeetingMessageOut, NoteIn, PieceDecision, UsageOut
 from app.services import jobs
 from app.services.meeting import job_dict, message_dict, post_message, publish, stream_key
 from app.services.requirements import add_requirement, note_source
@@ -28,6 +28,8 @@ APPROVE_TEXT = {
     "trial_read": "前几章看过了，继续写。",
     "chapter_stuck": "这一章就按现在的版本定稿。",
 }
+PIECE_ORDER = ("concept", "nodes", "cast", "fill", "first_volume")
+PIECE_NAMES = {"concept": "定调", "nodes": "关键节点", "cast": "人物上轴", "fill": "填中间", "first_volume": "第一卷"}
 
 
 async def _job(session: AsyncSession, job_id: uuid.UUID) -> Job:
@@ -56,7 +58,7 @@ async def decide(
 ) -> JobOut:
     job = await _job(session, job_id)
     kind = jobs.pending_kind(job)
-    if kind not in jobs.DECISION_KINDS:
+    if kind not in APPROVE_TEXT:
         raise HTTPException(409, "当前没有等待你拍板的内容")
     feedback = body.feedback.strip()
     if body.action == "revise" and not feedback:
@@ -77,6 +79,127 @@ async def decide(
     out = await _set_status(session, redis, job, "queued")
     jobs.enqueue(job.id, {"action": body.action, "feedback": feedback, "requirement_saved": True})
     return out
+
+
+async def _setup_gate(session: AsyncSession, job_id: uuid.UUID, kind: str) -> Job:
+    # 锁住等待状态，重复点击或两个窗口同时提交只能接受一次。
+    job = await session.scalar(select(Job).where(Job.id == job_id).with_for_update())
+    if job is None:
+        raise HTTPException(404, "任务不存在")
+    if job.kind != "book_setup" or jobs.pending_kind(job) != kind:
+        raise HTTPException(
+            409, "当前没有等待你选择方向" if kind == "setup_directions" else "当前没有等待你确认的开书拼图"
+        )
+    return job
+
+
+async def _queue_setup_response(session: AsyncSession, redis: Redis, job: Job, content: str, resume: dict) -> JobOut:
+    # post_message 会提交；在同一事务里写要求、作者消息和 queued，不能先放开 waiting_author 的锁。
+    job.status = "queued"
+    await post_message(
+        session,
+        redis,
+        book_id=job.book_id,
+        job_id=job.id,
+        speaker="author",
+        kind="decision",
+        content=content,
+        payload={"requirement_saved": True},
+    )
+    await session.refresh(job)
+    await publish(redis, job.book_id, "job", job_dict(job))
+    jobs.enqueue(job.id, {**resume, "requirement_saved": True})
+    return JobOut.model_validate(job)
+
+
+@router.post("/jobs/{job_id}/directions", response_model=JobOut)
+async def choose_direction(
+    job_id: uuid.UUID,
+    body: DirectionDecision,
+    session: AsyncSession = SessionDep,
+    redis: Redis = Depends(get_redis),
+) -> JobOut:
+    job = await _setup_gate(session, job_id, "setup_directions")
+    mix, length, feedback = body.mix.strip(), body.length.strip(), body.feedback.strip()
+    if body.action == "choose":
+        directions = (job.pending or {}).get("directions") or []
+        if body.choice is None or body.choice >= len(directions):
+            raise HTTPException(422, "请选择一个现有的开书方向")
+        if not length:
+            raise HTTPException(422, "请选择这本书打算写多长")
+        name = directions[body.choice].get("name", "")
+        await add_requirement(session, job.book_id, f"这本书打算写多长？——{length}", "answer")
+        direction = f"开书方向：选用「{name}」" + (f"；混搭：{mix}" if mix else "")
+        await add_requirement(session, job.book_id, direction, "answer")
+        if feedback:
+            await add_requirement(session, job.book_id, feedback, "note")
+        content = f"选方向「{name}」。" + (f"\n混搭：{mix}" if mix else "") + (f"\n{feedback}" if feedback else "")
+    else:
+        if not feedback:
+            raise HTTPException(422, "请写下重新出方向的要求")
+        await add_requirement(session, job.book_id, feedback, "note")
+        content = feedback
+    resume = {**body.model_dump(), "mix": mix, "length": length, "feedback": feedback}
+    return await _queue_setup_response(session, redis, job, content, resume)
+
+
+@router.post("/jobs/{job_id}/piece", response_model=JobOut)
+async def decide_piece(
+    job_id: uuid.UUID,
+    body: PieceDecision,
+    session: AsyncSession = SessionDep,
+    redis: Redis = Depends(get_redis),
+) -> JobOut:
+    job = await _setup_gate(session, job_id, "setup_piece")
+    current = (job.pending or {}).get("piece")
+    feedback = body.feedback.strip()
+    reopening = body.action in ("reopen", "unlock")
+    if reopening:
+        book = await session.get(Book, job.book_id)
+        pieces = (book.setup_progress or {}).get("pieces", {}) if book else {}
+        if current not in PIECE_ORDER or PIECE_ORDER.index(body.piece) >= PIECE_ORDER.index(current):
+            raise HTTPException(422, "只能重新打开当前块之前已经确认的拼图")
+        if pieces.get(body.piece) != "confirmed":
+            raise HTTPException(422, "这一块还没有确认，不能重新打开")
+    elif body.piece != current:
+        raise HTTPException(409, "这一块已经变了，刷新一下再试")
+    if body.action == "revise" and not (feedback or body.node_id or body.flips):
+        raise HTTPException(422, "请写下修改意见、指定节点或选择要改的决定")
+    if body.action in ("candidates", "fill") and body.node_id is None:
+        raise HTTPException(422, "请选择要处理的节点")
+    if (body.node_id or body.action in ("candidates", "fill")) and (
+        current != "nodes" or body.piece != "nodes" or body.action not in ("revise", "candidates", "fill")
+    ):
+        raise HTTPException(422, "节点操作只能在关键节点块等确认时使用")
+    node = None
+    if body.node_id:
+        node = await session.get(StoryNode, body.node_id)
+        if node is None or node.book_id != job.book_id:
+            raise HTTPException(422, "这个节点不属于当前书")
+        if body.action == "fill" and node.status == "pinned":
+            raise HTTPException(409, "铁钉节点不能由编辑部改写，请先改回暂定")
+    if body.action in ("revise", "reopen", "unlock") and feedback:
+        await add_requirement(session, job.book_id, feedback, "note")
+    for flip in body.flips:
+        await add_requirement(session, job.book_id, f"「{flip.topic}」改成：{flip.choice}", "answer")
+    label = PIECE_NAMES[body.piece]
+    changes = "\n".join(f"「{flip.topic}」改成：{flip.choice}" for flip in body.flips)
+    if body.action == "confirm":
+        content = f"确认「{label}」，下一块。"
+    elif body.action == "delegate":
+        content = f"「{label}」交给编辑部定。"
+    elif body.action == "revise":
+        content = "\n".join(value for value in (feedback, changes) if value)
+        if not content and node:
+            content = f"请修改节点 {node.position}「{node.title}」。"
+    elif body.action == "candidates":
+        content = f"给节点 {node.position} 出 3 个候选。"
+    elif body.action == "fill":
+        content = f"节点 {node.position}：{feedback}" if feedback else f"补上节点 {node.position}。"
+    else:
+        content = f"重新打开「{label}」。" + (f"\n{feedback}" if feedback else "")
+    resume = {**body.model_dump(mode="json"), "feedback": feedback}
+    return await _queue_setup_response(session, redis, job, content, resume)
 
 
 @router.post("/jobs/{job_id}/answers", response_model=JobOut)

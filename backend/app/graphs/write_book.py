@@ -34,6 +34,7 @@ from app.agents import editorial
 from app.agents.context import format_direction, format_pitches, format_revision
 from app.agents.planning import attach_new_foreshadowings, fit_chapter_counts, schedule_issues
 from app.agents.playbook import Playbook, pick, repetition_issues
+from app.agents.setup_puzzle import clean_reveals
 from app.book_settings import settings_of, strictness_text
 from app.graphs.deps import GraphDeps
 from app.llm.router import LLMError
@@ -528,7 +529,12 @@ async def revise_volume_node(state: WriteState, runtime: Runtime[GraphDeps]) -> 
             )
             current = {
                 "units": [setup_store.unit_dict(u) for u in units],
-                "new_foreshadowings": [f for f in ledger if f["plant_volume"] == index and f["span"] != "长"],
+                "new_foreshadowings": [
+                    f for f in ledger if f["kind"] == "伏笔" and f["plant_volume"] == index and f["span"] != "长"
+                ],
+                "new_expectations": [
+                    f for f in ledger if f["kind"] == "期待" and f["plant_volume"] == index and f["span"] != "长"
+                ],
             }
         if removed_feedback:
             return {"volume_draft": current, "feedback": "", "volume_fix": ""}
@@ -554,9 +560,24 @@ async def save_volume_node(state: WriteState, runtime: Runtime[GraphDeps]) -> di
         index = volume.index
         ledger = await setup_store.load_ledger(session, d.book_id)
         units = fit_chapter_counts(plan.get("units") or [], volume.chapter_count)
-        fresh = setup_store.assign_seqs(plan.get("new_foreshadowings") or [], ledger)
+        units = clean_reveals(units, await setup_store.load_secrets(session, d.book_id))
+        fresh = setup_store.assign_seqs(
+            [
+                *({**item, "kind": "伏笔"} for item in plan.get("new_foreshadowings") or []),
+                *({"span": "中", **item, "kind": "期待"} for item in plan.get("new_expectations") or []),
+            ],
+            ledger,
+        )
         units, fresh = attach_new_foreshadowings(units, fresh, index)
-        await writing_store.save_volume_plan(session, d.book_id, volume, units, fresh, replace_new=bool(feedback))
+        await writing_store.save_volume_plan(
+            session,
+            d.book_id,
+            volume,
+            units,
+            fresh,
+            replace_new=bool(feedback),
+            replace_expectations="new_expectations" in plan,
+        )
         # 改完还剩的问题（程序能查的那部分）交给作者拍板时一并看到
         prior = await prior_units(session, d.book_id, index)
         remaining = [
@@ -566,8 +587,16 @@ async def save_volume_node(state: WriteState, runtime: Runtime[GraphDeps]) -> di
         await session.commit()
     await d.emit.artifact(
         "chief",
-        f"第{index}卷拆成 {len(units)} 个剧情单元，新埋伏笔 {len(fresh)} 条",
-        {"type": "volume_plan", "data": {"volume": index, "units": units, "new_foreshadowings": fresh}},
+        f"第{index}卷拆成 {len(units)} 个剧情单元，新埋伏笔 {sum(item['kind'] == '伏笔' for item in fresh)} 条、新立期待 {sum(item['kind'] == '期待' for item in fresh)} 条",
+        {
+            "type": "volume_plan",
+            "data": {
+                "volume": index,
+                "units": units,
+                "new_foreshadowings": [item for item in fresh if item["kind"] == "伏笔"],
+                "new_expectations": [item for item in fresh if item["kind"] == "期待"],
+            },
+        },
     )
     return {
         "feedback": "",

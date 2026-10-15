@@ -574,12 +574,15 @@ def remap_node_refs(setup: dict, previous_nodes: list[dict], new_nodes: list) ->
     result = deepcopy(setup)
     before = {index: str(node["id"]) for index, node in enumerate(previous_nodes, 1) if node.get("id")}
     after = {}
+    snapshot_refs = {}
     titles = {}
     for index, node in enumerate(new_nodes, 1):
         id_ = node.get("id") if isinstance(node, dict) else node.id
         titles[index] = node.get("title", "") if isinstance(node, dict) else node.title
         if id_:
             after[str(id_)] = index
+        if isinstance(node, dict) and node.get("_snapshot_ref"):
+            snapshot_refs[node["_snapshot_ref"]] = index
     for block, collection, field in (
         ("lore", "anchors", "node"),
         ("lore", "secrets", "node"),
@@ -591,7 +594,9 @@ def remap_node_refs(setup: dict, previous_nodes: list[dict], new_nodes: list) ->
     ):
         for item in (result.get(block) or {}).get(collection) or []:
             if field in item:
-                item[field] = after.get(before.get(item[field]), 0)
+                old_index = item[field]
+                old_id = before.get(old_index)
+                item[field] = after.get(old_id, 0) if old_id else snapshot_refs.get(old_index, 0)
                 title_field = "target_node_title" if field == "target_node" else "node_title"
                 if title_field in item:
                     item[title_field] = titles.get(item[field], "")

@@ -27,6 +27,11 @@ export function useMeeting(bookId: string) {
       qc.invalidateQueries({ queryKey: keys.book(bookId) })
     })
     source.addEventListener('error', () => setConnected(false))
+    source.addEventListener('book', () => {
+      for (const key of [keys.book(bookId), keys.books, keys.nodes(bookId), keys.bible(bookId), keys.outline(bookId), keys.threads(bookId), keys.secrets(bookId)]) {
+        void qc.invalidateQueries({ queryKey: key })
+      }
+    })
     source.addEventListener('message', (event) => {
       const message = JSON.parse((event as MessageEvent).data) as MeetingMessage
       setState((prev) => {

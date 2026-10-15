@@ -1,7 +1,7 @@
 import type { Job, MeetingMessage, Outline } from '../../api/types'
 import { artifactTarget } from '../../lib/workspace.ts'
 
-const SETUP_PREVIEWS = new Set(['concept', 'lore', 'spine', 'threads', 'outline', 'volume_plan'])
+const SETUP_PREVIEWS = new Set(['directions', 'concept', 'lore', 'spine', 'threads', 'outline', 'volume_plan'])
 
 /** Setup persists only at its final checkpoint. Never put provisional output in the editable query cache. */
 export function setupPreviewForPath(

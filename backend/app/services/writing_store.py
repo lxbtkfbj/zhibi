@@ -9,8 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents import schemas as s
 from app.agents.glossary import clean_techniques
 from app.agents.planning import ref_seq
+from app.agents.setup_puzzle import clean_reveals
 from app.models import Chapter, Character, Foreshadowing, PlotUnit, Volume
-from app.services.setup_store import FORESHADOW_FIELDS, UNIT_FIELDS
+from app.services.setup_store import FORESHADOW_FIELDS, UNIT_FIELDS, load_nodes, load_secrets
 
 # 定稿时设定师会改的人物状态、伏笔进展；记下改前改后的值，重写时据此撤销
 CHARACTER_STATE = ("location", "condition", "abilities", "is_alive")
@@ -29,11 +30,15 @@ async def save_volume_plan(
     fresh: list[dict[str, Any]],
     *,
     replace_new: bool,
+    replace_expectations: bool = False,
 ) -> None:
     """保存某一卷的卷纲：剧情单元按序号对齐；本卷新埋的伏笔写进台账。
 
     replace_new：修改卷纲时，本卷上一版新埋、还没写到的伏笔若这一版不要了，就从台账删掉。
     """
+    nodes = await load_nodes(session, book_id)
+    node_ids = {index: uuid.UUID(node["id"]) for index, node in enumerate(nodes, 1)}
+    units = clean_reveals(units, await load_secrets(session, book_id, nodes))
     old_units = {
         u.index: u
         for u in (await session.execute(select(PlotUnit).where(PlotUnit.volume_id == volume.id))).scalars().all()
@@ -60,9 +65,9 @@ async def save_volume_plan(
     keep = {f["seq"] for f in fresh}
     if replace_new:
         for seq, row in list(ledger.items()):
-            # 任务 1 的旧 VolumePlan 只管理伏笔，不能因为它尚不会输出期待而删除作者已建的期待。
+            # 旧检查点没有 new_expectations 时仍保留作者的期待；新 schema 明确管理两类条目。
             if (
-                row.kind == "伏笔"
+                (row.kind == "伏笔" or replace_expectations)
                 and row.plant_volume == volume.index
                 and row.span != "长"
                 and row.status == "planned"
@@ -70,10 +75,14 @@ async def save_volume_plan(
             ):
                 await session.delete(row)
     for f in fresh:
+        if f.get("kind") == "期待" and not f.get("span"):
+            f = {**f, "span": "中"}
         row = ledger.get(f["seq"]) or Foreshadowing(book_id=book_id, seq=f["seq"], description="")
         for key in FORESHADOW_FIELDS:
             if f.get(key) is not None:
                 setattr(row, key, f[key])
+        if "node" in f:
+            row.node_id = node_ids.get(f["node"])
         session.add(row)
     if not volume.chapter_count:
         volume.chapter_count = sum(int(u.get("chapter_count") or 0) for u in units)

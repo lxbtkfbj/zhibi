@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 from pydantic import BaseModel
 
 from app.agents import schemas as s
+from app.agents.glossary import terms
 
 # 每次「调用」的耗时；演示时可调大，方便看清编辑部的讨论过程、试试中途插话
 DELAY_S = float(os.environ.get("ZHIBI_DEMO_DELAY", "0.3"))
@@ -32,6 +33,7 @@ def _concept(user: str) -> s.BookConcept:
         elif not rule.startswith("2-6 个字的经典短书名"):
             title = rule.strip("《》")
             alt_titles = [title + "记", title + "录"]
+    length = int(_match(r"这本书打算写多长？[—－-]+[^\n]*?(\d+)\s*万", user) or 100)
     return s.BookConcept(
         title=title,
         alt_titles=alt_titles,
@@ -45,14 +47,24 @@ def _concept(user: str) -> s.BookConcept:
         ],
         protagonist_hook="陆远知道每个人还能活多久，却必须装作什么都不知道",
         tone="冷静克制，带一点黑色幽默，节奏紧凑",
-        target_length=100,
-        target_volumes=4,
+        target_length=length,
+        target_volumes=8,
         chapter_words=3000,
-        remark="这本书的钩子我定在「看得见寿元的青灯」上，信息差是最稳的爽点，主角靠脑子赢。篇幅先按 100 万字、四卷来规划。",
+        stage_ladder="玄冥宗杂役院 → 外门 → 北境寒原 → 血河总坛 → 宗主峰",
+        target_reader="男频，喜欢信息差智斗与代价明确的成长，不喜欢无代价开挂",
+        decisions=[
+            s.AuthorChoice(
+                topic="感情线",
+                chosen="并肩查案慢慢靠近",
+                alternatives=["从欢喜冤家开始", "先有师徒之谊"],
+                why="互相试探能让智斗与感情一起推进",
+            )
+        ],
+        remark="这本书的钩子我定在「看得见寿元的青灯」上，信息差是最稳的爽点，主角靠脑子赢。篇幅先按 100 万字、八卷来规划。",
     )
 
 
-def _lore() -> s.LoreDraft:
+def _lore(user: str = "") -> s.LoreDraft:
     return s.LoreDraft(
         world_entries=[
             s.WorldEntryDraft(
@@ -95,7 +107,6 @@ def _lore() -> s.LoreDraft:
                 goal="活下去，然后查清父母之死的真相",
                 location="玄冥宗杂役院",
                 condition="刚挨过一顿打，肋骨有伤",
-                secrets=["青灯在他手里", "他看见宗主只剩三年寿元"],
             ),
             s.CharacterDraft(
                 name="苏晚晴",
@@ -109,7 +120,6 @@ def _lore() -> s.LoreDraft:
                 goal="重振家族",
                 location="玄冥宗执法堂",
                 condition="正常",
-                secrets=["她的家族当年被血河教灭门"],
             ),
             s.CharacterDraft(
                 name="赵乾",
@@ -123,7 +133,6 @@ def _lore() -> s.LoreDraft:
                 goal="拜入内门，成为宗主亲传",
                 location="玄冥宗外门",
                 condition="正常",
-                secrets=["他私下与血河教做寿元交易"],
             ),
             s.CharacterDraft(
                 name="老瞎子",
@@ -137,7 +146,6 @@ def _lore() -> s.LoreDraft:
                 goal="不详",
                 location="玄冥宗杂役院",
                 condition="寿元只剩七日（陆远所见）",
-                secrets=["他是青灯上一任主人"],
             ),
             s.CharacterDraft(
                 name="宗主厉沧海",
@@ -151,7 +159,13 @@ def _lore() -> s.LoreDraft:
                 goal="突破化神，延长寿元",
                 location="玄冥宗主峰",
                 condition="寿元仅剩三年（外人不知）",
-                secrets=["他在暗中收集寿元"],
+            ),
+            s.CharacterDraft(
+                name="周长老",
+                role_type="配角",
+                personality="谨慎护短，习惯先留退路",
+                background="赵乾的祖父，掌管外门资源",
+                goal="保住家族在宗门的地位",
             ),
         ],
         relationships=[
@@ -168,62 +182,154 @@ def _lore() -> s.LoreDraft:
                 source="苏晚晴", target="赵乾", kind="对立", description="苏晚晴在执法堂多次查赵乾，都被长老压下"
             ),
         ],
+        anchors=[
+            s.NodeAnchorDraft(character=name, node=number, kind="登场", note="进入故事并和主角的目标发生关联")
+            for name, number in [
+                ("陆远", 1),
+                ("苏晚晴", 2),
+                ("赵乾", 2),
+                ("老瞎子", 1),
+                ("宗主厉沧海", 3),
+                ("周长老", 3),
+            ]
+        ],
+        secrets=[
+            s.SecretDraft(
+                title=title,
+                truth=truth,
+                knowers=knowers,
+                reader_knows=reader,
+                reveal_plan="在对应节点通过对质和证据揭开，迫使知情者重新站队",
+                node=number,
+            )
+            for title, truth, knowers, reader, number in [
+                ("青灯的持有人", "青灯已经到了陆远手中，点灯能看见他人的寿元", ["陆远"], "知道", 3),
+                ("宗主剩余寿元", "厉沧海只剩三年寿元，正在以宗门弟子的寿元准备续命", ["陆远", "宗主厉沧海"], "知道", 7),
+                ("苏家灭门真相", "苏晚晴的家族被血河教灭门，留下的账册可以查出幕后交易", ["苏晚晴"], "部分", 5),
+                ("赵乾寿元交易", "赵乾私下用败者的寿元与血河教交换修炼资源", ["赵乾"], "不知道", 3),
+                ("老人的青灯来历", "老瞎子曾是青灯上一任主人，知道逆转寿元契约的方法", ["老瞎子"], "不知道", 6),
+            ]
+        ],
+        decisions=[
+            s.AuthorChoice(
+                topic="主要对手",
+                chosen="从赵乾查到宗主",
+                alternatives=["宗主先以恩人出现"],
+                why="反派逐层出现，成长才有分量",
+            )
+        ],
         remark="主角叫陆远，金手指是一盏能照见寿元的青灯，但每次点燃都要烧掉他自己一天寿命；头号反派是宗主厉沧海。力量体系我设计成「突破要烧寿元」，这样青灯就不只是外挂，而是整个世界的命门。",
     )
 
 
-def _spine() -> s.StorySpine:
+def _spine(user: str = "") -> s.StorySpine:
+    events = [
+        (
+            "开篇",
+            "寒夜捡灯",
+            1,
+            "老瞎子把青灯交给受伤的陆远，灯火第一次照见别人的死期",
+            "陆远陷入杂役院的欺压",
+            "陆远得到危险的信息优势",
+        ),
+        (
+            "节点",
+            "外门考核",
+            1,
+            "陆远借寿元信息拆穿考核陷阱，和苏晚晴合力查明跟班死亡原因",
+            "青灯能力已验证，药碗证据已找齐",
+            "陆远进入外门，赵乾把他当作真正的对手",
+        ),
+        (
+            "节点",
+            "生死擂台",
+            2,
+            "陆远在生死擂正面击败赵乾，当众留下寿元交易的证据",
+            "主角具备迎战实力，赵乾已立下赌约",
+            "败者交易暴露，调查走出宗门",
+        ),
+        (
+            "节点",
+            "寒原追查",
+            3,
+            "陆远追到寒原旧村，发现兽潮和寿元契约的联系",
+            "盟友建立信任，旧村路线与证人得到保护",
+            "父母死亡不再是天灾，主角决定追究责任",
+        ),
+        (
+            "节点",
+            "血河潜入",
+            4,
+            "陆远与苏晚晴潜入血河总坛，抢出灭门交易账册",
+            "已掌握换岗规律，能识别伪造的账册",
+            "双方结成牢固同盟，幕后交易有了实证",
+        ),
+        (
+            "节点",
+            "契约印记",
+            5,
+            "陆远对照账册发现缺失的小指是幼时被取走寿元的印记",
+            "老瞎子的遗言、账册与童年证据已经对上",
+            "主角不再只求自保，要阻止更多人被收割",
+        ),
+        (
+            "节点",
+            "宗主真相",
+            6,
+            "陆远揭开宗主的续命计划，联合弟子准备反制寿元大阵",
+            "主角有足够盟友与证据，也找到大阵的阵眼",
+            "宗门内斗公开化，大典成为最后倒计时",
+        ),
+        (
+            "节点",
+            "青灯燃尽",
+            7,
+            "化神大典上陆远燃尽青灯逆转寿元大阵，厉沧海遭到反噬",
+            "苏晚晴能守住阵眼，陆远明白青灯真正代价",
+            "宗主坐化，寿元交易终结，陆远失去青灯",
+        ),
+        (
+            "结局",
+            "重建家园",
+            8,
+            "陆远与苏晚晴归还受害者的寿元，在寒原重建杂役院",
+            "大阵已被摧毁，受害者与剩余资源妥善安置",
+            "主角失去外挂却拥有可以共同生活的家园",
+        ),
+    ]
+    current = _section(user, "当前主线骨架") or _section(user, "当前关键节点")
+    refs = {title: int(index) for index, title in re.findall(r"节点\s+(\d+)「([^」]+)」", current)}
+    known = [name for name, _ in terms()]
+    nodes = [
+        s.StoryNodeDraft(
+            ref=refs.get(title, 0),
+            kind=kind,
+            title=title,
+            volume=volume,
+            event=event,
+            prerequisite=prerequisite,
+            consequence=consequence,
+            editor_note="先把主角必须付出的代价摆出来，再让这一节点改变局面。",
+            techniques=known[3:5],
+        )
+        for kind, title, volume, event, prerequisite, consequence in events
+    ]
+    if "测试提醒" in user:
+        nodes[3].prerequisite = ""
     return s.StorySpine(
-        core_conflict="陆远想活下去并查清父母之死，而整个玄冥宗高层都靠暗中收割寿元续命",
-        theme="命数可以被看见，却不该被买卖",
-        protagonist_arc="从只求自保、事事留三分的杂役，变成愿意为别人的寿元押上自己性命的人",
-        opening="寒冬的杂役院，陆远挨了一顿毒打，老瞎子塞给他一盏旧灯。灯火一亮，他看见打他的人头顶只剩两天寿元——第 3 章那人果然暴毙，陆远第一次意识到自己能看见别人的死期。",
-        ending="宗主厉沧海在突破化神的大典上发动寿元大阵，要抽干全宗弟子续命。陆远点燃燃尽的青灯，把自己剩下的寿元全部还给被收割的人，阵法反噬，宗主坐化。陆远活了下来，却再也看不见任何人的寿元，他和苏晚晴在寒原上重建杂役院。",
-        milestones=[
-            s.Milestone(
-                index=1,
-                title="灯照死期",
-                volume=1,
-                event="陆远捡到青灯，看见跟班只剩两天寿元，跟班暴毙",
-                change="陆远确认青灯为真，同时被执法堂盯上",
-            ),
-            s.Milestone(
-                index=2,
-                title="老瞎子坐化",
-                volume=1,
-                event="青灯的上一任主人老瞎子坐化，留下半句遗言",
-                change="陆远失去唯一的庇护，决定进入外门追查",
-            ),
-            s.Milestone(
-                index=3,
-                title="生死擂",
-                volume=2,
-                event="外门大比上陆远与赵乾正面对决，借寿元信息险胜",
-                change="陆远成名，也暴露在宗门高层视线里",
-            ),
-            s.Milestone(
-                index=4,
-                title="契约印记",
-                volume=3,
-                event="陆远发现左手缺的小指是幼时被取走寿元的契约印记",
-                change="父母之死与宗门交易连成一线，他不再只求自保",
-            ),
-            s.Milestone(
-                index=5,
-                title="宗主的三年",
-                volume=3,
-                event="陆远证实宗主与血河教交易寿元，自己只剩三年可活",
-                change="与苏晚晴结盟，主动对抗宗主",
-            ),
-            s.Milestone(
-                index=6,
-                title="青灯尽",
-                volume=4,
-                event="化神大典上陆远燃尽青灯，以自身寿元反噬大阵",
-                change="宗主坐化，寿元交易终结，陆远失去青灯",
-            ),
+        core_conflict="陆远想查清父母之死，而宗门高层靠收割寿元续命",
+        theme="命数不该被买卖",
+        protagonist_arc="从只求自保到愿意保护别人",
+        nodes=nodes,
+        decisions=[
+            s.AuthorChoice(
+                topic="故事收束",
+                chosen="失去青灯但重建家园",
+                alternatives=["保留青灯继续守护"],
+                why="让胜利有代价，成长才可信",
+            )
         ],
-        remark="结局我先定了：陆远最后用自己的寿元破掉宗主的大阵，赢了却失去青灯。中间最关键的转折是第三卷发现小指的契约印记，从那以后他不再只求自保。",
+        remark="九个节点从捡灯走到重建家园，铁钉由程序原样保留，其余节点按序号衔接。",
     )
 
 
@@ -281,96 +387,82 @@ def _threads() -> s.ThreadsDraft:
     )
 
 
-def _outline() -> s.OutlineDraft:
+def _outline(user: str = "") -> s.OutlineDraft:
+    total = int(_match(r"合计约 (\d+) 章", user) or 333)
+    counts = [31, 90, 36, 36, 35, 35, 35, 35]
+    if total != sum(counts):
+        counts = [max(1, total // 8)] * 8
+        counts[-1] += total - sum(counts)
+    known = [name for name, _ in terms()]
+    nodes = _spine().nodes
+    volumes = [
+        s.VolumeDraft(
+            index=i,
+            title=("杂役" if i == 1 else "生死擂" if i == 2 else node.title),
+            stage="玄冥宗 → 北境寒原 → 血河总坛 → 宗主峰",
+            summary=node.event,
+            goal=node.consequence,
+            climax=node.event,
+            antagonist="赵乾及其背后的宗门长老" if i < 4 else "宗主厉沧海与血河教",
+            power_range="修为随着证据与盟友积累逐步提高",
+            chapter_count=counts[i - 1],
+            target_node=i + 1,
+            reaches_node=True,
+            editor_note="这卷铺齐下个大事件的条件，再用卷末高潮兑现。",
+            techniques=known[3:5],
+        )
+        for i, node in enumerate(nodes[1:], 1)
+    ]
+    truths = [
+        "陆远左手缺的小指，是幼时被血河教取走寿元的契约印记",
+        "宗主只剩三年寿元",
+        "老瞎子的半句遗言",
+        "药碗上的火漆属于外门库房",
+        "苏家的旧账册还有另一半",
+    ]
+    foreshadowings = [
+        s.ForeshadowingDraft(
+            description=value,
+            span="长",
+            plant_plan="用一个看似普通的细节带过",
+            payoff_plan="关键证据出现后重新解释这个细节",
+            plant_volume=1 if i < 3 else 2,
+            payoff_volume=5 if i in (0, 2) else 6 if i == 1 else 4,
+            node=6 if i in (0, 2) else 7 if i == 1 else 5,
+        )
+        for i, value in enumerate(truths)
+    ]
+    expectations = [
+        s.ExpectationDraft(
+            description="陆远要在生死擂当众击败赵乾",
+            plant_plan="赵乾立下生死擂赌约",
+            payoff_plan="不只赢擂台，还拿到寿元交易证据",
+            plant_volume=1,
+            payoff_volume=2,
+            node=3,
+        ),
+        s.ExpectationDraft(
+            description="陆远要查清父母之死，给被害者一个交代",
+            plant_plan="主角对着旧信承诺查清真相",
+            payoff_plan="不只找到凶手，还终结收割寿元的规则",
+            plant_volume=1,
+            payoff_volume=7,
+            node=8,
+        ),
+    ]
     return s.OutlineDraft(
-        volumes=[
-            s.VolumeDraft(
-                index=1,
-                title="杂役",
-                stage="玄冥宗杂役院 → 外门",
-                summary="陆远得到青灯，在杂役院和外门之间周旋，借寿元信息差扳倒赵乾的跟班，进入外门。",
-                goal="成为外门弟子，发现宗门里有人在收集寿元",
-                climax="外门考核中将计就计，让设局者自食其果",
-                antagonist="赵乾和他的跟班：想把陆远这个碍眼的杂役踩死",
-                power_range="炼气一层 → 炼气四层",
-                thread_beats=[
-                    s.ThreadStep(thread="主线：青灯与寿元", beat="捡到青灯并确认其真假"),
-                    s.ThreadStep(thread="感情线：苏晚晴", beat="执法堂初见，她欠下人情"),
-                ],
-                new_characters=["苏晚晴：执法堂弟子"],
-                chapter_count=31,
-            ),
-            s.VolumeDraft(
-                index=2,
-                title="生死擂",
-                stage="玄冥宗外门",
-                summary="外门大比，陆远与赵乾正面冲突，牵出寿元交易的线索。",
-                goal="击败赵乾，与苏晚晴结盟",
-                climax="生死擂上借寿元信息险胜赵乾",
-                antagonist="赵乾与他背后的长老",
-                power_range="炼气四层 → 筑基初期",
-                thread_beats=[
-                    s.ThreadStep(thread="反派线：玄冥宗高层", beat="击败赵乾，长老开始盯上陆远"),
-                    s.ThreadStep(thread="感情线：苏晚晴", beat="生死擂前两人第一次并肩"),
-                ],
-                new_characters=["周长老：赵乾的祖父"],
-                chapter_count=90,
-            ),
-            s.VolumeDraft(
-                index=3,
-                title="血河",
-                stage="北境寒原 → 血河教总坛",
-                summary="追查血河教，发现宗主与魔教交易的真相。",
-                goal="揭开父母之死的真相",
-                climax="血河教总坛里，契约印记揭开父母之死",
-                antagonist="血河教与暗中出手的宗主",
-                power_range="筑基初期 → 结丹初期",
-                thread_beats=[
-                    s.ThreadStep(thread="谜团线：父母之死", beat="小指的契约印记揭开真相"),
-                    s.ThreadStep(thread="主线：青灯与寿元", beat="查到宗主交易寿元"),
-                ],
-                chapter_count=100,
-            ),
-            s.VolumeDraft(
-                index=4,
-                title="青灯尽",
-                stage="玄冥宗主峰",
-                summary="宗主寿元将尽，孤注一掷；陆远必须在灯芯燃尽前做出选择。",
-                goal="结束寿元交易，付出自己的代价",
-                climax="化神大典上燃尽青灯，大阵反噬",
-                antagonist="宗主厉沧海",
-                power_range="结丹初期 → 结丹后期",
-                thread_beats=[s.ThreadStep(thread="主线：青灯与寿元", beat="燃尽青灯破阵")],
-                chapter_count=112,
-            ),
+        volumes=volumes,
+        foreshadowings=foreshadowings,
+        expectations=expectations,
+        decisions=[
+            s.AuthorChoice(
+                topic="前期节奏",
+                chosen="第一卷短、第二卷展开",
+                alternatives=["两卷均衡推进"],
+                why="先让主角有一次完整翻身，再加深冲突",
+            )
         ],
-        foreshadowings=[
-            s.ForeshadowingDraft(
-                description="陆远左手缺的小指，是幼时被血河教取走寿元的契约印记",
-                span="长",
-                plant_plan="第一卷开头随笔带过，读者以为只是旧伤",
-                payoff_plan="第三卷揭示是契约印记，指向父母之死",
-                plant_volume=1,
-                payoff_volume=3,
-            ),
-            s.ForeshadowingDraft(
-                description="宗主只剩三年寿元",
-                span="长",
-                plant_plan="第一卷陆远远远看见宗主时发现，却不敢声张",
-                payoff_plan="第四卷成为宗主孤注一掷的动机",
-                plant_volume=1,
-                payoff_volume=4,
-            ),
-            s.ForeshadowingDraft(
-                description="老瞎子的半句遗言",
-                span="长",
-                plant_plan="第一卷老瞎子坐化前只说了半句",
-                payoff_plan="第三卷补全，指向父母之死",
-                plant_volume=1,
-                payoff_volume=3,
-            ),
-        ],
-        remark="全书四卷三百多章：舞台从杂役院一路走到宗主峰，对手从跟班升级到宗主。最长的伏笔是陆远缺的那根小指，第一卷埋，第三卷收。",
+        remark=f"八卷合计 {total} 章，开篇之后每个节点都由一卷到达，长线伏笔与期待分开编号。",
     )
 
 
@@ -542,7 +634,7 @@ def _revise_units(user: str, units: list[s.PlotUnitDraft]) -> list[s.PlotUnitDra
     return units
 
 
-def _volume_plan(user: str) -> s.VolumePlanDraft:
+def _base_volume_plan(user: str) -> s.VolumePlanDraft:
     volume = int(_match(r"请为第 (\d+) 卷写「卷纲」", user) or 1)
     revising = "【修改要求】" in user
     if volume == 1:
@@ -621,6 +713,122 @@ def _volume_plan(user: str) -> s.VolumePlanDraft:
             )
         ],
         remark=remark,
+    )
+
+
+def _volume_plan(user: str) -> s.VolumePlanDraft:
+    plan = _base_volume_plan(user)
+    volume = int(_match(r"请为第 (\d+) 卷写「卷纲」", user) or 1)
+    known = [name for name, _ in terms()]
+    expectations = re.findall(r"^- (E\d+)［", user, re.M)
+    secrets = re.findall(r"^- (S\d+)「", user, re.M)
+    for i, unit in enumerate(plan.units):
+        unit.editor_note = "先让读者看到主角的目标，再把对手的阻力变成一次有代价的翻盘。"
+        unit.techniques = known[3:5]
+        if expectations:
+            unit.foreshadow_actions.append(
+                s.ForeshadowStep(
+                    ref=expectations[0],
+                    action="埋下" if i == 0 else "提醒",
+                    detail="把当众立下的约定和眼前的冲突连起来",
+                )
+            )
+        if secrets and i == 1:
+            unit.reveals = [
+                s.RevealStep(ref=secrets[0], to="苏晚晴", how="陆远以证据解释先前异常，双方因此开始互相信任")
+            ]
+    plan.new_expectations = [
+        s.NewExpectation(
+            description=f"第{volume}卷要让对手为轻视陆远付出代价",
+            plant_plan="主角当众约定在本卷末拿出证据",
+            payoff_plan="不只证实清白，还揭开对手背后的利益链",
+            plant_volume=volume,
+            payoff_volume=volume,
+            plant_unit=1,
+            payoff_unit=len(plan.units),
+        )
+    ]
+    return plan
+
+
+def _book_directions(user: str) -> s.BookDirections:
+    techniques = [name for name, _ in terms()]
+    variants = [
+        (
+            "青灯藏锋",
+            "杂役少年陆远",
+            "看见寿元，每次点灯消耗自己一天寿命",
+            "受伤的杂役捡到青灯，发现欺压他的人只剩两天寿元",
+            "宗门 → 寒原 → 血河总坛",
+            "信息差智斗",
+        ),
+        (
+            "逆命医女",
+            "被逐出家门的医女苏青",
+            "转移伤势，但必须自己承受一半代价",
+            "医馆被封的当天，她救活了本该死去的巡城使",
+            "边城医馆 → 王都 → 古战场",
+            "救人与身份反转",
+        ),
+        (
+            "寒原契约",
+            "被追捕的少年账房程越",
+            "能看见契约漏洞，但利用漏洞会失去一段记忆",
+            "押送途中发现自己是寿元账册上的抵押品，设局逃走",
+            "流亡商队 → 地下市集 → 王庭",
+            "冒险与契约博弈",
+        ),
+    ]
+    return s.BookDirections(
+        directions=[
+            s.BookDirection(
+                name=name,
+                logline=f"{hero}为了找回自己的命运，与买卖寿元的人周旋",
+                protagonist=f"{hero}，处境艰难却不肯放弃判断，表面退让而心里有自己的底线",
+                golden_finger=power,
+                opening=opening,
+                selling_points=[advantage, "每次取胜都有明确代价"],
+                stage_ladder=ladder,
+                tone="冷静智斗，关键时刻热血",
+                reader="男频，爱看靠判断赢下强敌，不喜欢无代价开挂",
+                difference=f"这个方向主要靠{advantage}吸引读者",
+                editor_note="先给主角一个别人看不见的优势，再用必须付出的代价保住悬念。",
+                techniques=techniques[3:5],
+            )
+            for name, hero, power, opening, ladder, advantage in variants
+        ],
+        recommended=0,
+        remark="我推荐青灯藏锋，信息差与代价能一起推动长篇；另外两个方向分别偏救人和冒险。",
+    )
+
+
+def _node_candidates(user: str) -> s.NodeCandidates:
+    slot = _section(user, "要补的位置")
+    count = 3 if re.search(r"3\s*个候选", slot) else 1
+    index = int(_match(r"节点\s*(\d+)", slot) or 2)
+    volume = int(_match(rf"节点\s+{index}「[^\n]*?约第\s*(\d+)\s*卷", user) or 1)
+    phrase = _match(r"作者写了一句：「(.+?)」", slot)
+    techniques = [name for name, _ in terms()]
+    variants = [
+        ("筹码交换", "主角用关键证据和对手交换保护盟友的承诺"),
+        ("夜探账房", "主角潜入账房取走契约原件，在追捕中暴露一张底牌"),
+        ("当众对质", "盟友在众人面前提出证据，使幕后交易第一次被公开质疑"),
+    ]
+    return s.NodeCandidates(
+        nodes=[
+            s.StoryNodeDraft(
+                kind="节点",
+                title=phrase[:10] if phrase else title,
+                volume=volume,
+                event=phrase or event,
+                prerequisite="上一个节点留下的线索已经查明，主角与盟友具备行动条件",
+                consequence="对手被迫改变原计划，下一个节点所需的证据和矛盾开始聚齐",
+                editor_note="让这个节点既接住前面的变化，又给后面的冲突留下必须解决的事。",
+                techniques=techniques[3:5],
+            )
+            for title, event in variants[:count]
+        ],
+        remark=f"这个位置给出 {count} 个方案，人物得失和推进方式各有区别。",
     )
 
 
@@ -738,7 +946,14 @@ def _digest(user: str) -> s.ChapterDigest:
     )
 
 
-def _critique() -> s.SetupCritique:
+def _critique(user: str = "") -> s.SetupCritique:
+    if _section(user, "第一卷卷纲").strip().startswith("（还没做）"):
+        return s.SetupCritique(
+            verdict="pass",
+            highlights=["关键节点的前提和后果能连起来"],
+            issues=[],
+            remark="已完成的节点可以交给作者确认，后面的部分等做完再审。",
+        )
     return s.SetupCritique(
         verdict="revise",
         highlights=["寿元信息差的设定和主角性格很搭", "第一卷每个单元都有明确的翻盘点"],
@@ -786,6 +1001,14 @@ def _absorb(user: str) -> s.RevisionTriage:
     """演示：插话里提到人物就改设定，否则留给后面的步骤。"""
     match = re.search(r"【作者刚才的插话】\n(.+?)(\n\n|$)", user, re.S)
     text = match.group(1).strip().lstrip("- ") if match else ""
+    # format_locked 的块名按产品格式紧接标题，不能用只识别换行正文的 _section。
+    locked = _match(r"【作者已确认（锁定）的部分】([^\n]*)", user) or _section(user, "作者已确认（锁定）的部分")
+    target = "concept" if any(word in text for word in ("概念", "基调", "方向")) else "lore"
+    if locked and ((target == "concept" and "定调" in locked) or (target == "lore" and "人物上轴" in locked)):
+        return s.RevisionTriage(
+            unlock_requests=[s.UnlockRequest(target=target, reason=f"作者要求调整：{text}")],
+            remark="这会影响已经确认的部分，我先提出解锁请求，等你决定后再改。",
+        )
     if any(word in text for word in ("名字", "叫", "主角", "金手指", "人物")):
         return s.RevisionTriage(
             lore_instructions=f"按作者的插话修改人物：{text}",
@@ -858,16 +1081,18 @@ def _recap(user: str) -> s.StoryRecap:
 async def respond(schema: type[BaseModel], system: str, user: str) -> BaseModel:
     await asyncio.sleep(DELAY_S)
     handlers = {
+        s.BookDirections: lambda: _book_directions(user),
+        s.NodeCandidates: lambda: _node_candidates(user),
         s.BookConcept: lambda: _concept(user),
-        s.LoreDraft: _lore,
-        s.StorySpine: _spine,
+        s.LoreDraft: lambda: _lore(user),
+        s.StorySpine: lambda: _spine(user),
         s.ThreadsDraft: _threads,
-        s.OutlineDraft: _outline,
+        s.OutlineDraft: lambda: _outline(user),
         s.VolumePlanDraft: lambda: _volume_plan(user),
         s.VolumeDirections: lambda: _directions(user),
         s.PitchJudgement: lambda: _judge(user),
         s.VolumeAudit: _audit,
-        s.SetupCritique: _critique,
+        s.SetupCritique: lambda: _critique(user),
         s.InterviewDraft: _interview,
         s.RevisionTriage: lambda: _absorb(user) if "【作者刚才的插话】" in user else _triage(user),
         s.ChapterPlanDraft: lambda: _chapter_plan(user),
