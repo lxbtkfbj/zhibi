@@ -34,11 +34,13 @@ from app.agents import editorial
 from app.agents.context import format_direction, format_pitches, format_revision
 from app.agents.planning import attach_new_foreshadowings, fit_chapter_counts, schedule_issues
 from app.agents.playbook import Playbook, pick, repetition_issues
+from app.book_settings import settings_of, strictness_text
 from app.graphs.deps import GraphDeps
 from app.llm.router import LLMError
 from app.models import Book, Chapter, MeetingMessage, PlotUnit, Volume
 from app.services import setup_store, writing_store
-from app.services.notes import note_requirement, note_thread
+from app.services.notes import note_thread
+from app.services.requirements import active_notes, add_requirement, deleted_texts, ingest_notes
 from app.services.writing_context import (
     SENTENCE,
     chapter_blocks,
@@ -52,10 +54,6 @@ from app.services.writing_context import (
     volume_recap_blocks,
 )
 
-# 审稿不合格时最多自动重写几次；之后交给作者
-MAX_REWRITES = 2
-# 拆卷纲时最多比几份方案
-MAX_PITCHES = 3
 ASPECT_NAMES = {"villain": "反派智商", "rhythm": "爽点节奏", "foreshadow": "伏笔排期", "repetition": "套路重复"}
 # 新书写完前几章请作者试读
 TRIAL_READ_AFTER = 3
@@ -127,10 +125,13 @@ def initial_state(params: dict) -> WriteState:
     }
 
 
-async def _requirement(session: AsyncSession, book_id: uuid.UUID, line: str) -> None:
-    book = await session.get(Book, book_id)
-    if book is not None and line.strip():
-        book.requirements = list(dict.fromkeys([*(book.requirements or []), line.strip()]))
+async def _requirement(session: AsyncSession, book_id: uuid.UUID, line: str, source: str = "note") -> None:
+    await add_requirement(session, book_id, line, source)
+
+
+async def live_settings(d: GraphDeps) -> dict:
+    async with d.sessionmaker() as session:
+        return settings_of(await session.get(Book, d.book_id))
 
 
 async def decide(session: AsyncSession, book_id: uuid.UUID, state: WriteState) -> dict:
@@ -144,7 +145,12 @@ async def decide(session: AsyncSession, book_id: uuid.UUID, state: WriteState) -
     finals = await session.scalar(
         select(func.count()).select_from(Chapter).where(Chapter.book_id == book_id, Chapter.status == "final")
     )
-    if book.source == "new" and not book.trial_read_done and finals >= TRIAL_READ_AFTER:
+    if (
+        settings_of(book)["trial_read"]
+        and book.source == "new"
+        and not book.trial_read_done
+        and finals >= TRIAL_READ_AFTER
+    ):
         return {"step": "trial_gate"}
     until, written, target = state.get("until", "count"), state.get("written", 0), state.get("target", 1)
     decision = await _next_step(session, book, state)
@@ -225,7 +231,8 @@ async def _new_notes(d: GraphDeps, seen: int) -> list[tuple[int, str, dict | Non
             .where(MeetingMessage.job_id == d.job_id, MeetingMessage.kind == "note", MeetingMessage.id > seen)
             .order_by(MeetingMessage.id)
         )
-        return [(row.id, row.content, row.payload) for row in rows]
+        messages = [(row.id, row.content, row.payload) for row in rows]
+        return await active_notes(session, d.book_id, messages) if messages else []
 
 
 async def dispatch_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
@@ -236,8 +243,7 @@ async def dispatch_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
     if rows:
         # 作者的插话记进这本书的要求里，之后的卷纲、章纲和正文都要落实
         async with d.sessionmaker() as session:
-            for _, content, payload in rows:
-                await _requirement(session, d.book_id, note_requirement(content, payload))
+            await ingest_notes(session, d.book_id, rows)
             await session.commit()
         update["notes_seen"] = rows[-1][0]
         if any(not note_thread(payload) for _, _, payload in rows):
@@ -264,7 +270,7 @@ async def _volume_context(d: GraphDeps, volume_id: str) -> tuple[Volume, Playboo
         book = await session.get(Book, d.book_id)
         volume = await session.get(Volume, uuid.UUID(volume_id))
         blocks = await volume_blocks(session, book, volume)
-        return volume, pick(book.concept), blocks
+        return volume, pick(book.concept, settings_of(book)["playbook"]), blocks
 
 
 def _unit_brief(u: dict[str, Any]) -> dict[str, Any]:
@@ -289,11 +295,31 @@ async def plan_volume_node(state: WriteState, runtime: Runtime[GraphDeps]) -> di
     await d.check_cancel()
     volume, _, blocks = await _volume_context(d, state["volume_id"])
     index = volume.index
-    await d.emit.status("chief", f"主编正在为第{index}卷想几个不同的拆法…")
+    count = (await live_settings(d))["pitches"]
+    if count == 1:
+        return {
+            "directions": [{"name": "按卷纲卡片拆", "idea": "按本卷卡片拆出一份完整方案。", "difference": ""}],
+            "pitches": Overwrite([]),
+            "chosen_pitch": 0,
+            "merge_note": "",
+            "volume_draft": {},
+            "volume_fix": "",
+            "open_issues": [],
+        }
+    blocks["requirements"] += f"\n\n本轮按设置给出 {count} 个不同方向，每个方向分别拆一份卷纲。"
+    await d.emit.status("chief", f"主编正在为第{index}卷想 {count} 个不同的拆法…")
     result = await editorial.volume_directions(d.llm, blocks, purpose=f"写作·第{index}卷比稿方向")
-    directions = [x.model_dump() for x in result.directions if x.name.strip() or x.idea.strip()][:MAX_PITCHES]
+    directions = [x.model_dump() for x in result.directions if x.name.strip() or x.idea.strip()][:count]
     if not directions:
         directions = [{"name": "贴着卡片拆", "idea": "按本卷卡片稳扎稳打地拆。", "difference": ""}]
+    while len(directions) < count:
+        directions.append(
+            {
+                "name": f"补充方向 {len(directions) + 1}",
+                "idea": "从不同冲突与节奏切入，提出有区分度的完整方案。",
+                "difference": "与已有方案拉开差异。",
+            }
+        )
     await d.emit.say("chief", result.remark)
     await d.emit.artifact(
         "chief",
@@ -390,8 +416,14 @@ async def judge_pitches_node(state: WriteState, runtime: Runtime[GraphDeps]) -> 
     return {"volume_draft": chosen["plan"], "chosen_pitch": winner, "merge_note": merge}
 
 
-def route_judged(state: WriteState) -> str:
-    return "merge_pitches" if state.get("merge_note") else "audit_volume"
+async def route_judged(state: WriteState, runtime: Runtime[GraphDeps]) -> str:
+    if state.get("merge_note"):
+        return "merge_pitches"
+    return await route_volume_audit(state, runtime)
+
+
+async def route_volume_audit(state: WriteState, runtime: Runtime[GraphDeps]) -> str:
+    return "audit_volume" if (await live_settings(runtime.context))["volume_audit"] else "save_volume"
 
 
 async def merge_pitches_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
@@ -474,9 +506,14 @@ async def revise_volume_node(state: WriteState, runtime: Runtime[GraphDeps]) -> 
     d = runtime.context
     await d.check_cancel()
     feedback = state.get("feedback", "")
+    async with d.sessionmaker() as session:
+        removed = await deleted_texts(session, d.book_id)
+    removed_feedback = any(text in feedback for text in removed)
+    if removed_feedback:
+        feedback = ""
     volume, _, blocks = await _volume_context(d, state["volume_id"])
     index = volume.index
-    if feedback:
+    if feedback or removed_feedback:
         # 作者可能在网页上改过卷纲，以数据库里的当前版本为准
         async with d.sessionmaker() as session:
             ledger = await setup_store.load_ledger(session, d.book_id)
@@ -493,6 +530,8 @@ async def revise_volume_node(state: WriteState, runtime: Runtime[GraphDeps]) -> 
                 "units": [setup_store.unit_dict(u) for u in units],
                 "new_foreshadowings": [f for f in ledger if f["plant_volume"] == index and f["span"] != "长"],
             }
+        if removed_feedback:
+            return {"volume_draft": current, "feedback": "", "volume_fix": ""}
         await d.emit.status("chief", f"主编正在按你的意见修改第{index}卷卷纲…")
         instructions, purpose = feedback, f"写作·第{index}卷按作者意见修改"
     else:
@@ -521,7 +560,7 @@ async def save_volume_node(state: WriteState, runtime: Runtime[GraphDeps]) -> di
         # 改完还剩的问题（程序能查的那部分）交给作者拍板时一并看到
         prior = await prior_units(session, d.book_id, index)
         remaining = [
-            *repetition_issues(pick(book.concept), prior, units),
+            *repetition_issues(pick(book.concept, settings_of(book)["playbook"]), prior, units),
             *schedule_issues(units, [], await setup_store.load_ledger(session, d.book_id), index),
         ]
         await session.commit()
@@ -547,8 +586,9 @@ async def volume_gate_node(
     pending: dict[str, Any] = {"kind": "volume_review", "volume": index, "title": state.get("volume_title", "")}
     if state.get("open_issues"):
         pending["issues"] = state["open_issues"]
-    decision = interrupt(pending)
     d = runtime.context
+    automatic = not (await live_settings(d))["volume_approval"]
+    decision = {"action": "approve"} if automatic else interrupt(pending)
     feedback = str(decision.get("feedback", "")).strip()
     async with d.sessionmaker() as session:
         if decision.get("action") == "approve":
@@ -556,10 +596,15 @@ async def volume_gate_node(
             if volume is not None and volume.status == "detailed":
                 volume.status = "approved"
             await session.commit()
-            await d.emit.say("system", f"作者批准了第{index}卷卷纲，开写。", kind="decision")
+            await d.emit.say(
+                "system",
+                f"第{index}卷卷纲按设置自动批准，开写。" if automatic else f"作者批准了第{index}卷卷纲，开写。",
+                kind="decision",
+            )
             return Command(goto="dispatch", update={"open_issues": []})
         # 卷纲的修改意见也要记住，免得以后的规划又改回去
-        await _requirement(session, d.book_id, f"第{index}卷卷纲的修改意见：{feedback}")
+        if not decision.get("requirement_saved"):
+            await _requirement(session, d.book_id, feedback, f"volume:{index}")
         await session.commit()
     return Command(goto="revise_volume", update={"feedback": feedback or "请整体再打磨一遍。"})
 
@@ -867,6 +912,7 @@ async def review_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
         chapter = await session.get(Chapter, uuid.UUID(state["chapter_id"]))
         blocks = await chapter_blocks(session, await session.get(Book, d.book_id), chapter)
     await d.emit.status("reviewer", f"审稿正在读第{state.get('chapter_index')}章…")
+    blocks["strictness"] = strictness_text((await live_settings(d))["review_strictness"])
     result = await editorial.review_chapter(d.llm, blocks)
     return {"review": result.model_dump()}
 
@@ -882,19 +928,20 @@ async def check_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
     return {"consistency": result.model_dump()}
 
 
-def blocking_issues(review: dict, consistency: dict) -> list[str]:
-    """必须重写的问题：审稿判退且有中等以上的问题，或者设定检查发现严重矛盾。"""
+def blocking_issues(review: dict, consistency: dict, strictness: str = "standard") -> list[str]:
     out = []
-    if review.get("verdict") == "revise":
+    review_levels = ("high",) if strictness == "lenient" else ("high", "medium")
+    consistency_levels = ("high", "medium") if strictness == "strict" else ("high",)
+    if strictness != "standard" or review.get("verdict") == "revise":
         out += [
             f"[审稿] {i['problem']}——{i['suggestion']}"
             for i in review.get("issues", [])
-            if i.get("severity") in ("high", "medium")
+            if i.get("severity") in review_levels
         ]
     out += [
         f"[设定] {i['problem']}——{i['suggestion']}"
         for i in consistency.get("issues", [])
-        if i.get("severity") == "high"
+        if i.get("severity") in consistency_levels
     ]
     return out
 
@@ -902,12 +949,14 @@ def blocking_issues(review: dict, consistency: dict) -> list[str]:
 async def judge_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
     d = runtime.context
     review, consistency = state.get("review") or {}, state.get("consistency") or {}
-    blocking = blocking_issues(review, consistency)
+    settings = await live_settings(d)
+    max_rewrites = settings["max_rewrites"]
+    blocking = blocking_issues(review, consistency, settings["review_strictness"])
     attempt = state.get("attempt", 0)
     async with d.sessionmaker() as session:
         chapter = await session.get(Chapter, uuid.UUID(state["chapter_id"]))
         chapter.review = {"review": review, "consistency": consistency}
-        if blocking and attempt < MAX_REWRITES:
+        if blocking and attempt < max_rewrites:
             chapter.attempts = attempt + 1
         await session.commit()
     if review.get("remark"):
@@ -928,11 +977,11 @@ async def judge_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
     )
     if not blocking:
         return {"step": "finalize", "blocking": []}
-    if attempt < MAX_REWRITES:
+    if attempt < max_rewrites:
         await d.emit.status("chief", f"主编：第{state.get('chapter_index')}章退回重写（第 {attempt + 1} 次）。")
         revision = "\n".join(f"- {line}" for line in blocking)
         return {"step": "write", "attempt": attempt + 1, "revision": revision, "blocking": blocking}
-    await d.emit.status("chief", f"第{state.get('chapter_index')}章重写 {MAX_REWRITES} 次仍未通过，请作者定夺。")
+    await d.emit.status("chief", f"第{state.get('chapter_index')}章重写 {max_rewrites} 次仍未通过，请作者定夺。")
     return {"step": "chapter_gate", "blocking": blocking}
 
 
@@ -1063,14 +1112,16 @@ async def recap_volume_node(state: WriteState, runtime: Runtime[GraphDeps]) -> d
 
 async def trial_gate_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
     # interrupt 之前不要放有副作用的代码：恢复执行时本节点会从头重跑
-    decision = interrupt({"kind": "trial_read", "chapters": TRIAL_READ_AFTER})
     d = runtime.context
+    if not (await live_settings(d))["trial_read"]:
+        return {}
+    decision = interrupt({"kind": "trial_read", "chapters": TRIAL_READ_AFTER})
     feedback = str(decision.get("feedback", "")).strip()
     async with d.sessionmaker() as session:
         book = await session.get(Book, d.book_id)
         book.trial_read_done = True
-        if feedback:
-            await _requirement(session, d.book_id, f"前 {TRIAL_READ_AFTER} 章试读意见：{feedback}")
+        if feedback and not decision.get("requirement_saved"):
+            await _requirement(session, d.book_id, feedback, "trial")
         await session.commit()
     await d.emit.say(
         "system",
@@ -1228,8 +1279,8 @@ def build_write_graph() -> StateGraph:
     # 拆卷纲：想方向 → 各方向并行起草 → 比稿 →（融合）→ 专项审稿 →（自动改一轮）→ 存库 → 回到 dispatch 等拍板
     graph.add_conditional_edges("plan_volume", route_planned, ["draft_pitch", "revise_volume"])
     graph.add_edge("draft_pitch", "judge_pitches")
-    graph.add_conditional_edges("judge_pitches", route_judged, ["merge_pitches", "audit_volume"])
-    graph.add_edge("merge_pitches", "audit_volume")
+    graph.add_conditional_edges("judge_pitches", route_judged, ["merge_pitches", "audit_volume", "save_volume"])
+    graph.add_conditional_edges("merge_pitches", route_volume_audit, ["audit_volume", "save_volume"])
     graph.add_conditional_edges("audit_volume", route_audited, ["revise_volume", "save_volume"])
     graph.add_edge("revise_volume", "save_volume")
     return graph

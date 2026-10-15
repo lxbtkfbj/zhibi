@@ -8,9 +8,9 @@
 import re
 from collections import Counter
 from dataclasses import dataclass
-from functools import cache
-from importlib import resources
 from typing import Any
+
+from app.prompts import _load, track_rendered
 
 GENERAL = "general"
 # 按顺序匹配：类型和标签里每一组词都至少出现一个，就用这套打法；都不匹配时用通用版
@@ -77,7 +77,7 @@ class Playbook:
         if not parts:
             return ""
         head = f"【题材打法：{self.name}（编辑部的经验，照着用；与作者的要求冲突时以作者为准）】"
-        return head + "\n" + "\n\n".join(parts)
+        return track_rendered(f"playbooks.{self.key}", head + "\n" + "\n\n".join(parts))
 
     def canonical_trope(self, text: str) -> str | None:
         return _canonical(text, self.tropes)
@@ -113,6 +113,12 @@ def parse(key: str, text: str) -> Playbook:
     for block in re.split(r"^##\s+", text, flags=re.M)[1:]:
         name, _, body = block.partition("\n")
         sections[name.strip()] = body.strip()
+    if not title:
+        raise ValueError("题材打法缺少一级标题（# 名称）")
+    required = {section for stage in STAGES.values() for section in stage} - {"套路上限"}
+    missing = sorted(section for section in required if not sections.get(section))
+    if missing:
+        raise ValueError("题材打法缺少有效分节：" + "、".join(missing))
     tropes: dict[str, Limit] = {}
     trope_texts: dict[str, str] = {}
     for block in re.split(r"^###\s+", sections.get("套路库", ""), flags=re.M)[1:]:
@@ -125,6 +131,10 @@ def parse(key: str, text: str) -> Playbook:
         m.group(1).strip(): _limit(m.group(2))
         for m in re.finditer(r"^-\s*(.+?)（(.*?)）", sections.get("破局手法", ""), re.M)
     }
+    if not tropes:
+        raise ValueError("套路库至少需要一个 ### 套路名称")
+    if not resolutions:
+        raise ValueError("破局手法至少需要一条「- 名称（限制）：说明」")
     return Playbook(
         key=key,
         name=title.group(1).strip() if title else key,
@@ -135,14 +145,16 @@ def parse(key: str, text: str) -> Playbook:
     )
 
 
-@cache
 def load(key: str) -> Playbook:
-    folder = resources.files("app.prompts").joinpath("playbooks")
-    return parse(key, folder.joinpath(f"{key}.md").read_text(encoding="utf-8"))
+    if key not in {GENERAL, *(rule[0] for rule in RULES)}:
+        raise ValueError(f"未知题材打法：{key}")
+    return parse(key, _load(f"playbooks.{key}"))
 
 
-def pick(concept: dict[str, Any] | None) -> Playbook:
-    """按概念里的类型和标签选打法库。"""
+def pick(concept: dict[str, Any] | None, selection: str = "auto") -> Playbook:
+    """作者指定时直接用该打法，否则按概念里的类型和标签挑选。"""
+    if selection and selection != "auto":
+        return load(selection)
     concept = concept or {}
     words = " ".join([str(concept.get("genre") or ""), *map(str, concept.get("tags") or [])])
     for key, groups in RULES:
@@ -151,8 +163,10 @@ def pick(concept: dict[str, Any] | None) -> Playbook:
     return load(GENERAL)
 
 
-def playbook_text(concept: dict[str, Any] | None, stage: str, tropes: list[str] | None = None) -> str:
-    return pick(concept).text(stage, tropes)
+def playbook_text(
+    concept: dict[str, Any] | None, stage: str, tropes: list[str] | None = None, *, selection: str = "auto"
+) -> str:
+    return pick(concept, selection).text(stage, tropes)
 
 
 # ---------- 套路使用台账 ----------

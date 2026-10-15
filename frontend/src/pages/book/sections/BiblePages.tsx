@@ -1,6 +1,7 @@
+import { useReducedMotion } from '../../../lib/appearance'
 import clsx from 'clsx'
 import { BookOpen, Castle, Gem, Landmark, MapPin, Mountain, Plus, ScrollText, Sparkles, Trash2, Zap } from 'lucide-react'
-import { motion, useReducedMotion } from 'motion/react'
+import { motion } from 'motion/react'
 import { type ReactNode, useMemo, useState } from 'react'
 import { useBible, useBibleMutations } from '../../../api/hooks'
 import type { Character, ForeshadowingStatus } from '../../../api/types'

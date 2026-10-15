@@ -1,6 +1,7 @@
+import { useReducedMotion } from '../../../lib/appearance'
 import clsx from 'clsx'
 import { ChevronLeft, ChevronRight, Download, MoreHorizontal, PenLine, RotateCcw, X } from 'lucide-react'
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
+import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useParams } from 'react-router-dom'
@@ -152,7 +153,7 @@ function Paragraphs({ text, live }: { text: string; live?: boolean }) {
   return (
     <>
       {paragraphs.map((p, i) => (
-        <p key={i} className="mb-[0.9em] indent-[2em] font-serif text-[17px] leading-[2] text-ink last:mb-0">
+        <p key={i} className="mb-[0.9em] indent-[2em] reading-prose text-ink last:mb-0">
           <span className={clsx(live && i === paragraphs.length - 1 && 'caret')}>{p.trim()}</span>
         </p>
       ))}
@@ -341,7 +342,7 @@ function ChapterContent({ n }: { n: number }) {
           </article>
         ) : chapter.content && editing ? (
           <div>
-            <textarea aria-label="修改章节正文" value={draftText} onChange={(e) => setDraftText(e.target.value)} className={clsx(inputClass, 'min-h-[65vh] font-serif text-[17px] leading-[2]')} />
+            <textarea aria-label="修改章节正文" value={draftText} onChange={(e) => setDraftText(e.target.value)} className={clsx(inputClass, 'min-h-[65vh] reading-prose')} />
             <div className="mt-3 flex items-center justify-end gap-2">
               <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>取消</Button>
               <Button size="sm" variant="primary" loading={update.isPending} onClick={async () => { await update.mutateAsync({ index: n, content: draftText }); setEditing(false) }}>保存</Button>

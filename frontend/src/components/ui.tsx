@@ -1,7 +1,8 @@
+import { useReducedMotion } from '../lib/appearance'
 import clsx from 'clsx'
 import { X } from 'lucide-react'
-import { animate, AnimatePresence, motion, useInView, useMotionValue, useReducedMotion, useTransform } from 'motion/react'
-import { type ButtonHTMLAttributes, type ReactNode, useEffect, useRef } from 'react'
+import { animate, AnimatePresence, motion, useInView, useMotionValue, useTransform } from 'motion/react'
+import { type ButtonHTMLAttributes, type ReactNode, useEffect, useId, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import type { Tone } from '../lib/status'
 
@@ -26,8 +27,8 @@ export function Button({
         'disabled:cursor-not-allowed disabled:opacity-50',
         { sm: 'h-8 px-3 text-[13px]', md: 'h-10 px-4 text-sm', lg: 'h-12 px-6 text-[15px]' }[size],
         {
-          primary: 'bg-ink text-paper-2 shadow-[0_6px_16px_-8px_rgb(38_35_32/0.6)] hover:bg-ink-2',
-          seal: 'bg-seal text-paper-2 shadow-[0_8px_20px_-10px_rgb(180_67_46/0.8)] hover:bg-seal-dark',
+          primary: 'bg-ink text-paper-2 shadow-[var(--shadow-paper)] hover:bg-ink-2',
+          seal: 'bg-seal text-paper-2 shadow-[var(--shadow-paper)] hover:bg-seal-dark',
           ghost: 'text-ink-2 hover:bg-line/60 hover:text-ink',
           outline: 'border border-line-2 bg-card text-ink hover:border-ink-3/50 hover:bg-paper-2',
           danger: 'border border-seal/40 bg-card text-seal hover:bg-seal-soft',
@@ -160,7 +161,7 @@ export function Modal({
     <AnimatePresence>
       {open && (
         <motion.div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-ink/30 p-0 backdrop-blur-[2px] sm:items-center sm:p-6"
+          className="fixed inset-0 z-50 flex items-end justify-center bg-[var(--color-overlay)] p-0 backdrop-blur-[2px] sm:items-center sm:p-6"
           onMouseDown={onClose}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -213,19 +214,42 @@ export function Sheet({
   footer?: ReactNode
 }) {
   useEscape(open, onClose)
+  const titleId = useId()
+  const sheet = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const overflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    sheet.current?.focus()
+    const trap = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') return
+      const items = Array.from(sheet.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), summary, [tabindex="0"]') ?? []).filter(element => element.getClientRects().length > 0)
+      const first = items[0]
+      const last = items.at(-1)
+      if (!first) { event.preventDefault(); return }
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === sheet.current)) { event.preventDefault(); last?.focus() }
+      else if (!event.shiftKey && (document.activeElement === last || document.activeElement === sheet.current)) { event.preventDefault(); first.focus() }
+    }
+    document.addEventListener('keydown', trap)
+    return () => { document.removeEventListener('keydown', trap); document.body.style.overflow = overflow; previous?.focus() }
+  }, [open])
   return createPortal(
     <AnimatePresence>
       {open && (
         <motion.div
-          className="fixed inset-0 z-50 bg-ink/20 backdrop-blur-[1px]"
+          className="fixed inset-0 z-50 bg-[var(--color-overlay)] backdrop-blur-[1px]"
           onMouseDown={onClose}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
         >
           <motion.aside
+            ref={sheet}
+            tabIndex={-1}
             role="dialog"
             aria-modal="true"
+            aria-labelledby={titleId}
             onMouseDown={(e) => e.stopPropagation()}
             initial={{ x: '100%' }}
             animate={{ x: 0 }}
@@ -234,7 +258,7 @@ export function Sheet({
             className="absolute inset-y-0 right-0 flex w-full max-w-lg flex-col bg-paper-2 shadow-[var(--shadow-panel)]"
           >
             <div className="flex items-center justify-between gap-3 border-b border-line px-6 py-4">
-              <div className="min-w-0 font-serif text-xl font-bold">{title}</div>
+              <div id={titleId} className="min-w-0 font-serif text-xl font-bold">{title}</div>
               <button onClick={onClose} className="rounded-lg p-1.5 text-ink-2 hover:bg-line/60 hover:text-ink" aria-label="关闭">
                 <X className="size-5" />
               </button>

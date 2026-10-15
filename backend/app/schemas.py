@@ -425,6 +425,6 @@ class MeetingMessageOut(BaseModel):
 
 class UsageOut(BaseModel):
     calls: int
-    prompt_tokens: int
-    completion_tokens: int
-    by_role: dict[str, dict[str, int]]
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    by_role: dict[str, dict[str, int | None]]

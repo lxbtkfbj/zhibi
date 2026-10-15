@@ -353,10 +353,10 @@ async def test_note_mid_run_revises_finished_parts(sessionmaker, monkeypatch, th
             )
             private_replies = [m for m in messages if m.kind == "speech" and m.payload == {"thread": thread}]
             assert [(m.speaker, m.content) for m in private_replies] == [(thread, "收到，主编已经安排，按你说的改。")]
-            assert "（作者对设定师说）主角名字改成云澈" in (await session.get(Book, book_id)).requirements
+            assert "主角名字改成云澈" in (await session.get(Book, book_id)).requirements
     if thread:
         for name, user in prompts[3:]:
-            assert "（作者对设定师说）主角名字改成云澈" in user, name
+            assert "主角名字改成云澈" in user, name
     else:
         assert any("云澈" in r for r in replies)  # 主编在会上回应了作者
 
@@ -388,7 +388,7 @@ async def test_targeted_note_before_setup_reaches_every_prompt(sessionmaker, mon
     await execute_job(job_id)
     status, _, error = await job_status(sessionmaker, job_id)
     assert status == "waiting_author", error
-    assert all("（作者对写手说）开篇节奏紧凑" in user for user in prompts)
+    assert all("开篇节奏紧凑" in user for user in prompts)
     async with sessionmaker() as session:
         assert "之前记下的要求不能丢" in (await session.get(Book, book_id)).requirements
         replies = (await session.execute(select(MeetingMessage).where(MeetingMessage.job_id == job_id))).scalars().all()
@@ -440,7 +440,7 @@ async def test_approval_keeps_late_targeted_note_without_replanning(sessionmaker
         book = await session.get(Book, book_id)
         assert book.status == "ready"
         assert "之前记下的要求" in book.requirements
-        assert f"（作者对设定师说）{late_content}" in book.requirements
+        assert late_content in book.requirements
         assert await load_setup(session, book_id) == before
         calls_after = await session.scalar(select(func.count()).select_from(LlmCall).where(LlmCall.job_id == job_id))
         assert calls_after == calls_before  # 批准只保存要求，不再调用模型改动已经审阅的稿件。

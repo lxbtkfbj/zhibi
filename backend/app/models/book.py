@@ -1,11 +1,16 @@
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.book_settings import default_settings
 from app.models.base import Base, Timestamps, UUIDPk
+
+if TYPE_CHECKING:
+    from app.models.settings import AuthorRequirement
 
 
 class Book(UUIDPk, Timestamps, Base):
@@ -21,8 +26,25 @@ class Book(UUIDPk, Timestamps, Base):
     concept: Mapped[dict] = mapped_column(JSONB, default=dict)
     # 主线骨架：开篇、结局、全书关键转折
     spine: Mapped[dict] = mapped_column(JSONB, default=dict)
-    # 作者的要求：动笔前的回答、过程中的插话、拍板与试读意见；之后每个角色都要落实
-    requirements: Mapped[list] = mapped_column(JSONB, default=list)
+    settings: Mapped[dict] = mapped_column(JSONB, default=default_settings)
+    author_requirements: Mapped[list["AuthorRequirement"]] = relationship(
+        back_populates="book",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="(AuthorRequirement.created_at, AuthorRequirement.id)",
+    )
+
+    @property
+    def requirements(self) -> list[str]:
+        """Compatibility view only; the table is the sole source of requirements."""
+        return [item.text for item in self.author_requirements]
+
+    @requirements.setter
+    def requirements(self, values: list[str]) -> None:
+        from app.models.settings import AuthorRequirement
+
+        self.author_requirements = [AuthorRequirement(text=text, source="legacy") for text in dict.fromkeys(values)]
+
     # 新书写完前 3 章后的试读是否已经做过
     trial_read_done: Mapped[bool] = mapped_column(Boolean, default=False)
     # setting_up / awaiting_approval / ready / writing / completed

@@ -1,6 +1,7 @@
+import { useReducedMotion } from '../../lib/appearance'
 import clsx from 'clsx'
 import { ArrowRight, SendHorizontal } from 'lucide-react'
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
+import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
 import { useJobActions } from '../../api/hooks'
 import { Button, ErrorText } from '../../components/ui'
@@ -97,7 +98,7 @@ function NoteComposer() {
           : '说说你的要求，编辑部下次开工会照办…'
 
   return (
-    <div className="shrink-0 border-t border-divider bg-[#f6f1e6] px-4 pt-3 pb-3">
+    <div className="shrink-0 border-t border-divider bg-pane-mid px-4 pt-3 pb-3">
       {idle && !resumable && (book.status === 'ready' || book.status === 'writing') && (
         <div className="mb-3 border-b border-divider pb-3"><WritingControls compact /></div>
       )}
@@ -162,7 +163,7 @@ export function ConversationPanel() {
   const todoPath = asking || pending?.kind === 'setup_review' ? `/books/${bookId}` : copy.links[0]?.[1] ?? `/books/${bookId}`
 
   return (
-    <section className="flex h-full min-h-0 min-w-0 flex-col bg-[#f6f1e6]" aria-label="会话消息与输入">
+    <section className="flex h-full min-h-0 min-w-0 flex-col bg-pane-mid" aria-label="会话消息与输入">
       <header className="shrink-0 border-b border-divider px-4 py-3">
         <div className="flex items-center gap-2.5">
           <RoleAvatar speaker={conversation} working={direct && status[conversation].state === 'working'} />

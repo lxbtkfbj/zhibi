@@ -1,5 +1,4 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MotionConfig } from 'motion/react'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom'
@@ -14,18 +13,22 @@ import { SpinePage } from './pages/book/sections/SpinePage'
 import { ThreadsPage } from './pages/book/sections/ThreadsPage'
 import { VolumePage } from './pages/book/sections/VolumePage'
 import { Home } from './pages/Home'
-import { SettingsPage } from './pages/SettingsPage'
+import { BookSettingsPage } from './pages/BookSettingsPage'
+import { AppearanceProvider } from './lib/appearance'
+import { SettingsHost } from './lib/settingsModal'
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { refetchOnWindowFocus: false, staleTime: 5_000, retry: 1 } },
 })
 
 const router = createBrowserRouter([
+ { element: <SettingsHost />, children: [
   {
     element: <SiteLayout />,
     children: [
       { path: '/', element: <Home /> },
-      { path: '/settings', element: <SettingsPage /> },
+      { path: '/settings', element: <Navigate to="/" replace state={{ openSettings: true }} /> },
+      { path: '/prompts', lazy: async () => ({ Component: (await import('./pages/PromptsPage')).PromptsPage }) },
     ],
   },
   {
@@ -43,17 +46,19 @@ const router = createBrowserRouter([
       { path: 'world', element: <WorldPage /> },
       { path: 'relations', element: <RelationsPage /> },
       { path: 'foreshadowing', element: <ForeshadowingPage /> },
+      { path: 'settings', element: <BookSettingsPage /> },
       { path: 'meeting', element: <Navigate to=".." relative="path" replace /> },
     ],
   },
+ ] },
 ])
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <MotionConfig reducedMotion="user">
+      <AppearanceProvider>
         <RouterProvider router={router} />
-      </MotionConfig>
+      </AppearanceProvider>
     </QueryClientProvider>
   </StrictMode>,
 )

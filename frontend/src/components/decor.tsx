@@ -18,20 +18,20 @@ export function Seal({ text = '笔', size = 36, className }: { text?: string; si
 export function InkMountains({ className, sun = true }: { className?: string; sun?: boolean }) {
   return (
     <svg viewBox="0 0 1200 240" preserveAspectRatio="xMidYMax slice" className={className} aria-hidden>
-      {sun && <circle cx="930" cy="70" r="34" fill="#b4432e" opacity="0.78" />}
+      {sun && <circle cx="930" cy="70" r="34" fill="var(--color-seal)" opacity="0.78" />}
       <path
         d="M0 170 C90 140 160 108 250 122 C330 134 380 86 470 92 C560 98 610 150 720 132 C820 116 880 70 980 86 C1070 100 1130 132 1200 122 L1200 240 L0 240Z"
-        fill="#262320"
+        fill="var(--color-ink)"
         opacity="0.05"
       />
       <path
         d="M0 196 C110 168 170 128 260 150 C340 170 400 116 500 124 C590 132 640 180 760 166 C860 154 930 112 1040 132 C1110 145 1160 166 1200 160 L1200 240 L0 240Z"
-        fill="#262320"
+        fill="var(--color-ink)"
         opacity="0.08"
       />
       <path
         d="M0 222 C80 206 150 176 230 190 C300 202 350 168 430 174 C520 181 560 214 660 206 C760 198 820 160 920 178 C1010 194 1080 210 1200 200 L1200 240 L0 240Z"
-        fill="#262320"
+        fill="var(--color-ink)"
         opacity="0.12"
       />
     </svg>

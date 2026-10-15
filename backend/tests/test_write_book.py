@@ -142,7 +142,7 @@ async def test_first_chapters_then_trial_read(sessionmaker):
     async with sessionmaker() as session:
         book = await session.get(Book, book_id)
         assert book.trial_read_done
-        assert "前 3 章试读意见：打斗再多一点" in book.requirements
+        assert "打斗再多一点" in book.requirements
 
 
 async def test_whole_volume_then_next_volume_plan(sessionmaker, monkeypatch):
@@ -212,7 +212,7 @@ async def test_whole_volume_then_next_volume_plan(sessionmaker, monkeypatch):
     assert rows[31].status == "final" and rows[31].index == 32
     async with sessionmaker() as session:
         book = await session.get(Book, book_id)
-        assert "第2卷卷纲的修改意见：苏晚晴的戏份再多一点" in book.requirements
+        assert "苏晚晴的戏份再多一点" in book.requirements
 
 
 async def test_chapter_stuck_goes_to_author(sessionmaker, monkeypatch):
@@ -275,7 +275,7 @@ async def test_notes_while_writing_become_requirements(sessionmaker, monkeypatch
     status, _, error = await job_state(sessionmaker, job_id)
     assert status == "succeeded", error
     assert "苏晚晴早点出场" not in prompts[0][1]
-    requirement = "对设定师：苏晚晴早点出场" if thread else "苏晚晴早点出场"
+    requirement = "苏晚晴早点出场"
     assert requirement in prompts[-1][1]  # 下一章开始照办
     async with sessionmaker() as session:
         assert requirement in (await session.get(Book, book_id)).requirements
@@ -305,6 +305,11 @@ async def artifacts_of(sessionmaker, job_id) -> list[MeetingMessage]:
 async def test_volume_pitches_then_special_review(sessionmaker, monkeypatch):
     """拆第二卷：三个方向并行各拆一份 → 审稿比稿（选方案 2，融合方案 3）→ 专项审稿 → 自动改一轮 → 拍板。"""
     book_id = await approved_book(sessionmaker)
+    # This scenario specifically covers three-way competition; balanced now defaults to two.
+    async with sessionmaker() as session:
+        book = await session.get(Book, book_id)
+        book.settings = {**book.settings, "effort_preset": "premium", "pitches": 3}
+        await session.commit()
     await skip_first_volume(sessionmaker, book_id)
     prompts = capture_prompts(monkeypatch)
 
@@ -372,6 +377,10 @@ async def test_volume_pitches_then_special_review(sessionmaker, monkeypatch):
 async def test_rule_issues_force_revision_and_reach_author(sessionmaker, monkeypatch):
     """审稿放行，程序查出套路超限照样改一轮；改完还没解决的，拍板时一并告诉作者。只有一个方向就不比稿。"""
     book_id = await approved_book(sessionmaker)
+    async with sessionmaker() as session:
+        book = await session.get(Book, book_id)
+        book.settings = {**book.settings, "effort_preset": "custom", "pitches": 1}
+        await session.commit()
     await skip_first_volume(sessionmaker, book_id)
     original = demo.respond
 
@@ -395,12 +404,12 @@ async def test_rule_issues_force_revision_and_reach_author(sessionmaker, monkeyp
     status, pending, error = await job_state(sessionmaker, job_id)
     assert status == "waiting_author", error
     purposes = await purposes_of(sessionmaker, job_id)
-    assert purposes == ["写作·第2卷比稿方向", "写作·第2卷方案1", "写作·第2卷专项审稿", "写作·第2卷按专项审稿修改"]
+    assert purposes == ["写作·第2卷方案1", "写作·第2卷专项审稿", "写作·第2卷按专项审稿修改"]
     assert pending["kind"] == "volume_review"
     assert any("套路「比试竞赛」全书最多用 4 次" in line for line in pending["issues"])
     assert any("破局手法「临阵突破」连着用了 2 个单元" in line for line in pending["issues"])
     types = [m.payload["type"] for m in await artifacts_of(sessionmaker, job_id)]
-    assert types == ["volume_directions", "volume_pitch", "volume_audit", "volume_plan"]
+    assert types == ["volume_pitch", "volume_audit", "volume_plan"]
 
     # 作者看过后批准，问题不再挂着
     await execute_job(job_id, {"action": "approve"})

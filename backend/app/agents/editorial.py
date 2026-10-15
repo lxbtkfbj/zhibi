@@ -24,8 +24,10 @@ def persona(role: str) -> str:
     return render(f"persona_{role}", rules=render("rules"))
 
 
-async def interview(llm: LLMRouter, idea: str, style: str) -> s.InterviewDraft:
+async def interview(llm: LLMRouter, idea: str, style: str, requirements: str = "") -> s.InterviewDraft:
     user = render("setup_interview", idea=idea, style=format_style(style))
+    if requirements:
+        user += "\n\n" + requirements
     return await llm.structured("chief", s.InterviewDraft, persona("chief"), user, purpose="开书·动笔前提问")
 
 
@@ -66,14 +68,21 @@ async def draft_spine(
 
 
 async def draft_threads(
-    llm: LLMRouter, concept: dict, lore: dict, spine: dict, requirements: str, current: dict, instructions: str
+    llm: LLMRouter,
+    concept: dict,
+    lore: dict,
+    spine: dict,
+    requirements: str,
+    current: dict,
+    instructions: str,
+    selection: str = "auto",
 ) -> s.ThreadsDraft:
     user = render(
         "setup_threads",
         concept=format_concept(concept),
         lore=format_lore(lore),
         spine=format_spine(spine),
-        playbook=playbook_text(concept, "threads"),
+        playbook=playbook_text(concept, "threads", selection=selection),
         requirements=requirements,
         revision=format_revision("当前线索", format_threads(current), instructions) if current else "",
     )
@@ -89,6 +98,7 @@ async def draft_outline(
     requirements: str,
     current: dict,
     instructions: str,
+    selection: str = "auto",
 ) -> s.OutlineDraft:
     chapters = planned_chapters(concept)
     user = render(
@@ -97,7 +107,7 @@ async def draft_outline(
         lore=format_lore(lore),
         spine=format_spine(spine),
         threads=format_threads(threads),
-        playbook=playbook_text(concept, "outline"),
+        playbook=playbook_text(concept, "outline", selection=selection),
         requirements=requirements,
         chapter_hint=f"（约 {chapters} 章）" if chapters else "",
         revision=format_revision("当前总纲", format_outline(current), instructions) if current else "",
@@ -143,12 +153,14 @@ async def audit_volume(
     return await llm.structured("reviewer", s.VolumeAudit, persona("reviewer"), user, purpose=purpose)
 
 
-async def critique_setup(llm: LLMRouter, idea: str, requirements: str, setup: dict[str, dict]) -> s.SetupCritique:
+async def critique_setup(
+    llm: LLMRouter, idea: str, requirements: str, setup: dict[str, dict], selection: str = "auto"
+) -> s.SetupCritique:
     user = render(
         "setup_critique",
         idea=idea,
         requirements=requirements,
-        playbook=playbook_text(setup.get("concept"), "review"),
+        playbook=playbook_text(setup.get("concept"), "review", selection=selection),
         **{k: PART_FORMATTERS[k](setup.get(k) or {}) for k in s.SETUP_PARTS},
     )
     return await llm.structured("reviewer", s.SetupCritique, persona("reviewer"), user, purpose="开书·审稿")
@@ -248,7 +260,7 @@ async def recap_volume(llm: LLMRouter, blocks: dict[str, str]) -> s.StoryRecap:
 
 
 async def review_chapter(llm: LLMRouter, blocks: dict[str, str]) -> s.ChapterReview:
-    user = render("review_chapter", **blocks)
+    user = render("review_chapter", **{"strictness": "", **blocks})
     return await llm.structured("reviewer", s.ChapterReview, persona("reviewer"), user, purpose="写作·审稿")
 
 

@@ -21,7 +21,7 @@ const endMarker = (tone: 'ink' | 'seal') => (
   <span
     className={
       tone === 'seal'
-        ? 'flex size-8 items-center justify-center rounded-full bg-seal text-paper-2 shadow-[0_6px_14px_-8px_rgb(180_67_46/0.9)]'
+        ? 'flex size-8 items-center justify-center rounded-full bg-seal text-paper-2 shadow-[var(--shadow-paper)]'
         : 'flex size-8 items-center justify-center rounded-full bg-ink text-paper-2'
     }
   >

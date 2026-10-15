@@ -81,8 +81,9 @@ export function currentTarget(bookId: string, job: Job | null, messages: Meeting
 }
 
 export function conversationContains(message: MeetingMessage, conversation: Conversation) {
-  if (conversation === 'group') return true // Private messages become a one-line group notification.
-  return message.payload?.thread === conversation || (!message.payload?.thread && message.speaker === conversation)
+  // Read markers belong to the actual thread, not optionally displayed group speech.
+  if (conversation === 'group') return !message.payload?.thread
+  return message.payload?.thread === conversation
 }
 
 export function unreadCount(messages: MeetingMessage[], conversation: Conversation, lastRead: number) {

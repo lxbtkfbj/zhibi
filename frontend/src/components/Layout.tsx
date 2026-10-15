@@ -1,9 +1,10 @@
 import clsx from 'clsx'
-import { Settings2 } from 'lucide-react'
-import { useState } from 'react'
-import { NavLink, Outlet } from 'react-router-dom'
+import { Settings } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useHealth } from '../api/hooks'
 import { Seal } from './decor'
+import { useSettingsModal } from '../lib/settingsModal'
 
 export function HealthDot({ compact }: { compact?: boolean }) {
   const { data, isError } = useHealth()
@@ -46,6 +47,15 @@ const navClass = ({ isActive }: { isActive: boolean }) =>
 /** 书房、设置等页面的外框：较高的顶栏，滚动后变为半透明纸色。 */
 export function SiteLayout() {
   const [scrolled, setScrolled] = useState(false)
+  const { openSettings } = useSettingsModal()
+  const location = useLocation()
+  const navigate = useNavigate()
+  useEffect(() => {
+    if (location.state?.openSettings) {
+      openSettings()
+      void navigate(location.pathname, { replace: true, state: null })
+    }
+  }, [location, navigate, openSettings])
   return (
     <div className="scroll-thin h-full overflow-y-auto" onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 8)}>
       <header
@@ -60,12 +70,12 @@ export function SiteLayout() {
             <NavLink to="/" end className={navClass}>
               书房
             </NavLink>
-            <NavLink to="/settings" className={navClass}>
+            <button type="button" onClick={openSettings} className="px-1 py-1 text-[15px] text-ink-2 hover:text-ink" aria-label="设置">
               <span className="flex items-center gap-1.5">
-                <Settings2 className="size-4" />
-                <span className="hidden sm:inline">模型设置</span>
+                <Settings className="size-4" />
+                <span className="hidden sm:inline">设置</span>
               </span>
-            </NavLink>
+            </button>
             <HealthDot />
           </nav>
         </div>

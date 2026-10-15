@@ -7,6 +7,7 @@
 {{recent}}
 
 {{requirements}}
+{{strictness}}
 
 【正文】
 {{content}}

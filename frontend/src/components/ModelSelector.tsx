@@ -26,8 +26,8 @@ function discoveryErrorMessage(error: unknown): string {
 
 /** A free-text model name, with optional discovery; the list never restricts manual input. */
 export function ModelSelector({
-  value, onChange, baseUrl, apiKey, profileId,
-}: Connection & { value: string; onChange: (value: string) => void }) {
+  value, onChange, baseUrl, apiKey, profileId, compact = false,
+}: Connection & { value: string; onChange: (value: string) => void; compact?: boolean }) {
   const id = useId()
   const container = useRef<HTMLDivElement>(null)
   const input = useRef<HTMLInputElement>(null)
@@ -107,7 +107,7 @@ export function ModelSelector({
     <div ref={container} onKeyDown={(event) => { if (event.key === 'Tab') setOpen(false) }}>
       <div className="mb-1.5 flex items-center justify-between gap-3">
         <label htmlFor={id} className="text-sm font-medium text-ink-2">模型名</label>
-        <Button size="sm" className="w-32" style={{ transform: 'none' }} onClick={fetchModels} loading={loading} disabled={!baseUrl.trim()}>
+        <Button size="sm" className={compact ? 'settings-button !h-7 !w-32 !rounded-[7px] !px-2' : 'w-32'} style={{ transform: 'none' }} onClick={fetchModels} loading={loading} disabled={!baseUrl.trim()}>
           {!loading && <Download className="size-3.5" />}
           {loading ? '正在获取…' : '获取模型列表'}
         </Button>
@@ -143,7 +143,7 @@ export function ModelSelector({
               setOpen(false)
             }
           }}
-          className={`${inputClass} h-11 pr-11`}
+          className={compact ? 'settings-input w-full !pr-9' : `${inputClass} h-11 pr-11`}
           placeholder="输入模型名，或获取列表后搜索"
         />
         {models.length > 0 && (
@@ -158,7 +158,7 @@ export function ModelSelector({
               setOpen(!expanded)
               setActive(-1)
             }}
-            className="absolute top-0 right-0 flex h-11 w-11 items-center justify-center rounded-r-xl text-ink-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-seal"
+            className={`absolute top-0 right-0 flex items-center justify-center text-ink-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-seal ${compact ? 'h-7 w-8 rounded-r-[7px]' : 'h-11 w-11 rounded-r-xl'}`}
           >
             <ChevronDown className={`size-4 transition-transform ${expanded ? 'rotate-180' : ''}`} />
           </button>
@@ -190,7 +190,7 @@ export function ModelSelector({
         )}
       </div>
       <p id={`${id}-hint`} className="mt-1.5 text-xs leading-5 text-ink-2">输入部分名称筛选，也可直接填写完整模型名。</p>
-      <div id={`${id}-status`} aria-live="polite" className="min-h-15 text-xs leading-5">
+      <div id={`${id}-status`} aria-live="polite" className={`${compact ? 'min-h-5' : 'min-h-15'} text-xs leading-5`}>
         {!baseUrl.trim() && <p className="text-ink-2">先填写接口地址，即可获取可用模型。</p>}
         {loading && <p className="text-ink-2">正在获取模型列表，请稍候…</p>}
         {current?.status === 'success' && <p className="text-ink-2">{models.length ? `已获取 ${models.length} 个模型` : '接口未返回可用模型，请手动填写模型名。'}</p>}

@@ -28,7 +28,9 @@ from app.agents.context import (
 )
 from app.agents.planning import ref_seq, relevant_ledger, unit_hint
 from app.agents.playbook import pick, usage_text
+from app.book_settings import settings_of
 from app.models import Book, Chapter, Character, PlotUnit, Volume, WorldEntry
+from app.services.requirements import list_requirements
 from app.services.setup_store import load_ledger, load_threads, unit_dict, volume_dict
 
 RECENT_CHAPTERS = 5
@@ -227,8 +229,9 @@ def ledger_for_refs(ledger: list[dict[str, Any]], refs: list[str], volume: int) 
     return picked
 
 
-def requirements_of(book: Book) -> str:
-    return format_requirements(list(book.requirements or []), [])
+async def requirements_of(book: Book, session: AsyncSession) -> str:
+    rows = await list_requirements(session, book.id)
+    return format_requirements([row.text for row in rows], [], settings_of(book))
 
 
 # ---------- 伏笔回收：摘出当初埋下那一章的原文 ----------
@@ -453,10 +456,10 @@ async def volume_blocks(session: AsyncSession, book: Book, volume: Volume) -> di
     ledger = await load_ledger(session, book.id)
     characters = await _characters(session, book.id)
     prior = await prior_units(session, book.id, volume.index)
-    playbook = pick(book.concept)
+    playbook = pick(book.concept, settings_of(book)["playbook"])
     return {
         "volume_index": str(volume.index),
-        "concept": format_concept(book.concept or {}),
+        "concept": format_concept({**(book.concept or {}), "chapter_words": chapter_words(book)}),
         "spine": format_spine(book.spine or {}),
         "threads": format_threads(await load_threads(session, book.id), volume=volume.index),
         "volume": format_volume_card(volume_dict(volume)),
@@ -467,7 +470,7 @@ async def volume_blocks(session: AsyncSession, book: Book, volume: Volume) -> di
         "playbook": playbook.text("volume"),
         "characters": character_states(characters),
         "ledger": format_ledger(relevant_ledger(ledger, volume.index)),
-        "requirements": requirements_of(book),
+        "requirements": await requirements_of(book, session),
         "unit_hint": unit_hint(volume.chapter_count),
         "chapter_count": str(volume.chapter_count or "若干"),
     }
@@ -497,7 +500,7 @@ async def chapter_plan_blocks(
         "chapter_count": str(count),
         "first_chapter": str(first_chapter),
         "last_chapter": str(first_chapter + count - 1),
-        "concept": format_concept(book.concept or {}),
+        "concept": format_concept({**(book.concept or {}), "chapter_words": chapter_words(book)}),
         "volume": format_volume_card(volume_dict(volume)),
         "unit": format_unit(unit_dict(unit)),
         "neighbors": "\n".join(neighbors),
@@ -507,8 +510,8 @@ async def chapter_plan_blocks(
         "characters": character_states(await _characters(session, book.id)),
         "ledger": format_ledger(ledger_for_refs(ledger, refs, volume.index)),
         # 套路库只带本单元用到的套路，省篇幅
-        "playbook": pick(book.concept).text("chapters", tropes=list(unit.tropes or [])),
-        "requirements": requirements_of(book),
+        "playbook": pick(book.concept, settings_of(book)["playbook"]).text("chapters", tropes=list(unit.tropes or [])),
+        "requirements": await requirements_of(book, session),
     }
 
 
@@ -536,7 +539,7 @@ async def chapter_blocks(session: AsyncSession, book: Book, chapter: Chapter) ->
     return {
         "chapter_index": str(chapter.index),
         "chapter_title": chapter.title,
-        "concept": format_concept(book.concept or {}),
+        "concept": format_concept({**(book.concept or {}), "chapter_words": chapter_words(book)}),
         "outline": format_chapter_outline(outline),
         "unit": format_unit(unit_dict(unit)) if unit else "（暂无）",
         "characters": character_profiles(characters, names),
@@ -555,7 +558,7 @@ async def chapter_blocks(session: AsyncSession, book: Book, chapter: Chapter) ->
         "foreshadow_tasks": await foreshadow_tasks(session, book.id, ledger, actions, chapter.index),
         "previous_tail": (previous or "")[-PREVIOUS_TAIL:].strip() or "（这是第一章）",
         "style": format_style(book.style_reference or ""),
-        "requirements": requirements_of(book),
+        "requirements": await requirements_of(book, session),
         "chapter_words": str(chapter_words(book)),
         "ledger": format_ledger(ledger_for_refs(ledger, refs, volume_index)),
         "content": chapter.content,
@@ -563,7 +566,7 @@ async def chapter_blocks(session: AsyncSession, book: Book, chapter: Chapter) ->
 
 
 def chapter_words(book: Book) -> int:
-    return int((book.concept or {}).get("chapter_words") or 3000)
+    return int(settings_of(book)["chapter_words"] or (book.concept or {}).get("chapter_words") or 3000)
 
 
 # ---------- 回顾 ----------

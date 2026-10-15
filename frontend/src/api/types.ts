@@ -302,9 +302,9 @@ export interface LiveDraft {
 
 export interface Usage {
   calls: number
-  prompt_tokens: number
-  completion_tokens: number
-  by_role: Record<string, { calls: number; prompt_tokens: number; completion_tokens: number }>
+  prompt_tokens: number | null
+  completion_tokens: number | null
+  by_role: Record<string, { calls: number; prompt_tokens: number | null; completion_tokens: number | null }>
 }
 
 export type StructuredMethod = 'function_calling' | 'json_mode' | 'json_schema'

@@ -402,14 +402,16 @@ async def test_targeted_notes_wait_for_active_reader(client, sessionmaker, kind,
     )
     assert response.status_code == 201, response.text
     assert response.json()["job_id"] == str(job_id)
-    assert response.json()["payload"] == {"thread": "lorekeeper"}
+    assert response.json()["payload"] == {"thread": "lorekeeper", "requirement_saved": True}
     assert response.json()["content"] == "苏灵素改成 19 岁"
     async with sessionmaker() as session:
-        assert (await session.get(Book, book_id)).requirements == ["已有的作者要求"]
+        assert (await session.get(Book, book_id)).requirements == ["已有的作者要求", "苏灵素改成 19 岁"]
         messages = (
             (await session.execute(select(MeetingMessage).where(MeetingMessage.book_id == book_id))).scalars().all()
         )
-    assert [(m.speaker, m.kind, m.payload) for m in messages] == [("author", "note", {"thread": "lorekeeper"})]
+    assert [(m.speaker, m.kind, m.payload) for m in messages] == [
+        ("author", "note", {"thread": "lorekeeper", "requirement_saved": True})
+    ]
 
 
 @pytest.mark.parametrize("recipient", [None, "chief", "lorekeeper", "writer", "reviewer"])
@@ -419,9 +421,8 @@ async def test_targeted_notes_wait_for_active_reader(client, sessionmaker, kind,
 async def test_idle_and_non_reader_notes_are_remembered_immediately(client, sessionmaker, recipient, kind, status):
     book_id, _ = await note_book(sessionmaker, kind, status)
     body = {"content": "  节奏再快一点  ", "to": recipient}
-    expected_payload = {"thread": recipient} if recipient else None
-    names = {"chief": "主编", "lorekeeper": "设定师", "writer": "写手", "reviewer": "审稿"}
-    requirement = f"对{names[recipient]}：节奏再快一点" if recipient else "节奏再快一点"
+    expected_payload = {"requirement_saved": True, **({"thread": recipient} if recipient else {})}
+    requirement = "节奏再快一点"
     for _ in range(2):
         response = await client.post(f"/api/books/{book_id}/notes", json=body)
         assert response.status_code == 201, response.text
@@ -491,9 +492,9 @@ async def test_concurrent_idle_notes_preserve_every_requirement(client, sessionm
         messages = (
             (await session.execute(select(MeetingMessage).where(MeetingMessage.book_id == book_id))).scalars().all()
         )
-    expected = {"已有的作者要求", "对写手：开篇更紧凑"}
+    expected = {"已有的作者要求", "开篇更紧凑"}
     if not duplicate:
-        expected.add("对设定师：补上人物年龄")
+        expected.add("补上人物年龄")
     assert set(requirements) == expected
     assert len(requirements) == len(expected)
     assert sum(message.kind == "note" for message in messages) == 2

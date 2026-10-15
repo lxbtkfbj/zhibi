@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.api.book_settings import new_book_defaults
 from app.api.deps import SessionDep, ensure_idle, get_book, get_redis
 from app.models import Book, Chapter, Job, PlotUnit, StoryThread, Volume
 from app.schemas import (
@@ -77,6 +78,7 @@ async def create_book(
     body: BookCreate, session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)
 ) -> BookCreated:
     book = Book(idea=body.idea.strip(), style_reference=body.style_reference.strip(), source="new", status="setting_up")
+    book.settings = await new_book_defaults(session)
     session.add(book)
     await session.flush()
     job = jobs.new_setup_job(book, ask=body.ask)

@@ -17,7 +17,8 @@ from app.models import Book, Job, LlmCall, MeetingMessage
 from app.schemas import Answers, Decision, JobOut, MeetingMessageOut, NoteIn, UsageOut
 from app.services import jobs
 from app.services.meeting import job_dict, message_dict, post_message, publish, stream_key
-from app.services.notes import note_requirement
+from app.services.requirements import add_requirement, note_source
+from app.services.usage import sum_known, token_sum
 
 router = APIRouter(tags=["jobs"])
 
@@ -60,12 +61,21 @@ async def decide(
     feedback = body.feedback.strip()
     if body.action == "revise" and not feedback:
         raise HTTPException(422, "请写下修改意见")
+    if feedback:
+        source = (
+            "trial"
+            if kind == "trial_read"
+            else f"volume:{(job.pending or {}).get('volume')}"
+            if kind == "volume_review"
+            else "note"
+        )
+        await add_requirement(session, job.book_id, feedback, source)
     content = APPROVE_TEXT[kind] if body.action == "approve" else feedback
     await post_message(
         session, redis, book_id=job.book_id, job_id=job.id, speaker="author", kind="decision", content=content
     )
     out = await _set_status(session, redis, job, "queued")
-    jobs.enqueue(job.id, {"action": body.action, "feedback": feedback})
+    jobs.enqueue(job.id, {"action": body.action, "feedback": feedback, "requirement_saved": True})
     return out
 
 
@@ -85,12 +95,14 @@ async def answer(
     ]
     if body.extra.strip():
         brief.append(f"补充：{body.extra.strip()}")
+    for line in brief:
+        await add_requirement(session, job.book_id, line, "answer")
     content = "\n".join(f"· {line}" for line in brief) if brief else "这些都交给编辑部决定。"
     await post_message(
         session, redis, book_id=job.book_id, job_id=job.id, speaker="author", kind="decision", content=content
     )
     out = await _set_status(session, redis, job, "queued")
-    jobs.enqueue(job.id, {"action": "answer", "brief": brief})
+    jobs.enqueue(job.id, {"action": "answer", "brief": brief, "requirement_saved": True})
     return out
 
 
@@ -105,7 +117,7 @@ async def add_note(
     content = body.content.strip()
     if not content:
         raise HTTPException(422, "请写下你的话")
-    payload = {"thread": body.to} if body.to else None
+    payload = {"requirement_saved": True, **({"thread": body.to} if body.to else {})}
     deferred = (
         job is not None
         and job.kind in ("book_setup", "write_book")
@@ -113,12 +125,8 @@ async def add_note(
     )
     # 不让失败任务以后恢复时再消费一遍已经立即记下的插话。
     job_id = job.id if deferred else None
-    if not deferred:
-        # get_book 可能在另一个请求提交前读过这本书；加锁并重新读取，避免同时插话互相覆盖要求。
-        # 锁与下面的 note 消息一起提交，下一位作者请求再接着追加。
-        await session.refresh(book, attribute_names=["requirements"], with_for_update=True)
-        requirement = note_requirement(content, payload)
-        book.requirements = list(dict.fromkeys([*(book.requirements or []), requirement]))
+    # Persist immediately, including deferred notes. Graph checkpoints never own the ledger.
+    await add_requirement(session, book.id, content, note_source(payload))
     data = await post_message(
         session, redis, book_id=book.id, job_id=job_id, speaker="author", kind="note", content=content, payload=payload
     )
@@ -240,8 +248,8 @@ async def usage(book: Book = Depends(get_book), session: AsyncSession = SessionD
             select(
                 LlmCall.role,
                 func.count(),
-                func.coalesce(func.sum(LlmCall.prompt_tokens), 0),
-                func.coalesce(func.sum(LlmCall.completion_tokens), 0),
+                token_sum(LlmCall.prompt_tokens),
+                token_sum(LlmCall.completion_tokens),
             )
             .where(LlmCall.book_id == book.id)
             .group_by(LlmCall.role)
@@ -250,7 +258,7 @@ async def usage(book: Book = Depends(get_book), session: AsyncSession = SessionD
     by_role = {role: {"calls": c, "prompt_tokens": p, "completion_tokens": o} for role, c, p, o in rows}
     return UsageOut(
         calls=sum(v["calls"] for v in by_role.values()),
-        prompt_tokens=sum(v["prompt_tokens"] for v in by_role.values()),
-        completion_tokens=sum(v["completion_tokens"] for v in by_role.values()),
+        prompt_tokens=sum_known(v["prompt_tokens"] for v in by_role.values()),
+        completion_tokens=sum_known(v["completion_tokens"] for v in by_role.values()),
         by_role=by_role,
     )

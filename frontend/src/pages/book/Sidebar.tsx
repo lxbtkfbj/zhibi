@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { BookMarked, BookOpenText, GitBranch, Globe2, LayoutDashboard, Lightbulb, Network, Route, ScrollText, Users } from 'lucide-react'
+import { BookMarked, BookOpenText, GitBranch, Globe2, LayoutDashboard, Lightbulb, Network, Route, ScrollText, Settings, Users } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useBible, useChapters, useThreads } from '../../api/hooks'
@@ -23,7 +23,7 @@ function Group({ title, children }: { title: string; children: ReactNode }) {
   return <div className="mt-5"><p className="mb-2 px-2.5 text-xs tracking-[0.2em] text-ink-2">{title}</p><div className="space-y-0.5">{children}</div></div>
 }
 function Unread({ count }: { count: number }) {
-  return count > 0 ? <span aria-label={`${count} 条未读`} className="min-w-4 rounded-full bg-seal px-1 text-center text-xs leading-4 text-white">{count > 99 ? '99+' : count}</span> : null
+  return count > 0 ? <span aria-label={`${count} 条未读`} className="min-w-4 rounded-full bg-seal px-1 text-center text-xs leading-4 text-on-role">{count > 99 ? '99+' : count}</span> : null
 }
 
 export function ConversationList({ compact, onSelect }: { compact?: boolean; onSelect?: () => void }) {
@@ -82,6 +82,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         <Item to={`${base}/relations`} icon={<Network className={icon} />} label="人物关系" count={bible?.relationships.length} onNavigate={onNavigate} />
         <Item to={`${base}/foreshadowing`} icon={<ScrollText className={icon} />} label="伏笔" count={bible?.foreshadowings.length} onNavigate={onNavigate} />
       </Group>
+      <div className="mt-5 border-t border-divider pt-3"><Item to={`${base}/settings`} icon={<Settings className={icon} />} label="这本书的设置" onNavigate={onNavigate} /></div>
     </nav>
   </div>
 }

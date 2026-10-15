@@ -1,7 +1,9 @@
 import uuid
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Identity, Integer, String, Text, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Identity, Index, Integer, String, Text, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, Timestamps, UUIDPk
@@ -42,6 +44,7 @@ class LlmCall(Base):
     """每次模型调用的耗时与用量，供界面展示。"""
 
     __tablename__ = "llm_calls"
+    __table_args__ = (Index("ix_llm_calls_book_id_id", "book_id", "id"),)
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
     job_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("jobs.id", ondelete="SET NULL"), index=True)
@@ -50,9 +53,23 @@ class LlmCall(Base):
     profile_name: Mapped[str] = mapped_column(String(100), default="")
     model: Mapped[str] = mapped_column(String(200), default="")
     purpose: Mapped[str] = mapped_column(String(100), default="")
-    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
-    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer)
     latency_ms: Mapped[int] = mapped_column(Integer, default=0)
     ok: Mapped[bool] = mapped_column(Boolean, default=True)
     error: Mapped[str] = mapped_column(Text, default="")
+    request: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
+    response: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PromptOverride(Base):
+    """全局提示词覆盖；读取时直接查数据库，API 和 worker 无须共享进程内缓存。"""
+
+    __tablename__ = "prompt_overrides"
+
+    name: Mapped[str] = mapped_column(String(100), primary_key=True)
+    content: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

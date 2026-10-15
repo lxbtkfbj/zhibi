@@ -28,10 +28,19 @@ from app.agents.context import (
 )
 from app.agents.planning import attach_new_foreshadowings, fit_chapter_counts, relevant_ledger, unit_hint
 from app.agents.playbook import pick, playbook_text
+from app.book_settings import settings_of
 from app.graphs.deps import GraphDeps
 from app.models import Book, MeetingMessage, Volume
 from app.services import setup_store
 from app.services.notes import note_prompt, note_thread
+from app.services.requirements import (
+    active_notes,
+    add_requirement,
+    deleted_texts,
+    import_legacy_checkpoint,
+    ingest_notes,
+    list_requirements,
+)
 
 ORDER = ["concept", "lore", "spine", "threads", "outline", "first_volume"]
 TARGET_NAMES = {
@@ -64,6 +73,7 @@ LENGTH_QUESTION = {
 
 
 class SetupState(TypedDict, total=False):
+    requirements_ledger_ready: bool
     idea: str
     style_reference: str
     # 动笔前是否先问作者几个问题
@@ -84,6 +94,9 @@ class SetupState(TypedDict, total=False):
     queue: list[str]
     # 本轮各部分的修改要求；为空表示从零起草
     instructions: dict[str, str]
+    instruction_sources: dict[str, list[str]]
+    instruction_fallbacks: dict[str, str]
+    feedback_sources: list[str]
     # draft：首次起草；reviewed：审稿通过；auto_revise：按审稿意见修改；author_revise：按作者意见修改
     phase: str
     auto_revised: bool
@@ -93,6 +106,7 @@ class SetupState(TypedDict, total=False):
 
 def initial_state(idea: str, style_reference: str = "", ask: bool = False) -> SetupState:
     return {
+        "requirements_ledger_ready": True,
         "idea": idea,
         "style_reference": style_reference,
         "ask": ask,
@@ -149,7 +163,43 @@ def fill_missing_steps(state: SetupState, queue: list[str]) -> list[str]:
 
 
 def requirements(state: SetupState) -> str:
-    return format_requirements(state.get("brief") or [], state.get("notes") or [])
+    # live_requirements is loaded from the sole ledger before every model step, never checkpoint brief/notes.
+    return format_requirements(state.get("live_requirements") or [], [], state.get("settings"))
+
+
+async def live_state(state: SetupState, d: GraphDeps) -> SetupState:
+    async with d.sessionmaker() as session:
+        await import_legacy_checkpoint(session, d.book_id, d.job_id, state)
+        await session.commit()
+        book = await session.get(Book, d.book_id)
+        settings = settings_of(book) if book else {}
+        rows = await list_requirements(session, d.book_id)
+        deleted = await deleted_texts(session, d.book_id)
+    current = {**state, "settings": settings, "live_requirements": [row.text for row in rows]}
+    current["feedback_sources"] = [text for text in state.get("feedback_sources") or [] if text not in deleted]
+    # Author-derived directives are transient, but still must respect explicit deletion.
+    # Source tracking lets us invalidate paraphrased instructions without erasing reviewer-only revisions.
+    feedback = state.get("feedback", "")
+    if any(text in feedback for text in deleted):
+        current["feedback"] = "\n".join(current["feedback_sources"])
+    instructions = dict(state.get("instructions") or {})
+    sources = state.get("instruction_sources") or {}
+    legacy_author = (
+        state.get("phase") == "author_revise"
+        and not sources
+        and any(text in "\n".join(state.get("notes") or []) for text in deleted)
+    )
+    for target in list(instructions):
+        if legacy_author or any(text in deleted for text in sources.get(target, [])):
+            fallback = (state.get("instruction_fallbacks") or {}).get(target)
+            if fallback:
+                instructions[target] = fallback
+            else:
+                instructions.pop(target)
+    current["instructions"] = instructions
+    if settings.get("chapter_words") and state.get("concept"):
+        current["concept"] = {**state["concept"], "chapter_words": settings["chapter_words"]}
+    return current
 
 
 def setup_of(state: SetupState) -> dict[str, dict]:
@@ -179,14 +229,23 @@ def _revising(state: SetupState, target: str) -> tuple[dict, str]:
 def _finish(state: SetupState, target: str, value: dict) -> dict:
     """一步做完：存下结果，弹出队列，用掉这一部分的修改要求。"""
     rest = {k: v for k, v in (state.get("instructions") or {}).items() if k != target}
-    return {target: value, "queue": (state.get("queue") or [])[1:], "instructions": rest}
+    origins = {k: v for k, v in (state.get("instruction_sources") or {}).items() if k != target}
+    fallbacks = {k: v for k, v in (state.get("instruction_fallbacks") or {}).items() if k != target}
+    return {
+        target: value,
+        "queue": (state.get("queue") or [])[1:],
+        "instructions": rest,
+        "instruction_sources": origins,
+        "instruction_fallbacks": fallbacks,
+    }
 
 
 async def interview_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     d = runtime.context
+    state = await live_state(state, d)
     await d.check_cancel()
     await d.emit.status("chief", "主编动笔前想先问你几个问题…")
-    result = await editorial.interview(d.llm, state["idea"], state.get("style_reference", ""))
+    result = await editorial.interview(d.llm, state["idea"], state.get("style_reference", ""), requirements(state))
     questions = [LENGTH_QUESTION]
     for q in result.questions[:5]:
         options = [o.strip() for o in q.options if o.strip()][:4]
@@ -209,11 +268,17 @@ async def interview_gate_node(state: SetupState, runtime: Runtime[GraphDeps]) ->
     brief = [str(line).strip() for line in answer.get("brief") or [] if str(line).strip()]
     d = runtime.context
     await d.emit.status("chief", "收到，按你的意思开工。" if brief else "好，那就都交给编辑部来定。")
+    async with d.sessionmaker() as session:
+        if not answer.get("requirement_saved"):
+            for line in brief:
+                await add_requirement(session, d.book_id, line, "answer")
+        await session.commit()
     return {"brief": brief}
 
 
 async def concept_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     d = runtime.context
+    state = await live_state(state, d)
     await d.check_cancel()
     current, instruction = _revising(state, "concept")
     await d.emit.status("chief", "主编正在修改书的概念…" if instruction else "主编正在构思这本书…")
@@ -221,6 +286,8 @@ async def concept_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
         d.llm, state["idea"], state.get("style_reference", ""), requirements(state), current, instruction
     )
     concept = result.model_dump(exclude={"remark"})
+    if (state.get("settings") or {}).get("chapter_words"):
+        concept["chapter_words"] = state["settings"]["chapter_words"]
     await d.emit.say("chief", result.remark)
     await d.emit.artifact("chief", f"书的概念：《{concept['title']}》", {"type": "concept", "data": concept})
     return _finish(state, "concept", concept)
@@ -228,6 +295,7 @@ async def concept_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
 
 async def lore_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     d = runtime.context
+    state = await live_state(state, d)
     await d.check_cancel()
     current, instruction = _revising(state, "lore")
     await d.emit.status("lorekeeper", "设定师正在修改世界观与人物…" if instruction else "设定师正在搭建世界观与人物…")
@@ -244,6 +312,7 @@ async def lore_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
 
 async def spine_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     d = runtime.context
+    state = await live_state(state, d)
     await d.check_cancel()
     current, instruction = _revising(state, "spine")
     await d.emit.status("chief", "主编正在修改主线骨架…" if instruction else "主编正在定主线：开篇、结局和关键转折…")
@@ -258,9 +327,10 @@ async def spine_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
 
 async def threads_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     d = runtime.context
+    state = await live_state(state, d)
     await d.check_cancel()
     current, instruction = _revising(state, "threads")
-    playbook = pick(state.get("concept")).name
+    playbook = pick(state.get("concept"), (state.get("settings") or {}).get("playbook", "auto")).name
     await d.emit.status(
         "chief",
         "主编正在修改线索…"
@@ -268,7 +338,14 @@ async def threads_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
         else f"主编正在做线索规划（题材打法：{playbook}）：主线、感情线、反派线、谜团线…",
     )
     result = await editorial.draft_threads(
-        d.llm, state["concept"], state["lore"], state.get("spine") or {}, requirements(state), current, instruction
+        d.llm,
+        state["concept"],
+        state["lore"],
+        state.get("spine") or {},
+        requirements(state),
+        current,
+        instruction,
+        selection=(state.get("settings") or {}).get("playbook", "auto"),
     )
     threads = result.model_dump(exclude={"remark"})
     for t in threads["threads"]:
@@ -281,6 +358,7 @@ async def threads_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
 
 async def outline_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     d = runtime.context
+    state = await live_state(state, d)
     await d.check_cancel()
     current, instruction = _revising(state, "outline")
     await d.emit.status(
@@ -295,6 +373,7 @@ async def outline_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
         requirements(state),
         current,
         instruction,
+        selection=(state.get("settings") or {}).get("playbook", "auto"),
     )
     outline = result.model_dump(exclude={"remark"})
     # 长线伏笔编号：与当前版本内容相同的沿用原编号，第一卷卷纲引用的编号才不会乱
@@ -335,7 +414,9 @@ def first_volume_blocks(state: SetupState) -> dict[str, str]:
         "characters": "\n".join(format_character_state(c) for c in lore.get("characters", [])) or "（暂无）",
         "ledger": format_ledger(relevant_ledger(ledger, 1)),
         "trope_usage": "（还没用过任何套路，这是第一卷）",
-        "playbook": playbook_text(state.get("concept"), "volume"),
+        "playbook": playbook_text(
+            state.get("concept"), "volume", selection=(state.get("settings") or {}).get("playbook", "auto")
+        ),
         "requirements": requirements(state),
         "unit_hint": unit_hint(chapter_count),
         "chapter_count": str(chapter_count or "若干"),
@@ -344,6 +425,7 @@ def first_volume_blocks(state: SetupState) -> dict[str, str]:
 
 async def first_volume_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     d = runtime.context
+    state = await live_state(state, d)
     await d.check_cancel()
     current, instruction = _revising(state, "first_volume")
     await d.emit.status(
@@ -369,9 +451,16 @@ async def first_volume_node(state: SetupState, runtime: Runtime[GraphDeps]) -> d
 
 async def critique_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     d = runtime.context
+    state = await live_state(state, d)
     await d.check_cancel()
     await d.emit.status("reviewer", "审稿正在审阅开书方案…")
-    result = await editorial.critique_setup(d.llm, state["idea"], requirements(state), setup_of(state))
+    result = await editorial.critique_setup(
+        d.llm,
+        state["idea"],
+        requirements(state),
+        setup_of(state),
+        selection=(state.get("settings") or {}).get("playbook", "auto"),
+    )
     await d.emit.say("reviewer", result.remark)
     await d.emit.artifact("reviewer", "审稿意见", {"type": "critique", "data": result.model_dump(exclude={"remark"})})
 
@@ -383,7 +472,14 @@ async def critique_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
         queue, instructions = cascade(raw)
         names = "、".join(TARGET_NAMES[t] for t in queue)
         await d.emit.status("chief", f"主编采纳审稿意见，先修改一轮：{names}")
-        return {"queue": queue, "instructions": instructions, "phase": "auto_revise", "auto_revised": True}
+        return {
+            "queue": queue,
+            "instructions": instructions,
+            "instruction_sources": {},
+            "instruction_fallbacks": {},
+            "phase": "auto_revise",
+            "auto_revised": True,
+        }
     return {"queue": [], "instructions": {}, "phase": "reviewed"}
 
 
@@ -394,7 +490,8 @@ async def _new_notes(d: GraphDeps, seen: int) -> list[tuple[int, str, dict | Non
             .where(MeetingMessage.job_id == d.job_id, MeetingMessage.kind == "note", MeetingMessage.id > seen)
             .order_by(MeetingMessage.id)
         )
-        return [(row.id, row.content, row.payload) for row in rows]
+        messages = [(row.id, row.content, row.payload) for row in rows]
+        return await active_notes(session, d.book_id, messages) if messages else []
 
 
 async def _reply_to_notes(d: GraphDeps, rows: list[tuple[int, str, dict | None]]) -> None:
@@ -415,6 +512,10 @@ async def intake_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     rows = await _new_notes(d, state.get("notes_seen", 0))
     if not rows:
         return update
+    async with d.sessionmaker() as session:
+        await ingest_notes(session, d.book_id, rows)
+        await session.commit()
+    state = await live_state(state, d)
     fresh = [note_prompt(content, payload) for _, content, payload in rows]
     notes = [*(state.get("notes") or []), *fresh]
     update.update(notes=notes, notes_seen=rows[-1][0])
@@ -428,9 +529,7 @@ async def intake_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     await d.check_cancel()
     await d.emit.status("chief", "主编正在看你的插话…")
     todo = [t for t in ORDER if t not in done]
-    result = await editorial.absorb_notes(
-        d.llm, done, todo, format_requirements(state.get("brief") or [], notes), fresh
-    )
+    result = await editorial.absorb_notes(d.llm, done, todo, requirements(state), fresh)
     if any(not note_thread(payload) for _, _, payload in rows):
         await d.emit.say("chief", result.remark)
     raw = {t: text for t, text in result.instructions().items() if t in done}
@@ -439,6 +538,21 @@ async def intake_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
         queue, instructions = merge_plan(queue, state.get("instructions") or {}, extra_queue, extra)
         await d.emit.artifact("chief", "按作者插话调整", {"type": "triage", "data": extra})
         update.update(queue=queue, instructions=instructions)
+        origins = dict(state.get("instruction_sources") or {})
+        fallbacks = dict(state.get("instruction_fallbacks") or {})
+        for target in extra_queue:
+            if not origins.get(target) and (state.get("instructions") or {}).get(target):
+                fallbacks[target] = state["instructions"][target]
+            origins[target] = list(
+                dict.fromkeys(
+                    [
+                        *origins.get(target, []),
+                        *(content for _, content, payload in rows if not (payload or {}).get("settings_change")),
+                    ]
+                )
+            )
+        update["instruction_sources"] = origins
+        update["instruction_fallbacks"] = fallbacks
     await _reply_to_notes(d, rows)
     return update
 
@@ -448,12 +562,6 @@ async def persist_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     setup = setup_of(state)
     async with d.sessionmaker() as session:
         await setup_store.save_setup(session, d.book_id, setup)
-        book = await session.get(Book, d.book_id)
-        if book is not None:
-            # 作者的回答与插话之后写正文时也要遵守
-            book.requirements = list(
-                dict.fromkeys([*(book.requirements or []), *(state.get("brief") or []), *(state.get("notes") or [])])
-            )
         await setup_store.snapshot(
             session, d.book_id, d.job_id, state.get("round", 0), "ai", state.get("phase", ""), setup
         )
@@ -476,10 +584,7 @@ async def author_gate_node(state: SetupState, runtime: Runtime[GraphDeps]) -> Co
             return Command(goto="finalize")
         fresh = [note_prompt(content, payload) for _, content, payload in rows]
         async with d.sessionmaker() as session:
-            book = await session.get(Book, d.book_id)
-            if book is not None:
-                await session.refresh(book, attribute_names=["requirements"], with_for_update=True)
-                book.requirements = list(dict.fromkeys([*(book.requirements or []), *fresh]))
+            await ingest_notes(session, d.book_id, rows)
             await session.commit()
         if any(not note_thread(payload) for _, _, payload in rows):
             await d.emit.say("chief", "收到，要求已经记下，之后的规划和章节都会照办。")
@@ -495,7 +600,13 @@ async def author_gate_node(state: SetupState, runtime: Runtime[GraphDeps]) -> Co
     feedback = "\n".join(
         x for x in [*(note_prompt(c, p) for _, c, p in rows), str(decision.get("feedback", "")).strip()] if x
     )
+    async with d.sessionmaker() as session:
+        await ingest_notes(session, d.book_id, rows)
+        if decision.get("feedback", "").strip() and not decision.get("requirement_saved"):
+            await add_requirement(session, d.book_id, decision["feedback"], "note")
+        await session.commit()
     update: dict = {**setup, "feedback": feedback, "round": state.get("round", 0) + 1}
+    update["feedback_sources"] = [*(content for _, content, _ in rows), str(decision.get("feedback", "")).strip()]
     # 作者的意见之后每一轮都要遵守，不能下一次修改又改回去
     update["notes"] = [*(state.get("notes") or []), *([feedback] if feedback else [])]
     if rows:
@@ -506,6 +617,7 @@ async def author_gate_node(state: SetupState, runtime: Runtime[GraphDeps]) -> Co
 
 async def triage_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     d = runtime.context
+    state = await live_state(state, d)
     await d.check_cancel()
     await d.emit.status("chief", "主编正在研究作者的意见…")
     result = await editorial.triage_feedback(d.llm, setup_of(state), requirements(state), state.get("feedback", ""))
@@ -513,7 +625,14 @@ async def triage_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     queue, instructions = cascade(result.instructions())
     if queue:
         await d.emit.artifact("chief", "修改分工", {"type": "triage", "data": instructions})
-    return {"queue": queue, "instructions": instructions, "phase": "author_revise"}
+    origins = list(state.get("feedback_sources") or ([state["feedback"]] if state.get("feedback") else []))
+    return {
+        "queue": queue,
+        "instructions": instructions,
+        "instruction_sources": {target: origins for target in queue},
+        "instruction_fallbacks": {},
+        "phase": "author_revise",
+    }
 
 
 async def finalize_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:

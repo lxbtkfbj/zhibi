@@ -1,6 +1,7 @@
+import { useReducedMotion } from '../../lib/appearance'
 import clsx from 'clsx'
 import { AlertTriangle, Check, ChevronDown, X } from 'lucide-react'
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
+import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
 import type { Concept, InterviewQuestion, LiveDraft, MeetingMessage, PlotUnit, Speaker, Spine, StoryThread } from '../../api/types'
 import { TypingDots } from '../../components/ui'
@@ -22,7 +23,7 @@ export function RoleAvatar({
   return (
     <span
       className={clsx(
-        'relative inline-flex shrink-0 items-center justify-center rounded-full font-serif font-bold text-white',
+        'relative inline-flex shrink-0 items-center justify-center rounded-full font-serif font-bold text-on-role',
         meta.dot,
         working && 'breath',
         { sm: 'size-7 text-xs', md: 'size-8 text-sm', lg: 'size-11 text-base' }[size],
@@ -590,7 +591,7 @@ function LiveDraftRow({ draft, fromGroup }: { draft: LiveDraft; fromGroup?: bool
           <span>{DRAFT_MODE[draft.mode]}第 {draft.chapter} 章 · {draft.text.replace(/\s/g, '').length} 字</span>
         </p>
         <div className="rounded-[2px_12px_12px_12px] border border-divider bg-card px-3 py-2.5">
-          <p className="font-serif text-sm leading-[1.75] whitespace-pre-wrap text-ink">
+          <p className="font-serif chat-text leading-[1.75] whitespace-pre-wrap text-ink">
             <span className="caret">{tail.length < draft.text.length && '…'}{tail}</span>
           </p>
           <button type="button" onClick={() => manualNavigate(`/books/${bookId}/chapter/${draft.chapter}`)} className="mt-2 text-xs text-seal hover:underline">
@@ -630,8 +631,8 @@ function MessageRow({ message, fromGroup }: { message: MeetingMessage; fromGroup
           <time className="text-ink-3">{time(message.created_at)}</time>
         </p>
         <div className={clsx(
-          'border border-divider px-3 py-2.5 text-sm leading-[1.75] text-ink',
-          author ? 'rounded-[12px_2px_12px_12px] bg-[#e8dfcc] whitespace-pre-wrap break-words' : 'rounded-[2px_12px_12px_12px] bg-card',
+          'border border-divider px-3 py-2.5 chat-text leading-[1.75] text-ink',
+          author ? 'rounded-[12px_2px_12px_12px] bg-author-bubble whitespace-pre-wrap break-words' : 'rounded-[2px_12px_12px_12px] bg-card',
         )}>
           {message.kind === 'artifact' ? <ArtifactCard message={message} /> : author ? message.content : <Speech message={message} />}
         </div>

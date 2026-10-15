@@ -21,9 +21,20 @@ def _idea(user: str) -> str:
 def _concept(user: str) -> s.BookConcept:
     # 点子里提到后宫时按后宫玄幻爽文来定，便于体验题材打法库的选择
     harem = "后宫" in _idea(user)
+    title, alt_titles = "青灯问道", ["一灯照九州", "灯下问长生"]
+    rules = re.search(r"【这本书的写作规矩】\n(.*?)(?:\n\n|$)", user, re.S)
+    title_rule = re.search(r"^- 书名：(.+)$", rules.group(1), re.M) if rules else None
+    if title_rule:
+        rule = title_rule.group(1).strip()
+        if rule.startswith("番茄式长书名"):
+            title = "青灯问道：看透寿元的我在宗门步步为营"
+            alt_titles = ["一灯照九州：从杂役开始窥见长生", "灯下问长生：我能看见所有人的死期"]
+        elif not rule.startswith("2-6 个字的经典短书名"):
+            title = rule.strip("《》")
+            alt_titles = [title + "记", title + "录"]
     return s.BookConcept(
-        title="青灯问道",
-        alt_titles=["一灯照九州", "灯下问长生"],
+        title=title,
+        alt_titles=alt_titles,
         genre="玄幻·东方玄幻" if harem else "玄幻·修仙",
         tags=["后宫", "爽文", "宗门", "智斗"] if harem else ["凡人流", "宗门", "智斗", "慢热成长"],
         logline=f"{_idea(user)}——杂役弟子陆远捡到一盏能照见他人寿元的青灯，从此在吃人的宗门里步步为营。",
@@ -482,6 +493,11 @@ DIRECTIONS = [
         "让苏晚晴的感情线唱主角：两人一明一暗查寿元交易，在互相试探里靠近；高潮是她为了陆远违抗执法堂。",
         "感情线比重最大",
     ),
+    (
+        "绝境脱身",
+        "把全卷写成一场被多方追捕的逃亡，陆远借敌对势力的矛盾反过来布局。",
+        "以追逐、失去与营救推动线索，卷末逆转追捕者与猎物的地位。",
+    ),
 ]
 
 
@@ -608,10 +624,13 @@ def _volume_plan(user: str) -> s.VolumePlanDraft:
     )
 
 
-def _directions() -> s.VolumeDirections:
+def _directions(user: str = "") -> s.VolumeDirections:
+    match = re.search(r"本轮按设置给出\s*(\d+)\s*个不同方向", user)
+    count = max(1, min(4, int(match.group(1)))) if match else 3
+    choices = DIRECTIONS[:count]
     return s.VolumeDirections(
-        directions=[s.VolumeDirection(name=n, idea=idea, difference=diff) for n, idea, diff in DIRECTIONS],
-        remark="这一卷我想了三种拆法：一种稳扎稳打，一种让陆远躲在幕后借刀杀人，一种让苏晚晴的感情线唱主角。各拆一份，请审稿比一比。",
+        directions=[s.VolumeDirection(name=n, idea=idea, difference=diff) for n, idea, diff in choices],
+        remark=f"这一卷按设置想了 {count} 种拆法：" + "、".join(choice[0] for choice in choices) + "。各拆一份，请审稿比一比。",
     )
 
 
@@ -843,7 +862,7 @@ async def respond(schema: type[BaseModel], system: str, user: str) -> BaseModel:
         s.ThreadsDraft: _threads,
         s.OutlineDraft: _outline,
         s.VolumePlanDraft: lambda: _volume_plan(user),
-        s.VolumeDirections: _directions,
+        s.VolumeDirections: lambda: _directions(user),
         s.PitchJudgement: lambda: _judge(user),
         s.VolumeAudit: _audit,
         s.SetupCritique: _critique,

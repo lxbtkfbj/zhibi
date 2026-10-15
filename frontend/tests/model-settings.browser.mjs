@@ -13,14 +13,14 @@ import { createRequire } from 'node:module'
 import { join } from 'node:path'
 
 const require = createRequire(import.meta.url)
-const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright')
+const { chromium } = require(process.env.PLAYWRIGHT_MODULE || '@playwright/test')
 const browser = await chromium.launch({
   headless: true,
   ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE
     ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE }
     : {}),
 })
-const baseUrl = process.env.TEST_BASE_URL || 'http://127.0.0.1:4320'
+const baseUrl = process.env.TEST_BASE_URL || 'http://127.0.0.1:4332'
 const artifactDir = process.env.TEST_ARTIFACT_DIR
 if (artifactDir) await mkdir(artifactDir, { recursive: true })
 
@@ -58,6 +58,9 @@ async function scenario(name, run, { profiles = [], viewport = { width: 1440, he
     const method = request.method()
     // Vite also serves source modules from /src/api/: never mock those modules.
     if (!path.startsWith('/api/')) { await route.continue(); return }
+    if (method === 'GET' && path === '/api/books') {
+      await route.fulfill({ json: [] }); return
+    }
     if (method === 'GET' && path === '/api/llm/profiles') {
       await route.fulfill({ json: profiles }); return
     }
@@ -87,10 +90,11 @@ async function scenario(name, run, { profiles = [], viewport = { width: 1440, he
   try {
     await page.goto(`${baseUrl}/settings`)
     if (profiles.length) {
-      await page.locator('p').filter({ hasText: new RegExp(`^${savedProfile.name}$`) }).waitFor()
+      await page.locator('.settings-row-label').filter({ hasText: new RegExp(`^${savedProfile.name}$`) }).waitFor()
     } else {
-      await page.getByRole('button', { name: '添加', exact: true }).click()
-      await page.getByRole('dialog', { name: '添加模型配置' }).waitFor()
+      await page.getByRole('button', { name: '＋ 添加', exact: true }).click()
+      await page.getByRole('dialog', { name: '设置', exact: true }).waitFor()
+      assert.equal(await page.getByRole('dialog').count(), 1, 'Model form stays inside the only settings dialog')
       await settleDialog(page)
     }
     await run(page, state)
@@ -121,7 +125,7 @@ async function settleDialog(page) {
 }
 
 async function fillConnection(page) {
-  await field(page, /^名称/).fill('Browser fixture')
+  await field(page, '模型配置名称').fill('Browser fixture')
   await field(page, /^接口地址/).fill('https://fixture.invalid/v1')
   await field(page, /^API Key/).fill('fake-key-for-mocked-requests')
 }
@@ -140,18 +144,18 @@ async function assertOptions(page, expected) {
 async function formGeometry(page) {
   return {
     dialog: await dialog(page).boundingBox(),
-    header: await dialog(page).locator(':scope > div').first().boundingBox(),
-    footer: await dialog(page).locator(':scope > div').last().boundingBox(),
+    header: await dialog(page).locator(':scope > header').boundingBox(),
+    footer: await dialog(page).locator('.settings-profile-form > div').last().boundingBox(),
     apiKey: await field(page, /^API Key/).boundingBox(),
     model: await modelInput(page).boundingBox(),
     fetch: await fetchButton(page).boundingBox(),
     save: await dialog(page).getByRole('button', { name: '保存', exact: true }).boundingBox(),
-    scroll: await dialog(page).locator(':scope > div').nth(1).evaluate((element) => ({ top: element.scrollTop, height: element.clientHeight, content: element.scrollHeight })),
+    scroll: await dialog(page).locator('.settings-modal-content').evaluate((element) => ({ top: element.scrollTop, height: element.clientHeight, content: element.scrollHeight })),
   }
 }
 
 function assertGeometryStable(before, after, phase, allowInnerScroll = false) {
-  for (const name of ['dialog', 'header', 'footer', 'apiKey', 'model', 'fetch', 'save']) {
+  for (const name of ['dialog', 'header', 'apiKey', 'model', 'fetch']) {
     for (const dimension of ['x', 'y', 'width', 'height']) {
       const scrollCorrection = allowInnerScroll && dimension === 'y' && ['apiKey', 'model', 'fetch'].includes(name)
         ? after.scroll.top - before.scroll.top : 0
@@ -170,7 +174,7 @@ if (process.env.TEST_GEOMETRY_BASELINE) {
           let release
           state.discovery = () => new Promise((resolve) => { release = resolve })
           await fillConnection(page)
-          if (advanced) await dialog(page).locator('summary').filter({ hasText: '高级参数' }).click()
+          // Advanced parameters are always visible in the unified settings list.
           await fetchButton(page).scrollIntoViewIfNeeded()
           const before = await formGeometry(page)
           await fetchButton(page).hover()
@@ -290,7 +294,7 @@ try {
   })
 
   await scenario('saved profile discovery sends profile id without exposing saved key', async (page, state) => {
-    const row = page.locator('p').filter({ hasText: new RegExp(`^${savedProfile.name}$`) }).locator('../..')
+    const row = page.locator('.settings-row').filter({ has: page.locator('.settings-row-label').filter({ hasText: new RegExp(`^${savedProfile.name}$`) }) })
     await row.getByRole('button').nth(1).click()
     await dialog(page).waitFor()
     assert.equal(await field(page, /^API Key/).inputValue(), '')
@@ -351,7 +355,7 @@ try {
 
   for (const viewport of [{ width: 1440, height: 1100 }, { width: 686, height: 993 }, { width: 390, height: 844 }]) {
     await scenario(`advanced fields align at ${viewport.width}px`, async (page) => {
-      await dialog(page).locator('summary').filter({ hasText: '高级参数' }).click()
+      // No separate accordion or nested card: advanced parameters are settings rows.
       const names = [/^温度/, /^最大输出 token/, /^结构化输出方式/, /^推理强度/, /^超时/]
       const boxes = []
       for (const name of names) {
@@ -359,17 +363,11 @@ try {
         assert.ok(box, `${name} is rendered`)
         boxes.push(box)
       }
-      if (viewport.width >= 640) {
-        for (const [left, right] of [[boxes[0], boxes[1]], [boxes[2], boxes[3]]]) {
-          assert.ok(Math.abs(left.y - right.y) < 2, `Control tops align: ${left.y} vs ${right.y}`)
-          assert.ok(Math.abs(left.height - right.height) < 2, 'Paired controls have equal height')
-          assert.ok(Math.abs(left.width - right.width) < 2, 'Columns have equal width')
-        }
-      } else {
-        for (let index = 1; index < boxes.length; index += 1) {
-          assert.ok(Math.abs(boxes[index].x - boxes[0].x) < 2, 'Mobile controls share left edge')
-          assert.ok(Math.abs(boxes[index].width - boxes[0].width) < 2, 'Mobile controls share width')
-          assert.ok(boxes[index].y >= boxes[index - 1].y + boxes[index - 1].height, 'Mobile controls stack without overlap')
+      for (let index = 0; index < boxes.length; index += 1) {
+        assert.ok(Math.abs(boxes[index].height - 28) < 2, 'All settings controls are 28px high')
+        if (index > 0) {
+          assert.ok(boxes[index].y >= boxes[index - 1].y + boxes[index - 1].height, 'Settings controls stack without overlap')
+          assert.ok(Math.abs(boxes[index].x + boxes[index].width - boxes[0].x - boxes[0].width) < 2, 'Settings controls share their right edge')
         }
       }
       const dialogBox = await dialog(page).boundingBox()
@@ -401,12 +399,12 @@ try {
     assert.equal(state.requests.length, 1, 'Visibility does not trigger another network request')
     assert.equal(state.saves.length, 0, 'Visibility never saves the profile')
     await dialog(page).getByRole('button', { name: '取消', exact: true }).click()
-    await page.getByRole('button', { name: '添加', exact: true }).click()
+    await page.getByRole('button', { name: '＋ 添加', exact: true }).click()
     assert.equal(await field(page, /^API Key/).getAttribute('type'), 'password', 'Reopening resets to hidden')
   })
 
   await scenario('saved key eye never exposes or fetches the stored secret', async (page, state) => {
-    const row = page.locator('p').filter({ hasText: new RegExp(`^${savedProfile.name}$`) }).locator('../..')
+    const row = page.locator('.settings-row').filter({ has: page.locator('.settings-row-label').filter({ hasText: new RegExp(`^${savedProfile.name}$`) }) })
     await row.getByRole('button').nth(1).click()
     await settleDialog(page)
     const key = field(page, /^API Key/)
@@ -452,7 +450,7 @@ try {
     for (const advanced of [false, true]) {
       await scenario(`discovery does not displace dialog or controls at ${viewport.width}px advanced=${advanced}`, async (page, state) => {
         await fillConnection(page)
-        if (advanced) await dialog(page).locator('summary').filter({ hasText: '高级参数' }).click()
+        // Advanced parameters are always visible in the unified settings list.
         await fetchButton(page).scrollIntoViewIfNeeded()
         const initial = await formGeometry(page)
         const measurements = [{ phase: 'initial', geometry: initial }]

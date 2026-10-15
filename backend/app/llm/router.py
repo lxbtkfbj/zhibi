@@ -13,16 +13,18 @@ import openai
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.crypto import decrypt
 from app.llm import demo
-from app.models import LlmCall, LlmProfile, RoleAssignment
+from app.models import Book, LlmCall, LlmProfile, RoleAssignment
+from app.prompts import prompt_names_for
 
 log = logging.getLogger(__name__)
 
 MAX_PARSE_ATTEMPTS = 3
+FULL_CONTENT_LIMIT = 2000
 
 
 class LLMError(RuntimeError):
@@ -79,7 +81,8 @@ def build_chat_model(p: ResolvedProfile, *, streaming: bool = False) -> ChatOpen
         temperature=p.temperature,
         max_tokens=p.max_tokens,
         timeout=p.timeout_s,
-        max_retries=2,
+        # 重试必须在路由层进行，否则 SDK 内的失败请求不会留下逐次记录。
+        max_retries=0,
         streaming=streaming,
         stream_usage=True,
         **kwargs,
@@ -132,8 +135,15 @@ class LLMRouter:
         profile = await self.resolve(role)
         if profile.provider == "demo":
             started = time.monotonic()
-            result = await demo.respond(schema, system, user)
-            await self._record(role, profile, purpose, started, 0, 0, ok=True)
+            request = _request(system, user, schema, "demo")
+            try:
+                result = await demo.respond(schema, system, user)
+            except Exception as exc:
+                await self._record(role, profile, purpose, started, 0, 0, ok=False, error=str(exc), request=request)
+                raise
+            await self._record(
+                role, profile, purpose, started, 0, 0, ok=True, request=request, response=result.model_dump_json()
+            )
             return result
         return await self._structured_remote(role, profile, schema, system, user, purpose)
 
@@ -149,31 +159,54 @@ class LLMRouter:
                 else f"{user}\n\n【上次输出无法解析】{last_error}\n请严格按要求的结构重新输出完整结果。"
             )
             started = time.monotonic()
+            request = _request(system, prompt_user, schema, method)
             try:
                 outcome = await self._invoke_structured(profile, method, schema, system, prompt_user)
             except openai.BadRequestError as exc:
                 # 部分接口不支持工具调用或 JSON Schema，自动降级为 JSON 模式
-                await self._record(role, profile, purpose, started, 0, 0, ok=False, error=str(exc))
+                await self._record(
+                    role, profile, purpose, started, None, None, ok=False, error=str(exc),
+                    request=request, response=_error_response(exc),
+                )
                 if method != "json_mode" and attempt < MAX_PARSE_ATTEMPTS:
                     log.warning("结构化输出方式 %s 不受支持，改用 json_mode：%s", method, exc)
                     method = "json_mode"
                     continue
                 raise LLMError(f"模型接口拒绝了请求：{exc}") from exc
             except (openai.APIError, TimeoutError) as exc:
-                await self._record(role, profile, purpose, started, 0, 0, ok=False, error=str(exc))
+                await self._record(
+                    role, profile, purpose, started, None, None, ok=False, error=str(exc),
+                    request=request, response=_error_response(exc),
+                )
+                retryable = isinstance(exc, (TimeoutError, openai.APIConnectionError)) or (
+                    isinstance(exc, openai.APIStatusError) and (exc.status_code == 429 or exc.status_code >= 500)
+                )
+                if retryable and attempt < MAX_PARSE_ATTEMPTS:
+                    continue
                 raise LLMError(f"调用模型失败（{profile.name}）：{exc}") from exc
+            except Exception as exc:
+                await self._record(
+                    role, profile, purpose, started, None, None, ok=False, error=str(exc), request=request,
+                    response=_error_response(exc),
+                )
+                raise
             prompt_tokens, completion_tokens = outcome.usage
-            if outcome.parsed is not None:
-                await self._record(role, profile, purpose, started, prompt_tokens, completion_tokens, ok=True)
+            if outcome.parsed is not None and not outcome.truncated:
+                await self._record(
+                    role, profile, purpose, started, prompt_tokens, completion_tokens, ok=True,
+                    request=request, response=outcome.response,
+                )
                 return outcome.parsed
-            last_error = outcome.error[:500]
+            last_error = (outcome.error or ("模型输出被截断" if outcome.truncated else "未返回结构化结果"))[:500]
             await self._record(
-                role, profile, purpose, started, prompt_tokens, completion_tokens, ok=False, error=last_error
+                role, profile, purpose, started, prompt_tokens, completion_tokens, ok=False, error=last_error,
+                request=request, response=outcome.response,
             )
             if outcome.truncated:
                 # 被截断时重试同样的请求没有意义
                 raise LLMError(
-                    f"模型输出被截断（本次输入 {prompt_tokens} token，输出 {completion_tokens} token）："
+                    f"模型输出被截断（本次输入 {prompt_tokens if prompt_tokens is not None else '未知'} token，"
+                    f"输出 {completion_tokens if completion_tokens is not None else '未知'} token）："
                     "上下文窗口或最大输出长度不够。请换用上下文更长的模型，或调大最大输出 token；"
                     "本地 Ollama 需要调大 num_ctx。"
                 )
@@ -190,7 +223,7 @@ class LLMRouter:
             raw = await llm.bind(response_format={"type": "json_object"}).ainvoke(
                 [SystemMessage(system + schema_instruction(schema)), HumanMessage(user)]
             )
-            outcome: Outcome[T] = Outcome(usage=_usage(raw), truncated=_truncated(raw))
+            outcome: Outcome[T] = Outcome(usage=_usage(raw), truncated=_truncated(raw), response=_raw_response(raw))
             try:
                 outcome.parsed = parse_json_output(schema, str(raw.content))
             except ValueError as exc:
@@ -200,7 +233,7 @@ class LLMRouter:
         runnable = llm.with_structured_output(schema, method=method, include_raw=True)
         out = await runnable.ainvoke([SystemMessage(system), HumanMessage(user)])
         raw = out["raw"]
-        outcome = Outcome(usage=_usage(raw), truncated=_truncated(raw))
+        outcome = Outcome(usage=_usage(raw), truncated=_truncated(raw), response=_raw_response(raw))
         if out["parsed"] is not None:
             outcome.parsed = out["parsed"]
             return outcome
@@ -224,26 +257,40 @@ class LLMRouter:
         """流式生成正文（写手用）。"""
         profile = await self.resolve(role)
         started = time.monotonic()
-        if profile.provider == "demo":
-            async for chunk in demo.stream_text(system, user):
-                yield chunk
-            await self._record(role, profile, purpose, started, 0, 0, ok=True)
-            return
-        llm = build_chat_model(profile, streaming=True)
-        prompt_tokens = completion_tokens = 0
+        request = _request(system, user, None, "demo_stream" if profile.provider == "demo" else "stream_text")
+        prompt_tokens = completion_tokens = 0 if profile.provider == "demo" else None
+        parts: list[str] = []
+        ok, error = False, ""
+        truncated = False
         try:
-            async for chunk in llm.astream([SystemMessage(system), HumanMessage(user)]):
-                if chunk.usage_metadata:
-                    prompt_tokens = chunk.usage_metadata.get("input_tokens", prompt_tokens)
-                    completion_tokens = chunk.usage_metadata.get("output_tokens", completion_tokens)
-                if chunk.content:
-                    yield str(chunk.content)
+            if profile.provider == "demo":
+                async for chunk in demo.stream_text(system, user):
+                    parts.append(chunk)
+                    yield chunk
+            else:
+                llm = build_chat_model(profile, streaming=True)
+                async for chunk in llm.astream([SystemMessage(system), HumanMessage(user)]):
+                    truncated = truncated or _truncated(chunk)
+                    if chunk.usage_metadata:
+                        prompt_tokens = chunk.usage_metadata.get("input_tokens", prompt_tokens)
+                        completion_tokens = chunk.usage_metadata.get("output_tokens", completion_tokens)
+                    if chunk.content:
+                        parts.append(str(chunk.content))
+                        yield str(chunk.content)
+            if truncated:
+                raise LLMError("模型输出被截断：正文尚未完成。原样回复已保存在调用记录，请调大最大输出 token 或换用上下文更长的模型。")
+            ok = True
         except (openai.APIError, TimeoutError) as exc:
-            await self._record(
-                role, profile, purpose, started, prompt_tokens, completion_tokens, ok=False, error=str(exc)
-            )
+            error = str(exc)
             raise LLMError(f"调用模型失败（{profile.name}）：{exc}") from exc
-        await self._record(role, profile, purpose, started, prompt_tokens, completion_tokens, ok=True)
+        except BaseException as exc:
+            error = str(exc) or type(exc).__name__
+            raise
+        finally:
+            await self._record(
+                role, profile, purpose, started, prompt_tokens, completion_tokens, ok=ok, error=error,
+                request=request, response="".join(parts),
+            )
 
     async def _record(
         self,
@@ -251,13 +298,18 @@ class LLMRouter:
         profile: ResolvedProfile,
         purpose: str,
         started: float,
-        prompt_tokens: int,
-        completion_tokens: int,
+        prompt_tokens: int | None,
+        completion_tokens: int | None,
         *,
         ok: bool,
         error: str = "",
+        request: dict | None = None,
+        response: str | None = None,
     ) -> None:
         async with self.sessionmaker() as session:
+            # 同一本书并行审稿时串行化入库与清理，保证第 2001 条之后仍严格保留 2000 条正文。
+            if self.book_id is not None:
+                await session.execute(select(Book.id).where(Book.id == self.book_id).with_for_update())
             session.add(
                 LlmCall(
                     job_id=self.job_id,
@@ -271,17 +323,64 @@ class LLMRouter:
                     latency_ms=int((time.monotonic() - started) * 1000),
                     ok=ok,
                     error=error[:2000],
+                    request=request,
+                    response=response,
                 )
             )
+            await session.flush()
+            scope = LlmCall.book_id == self.book_id if self.book_id is not None else LlmCall.book_id.is_(None)
+            cutoff = await session.scalar(
+                select(LlmCall.id).where(scope).order_by(LlmCall.id.desc()).offset(FULL_CONTENT_LIMIT).limit(1)
+            )
+            if cutoff is not None:
+                await session.execute(
+                    update(LlmCall).where(
+                        scope, LlmCall.id <= cutoff, or_(LlmCall.request.is_not(None), LlmCall.response.is_not(None))
+                    ).values(request=None, response=None)
+                )
             await session.commit()
 
 
 @dataclass
 class Outcome[T: BaseModel]:
-    usage: tuple[int, int]
+    usage: tuple[int | None, int | None]
     truncated: bool = False
     parsed: T | None = None
     error: str = ""
+    response: str = ""
+
+
+def _request(system: str, user: str, schema: type[BaseModel] | None, method: str) -> dict:
+    return {
+        "system": system + schema_instruction(schema) if schema is not None and method == "json_mode" else system,
+        "user": user,
+        "schema_name": schema.__name__ if schema is not None else None,
+        "schema": schema.model_json_schema() if schema is not None else None,
+        "method": method,
+        "prompt_names": prompt_names_for(system, user),
+    }
+
+
+def _raw_response(message) -> str:
+    """优先保留供应商的工具参数原文（包括无效 JSON），而不是重新序列化验证后的模型。"""
+    calls = (getattr(message, "additional_kwargs", None) or {}).get("tool_calls") or []
+    if calls:
+        return "\n".join(str((call.get("function") or {}).get("arguments") or "") for call in calls)
+    calls = getattr(message, "invalid_tool_calls", None) or getattr(message, "tool_calls", None) or []
+    if calls:
+        return "\n".join(
+            args if isinstance(args := call.get("args"), str) else json.dumps(args, ensure_ascii=False)
+            for call in calls
+        )
+    content = getattr(message, "content", "")
+    return content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
+
+
+def _error_response(exc: Exception) -> str | None:
+    body = getattr(exc, "body", None)
+    if body is None:
+        return None
+    return body if isinstance(body, str) else json.dumps(body, ensure_ascii=False, default=str)
 
 
 def _truncated(message) -> bool:
@@ -289,9 +388,12 @@ def _truncated(message) -> bool:
     return meta.get("finish_reason") == "length"
 
 
-def _usage(message) -> tuple[int, int]:
+def _usage(message) -> tuple[int | None, int | None]:
     meta = getattr(message, "usage_metadata", None) or {}
-    return int(meta.get("input_tokens", 0)), int(meta.get("output_tokens", 0))
+    return (
+        int(meta["input_tokens"]) if meta.get("input_tokens") is not None else None,
+        int(meta["output_tokens"]) if meta.get("output_tokens") is not None else None,
+    )
 
 
 async def ping(profile: ResolvedProfile) -> str:

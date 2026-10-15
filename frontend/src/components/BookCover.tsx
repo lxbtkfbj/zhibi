@@ -1,12 +1,12 @@
 import clsx from 'clsx'
 
 const PALETTES = [
-  { bg: '#2f3e5c', edge: '#22304a', label: '#efe6d2' }, // 黛蓝
-  { bg: '#2f5f57', edge: '#234943', label: '#efe6d2' }, // 青碧
-  { bg: '#7a4a2a', edge: '#5f391f', label: '#f3e9d6' }, // 赭石
-  { bg: '#8f2f24', edge: '#71241b', label: '#f3e9d6' }, // 朱砂
-  { bg: '#3a3631', edge: '#2a2723', label: '#ece3cf' }, // 玄墨
-  { bg: '#56654b', edge: '#43503a', label: '#efe6d2' }, // 苍绿
+  { bg: 'var(--cover-1)', edge: 'var(--cover-edge-1)', label: 'var(--cover-label-1)' }, // 黛蓝
+  { bg: 'var(--cover-2)', edge: 'var(--cover-edge-2)', label: 'var(--cover-label-2)' }, // 青碧
+  { bg: 'var(--cover-3)', edge: 'var(--cover-edge-3)', label: 'var(--cover-label-3)' }, // 赭石
+  { bg: 'var(--cover-4)', edge: 'var(--cover-edge-4)', label: 'var(--cover-label-4)' }, // 朱砂
+  { bg: 'var(--cover-5)', edge: 'var(--cover-edge-5)', label: 'var(--cover-label-5)' }, // 玄墨
+  { bg: 'var(--cover-6)', edge: 'var(--cover-edge-6)', label: 'var(--cover-label-6)' }, // 苍绿
 ]
 
 function hash(text: string) {
@@ -43,8 +43,8 @@ export function BookCover({
       style={{
         width,
         aspectRatio: '3 / 4',
-        background: `${p.bg} repeating-linear-gradient(45deg, rgb(255 255 255 / 0.025) 0 2px, transparent 2px 6px)`,
-        boxShadow: tiny ? 'none' : 'inset -6px 0 12px -8px rgb(0 0 0 / 0.35), 0 1px 2px rgb(0 0 0 / 0.15)',
+        background: `${p.bg} repeating-linear-gradient(45deg, var(--cover-grain) 0 2px, transparent 2px 6px)`,
+        boxShadow: tiny ? 'none' : 'inset -6px 0 12px -8px var(--cover-shadow), 0 1px 2px var(--cover-shadow-soft)',
       }}
       aria-hidden
     >
@@ -53,26 +53,26 @@ export function BookCover({
         {!tiny &&
           [0.16, 0.38, 0.62, 0.84].map((top) => (
             <span key={top} className="absolute left-1/2 -translate-x-1/2" style={{ top: `${top * 100}%` }}>
-              <span className="block h-px bg-[#e9dcc0]/60" style={{ width: width * 0.16, marginLeft: -width * 0.02 }} />
-              <span className="absolute -top-[2px] left-1/2 block size-[3px] -translate-x-1/2 rounded-full bg-black/40" />
+              <span className="block h-px bg-binding/60" style={{ width: width * 0.16, marginLeft: -width * 0.02 }} />
+              <span className="absolute -top-[2px] left-1/2 block size-[3px] -translate-x-1/2 rounded-full bg-cover-shadow/40" />
             </span>
           ))}
       </div>
       {/* 题签 */}
       {!tiny && (
         <div
-          className="absolute flex justify-center border border-black/10 py-2"
+          className="absolute flex justify-center border border-cover-shadow/10 py-2"
           style={{
             top: width * 0.1,
             right: width * 0.12,
             width: width * 0.24,
             height: '62%',
             background: p.label,
-            boxShadow: 'inset 0 0 0 2px rgb(255 255 255 / 0.4)',
+            boxShadow: 'inset 0 0 0 2px var(--cover-highlight)',
           }}
         >
           <span
-            className="vertical overflow-hidden font-serif font-bold text-[#2a2622]"
+            className="vertical overflow-hidden font-serif font-bold text-cover-ink"
             style={{ fontSize: titleSize, lineHeight: 1.1, letterSpacing: '0.08em' }}
           >
             {shortTitle}
@@ -82,7 +82,7 @@ export function BookCover({
       {/* 钤印 */}
       {!tiny && size !== 'sm' && (
         <span
-          className="absolute flex items-center justify-center bg-seal font-serif text-[#f6eadf]"
+          className="absolute flex items-center justify-center bg-seal font-serif text-on-seal"
           style={{ left: width * 0.2, bottom: width * 0.1, width: width * 0.13, height: width * 0.13, fontSize: width * 0.055, opacity: 0.9 }}
         >
           执笔

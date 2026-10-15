@@ -141,7 +141,7 @@ function UnitCard({
       <span
         className={clsx(
           'absolute top-1 left-0 flex size-8 items-center justify-center rounded-md font-serif text-sm font-bold text-paper-2',
-          unit.status === 'done' ? 'bg-lore' : 'bg-seal shadow-[0_6px_14px_-8px_rgb(180_67_46/0.9)]',
+          unit.status === 'done' ? 'bg-lore' : 'bg-seal shadow-[var(--shadow-paper)]',
         )}
       >
         {unit.index}

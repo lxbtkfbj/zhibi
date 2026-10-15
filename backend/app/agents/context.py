@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from app.book_settings import compile_rules
+
 
 def _lines(items: list[str]) -> str:
     return "\n".join(f"- {item}" for item in items if item)
@@ -242,19 +244,14 @@ def format_pitches(pitches: list[dict[str, Any]]) -> str:
     )
 
 
-MAX_REQUIREMENTS = 40
-
-
-def format_requirements(brief: list[str], notes: list[str]) -> str:
-    """作者在动笔前的回答和过程中的插话：每个角色都要看到，并且必须落实。"""
+def format_requirements(brief: list[str], notes: list[str], settings: dict | None = None) -> str:
+    """Every active requirement is included; deleting a ledger row removes it next step."""
     lines = list(dict.fromkeys(x for x in [*brief, *notes] if x.strip()))
-    if not lines:
-        return ""
-    if len(lines) > MAX_REQUIREMENTS:
-        # 太多时保留动笔前的回答和最近的意见
-        lines = lines[: MAX_REQUIREMENTS // 4] + lines[-(MAX_REQUIREMENTS - MAX_REQUIREMENTS // 4) :]
-    body = "\n".join(f"- {line}" for line in lines)
-    return f"【作者的要求（必须落实；后面的要求与前面冲突时以后面的为准）】\n{body}"
+    blocks = [compile_rules(settings)]
+    if lines:
+        body = "\n".join(f"- {line}" for line in lines)
+        blocks.append(f"【作者的要求（必须落实；后面的要求与前面冲突时以后面的为准）】\n{body}")
+    return "\n\n".join(block for block in blocks if block)
 
 
 def format_style(style_reference: str) -> str:

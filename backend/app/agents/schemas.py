@@ -39,8 +39,8 @@ def remark_field(focus: str = "") -> Any:
 
 
 class BookConcept(Lenient):
-    title: str = Field(description="书名本身（不带书名号、不带备选），网文风格，好记、有画面感")
-    alt_titles: list[str] = Field(default_factory=list, description="2-3 个备选书名")
+    title: str = Field(description="书名本身（不带书名号、不带备选），按作者写作规矩里的书名要求来起")
+    alt_titles: list[str] = Field(default_factory=list, description="2-3 个备选书名，风格与书名一致")
     genre: str = Field(description="类型，如「玄幻·修仙」「都市·重生」")
     tags: list[str] = Field(default_factory=list, description="3-6 个标签")
     logline: str = Field(description="一句话简介，50 字以内，点出主角、核心冲突与看点")
@@ -251,7 +251,7 @@ class VolumeDirection(Lenient):
 class VolumeDirections(Lenient):
     """拆卷纲之前，主编先想几个不同方向，每个方向各拆一份，交给审稿比稿。"""
 
-    directions: list[VolumeDirection] = Field(description="2-3 个方向，彼此要有实质差别")
+    directions: list[VolumeDirection] = Field(description="按编辑部力度设置给出 2-4 个方向，彼此要有实质差别")
     remark: str = remark_field("这几个方向分别押在什么上")
 
 
