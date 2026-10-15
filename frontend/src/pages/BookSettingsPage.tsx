@@ -43,7 +43,7 @@ function BookSettingsEditor({ bookId, initial }: { bookId: string; initial: Sett
   const { data: book } = useBook(bookId)
   const currentPlaybook = automaticPlaybookName(book?.concept)
   return <div className="mx-auto w-full max-w-3xl px-5 py-7 sm:px-8">
-    <h1 className="mb-2 font-serif text-2xl font-bold">这本书的设置</h1><p className="mb-6 text-xs leading-6 text-ink-3">每项修改自动保存。编辑部正在工作也可以改，从下一步开始生效。</p>
+    <h1 className="mb-2 font-serif text-2xl font-bold">本书设置</h1><p className="mb-6 text-xs leading-6 text-ink-3">每项修改自动保存。编辑部正在工作也可以改，从下一步开始生效。</p>
     {!!editor.error && <div role="alert" className="mb-4"><ErrorText error={editor.error} /><SettingsButton className="mt-2" onClick={editor.retry}>重试保存</SettingsButton></div>}
     <WritingSettings value={editor.value} onChange={editor.update} statuses={editor.statuses} currentPlaybook={currentPlaybook} />
     <div className="mt-6"><RequirementsList bookId={bookId} /></div>

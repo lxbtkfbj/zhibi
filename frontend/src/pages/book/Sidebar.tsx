@@ -82,7 +82,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         <Item to={`${base}/relations`} icon={<Network className={icon} />} label="人物关系" count={bible?.relationships.length} onNavigate={onNavigate} />
         <Item to={`${base}/foreshadowing`} icon={<ScrollText className={icon} />} label="伏笔" count={bible?.foreshadowings.length} onNavigate={onNavigate} />
       </Group>
-      <div className="mt-5 border-t border-divider pt-3"><Item to={`${base}/settings`} icon={<Settings className={icon} />} label="这本书的设置" onNavigate={onNavigate} /></div>
+      <div className="mt-5 border-t border-divider pt-3"><Item to={`${base}/settings`} icon={<Settings className={icon} />} label="本书设置" onNavigate={onNavigate} /></div>
     </nav>
   </div>
 }

@@ -195,7 +195,7 @@ async def test_writing_settings_change_is_group_system_message(client, sessionma
     async with sessionmaker() as session:
         message = await session.scalar(sa.select(MeetingMessage).where(MeetingMessage.job_id == job_id))
         assert message.speaker == "system" and not (message.payload or {}).get("thread")
-        assert message.content == "作者修改了这本书的设置：每章字数：2200"
+        assert message.content == "作者修改了本书设置：每章字数：2200"
         book = await session.get(Book, book_id)
         book.concept = {"chapter_words": 1000}
         assert chapter_words(book) == 2200

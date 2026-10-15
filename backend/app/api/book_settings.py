@@ -162,7 +162,7 @@ async def patch_settings(
                 job_id=job.id,
                 speaker="system",
                 kind="status",
-                content=f"作者修改了这本书的设置：{changed}",
+                content=f"作者修改了本书设置：{changed}",
             )
     await session.commit()
     return result(values)
