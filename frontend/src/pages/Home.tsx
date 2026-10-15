@@ -223,7 +223,7 @@ export function Home() {
   return (
     <div className="pb-20">
       {/* 开头 */}
-      <section className="relative overflow-hidden">
+      <section className="relative isolate overflow-hidden">
         <Cloud className="pointer-events-none absolute top-6 right-[8%] w-40 text-ink/[0.06]" />
         <Cloud className="pointer-events-none absolute top-40 left-[4%] w-28 text-ink/[0.05]" />
         <InkMountains sun={false} className="pointer-events-none absolute inset-x-0 bottom-0 h-56 w-full" />
@@ -246,7 +246,8 @@ export function Home() {
         </div>
       </section>
 
-      <div className="mx-auto max-w-6xl px-5 sm:px-8">
+      {/* 继续写作卡片与山水重叠：固定前景层级，避免 Reveal 动画结束后背景盖住卡片。 */}
+      <div className="relative z-10 mx-auto max-w-6xl px-5 sm:px-8">
         {isLoading && (
           <div className="grid grid-cols-2 gap-6 pt-10 sm:grid-cols-4">
             {[0, 1, 2, 3].map((i) => (
