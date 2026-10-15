@@ -21,8 +21,10 @@ def to_out(p: LlmProfile) -> ProfileOut:
     return out
 
 
-async def _get(session: AsyncSession, profile_id: uuid.UUID) -> LlmProfile:
-    profile = await session.get(LlmProfile, profile_id)
+async def _get(session: AsyncSession, profile_id: uuid.UUID, *, for_update: bool = False) -> LlmProfile:
+    profile = await session.get(
+        LlmProfile, profile_id, with_for_update=True if for_update else None, populate_existing=for_update,
+    )
     if profile is None:
         raise HTTPException(404, "模型配置不存在")
     return profile
@@ -85,8 +87,17 @@ async def create_profile(body: ProfileIn, session: AsyncSession = SessionDep) ->
 
 @router.patch("/profiles/{profile_id}", response_model=ProfileOut)
 async def update_profile(profile_id: uuid.UUID, body: ProfilePatch, session: AsyncSession = SessionDep) -> ProfileOut:
-    profile = await _get(session, profile_id)
+    # Serialize author edits with automatic capability updates. A stale ORM value
+    # of False would otherwise omit the hint reset from the UPDATE entirely.
+    profile = await _get(session, profile_id, for_update=True)
     changes = body.model_dump(exclude_unset=True, exclude={"api_key"})
+    # A different endpoint/model/method is a new capability choice. Unrelated edits
+    # (or resubmitting the unchanged form) must retain the automatic-fallback hint.
+    if body.api_key or any(
+        key in changes and changes[key] != getattr(profile, key)
+        for key in ("provider", "base_url", "model", "structured_method")
+    ):
+        profile.structured_method_auto = False
     for key, value in changes.items():
         setattr(profile, key, value)
     if body.api_key:

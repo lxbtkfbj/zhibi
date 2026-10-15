@@ -53,6 +53,7 @@ class ProfileOut(ORM):
     temperature: float
     max_tokens: int | None
     structured_method: str
+    structured_method_auto: bool = False
     timeout_s: int
     reasoning_effort: str | None
     has_key: bool = False

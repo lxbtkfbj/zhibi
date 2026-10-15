@@ -17,7 +17,7 @@ def make_sessionmaker(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
 
 
 def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
-    """API 进程共用的会话工厂。worker 每个任务在自己的事件循环里另建。"""
+    """API 进程共用的会话工厂；worker 每个任务另建并释放引擎，进程内复用事件循环。"""
     global _engine, _sessionmaker
     if _sessionmaker is None:
         _engine = make_engine()

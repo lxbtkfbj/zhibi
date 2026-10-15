@@ -26,6 +26,7 @@ class LlmProfile(UUIDPk, Timestamps, Base):
     max_tokens: Mapped[int | None] = mapped_column(Integer)
     # function_calling / json_mode / json_schema
     structured_method: Mapped[str] = mapped_column(String(30), default="function_calling")
+    structured_method_auto: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     timeout_s: Mapped[int] = mapped_column(Integer, default=300)
     # 推理强度（none / low / medium / high）；留空不发送。Ollama 上设为 none 可关闭思考，速度快很多
     reasoning_effort: Mapped[str | None] = mapped_column(String(20))

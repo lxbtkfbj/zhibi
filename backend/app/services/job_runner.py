@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 import logging
+import sys
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -79,6 +80,7 @@ async def execute_job(job_id: uuid.UUID, resume: dict | None = None, *, checkpoi
     engine = make_engine()
     sm = make_sessionmaker(engine)
     redis = Redis.from_url(settings.redis_url, decode_responses=True)
+    router = LLMRouter(sm, job_id=job_id)
     lock = redis.lock(lock_key(job_id), timeout=LOCK_TIMEOUT_S, blocking=False)
     try:
         if not await lock.acquire():
@@ -86,7 +88,7 @@ async def execute_job(job_id: uuid.UUID, resume: dict | None = None, *, checkpoi
             return
         renew = asyncio.create_task(_keep_lock(lock))
         try:
-            await _run(job_id, resume, sm, redis, checkpoint_dsn or settings.checkpoint_dsn)
+            await _run(job_id, resume, sm, redis, checkpoint_dsn or settings.checkpoint_dsn, router)
         finally:
             renew.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -94,8 +96,20 @@ async def execute_job(job_id: uuid.UUID, resume: dict | None = None, *, checkpoi
             with contextlib.suppress(LockError):
                 await lock.release()
     finally:
-        await redis.aclose()
-        await engine.dispose()
+        active_error = sys.exception()
+        try:
+            try:
+                await router.aclose()
+            finally:
+                try:
+                    await redis.aclose()
+                finally:
+                    await engine.dispose()
+        except Exception:
+            if active_error is None:
+                raise
+            # 清理错误不能覆盖真正的任务失败，尤其不能把任务取消变成另一种异常。
+            log.exception("任务 %s 释放资源时出错，保留原始异常", job_id)
 
 
 async def _keep_lock(lock) -> None:
@@ -106,7 +120,12 @@ async def _keep_lock(lock) -> None:
 
 
 async def _run(
-    job_id: uuid.UUID, resume: dict | None, sm: async_sessionmaker[AsyncSession], redis: Redis, dsn: str
+    job_id: uuid.UUID,
+    resume: dict | None,
+    sm: async_sessionmaker[AsyncSession],
+    redis: Redis,
+    dsn: str,
+    router: LLMRouter,
 ) -> None:
     async with sm() as session:
         job = await session.get(Job, job_id)
@@ -119,10 +138,11 @@ async def _run(
 
     build_graph, make_initial = GRAPHS[kind]
     emitter = Emitter(sm, redis, book_id, job_id)
+    router.book_id = book_id
     deps = GraphDeps(
         sessionmaker=sm,
         redis=redis,
-        llm=LLMRouter(sm, job_id=job_id, book_id=book_id),
+        llm=router,
         emit=emitter,
         book_id=book_id,
         job_id=job_id,

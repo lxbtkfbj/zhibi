@@ -6,6 +6,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from datetime import datetime
 from urllib.parse import urlparse
 
 import httpx
@@ -43,10 +44,14 @@ class ResolvedProfile:
     structured_method: str = "function_calling"
     timeout_s: int = 300
     reasoning_effort: str | None = None
+    profile_id: uuid.UUID | None = None
+    updated_at: datetime | None = None
 
     @classmethod
     def from_row(cls, row: LlmProfile) -> "ResolvedProfile":
         return cls(
+            profile_id=row.id,
+            updated_at=row.updated_at,
             name=row.name,
             provider=row.provider,
             base_url=row.base_url,
@@ -66,14 +71,17 @@ DEMO_PROFILE = ResolvedProfile(name="演示模式", provider="demo", model="demo
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "host.docker.internal"}
 
 
-def build_chat_model(p: ResolvedProfile, *, streaming: bool = False) -> ChatOpenAI:
+def build_chat_model(
+    p: ResolvedProfile,
+    *,
+    http_client: httpx.Client,
+    http_async_client: httpx.AsyncClient,
+    streaming: bool = False,
+) -> ChatOpenAI:
+    """客户端必须由调用方拥有，不能落入 LangChain 的跨任务全局缓存。"""
     kwargs: dict = {}
     if p.reasoning_effort:
         kwargs["reasoning_effort"] = p.reasoning_effort
-    if urlparse(p.base_url).hostname in LOCAL_HOSTS:
-        # 本机模型（如 Ollama）直连，不走系统代理
-        kwargs["http_client"] = httpx.Client(trust_env=False, timeout=p.timeout_s)
-        kwargs["http_async_client"] = httpx.AsyncClient(trust_env=False, timeout=p.timeout_s)
     return ChatOpenAI(
         model=p.model,
         base_url=p.base_url or None,
@@ -85,8 +93,54 @@ def build_chat_model(p: ResolvedProfile, *, streaming: bool = False) -> ChatOpen
         max_retries=0,
         streaming=streaming,
         stream_usage=True,
+        http_client=http_client,
+        http_async_client=http_async_client,
+        # 代理与传输由显式客户端负责，禁用库默认 socket transport 及其误报警告。
+        http_socket_options=(),
         **kwargs,
     )
+
+
+class _HttpClients:
+    """仅在本任务中复用连接；本地/远程代理策略和不同超时不能混用。"""
+
+    def __init__(self) -> None:
+        self._pairs: dict[tuple[bool, int], tuple[httpx.Client, httpx.AsyncClient]] = {}
+        self._closed = False
+
+    def for_profile(self, profile: ResolvedProfile) -> tuple[httpx.Client, httpx.AsyncClient]:
+        if self._closed:
+            raise RuntimeError("模型 HTTP 客户端已经关闭")
+        trust_env = urlparse(profile.base_url).hostname not in LOCAL_HOSTS
+        key = (trust_env, profile.timeout_s)
+        if key not in self._pairs:
+            # 远程保留系统代理，本机模型（如 Ollama）仍然直连。
+            client = httpx.Client(trust_env=trust_env, timeout=profile.timeout_s)
+            try:
+                async_client = httpx.AsyncClient(trust_env=trust_env, timeout=profile.timeout_s)
+            except BaseException:
+                client.close()
+                raise
+            self._pairs[key] = (client, async_client)
+        return self._pairs[key]
+
+    async def aclose(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        pairs, self._pairs = self._pairs, {}
+        errors: list[BaseException] = []
+        for client, async_client in pairs.values():
+            try:
+                await async_client.aclose()
+            except BaseException as exc:
+                errors.append(exc)
+            try:
+                client.close()
+            except BaseException as exc:
+                errors.append(exc)
+        if errors:
+            raise errors[0]
 
 
 def schema_instruction(schema: type[BaseModel]) -> str:
@@ -94,6 +148,27 @@ def schema_instruction(schema: type[BaseModel]) -> str:
         "\n\n请只输出一个 JSON 对象，不要输出任何其他文字或代码块标记。"
         f"JSON 必须符合以下 JSON Schema：\n{json.dumps(schema.model_json_schema(), ensure_ascii=False)}"
     )
+
+
+def _unsupported_structured_method(exc: openai.BadRequestError, method: str) -> bool:
+    """Only remember capability errors, never malformed schemas or unrelated 400s."""
+    message = f"{exc} {json.dumps(exc.body, ensure_ascii=False, default=str)}".lower()
+    if any(term in message for term in (
+        "invalid schema", "invalid_json_schema", "invalid_function_parameters",
+        "schema validation", "schema is invalid", "unsupported schema keyword",
+    )):
+        return False
+    feature_terms = (
+        ("tools", "tool_choice", "function_call", "functions", "function calling", "function-calling",
+         "tool calling", "tool use", "工具调用")
+        if method == "function_calling"
+        else ("response_format", "json_schema", "json schema", "structured output")
+    )
+    unsupported_terms = (
+        "unsupported", "not support", "doesn't support", "unrecognized",
+        "unknown parameter", "not available", "不支持", "未支持",
+    )
+    return any(term in message for term in feature_terms) and any(term in message for term in unsupported_terms)
 
 
 def parse_json_output[T: BaseModel](schema: type[T], text: str) -> T:
@@ -119,6 +194,23 @@ class LLMRouter:
         self.sessionmaker = sessionmaker
         self.job_id = job_id
         self.book_id = book_id
+        self._http_clients = _HttpClients()
+
+    def _chat_model(self, profile: ResolvedProfile, *, streaming: bool = False) -> ChatOpenAI:
+        client, async_client = self._http_clients.for_profile(profile)
+        return build_chat_model(
+            profile, http_client=client, http_async_client=async_client, streaming=streaming,
+        )
+
+    async def aclose(self) -> None:
+        """在任务的事件循环结束之前释放所有模型连接。"""
+        await self._http_clients.aclose()
+
+    async def __aenter__(self) -> "LLMRouter":
+        return self
+
+    async def __aexit__(self, *_exc) -> None:
+        await self.aclose()
 
     async def resolve(self, role: str) -> ResolvedProfile:
         async with self.sessionmaker() as session:
@@ -130,6 +222,25 @@ class LLMRouter:
                         return ResolvedProfile.from_row(profile)
             first = (await session.execute(select(LlmProfile).order_by(LlmProfile.created_at).limit(1))).scalar()
             return ResolvedProfile.from_row(first) if first else DEMO_PROFILE
+
+    async def _remember_structured_method(self, profile: ResolvedProfile, method: str) -> None:
+        if profile.profile_id is None:
+            return
+        async with self.sessionmaker() as session:
+            statement = update(LlmProfile).where(
+                LlmProfile.id == profile.profile_id,
+                LlmProfile.structured_method == profile.structured_method,
+                LlmProfile.base_url == profile.base_url,
+                LlmProfile.model == profile.model,
+                LlmProfile.provider == profile.provider,
+            )
+            if profile.updated_at is not None:
+                # Never overwrite a configuration the author edited while this call ran.
+                statement = statement.where(LlmProfile.updated_at == profile.updated_at)
+            result = await session.execute(statement.values(structured_method=method, structured_method_auto=True))
+            await session.commit()
+            if result.rowcount:
+                log.info("模型配置 %s (%s) 已自动改用 %s，已保存", profile.name, profile.profile_id, method)
 
     async def structured[T: BaseModel](self, role: str, schema: type[T], system: str, user: str, *, purpose: str) -> T:
         profile = await self.resolve(role)
@@ -152,6 +263,7 @@ class LLMRouter:
     ) -> T:
         method = profile.structured_method
         last_error = ""
+        unsupported_method = False
         for attempt in range(1, MAX_PARSE_ATTEMPTS + 1):
             prompt_user = (
                 user
@@ -168,8 +280,9 @@ class LLMRouter:
                     role, profile, purpose, started, None, None, ok=False, error=str(exc),
                     request=request, response=_error_response(exc),
                 )
-                if method != "json_mode" and attempt < MAX_PARSE_ATTEMPTS:
-                    log.warning("结构化输出方式 %s 不受支持，改用 json_mode：%s", method, exc)
+                if method != "json_mode" and attempt < MAX_PARSE_ATTEMPTS and _unsupported_structured_method(exc, method):
+                    log.warning("模型配置 %s 的结构化输出方式 %s 不受支持，尝试 json_mode", profile.name, method)
+                    unsupported_method = True
                     method = "json_mode"
                     continue
                 raise LLMError(f"模型接口拒绝了请求：{exc}") from exc
@@ -196,6 +309,8 @@ class LLMRouter:
                     role, profile, purpose, started, prompt_tokens, completion_tokens, ok=True,
                     request=request, response=outcome.response,
                 )
+                if unsupported_method and method != profile.structured_method:
+                    await self._remember_structured_method(profile, method)
                 return outcome.parsed
             last_error = (outcome.error or ("模型输出被截断" if outcome.truncated else "未返回结构化结果"))[:500]
             await self._record(
@@ -218,7 +333,7 @@ class LLMRouter:
     async def _invoke_structured[T: BaseModel](
         self, profile: ResolvedProfile, method: str, schema: type[T], system: str, user: str
     ) -> "Outcome[T]":
-        llm = build_chat_model(profile)
+        llm = self._chat_model(profile)
         if method == "json_mode":
             raw = await llm.bind(response_format={"type": "json_object"}).ainvoke(
                 [SystemMessage(system + schema_instruction(schema)), HumanMessage(user)]
@@ -268,7 +383,7 @@ class LLMRouter:
                     parts.append(chunk)
                     yield chunk
             else:
-                llm = build_chat_model(profile, streaming=True)
+                llm = self._chat_model(profile, streaming=True)
                 async for chunk in llm.astream([SystemMessage(system), HumanMessage(user)]):
                     truncated = truncated or _truncated(chunk)
                     if chunk.usage_metadata:
@@ -400,10 +515,14 @@ async def ping(profile: ResolvedProfile) -> str:
     """测试连接：发一条极短的请求。"""
     if profile.provider == "demo":
         return "演示模式无需联网"
-    llm = build_chat_model(profile).bind(max_tokens=64)
+    clients = _HttpClients()
     try:
+        client, async_client = clients.for_profile(profile)
+        llm = build_chat_model(profile, http_client=client, http_async_client=async_client).bind(max_tokens=64)
         reply = await llm.ainvoke([HumanMessage("请只回复：连接成功")])
     except openai.APIError as exc:
         raise LLMError(str(exc)) from exc
+    finally:
+        await clients.aclose()
     text = str(reply.content).strip()
     return text[:200] if text else "连接成功（模型在思考，没有直接回复；可在高级参数里把推理强度设为 none）"

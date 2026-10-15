@@ -64,6 +64,7 @@ function ProfileForm({ profile, onBack }: { profile: LlmProfile | null; onBack: 
 function ProfileRow({ profile, onEdit }: { profile: LlmProfile; onEdit: () => void }) {
   const { remove, test } = useProfileMutations()
   return <SettingsRow label={profile.name} hint={profile.provider === 'demo' ? '演示模式 · 内置示例内容，不联网' : `${profile.model} · ${profile.has_key ? '已保存密钥' : '未填 Key'}`} extra={<>
+    {profile.structured_method_auto && <p className="text-xs text-ink-3">已自动改用 {profile.structured_method}</p>}
     {test.data && <p className={`flex items-center gap-1 text-xs ${test.data.ok ? 'text-lore' : 'text-seal'}`}>{test.data.ok ? <CheckCircle2 className="size-3.5" /> : <XCircle className="size-3.5" />}{test.data.message}</p>}
     <ErrorText error={remove.error || test.error} />
   </>}><SettingsButton disabled={test.isPending} onClick={() => test.mutate(profile.id)}>{test.isPending ? '测试中…' : '测试'}</SettingsButton><SettingsButton onClick={onEdit}>修改</SettingsButton><SettingsButton danger disabled={remove.isPending} onClick={() => { if (confirm(`删除「${profile.name}」？`)) remove.mutate(profile.id) }}>删除</SettingsButton></SettingsRow>

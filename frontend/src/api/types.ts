@@ -318,6 +318,7 @@ export interface LlmProfile {
   temperature: number
   max_tokens: number | null
   structured_method: StructuredMethod
+  structured_method_auto: boolean
   timeout_s: number
   reasoning_effort: string | null
   has_key: boolean
