@@ -36,8 +36,10 @@ export function useMeeting(bookId: string) {
       })
       if (message.kind === 'artifact' && REFRESH_ON.has(message.payload?.type ?? '')) {
         for (const key of [keys.chapters(bookId), keys.outline(bookId), keys.book(bookId)]) qc.invalidateQueries({ queryKey: key })
-        if (message.payload?.type === 'chapter_final') qc.invalidateQueries({ queryKey: keys.bible(bookId) })
-        if (message.payload?.type === 'lore') qc.invalidateQueries({ queryKey: keys.bible(bookId) })
+        if (message.payload?.type === 'spine') qc.invalidateQueries({ queryKey: keys.nodes(bookId) })
+        if (message.payload?.type === 'chapter_final' || message.payload?.type === 'lore') {
+          for (const key of [keys.bible(bookId), keys.secrets(bookId), keys.nodes(bookId)]) qc.invalidateQueries({ queryKey: key })
+        }
         if (message.payload?.type === 'threads') qc.invalidateQueries({ queryKey: keys.threads(bookId) })
       }
     })
@@ -49,7 +51,7 @@ export function useMeeting(bookId: string) {
       qc.setQueryData<BookDetail>(keys.book(bookId), (old) => (old ? { ...old, active_job: job } : old))
       if (SETTLED.has(job.status)) {
         setDraft({ bookId, draft: null })
-        const all = [keys.book(bookId), keys.outline(bookId), keys.bible(bookId), keys.threads(bookId), keys.chapters(bookId), keys.usage(bookId), keys.books]
+        const all = [keys.book(bookId), keys.outline(bookId), keys.bible(bookId), keys.threads(bookId), keys.nodes(bookId), keys.secrets(bookId), keys.chapters(bookId), keys.usage(bookId), keys.books]
         for (const key of all) {
           qc.invalidateQueries({ queryKey: key })
         }

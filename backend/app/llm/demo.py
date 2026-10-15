@@ -630,7 +630,9 @@ def _directions(user: str = "") -> s.VolumeDirections:
     choices = DIRECTIONS[:count]
     return s.VolumeDirections(
         directions=[s.VolumeDirection(name=n, idea=idea, difference=diff) for n, idea, diff in choices],
-        remark=f"这一卷按设置想了 {count} 种拆法：" + "、".join(choice[0] for choice in choices) + "。各拆一份，请审稿比一比。",
+        remark=f"这一卷按设置想了 {count} 种拆法："
+        + "、".join(choice[0] for choice in choices)
+        + "。各拆一份，请审稿比一比。",
     )
 
 

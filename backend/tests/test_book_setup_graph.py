@@ -22,7 +22,7 @@ from app.models import (
     Volume,
 )
 from app.services.job_runner import execute_job
-from app.services.setup_store import load_setup
+from app.services.setup_store import load_nodes, load_setup
 
 
 @pytest.fixture(autouse=True)
@@ -94,7 +94,10 @@ async def test_setup_flow_to_approval(sessionmaker):
         )
         assert [v.status for v in volumes] == ["detailed", "planned", "planned", "planned"]
         # 先定主线骨架（开篇、结局、关键转折），分卷按篇幅分配章数
-        assert book.spine["ending"] and len(book.spine["milestones"]) == 6
+        nodes = await load_nodes(session, book_id)
+        assert nodes[0]["kind"] == "opening" and nodes[-1]["kind"] == "ending"
+        assert nodes[-1]["event"] and sum(n["kind"] == "milestone" for n in nodes) == 6
+        assert not ({"opening", "ending", "milestones", "nodes"} & book.spine.keys())
         assert sum(v.chapter_count for v in volumes) == 333
         # 审稿要求压缩第二单元，演示模型的修改版是 6 章；各单元章数之和仍等于第一卷的 31 章
         units = (

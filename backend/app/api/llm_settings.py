@@ -23,7 +23,10 @@ def to_out(p: LlmProfile) -> ProfileOut:
 
 async def _get(session: AsyncSession, profile_id: uuid.UUID, *, for_update: bool = False) -> LlmProfile:
     profile = await session.get(
-        LlmProfile, profile_id, with_for_update=True if for_update else None, populate_existing=for_update,
+        LlmProfile,
+        profile_id,
+        with_for_update=True if for_update else None,
+        populate_existing=for_update,
     )
     if profile is None:
         raise HTTPException(404, "模型配置不存在")

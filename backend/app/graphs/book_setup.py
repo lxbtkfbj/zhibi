@@ -8,6 +8,7 @@
 后面各卷的卷纲和每个单元的章纲，在写作流程里写到之前再做（见 write_book）。
 """
 
+from copy import deepcopy
 from typing import Literal, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -301,6 +302,9 @@ async def lore_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     await d.emit.status("lorekeeper", "设定师正在修改世界观与人物…" if instruction else "设定师正在搭建世界观与人物…")
     result = await editorial.draft_lore(d.llm, state["concept"], requirements(state), current, instruction)
     lore = result.model_dump(exclude={"remark"})
+    for key in ("anchors", "secrets"):
+        if key in (state.get("lore") or {}):
+            lore[key] = deepcopy(state["lore"][key])
     await d.emit.say("lorekeeper", result.remark)
     await d.emit.artifact(
         "lorekeeper",
@@ -319,10 +323,17 @@ async def spine_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     result = await editorial.draft_spine(
         d.llm, state["concept"], state["lore"], requirements(state), current, instruction
     )
-    spine = result.model_dump(exclude={"remark"})
+    # 旧 schema 没有节点 ID、铁钉等字段；进入后续线索与总纲前先恢复作者的硬约束。
+    previous_nodes = (state.get("spine") or {}).get("nodes") or []
+    spine = setup_store.merge_legacy_spine(result.model_dump(exclude={"remark"}), previous_nodes)
+    remapped = setup_store.remap_node_refs(setup_of(state), previous_nodes, spine["nodes"])
     await d.emit.say("chief", result.remark)
-    await d.emit.artifact("chief", f"主线骨架：{len(spine['milestones'])} 个关键转折", {"type": "spine", "data": spine})
-    return _finish(state, "spine", spine)
+    milestones = sum(node["kind"] == "milestone" for node in spine["nodes"])
+    await d.emit.artifact("chief", f"主线骨架：{milestones} 个关键转折", {"type": "spine", "data": spine})
+    return {
+        **{key: remapped[key] for key in ("lore", "outline", "first_volume") if key in state},
+        **_finish(state, "spine", spine),
+    }
 
 
 async def threads_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
@@ -376,6 +387,8 @@ async def outline_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
         selection=(state.get("settings") or {}).get("playbook", "auto"),
     )
     outline = result.model_dump(exclude={"remark"})
+    if "expectations" in (state.get("outline") or {}):
+        outline["expectations"] = deepcopy(state["outline"]["expectations"])
     # 长线伏笔编号：与当前版本内容相同的沿用原编号，第一卷卷纲引用的编号才不会乱
     previous = setup_store.ledger_of(setup_of(state))
     outline["foreshadowings"] = setup_store.assign_seqs(
@@ -400,7 +413,8 @@ def first_volume_blocks(state: SetupState) -> dict[str, str]:
     following = next((v for v in volumes if v.get("index") == 2), None)
     chapter_count = int(card.get("chapter_count") or 0)
     lore = state.get("lore") or {}
-    spine = state.get("spine") or {}
+    spine = setup_store.spine_from_legacy(state.get("spine") or {})
+    opening = next((n.get("event", "") for n in spine.get("nodes", []) if n.get("kind") == "opening"), "（暂无）")
     ledger = setup_store.ledger_of({"outline": state.get("outline") or {}})
     return {
         "volume_index": "1",
@@ -409,7 +423,7 @@ def first_volume_blocks(state: SetupState) -> dict[str, str]:
         "threads": format_threads(state.get("threads") or {}, volume=1),
         "volume": format_volume_card(card),
         "neighbors": "上一卷：无（这是第一卷）\n下一卷：" + (format_volume_card(following) if following else "无"),
-        "story_so_far": f"还没开写，这是第一卷。开篇设计：{spine.get('opening', '（暂无）')}",
+        "story_so_far": f"还没开写，这是第一卷。开篇设计：{opening}",
         "used_climaxes": "（暂无）",
         "characters": "\n".join(format_character_state(c) for c in lore.get("characters", [])) or "（暂无）",
         "ledger": format_ledger(relevant_ledger(ledger, 1)),
@@ -440,6 +454,8 @@ async def first_volume_node(state: SetupState, runtime: Runtime[GraphDeps]) -> d
     fresh = setup_store.assign_seqs(plan["new_foreshadowings"], setup_store.ledger_of(setup_of(state)))
     units, fresh = attach_new_foreshadowings(units, fresh, 1)
     first_volume = {"units": units, "new_foreshadowings": fresh}
+    if "new_expectations" in (state.get("first_volume") or {}):
+        first_volume["new_expectations"] = deepcopy(state["first_volume"]["new_expectations"])
     await d.emit.say("chief", result.remark)
     await d.emit.artifact(
         "chief",

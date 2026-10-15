@@ -8,8 +8,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.agents.glossary import clean_techniques
 from app.api.book_settings import new_book_defaults
 from app.api.deps import SessionDep, ensure_idle, get_book, get_redis
+from app.api.story_map import validate_node
 from app.models import Book, Chapter, Job, PlotUnit, StoryThread, Volume
 from app.schemas import (
     BookCreate,
@@ -118,6 +120,8 @@ async def update_book(
         book.concept = {**(book.concept or {}), **body.concept}
         book.title = book.concept.get("title") or book.title
     if body.spine is not None:
+        if set(body.spine) - {"core_conflict", "theme", "protagonist_arc"}:
+            raise HTTPException(422, "主线骨架只保存核心矛盾、主题和主角成长弧；请通过节点接口编辑关键节点")
         book.spine = {**(book.spine or {}), **body.spine}
     await session.commit()
     await session.refresh(book)
@@ -158,7 +162,10 @@ async def update_volume(volume_id: uuid.UUID, body: VolumePatch, session: AsyncS
     if volume is None:
         raise HTTPException(404, "卷不存在")
     await ensure_idle(session, volume.book_id)
+    await validate_node(session, volume.book_id, body.target_node_id)
     for key, value in body.model_dump(exclude_unset=True).items():
+        if key == "techniques":
+            value = clean_techniques(value)
         setattr(volume, key, value)
     await session.commit()
     await session.refresh(volume, attribute_names=["units", "updated_at"])
@@ -172,6 +179,8 @@ async def update_unit(unit_id: uuid.UUID, body: UnitPatch, session: AsyncSession
         raise HTTPException(404, "剧情单元不存在")
     await ensure_idle(session, unit.book_id)
     for key, value in body.model_dump(exclude_unset=True).items():
+        if key == "techniques":
+            value = clean_techniques(value)
         setattr(unit, key, value)
     await session.commit()
     await session.refresh(unit)

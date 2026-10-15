@@ -275,7 +275,9 @@ async def test_questions_then_note_then_review(client, queued):
     assert job["pending"]["kind"] == "setup_review"
     book = (await client.get(f"/api/books/{book_id}")).json()
     assert book["status"] == "awaiting_approval"
-    assert book["spine"]["milestones"]
+    nodes = (await client.get(f"/api/books/{book_id}/nodes")).json()
+    assert any(node["kind"] == "milestone" for node in nodes)
+    assert "milestones" not in book["spine"]
     outline = (await client.get(f"/api/books/{book_id}/outline")).json()
     assert outline["volumes"][1]["chapter_count"] == 90
 
@@ -289,9 +291,11 @@ async def test_questions_then_note_then_review(client, queued):
     # 方案出来以后，插话要走「提修改意见」
     assert (await client.post(f"/api/books/{book_id}/notes", json={"content": "再改改"})).status_code == 409
 
-    res = await client.patch(f"/api/books/{book_id}", json={"spine": {"ending": "作者改的结局"}})
-    assert res.json()["spine"]["ending"] == "作者改的结局"
-    assert res.json()["spine"]["milestones"]
+    ending = next(node for node in nodes if node["kind"] == "ending")
+    res = await client.patch(f"/api/nodes/{ending['id']}", json={"event": "作者改的结局"})
+    assert res.json()["event"] == "作者改的结局"
+    assert res.json()["status"] == "pencil"
+    assert len((await client.get(f"/api/books/{book_id}/nodes")).json()) == len(nodes)
 
 
 async def test_write_chapters_and_read_them(client, queued):

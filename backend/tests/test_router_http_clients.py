@@ -36,7 +36,11 @@ def transports(monkeypatch):
 
 def remote_profile(**kwargs):
     return ResolvedProfile(
-        name="remote", provider="openai", base_url="https://models.example/v1", model="chat", **kwargs,
+        name="remote",
+        provider="openai",
+        base_url="https://models.example/v1",
+        model="chat",
+        **kwargs,
     )
 
 
@@ -70,9 +74,15 @@ async def test_router_clients_are_lazy_shared_and_task_scoped(transports):
 async def test_proxy_policy_and_timeouts_get_separate_pairs(transports):
     async with LLMRouter(None) as router:
         remote = router._chat_model(remote_profile(timeout_s=25))
-        local = router._chat_model(ResolvedProfile(
-            name="local", provider="openai", base_url="http://localhost:11434/v1", model="chat", timeout_s=25,
-        ))
+        local = router._chat_model(
+            ResolvedProfile(
+                name="local",
+                provider="openai",
+                base_url="http://localhost:11434/v1",
+                model="chat",
+                timeout_s=25,
+            )
+        )
         slow = router._chat_model(remote_profile(timeout_s=90))
         assert len(transports) == 6
         assert local.http_client.options == {"trust_env": False, "timeout": 25}
@@ -155,14 +165,22 @@ async def test_remote_ping_reaches_environment_forward_proxy(monkeypatch):
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             requests.append((self.path, body))
-            payload = json.dumps({
-                "id": "proxy-test", "object": "chat.completion", "created": 1, "model": "chat",
-                "choices": [{
-                    "index": 0, "finish_reason": "stop",
-                    "message": {"role": "assistant", "content": "proxied"},
-                }],
-                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-            }).encode()
+            payload = json.dumps(
+                {
+                    "id": "proxy-test",
+                    "object": "chat.completion",
+                    "created": 1,
+                    "model": "chat",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "finish_reason": "stop",
+                            "message": {"role": "assistant", "content": "proxied"},
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                }
+            ).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(payload)))
@@ -181,7 +199,11 @@ async def test_remote_ping_reaches_environment_forward_proxy(monkeypatch):
         monkeypatch.setenv("NO_PROXY", "")
         monkeypatch.delenv("OPENAI_PROXY", raising=False)
         profile = ResolvedProfile(
-            name="proxy", provider="openai", base_url="http://model.example.invalid/v1", model="chat", timeout_s=5,
+            name="proxy",
+            provider="openai",
+            base_url="http://model.example.invalid/v1",
+            model="chat",
+            timeout_s=5,
         )
         assert await module.ping(profile) == "proxied"
         assert len(requests) == 1

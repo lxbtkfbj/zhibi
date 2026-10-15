@@ -10,7 +10,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import SessionDep, ensure_idle, get_book
-from app.models import Book, Character, Foreshadowing, Relationship, WorldEntry
+from app.api.story_map import validate_node
+from app.models import Book, Character, Foreshadowing, Relationship, Secret, WorldEntry
 from app.schemas import (
     BibleOut,
     CharacterBase,
@@ -22,6 +23,7 @@ from app.schemas import (
     RelationshipIn,
     RelationshipOut,
     RelationshipPatch,
+    SecretOut,
     WorldEntryBase,
     WorldEntryOut,
     WorldEntryPatch,
@@ -46,6 +48,10 @@ async def get_bible(book: Book = Depends(get_book), session: AsyncSession = Sess
             ForeshadowingOut.model_validate(r)
             for r in sorted(await _rows(session, Foreshadowing, book.id), key=lambda f: f.seq)
         ],
+        secrets=[
+            SecretOut.model_validate(r)
+            for r in sorted(await _rows(session, Secret, book.id), key=lambda secret: secret.seq)
+        ],
     )
 
 
@@ -66,6 +72,17 @@ async def _update(session: AsyncSession, model: Any, row_id: uuid.UUID, body: Ba
     if row is None:
         raise HTTPException(404, "条目不存在")
     await ensure_idle(session, row.book_id)
+    if model is Foreshadowing:
+        await validate_node(session, row.book_id, body.model_dump(exclude_unset=True).get("node_id"))
+    if model is Character and body.name is not None and body.name != row.name:
+        old_name = row.name
+        secrets = await session.scalars(select(Secret).where(Secret.book_id == row.book_id))
+        for secret in secrets:
+            if any(knower.get("name") == old_name for knower in secret.knowers):
+                secret.knowers = [
+                    {**knower, "name": body.name} if knower.get("name") == old_name else knower
+                    for knower in secret.knowers
+                ]
     for key, value in body.model_dump(exclude_unset=True).items():
         setattr(row, key, value)
     try:
@@ -123,6 +140,8 @@ async def create_foreshadowing(
     body: ForeshadowingBase, book: Book = Depends(get_book), session: AsyncSession = SessionDep
 ):
     await ensure_idle(session, book.id)
+    await session.execute(select(Book.id).where(Book.id == book.id).with_for_update())
+    await validate_node(session, book.id, body.node_id)
     seq = await session.scalar(
         select(func.coalesce(func.max(Foreshadowing.seq), 0)).where(Foreshadowing.book_id == book.id)
     )
@@ -146,6 +165,7 @@ async def delete_foreshadowing(row_id: uuid.UUID, session: AsyncSession = Sessio
 # 人物关系
 @router.post("/books/{book_id}/relationships", response_model=RelationshipOut, status_code=201)
 async def create_relationship(body: RelationshipIn, book: Book = Depends(get_book), session: AsyncSession = SessionDep):
+    await ensure_idle(session, book.id)
     if body.source_id == body.target_id:
         raise HTTPException(422, "关系的两端不能是同一个人")
     count = await session.scalar(

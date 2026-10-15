@@ -35,6 +35,11 @@ def _load(name: str) -> str:
     return row[0] if row is not None else fallback
 
 
+def load(name: str) -> str:
+    """读取当前生效的原文（覆盖版本优先），不进行变量替换。"""
+    return _load(name)
+
+
 def track_rendered(name: str, content: str) -> str:
     # 不可变 ContextVar 保证并行审稿任务不会互相污染。
     if content:

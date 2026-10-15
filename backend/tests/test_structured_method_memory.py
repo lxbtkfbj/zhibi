@@ -26,20 +26,23 @@ def bad_request(message):
     )
 
 
-@pytest.mark.parametrize("method,message,expected", [
-    ("function_calling", "unsupported_tools", True),
-    ("function_calling", "tools are not supported by this model", True),
-    ("function_calling", "This model does not support function calling", True),
-    ("function_calling", "Tool calling is not supported", True),
-    ("function_calling", "Tool use is not supported", True),
-    ("function_calling", "不支持工具调用", True),
-    ("json_schema", "response_format type json_schema is not supported", True),
-    ("json_schema", "Unknown parameter: response_format", True),
-    ("json_schema", "Invalid schema for response_format: 'oneOf' is not supported", False),
-    ("function_calling", "invalid_function_parameters: tools schema keyword is unsupported", False),
-    ("function_calling", "max_tokens is not supported", False),
-    ("json_schema", "context_length_exceeded", False),
-])
+@pytest.mark.parametrize(
+    "method,message,expected",
+    [
+        ("function_calling", "unsupported_tools", True),
+        ("function_calling", "tools are not supported by this model", True),
+        ("function_calling", "This model does not support function calling", True),
+        ("function_calling", "Tool calling is not supported", True),
+        ("function_calling", "Tool use is not supported", True),
+        ("function_calling", "不支持工具调用", True),
+        ("json_schema", "response_format type json_schema is not supported", True),
+        ("json_schema", "Unknown parameter: response_format", True),
+        ("json_schema", "Invalid schema for response_format: 'oneOf' is not supported", False),
+        ("function_calling", "invalid_function_parameters: tools schema keyword is unsupported", False),
+        ("function_calling", "max_tokens is not supported", False),
+        ("json_schema", "context_length_exceeded", False),
+    ],
+)
 def test_only_capability_errors_are_remembered(method, message, expected):
     assert _unsupported_structured_method(bad_request(message), method) is expected
 
@@ -57,10 +60,12 @@ async def seed(sessionmaker, method="function_calling"):
 async def test_json_schema_capability_fallback_is_persisted(sessionmaker, monkeypatch):
     profile_id = await seed(sessionmaker, "json_schema")
     async with LLMRouter(sessionmaker) as router:
-        invoke = AsyncMock(side_effect=[
-            bad_request("response_format json_schema is not supported"),
-            Outcome(usage=(1, 1), parsed=Answer(answer="ok"), response='{"answer":"ok"}'),
-        ])
+        invoke = AsyncMock(
+            side_effect=[
+                bad_request("response_format json_schema is not supported"),
+                Outcome(usage=(1, 1), parsed=Answer(answer="ok"), response='{"answer":"ok"}'),
+            ]
+        )
         monkeypatch.setattr(router, "_invoke_structured", invoke)
         await router.structured("chief", Answer, "system", "user", purpose="schema fallback")
     async with sessionmaker() as session:
@@ -71,10 +76,16 @@ async def test_json_schema_capability_fallback_is_persisted(sessionmaker, monkey
 async def test_parse_fallback_is_not_persisted(sessionmaker, monkeypatch):
     profile_id = await seed(sessionmaker)
     async with LLMRouter(sessionmaker) as router:
-        monkeypatch.setattr(router, "_invoke_structured", AsyncMock(side_effect=[
-            Outcome(usage=(1, 1), error="bad JSON", response="broken"),
-            Outcome(usage=(1, 1), parsed=Answer(answer="ok"), response='{"answer":"ok"}'),
-        ]))
+        monkeypatch.setattr(
+            router,
+            "_invoke_structured",
+            AsyncMock(
+                side_effect=[
+                    Outcome(usage=(1, 1), error="bad JSON", response="broken"),
+                    Outcome(usage=(1, 1), parsed=Answer(answer="ok"), response='{"answer":"ok"}'),
+                ]
+            ),
+        )
         await router.structured("chief", Answer, "system", "user", purpose="parse failure")
     async with sessionmaker() as session:
         profile = await session.get(LlmProfile, profile_id)

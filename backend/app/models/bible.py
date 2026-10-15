@@ -28,8 +28,6 @@ class Character(UUIDPk, Timestamps, Base):
     # 随剧情变化的当前状态
     location: Mapped[str] = mapped_column(Text, default="")
     condition: Mapped[str] = mapped_column(Text, default="")
-    # 此人知道的秘密 / 隐藏的秘密
-    secrets: Mapped[list] = mapped_column(JSONB, default=list)
     notes: Mapped[str] = mapped_column(Text, default="")
     is_alive: Mapped[bool] = mapped_column(Boolean, default=True)
     first_appearance_chapter: Mapped[int | None] = mapped_column(Integer)
@@ -64,6 +62,8 @@ class Foreshadowing(UUIDPk, Timestamps, Base):
     book_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("books.id", ondelete="CASCADE"), index=True)
     # 书内编号，提示词里写作 F{seq}
     seq: Mapped[int] = mapped_column(Integer, default=0)
+    kind: Mapped[str] = mapped_column(String(10), default="伏笔", server_default="伏笔")
+    node_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("story_nodes.id", ondelete="SET NULL"))
     description: Mapped[str] = mapped_column(Text)
     # 短（一个单元内收）/ 中（一卷内收）/ 长（跨卷）
     span: Mapped[str] = mapped_column(String(10), default="中")

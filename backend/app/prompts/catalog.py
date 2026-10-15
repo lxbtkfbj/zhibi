@@ -34,28 +34,74 @@ CATALOG = [
     ("persona_writer", "写手人设", "角色与规矩", "writer", "写手每次调用的系统提示"),
     ("persona_reviewer", "审稿人设", "角色与规矩", "reviewer", "审稿每次调用的系统提示"),
     ("rules", "通用规则", "角色与规矩", "all", "所有角色的系统提示"),
+    ("glossary", "术语表", "角色与规矩", "all", "编辑批注里的技巧名称与白话解释"),
     ("playbooks.harem_xuanhuan", "后宫玄幻爽文", "题材打法", "chief,reviewer", "匹配或指定后宫玄幻爽文时的规划与审稿"),
     ("playbooks.general", "通用", "题材打法", "chief,reviewer", "匹配或指定通用打法时的规划与审稿"),
 ]
 BY_NAME = {row[0]: row for row in CATALOG}
 
 VARIABLE_LABELS = {
-    "idea": "作者的点子", "requirements": "作者的要求", "style": "文风参考", "revision": "修改要求",
-    "playbook": "题材打法", "chapter_hint": "章数提示", "concept": "书的概念", "lore": "世界观与人物",
-    "spine": "主线骨架", "threads": "故事线索", "outline": "章纲或总纲", "first_volume": "第一卷卷纲",
-    "feedback": "作者意见", "done": "已完成的方案", "todo": "待完成的步骤", "notes": "作者插话",
-    "rules": "通用规则", "strictness": "审稿尺度", "volume_index": "卷号", "volume_title": "卷名",
-    "volume": "本卷规划", "unit_index": "单元序号", "unit_title": "单元标题", "unit": "本单元规划",
-    "units": "各单元回顾", "chapter_index": "章号", "chapter_title": "章节标题", "chapter_words": "目标字数",
-    "chapter_count": "章节数量", "chapter_catalog": "章节目录", "chapters": "各章内容", "first_chapter": "起始章号",
-    "last_chapter": "结束章号", "characters": "人物资料", "world": "世界设定", "world_catalog": "世界设定目录",
-    "roster": "人物名册", "ledger": "伏笔台账", "neighbors": "相邻卷与单元", "story_so_far": "故事前情",
-    "trope_usage": "套路使用台账", "used_climaxes": "已用高潮", "unit_hint": "单元数量提示",
-    "direction": "本次卷纲方向", "pitch_count": "比稿方案数", "pitches": "待评卷纲方案", "plan": "卷纲方案",
-    "found": "程序发现的问题", "content": "正文", "recent": "最近几章", "words": "已写字数",
-    "missing": "还缺字数", "body": "结尾前正文", "ending": "原结尾", "ending_words": "结尾目标字数",
-    "reason": "改写原因", "hook": "结尾钩子", "foreshadow_tasks": "本章伏笔任务", "previous_tail": "上章结尾",
+    "idea": "作者的点子",
+    "requirements": "作者的要求",
+    "style": "文风参考",
+    "revision": "修改要求",
+    "playbook": "题材打法",
+    "chapter_hint": "章数提示",
+    "concept": "书的概念",
+    "lore": "世界观与人物",
+    "spine": "主线骨架",
+    "threads": "故事线索",
+    "outline": "章纲或总纲",
+    "first_volume": "第一卷卷纲",
+    "feedback": "作者意见",
+    "done": "已完成的方案",
+    "todo": "待完成的步骤",
+    "notes": "作者插话",
+    "rules": "通用规则",
+    "strictness": "审稿尺度",
+    "volume_index": "卷号",
+    "volume_title": "卷名",
+    "volume": "本卷规划",
+    "unit_index": "单元序号",
+    "unit_title": "单元标题",
+    "unit": "本单元规划",
+    "units": "各单元回顾",
+    "chapter_index": "章号",
+    "chapter_title": "章节标题",
+    "chapter_words": "目标字数",
+    "chapter_count": "章节数量",
+    "chapter_catalog": "章节目录",
+    "chapters": "各章内容",
+    "first_chapter": "起始章号",
+    "last_chapter": "结束章号",
+    "characters": "人物资料",
+    "world": "世界设定",
+    "world_catalog": "世界设定目录",
+    "roster": "人物名册",
+    "ledger": "伏笔台账",
+    "neighbors": "相邻卷与单元",
+    "story_so_far": "故事前情",
+    "trope_usage": "套路使用台账",
+    "used_climaxes": "已用高潮",
+    "unit_hint": "单元数量提示",
+    "direction": "本次卷纲方向",
+    "pitch_count": "比稿方案数",
+    "pitches": "待评卷纲方案",
+    "plan": "卷纲方案",
+    "found": "程序发现的问题",
+    "content": "正文",
+    "recent": "最近几章",
+    "words": "已写字数",
+    "missing": "还缺字数",
+    "body": "结尾前正文",
+    "ending": "原结尾",
+    "ending_words": "结尾目标字数",
+    "reason": "改写原因",
+    "hook": "结尾钩子",
+    "foreshadow_tasks": "本章伏笔任务",
+    "previous_tail": "上章结尾",
     "recall": "相关前文",
+    "glossary": "术语表",
 }
 
 
@@ -94,3 +140,11 @@ def validate_content(name: str, content: str) -> None:
         from app.agents.playbook import parse
 
         parse(name.split(".", 1)[1], content)
+    if name == "glossary":
+        from app.agents.glossary import parse
+
+        terms = parse(content)
+        if len({term for term, _ in terms if term}) < 5:
+            raise ValueError("术语表至少需要 5 个术语")
+        if any(not term or not explanation for term, explanation in terms):
+            raise ValueError("每个术语都需要名称和解释")

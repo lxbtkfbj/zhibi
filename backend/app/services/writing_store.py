@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents import schemas as s
+from app.agents.glossary import clean_techniques
 from app.agents.planning import ref_seq
 from app.models import Chapter, Character, Foreshadowing, PlotUnit, Volume
 from app.services.setup_store import FORESHADOW_FIELDS, UNIT_FIELDS
@@ -46,7 +47,7 @@ async def save_volume_plan(
         )
         for key in UNIT_FIELDS:
             if key in u and u[key] is not None:
-                setattr(row, key, u[key])
+                setattr(row, key, clean_techniques(u[key]) if key == "techniques" else u[key])
         row.status = "planned"
         session.add(row)
     for row in old_units.values():
@@ -59,7 +60,14 @@ async def save_volume_plan(
     keep = {f["seq"] for f in fresh}
     if replace_new:
         for seq, row in list(ledger.items()):
-            if row.plant_volume == volume.index and row.span != "长" and row.status == "planned" and seq not in keep:
+            # 任务 1 的旧 VolumePlan 只管理伏笔，不能因为它尚不会输出期待而删除作者已建的期待。
+            if (
+                row.kind == "伏笔"
+                and row.plant_volume == volume.index
+                and row.span != "长"
+                and row.status == "planned"
+                and seq not in keep
+            ):
                 await session.delete(row)
     for f in fresh:
         row = ledger.get(f["seq"]) or Foreshadowing(book_id=book_id, seq=f["seq"], description="")

@@ -17,6 +17,8 @@ import type {
   PlotUnit,
   Relationship,
   RoleAssignments,
+  Secret,
+  StoryNode,
   StoryThread,
   TeamRole,
   Usage,
@@ -31,6 +33,8 @@ export const keys = {
   outline: (id: string) => ['outline', id] as const,
   bible: (id: string) => ['bible', id] as const,
   threads: (id: string) => ['threads', id] as const,
+  nodes: (id: string) => ['nodes', id] as const,
+  secrets: (id: string) => ['secrets', id] as const,
   /** 前缀：失效时连同按卷筛选的目录、单章一起刷新 */
   chapters: (id: string) => ['chapters', id] as const,
   chapterList: (id: string, volume?: number) => ['chapters', id, 'list', volume ?? 'all'] as const,
@@ -48,6 +52,10 @@ export const useOutline = (id: string) =>
 export const useBible = (id: string) => useQuery({ queryKey: keys.bible(id), queryFn: () => get<Bible>(`/books/${id}/bible`) })
 export const useThreads = (id: string) =>
   useQuery({ queryKey: keys.threads(id), queryFn: () => get<StoryThread[]>(`/books/${id}/threads`) })
+export const useNodes = (id: string) =>
+  useQuery({ queryKey: keys.nodes(id), queryFn: () => get<StoryNode[]>(`/books/${id}/nodes`) })
+export const useSecrets = (id: string) =>
+  useQuery({ queryKey: keys.secrets(id), queryFn: () => get<Secret[]>(`/books/${id}/secrets`) })
 /** 章节目录；指定 volume 时只列这一卷，并带上章纲。 */
 export const useChapters = (id: string, volume?: number) =>
   useQuery({
@@ -96,6 +104,33 @@ export function useUpdateBook(bookId: string) {
 
 function patchInCache<T extends { id: string }>(list: T[] | undefined, item: T): T[] | undefined {
   return list?.map((x) => (x.id === item.id ? item : x))
+}
+
+type NodeFields = 'title' | 'event' | 'prerequisite' | 'consequence' | 'volume' | 'status'
+
+export function useNodeMutations(bookId: string) {
+  const qc = useQueryClient()
+  const refresh = () => {
+    for (const queryKey of [keys.nodes(bookId), keys.outline(bookId), keys.bible(bookId), keys.secrets(bookId)]) {
+      void qc.invalidateQueries({ queryKey })
+    }
+  }
+  const create = useMutation({
+    mutationFn: (body: Pick<StoryNode, 'title'> & Partial<Pick<StoryNode, Exclude<NodeFields, 'title'>>> & { after_node_id?: string }) =>
+      post<StoryNode>(`/books/${bookId}/nodes`, body),
+    onSuccess: refresh,
+  })
+  const update = useMutation({
+    mutationFn: ({ id, ...body }: { id: string } & Partial<Pick<StoryNode, NodeFields | 'editor_note'>>) =>
+      patch<StoryNode>(`/nodes/${id}`, body),
+    onSuccess: (node) => qc.setQueryData<StoryNode[]>(keys.nodes(bookId), (old) => patchInCache(old, node)),
+  })
+  const remove = useMutation({ mutationFn: (id: string) => del(`/nodes/${id}`), onSuccess: refresh })
+  const reorder = useMutation({
+    mutationFn: (ids: string[]) => post<StoryNode[]>(`/books/${bookId}/nodes/order`, { ids }),
+    onSuccess: refresh,
+  })
+  return { create, update, remove, reorder }
 }
 
 export function useUpdateThread(bookId: string) {
@@ -165,7 +200,13 @@ type BibleItem = {
 export function useBibleMutations<K extends BibleList>(bookId: string, list: K) {
   const qc = useQueryClient()
   const route = bibleRoutes[list]
-  const refresh = () => qc.invalidateQueries({ queryKey: keys.bible(bookId) })
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: keys.bible(bookId) })
+    if (list === 'characters') {
+      void qc.invalidateQueries({ queryKey: keys.nodes(bookId) })
+      void qc.invalidateQueries({ queryKey: keys.secrets(bookId) })
+    }
+  }
   const create = useMutation({
     mutationFn: (body: Partial<BibleItem[K]>) => post<BibleItem[K]>(`/books/${bookId}/${route.create}`, body),
     onSuccess: refresh,
@@ -173,10 +214,12 @@ export function useBibleMutations<K extends BibleList>(bookId: string, list: K) 
   const update = useMutation({
     mutationFn: ({ id, ...body }: { id: string } & Partial<BibleItem[K]>) =>
       patch<BibleItem[K]>(`/${route.item}/${id}`, body),
-    onSuccess: (item) =>
+    onSuccess: (item) => {
       qc.setQueryData<Bible>(keys.bible(bookId), (old) =>
         old ? { ...old, [list]: patchInCache(old[list] as BibleItem[K][], item) } : old,
-      ),
+      )
+      if (list === 'characters') refresh()
+    },
   })
   const remove = useMutation({ mutationFn: (id: string) => del(`/${route.item}/${id}`), onSuccess: refresh })
   return { create, update, remove }

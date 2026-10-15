@@ -55,8 +55,6 @@ def format_character(ch: dict[str, Any]) -> str:
     state = "，".join(x for x in (ch.get("location"), ch.get("condition")) if x)
     if state:
         parts.append(f"当前：{state}")
-    if ch.get("secrets"):
-        parts.append(f"秘密：{'；'.join(ch['secrets'])}")
     return "\n".join(parts)
 
 
@@ -83,25 +81,88 @@ def format_lore(lore: dict[str, Any]) -> str:
         f"- {r.get('source')} 与 {r.get('target')}：{r.get('kind')}。{r.get('description', '')}"
         for r in lore.get("relationships", [])
     )
-    return f"世界观：\n{world}\n\n人物：\n{characters}\n\n人物关系：\n{relations or '（暂无）'}"
+    anchors: dict[int, list[str]] = {}
+    titles = {i: n.get("title", "") for i, n in enumerate(lore.get("nodes") or [], start=1)}
+    for a in lore.get("anchors") or []:
+        node = a.get("node", 0)
+        if a.get("node_title"):
+            titles[node] = a["node_title"]
+        anchors.setdefault(node, []).append(
+            f"{a.get('character', '')} {a.get('kind', '')}" + (f"——{a['note']}" if a.get("note") else "")
+        )
+    anchor_text = "\n".join(
+        f"- 节点 {n}" + (f"「{titles[n]}」" if titles.get(n) else "") + f"：{'；'.join(anchors[n])}"
+        for n in sorted(anchors)
+    )
+    secrets = list(lore.get("secrets") or [])
+    # 过渡期旧 schema 尚会产出人物秘密，仍放进独立的信息差区，不能在保存前丢掉上下文。
+    next_seq = max((s.get("seq") or 0 for s in secrets), default=0) + 1
+    known = {(s.get("truth", "").strip(), k.get("name")) for s in secrets for k in s.get("knowers") or []}
+    for ch in lore.get("characters") or []:
+        for truth in ch.get("secrets") or []:
+            key = (truth.strip(), ch.get("name", ""))
+            if not key[0] or key in known:
+                continue
+            secrets.append(
+                {
+                    "seq": next_seq,
+                    "title": truth[:12].rstrip("，。！？；：、,.!?;:"),
+                    "truth": truth,
+                    "knowers": [{"name": ch.get("name", ""), "since_chapter": None, "how": "开书设定"}],
+                }
+            )
+            known.add(key)
+            next_seq += 1
+    return (
+        f"世界观：\n{world}\n\n人物：\n{characters}\n\n人物关系：\n{relations or '（暂无）'}"
+        f"\n\n人物锚点：\n{anchor_text or '（暂无）'}\n\n信息差：\n{format_secrets(secrets)}"
+    )
+
+
+def format_secrets(secrets: list[dict[str, Any]]) -> str:
+    blocks = []
+    for s in secrets:
+        status = "公开" if s.get("status") == "public" else "隐藏"
+        lines = [
+            f"- S{s.get('seq') or '?'}「{s.get('title', '')}」［{status}｜读者：{s.get('reader_knows') or '未标注'}］真相：{s.get('truth', '')}"
+        ]
+        knowers = []
+        for k in s.get("knowers") or []:
+            when = "开书时" if k.get("since_chapter") is None else f"第 {k['since_chapter']} 章"
+            if k.get("since_chapter") is not None and k.get("how"):
+                when += f"，{k['how']}"
+            knowers.append(f"{k.get('name', '')}（{when}）")
+        detail = "知道的人：" + ("、".join(knowers) or "（暂无）")
+        if s.get("reveal_plan"):
+            detail += f"；计划：{s['reveal_plan']}"
+        lines.append(f"  {detail}")
+        blocks.append("\n".join(lines))
+    return "\n".join(blocks) or "（暂无）"
 
 
 def format_spine(spine: dict[str, Any]) -> str:
     if not spine:
         return "（暂无）"
-    milestones = "\n".join(
-        f"{m.get('index')}. 【{m.get('title', '')}】（约第{m.get('volume', '?')}卷）{m.get('event', '')}"
-        f"——之后：{m.get('change', '')}"
-        for m in spine.get("milestones", [])
-    )
+    from app.services.setup_store import spine_from_legacy
+
+    spine = spine_from_legacy(spine)
+    nodes = []
+    for i, n in enumerate(spine.get("nodes") or [], start=1):
+        status = {"pinned": "铁钉", "pencil": "暂定", "empty": "留空"}.get(n.get("status", "pencil"), "暂定")
+        label = {"opening": "· 开篇", "ending": "· 结局"}.get(n.get("kind"), "")
+        volume = f"｜约第 {n['volume']} 卷" if n.get("volume") else ""
+        title = n.get("title") or ("（留空）" if n.get("status") == "empty" else "")
+        event = "这里还没定" if n.get("status") == "empty" else f"发生：{n.get('event', '')}"
+        nodes.append(f"节点 {i}「{title}」{label}［{status}{volume}］{event}")
+        for key, name in (("prerequisite", "之前得先有"), ("consequence", "之后变成")):
+            if n.get(key):
+                nodes.append(f"  {name}：{n[key]}")
     return "\n".join(
         [
             f"核心矛盾：{spine.get('core_conflict', '')}",
             f"主题：{spine.get('theme', '')}",
             f"主角成长弧：{spine.get('protagonist_arc', '')}",
-            f"开篇：{spine.get('opening', '')}",
-            f"结局：{spine.get('ending', '')}",
-            f"关键转折：\n{milestones or '（暂无）'}",
+            "关键节点：\n" + ("\n".join(nodes) or "（暂无）"),
         ]
     )
 
@@ -147,25 +208,33 @@ def format_volume_card(v: dict[str, Any]) -> str:
         lines.append(f"推进线索：{format_steps(v['thread_beats'])}")
     if v.get("new_characters"):
         lines.append(f"新登场：{'、'.join(v['new_characters'])}")
+    if v.get("target_node"):
+        title = v.get("target_node_title") or ""
+        lines.append(f"走向：节点 {v['target_node']}「{title}」" + ("（本卷发生）" if v.get("reaches_node") else ""))
     return "\n".join(lines)
 
 
 def foreshadow_code(f: dict[str, Any]) -> str:
-    return f"F{f.get('seq')}" if f.get("seq") else "F?"
+    return f"{'E' if f.get('kind') == '期待' else 'F'}{f.get('seq') or '?'}"
 
 
 FORESHADOW_STATUS = {"planned": "未埋", "planted": "已埋", "resolved": "已收", "abandoned": "放弃"}
+EXPECTATION_STATUS = {"planned": "未立", "planted": "已立", "resolved": "已兑现", "abandoned": "放弃"}
 
 
 def format_foreshadowing(f: dict[str, Any]) -> str:
+    kind = f.get("kind") or "伏笔"
+    expectation = kind == "期待"
+    plant, payoff = ("立", "兑现") if expectation else ("埋", "收")
     where = []
     if f.get("plant_volume"):
-        where.append(f"第{f['plant_volume']}卷埋")
+        where.append(f"第{f['plant_volume']}卷{plant}")
     if f.get("payoff_volume"):
-        where.append(f"第{f['payoff_volume']}卷收")
-    status = FORESHADOW_STATUS.get(f.get("status", "planned"), "")
-    head = f"- {foreshadow_code(f)}［{f.get('span', '中')}·{status}{'·' + '、'.join(where) if where else ''}］"
-    return f"{head}{f.get('description', '')}（埋：{f.get('plant_plan', '')}；收：{f.get('payoff_plan', '')}）"
+        where.append(f"第{f['payoff_volume']}卷{payoff}")
+    status = (EXPECTATION_STATUS if expectation else FORESHADOW_STATUS).get(f.get("status", "planned"), "")
+    head = f"- {foreshadow_code(f)}［{kind}·{f.get('span', '中')}·{status}{'·' + '、'.join(where) if where else ''}］"
+    prefix = "读者在等：" if expectation else ""
+    return f"{head}{prefix}{f.get('description', '')}（{plant}：{f.get('plant_plan', '')}；{payoff}：{f.get('payoff_plan', '')}）"
 
 
 def format_ledger(foreshadowings: list[dict[str, Any]]) -> str:
@@ -177,7 +246,11 @@ def format_outline(outline: dict[str, Any]) -> str:
     if not outline:
         return "（暂无）"
     volumes = "\n\n".join(format_volume_card(v) for v in outline.get("volumes", []))
-    return f"分卷：\n{volumes}\n\n伏笔台账：\n{format_ledger(outline.get('foreshadowings', []))}"
+    ledger = [
+        *(outline.get("foreshadowings") or []),
+        *({**f, "kind": "期待"} for f in outline.get("expectations") or []),
+    ]
+    return f"分卷：\n{volumes}\n\n伏笔与期待台账：\n{format_ledger(ledger)}"
 
 
 def format_unit(u: dict[str, Any]) -> str:
@@ -201,7 +274,12 @@ def format_unit(u: dict[str, Any]) -> str:
                 f"{a.get('action')}{a.get('ref')} {a.get('detail', '')}".strip() for a in u["foreshadow_actions"]
             )
         )
+    lines.extend(format_reveals(u.get("reveals") or []))
     return "\n".join(lines)
+
+
+def format_reveals(reveals: list[dict[str, Any]]) -> list[str]:
+    return [f"揭晓：{r.get('ref', '')} 揭给 {r.get('to', '')}——{r.get('how', '')}" for r in reveals]
 
 
 def format_units(units: list[dict[str, Any]]) -> str:
@@ -221,6 +299,9 @@ def format_volume_plan(plan: dict[str, Any]) -> str:
             + "）"
             for f in fresh
         )
+    expectations = [{**f, "kind": "期待"} for f in plan.get("new_expectations") or []]
+    if expectations:
+        text += "\n\n本卷新立的期待：\n" + format_ledger(expectations)
     return text
 
 

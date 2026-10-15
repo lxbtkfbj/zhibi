@@ -153,20 +153,42 @@ def schema_instruction(schema: type[BaseModel]) -> str:
 def _unsupported_structured_method(exc: openai.BadRequestError, method: str) -> bool:
     """Only remember capability errors, never malformed schemas or unrelated 400s."""
     message = f"{exc} {json.dumps(exc.body, ensure_ascii=False, default=str)}".lower()
-    if any(term in message for term in (
-        "invalid schema", "invalid_json_schema", "invalid_function_parameters",
-        "schema validation", "schema is invalid", "unsupported schema keyword",
-    )):
+    if any(
+        term in message
+        for term in (
+            "invalid schema",
+            "invalid_json_schema",
+            "invalid_function_parameters",
+            "schema validation",
+            "schema is invalid",
+            "unsupported schema keyword",
+        )
+    ):
         return False
     feature_terms = (
-        ("tools", "tool_choice", "function_call", "functions", "function calling", "function-calling",
-         "tool calling", "tool use", "工具调用")
+        (
+            "tools",
+            "tool_choice",
+            "function_call",
+            "functions",
+            "function calling",
+            "function-calling",
+            "tool calling",
+            "tool use",
+            "工具调用",
+        )
         if method == "function_calling"
         else ("response_format", "json_schema", "json schema", "structured output")
     )
     unsupported_terms = (
-        "unsupported", "not support", "doesn't support", "unrecognized",
-        "unknown parameter", "not available", "不支持", "未支持",
+        "unsupported",
+        "not support",
+        "doesn't support",
+        "unrecognized",
+        "unknown parameter",
+        "not available",
+        "不支持",
+        "未支持",
     )
     return any(term in message for term in feature_terms) and any(term in message for term in unsupported_terms)
 
@@ -199,7 +221,10 @@ class LLMRouter:
     def _chat_model(self, profile: ResolvedProfile, *, streaming: bool = False) -> ChatOpenAI:
         client, async_client = self._http_clients.for_profile(profile)
         return build_chat_model(
-            profile, http_client=client, http_async_client=async_client, streaming=streaming,
+            profile,
+            http_client=client,
+            http_async_client=async_client,
+            streaming=streaming,
         )
 
     async def aclose(self) -> None:
@@ -277,10 +302,22 @@ class LLMRouter:
             except openai.BadRequestError as exc:
                 # 部分接口不支持工具调用或 JSON Schema，自动降级为 JSON 模式
                 await self._record(
-                    role, profile, purpose, started, None, None, ok=False, error=str(exc),
-                    request=request, response=_error_response(exc),
+                    role,
+                    profile,
+                    purpose,
+                    started,
+                    None,
+                    None,
+                    ok=False,
+                    error=str(exc),
+                    request=request,
+                    response=_error_response(exc),
                 )
-                if method != "json_mode" and attempt < MAX_PARSE_ATTEMPTS and _unsupported_structured_method(exc, method):
+                if (
+                    method != "json_mode"
+                    and attempt < MAX_PARSE_ATTEMPTS
+                    and _unsupported_structured_method(exc, method)
+                ):
                     log.warning("模型配置 %s 的结构化输出方式 %s 不受支持，尝试 json_mode", profile.name, method)
                     unsupported_method = True
                     method = "json_mode"
@@ -288,8 +325,16 @@ class LLMRouter:
                 raise LLMError(f"模型接口拒绝了请求：{exc}") from exc
             except (openai.APIError, TimeoutError) as exc:
                 await self._record(
-                    role, profile, purpose, started, None, None, ok=False, error=str(exc),
-                    request=request, response=_error_response(exc),
+                    role,
+                    profile,
+                    purpose,
+                    started,
+                    None,
+                    None,
+                    ok=False,
+                    error=str(exc),
+                    request=request,
+                    response=_error_response(exc),
                 )
                 retryable = isinstance(exc, (TimeoutError, openai.APIConnectionError)) or (
                     isinstance(exc, openai.APIStatusError) and (exc.status_code == 429 or exc.status_code >= 500)
@@ -299,23 +344,46 @@ class LLMRouter:
                 raise LLMError(f"调用模型失败（{profile.name}）：{exc}") from exc
             except Exception as exc:
                 await self._record(
-                    role, profile, purpose, started, None, None, ok=False, error=str(exc), request=request,
+                    role,
+                    profile,
+                    purpose,
+                    started,
+                    None,
+                    None,
+                    ok=False,
+                    error=str(exc),
+                    request=request,
                     response=_error_response(exc),
                 )
                 raise
             prompt_tokens, completion_tokens = outcome.usage
             if outcome.parsed is not None and not outcome.truncated:
                 await self._record(
-                    role, profile, purpose, started, prompt_tokens, completion_tokens, ok=True,
-                    request=request, response=outcome.response,
+                    role,
+                    profile,
+                    purpose,
+                    started,
+                    prompt_tokens,
+                    completion_tokens,
+                    ok=True,
+                    request=request,
+                    response=outcome.response,
                 )
                 if unsupported_method and method != profile.structured_method:
                     await self._remember_structured_method(profile, method)
                 return outcome.parsed
             last_error = (outcome.error or ("模型输出被截断" if outcome.truncated else "未返回结构化结果"))[:500]
             await self._record(
-                role, profile, purpose, started, prompt_tokens, completion_tokens, ok=False, error=last_error,
-                request=request, response=outcome.response,
+                role,
+                profile,
+                purpose,
+                started,
+                prompt_tokens,
+                completion_tokens,
+                ok=False,
+                error=last_error,
+                request=request,
+                response=outcome.response,
             )
             if outcome.truncated:
                 # 被截断时重试同样的请求没有意义
@@ -393,7 +461,9 @@ class LLMRouter:
                         parts.append(str(chunk.content))
                         yield str(chunk.content)
             if truncated:
-                raise LLMError("模型输出被截断：正文尚未完成。原样回复已保存在调用记录，请调大最大输出 token 或换用上下文更长的模型。")
+                raise LLMError(
+                    "模型输出被截断：正文尚未完成。原样回复已保存在调用记录，请调大最大输出 token 或换用上下文更长的模型。"
+                )
             ok = True
         except (openai.APIError, TimeoutError) as exc:
             error = str(exc)
@@ -403,8 +473,16 @@ class LLMRouter:
             raise
         finally:
             await self._record(
-                role, profile, purpose, started, prompt_tokens, completion_tokens, ok=ok, error=error,
-                request=request, response="".join(parts),
+                role,
+                profile,
+                purpose,
+                started,
+                prompt_tokens,
+                completion_tokens,
+                ok=ok,
+                error=error,
+                request=request,
+                response="".join(parts),
             )
 
     async def _record(
@@ -449,9 +527,11 @@ class LLMRouter:
             )
             if cutoff is not None:
                 await session.execute(
-                    update(LlmCall).where(
+                    update(LlmCall)
+                    .where(
                         scope, LlmCall.id <= cutoff, or_(LlmCall.request.is_not(None), LlmCall.response.is_not(None))
-                    ).values(request=None, response=None)
+                    )
+                    .values(request=None, response=None)
                 )
             await session.commit()
 

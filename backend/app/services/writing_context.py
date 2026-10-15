@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.context import (
+    EXPECTATION_STATUS,
     FORESHADOW_STATUS,
     foreshadow_code,
     format_character,
@@ -20,6 +21,7 @@ from app.agents.context import (
     format_concept,
     format_ledger,
     format_requirements,
+    format_reveals,
     format_spine,
     format_style,
     format_threads,
@@ -31,7 +33,7 @@ from app.agents.playbook import pick, usage_text
 from app.book_settings import settings_of
 from app.models import Book, Chapter, Character, PlotUnit, Volume, WorldEntry
 from app.services.requirements import list_requirements
-from app.services.setup_store import load_ledger, load_threads, unit_dict, volume_dict
+from app.services.setup_store import load_ledger, load_nodes, load_threads, unit_dict, volume_dict
 
 RECENT_CHAPTERS = 5
 USED_CLIMAXES = 30
@@ -69,6 +71,14 @@ def format_chapter_outline(outline: dict[str, Any]) -> str:
         lines.append(
             "伏笔：" + "；".join(f"{a.get('action')}{a.get('ref')} {a.get('detail', '')}".strip() for a in actions)
         )
+    emotions = {-2: "憋屈压抑", -1: "偏压", 0: "平稳或悬着", 1: "偏扬", 2: "爆发爽快"}
+    emotion, mood = outline.get("emotion"), outline.get("mood")
+    if emotion in emotions:
+        number = f"{emotion:+d}" if emotion else "0"
+        lines.append(f"情绪：{number} {emotions[emotion]}" + (f"（{mood}）" if mood else ""))
+    elif mood:
+        lines.append(f"情绪：{mood}")
+    lines.extend(format_reveals(outline.get("reveals") or []))
     return "\n".join(lines)
 
 
@@ -180,7 +190,6 @@ def _char_dict(c: Character) -> dict[str, Any]:
             "goal",
             "location",
             "condition",
-            "secrets",
             "is_alive",
         )
     }
@@ -281,9 +290,11 @@ async def foreshadow_tasks(
         if f is None:
             continue
         action, detail = a.get("action", ""), (a.get("detail") or "").strip()
-        status = FORESHADOW_STATUS.get(f.get("status", "planned"), "")
+        expectation = f.get("kind") == "期待"
+        status = (EXPECTATION_STATUS if expectation else FORESHADOW_STATUS).get(f.get("status", "planned"), "")
+        action_label = {"埋下": "立下", "回收": "兑现"}.get(action, action) if expectation else action
         lines.append(
-            f"- {action}{foreshadow_code(f)}［{status}］{f.get('description', '')}"
+            f"- {action_label}{foreshadow_code(f)}［{status}］{f.get('description', '')}"
             + (f"（这一章：{detail}）" if detail else "")
         )
         if action == "埋下":
@@ -433,6 +444,7 @@ def used_climaxes(prior: list[dict[str, Any]]) -> str:
 
 async def volume_blocks(session: AsyncSession, book: Book, volume: Volume) -> dict[str, str]:
     """拆某一卷的卷纲时需要的上下文。"""
+    nodes = await load_nodes(session, book.id)
     volumes = list(
         (await session.execute(select(Volume).where(Volume.book_id == book.id).order_by(Volume.index))).scalars().all()
     )
@@ -446,10 +458,12 @@ async def volume_blocks(session: AsyncSession, book: Book, volume: Volume) -> di
             .all()
         )
         recap = "\n".join(f"  单元{u.index}「{u.title}」：{u.outcome}" for u in units)
-        neighbors.append(f"上一卷：{format_volume_card(volume_dict(prev))}\n各单元结果：\n{recap}")
+        neighbors.append(f"上一卷：{format_volume_card(volume_dict(prev, nodes))}\n各单元结果：\n{recap}")
     else:
         neighbors.append("上一卷：无（这是第一卷）")
-    neighbors.append("下一卷：" + (format_volume_card(volume_dict(following)) if following else "无（这是最后一卷）"))
+    neighbors.append(
+        "下一卷：" + (format_volume_card(volume_dict(following, nodes)) if following else "无（这是最后一卷）")
+    )
     first_chapter = (
         await session.scalar(select(func.coalesce(func.max(Chapter.index), 0)).where(Chapter.book_id == book.id))
     ) + 1
@@ -460,9 +474,9 @@ async def volume_blocks(session: AsyncSession, book: Book, volume: Volume) -> di
     return {
         "volume_index": str(volume.index),
         "concept": format_concept({**(book.concept or {}), "chapter_words": chapter_words(book)}),
-        "spine": format_spine(book.spine or {}),
+        "spine": format_spine({**(book.spine or {}), "nodes": nodes}),
         "threads": format_threads(await load_threads(session, book.id), volume=volume.index),
-        "volume": format_volume_card(volume_dict(volume)),
+        "volume": format_volume_card(volume_dict(volume, nodes)),
         "neighbors": "\n\n".join(neighbors),
         "story_so_far": await story_so_far(session, book, volume.index, before_chapter=first_chapter),
         "used_climaxes": used_climaxes(prior),
@@ -501,7 +515,7 @@ async def chapter_plan_blocks(
         "first_chapter": str(first_chapter),
         "last_chapter": str(first_chapter + count - 1),
         "concept": format_concept({**(book.concept or {}), "chapter_words": chapter_words(book)}),
-        "volume": format_volume_card(volume_dict(volume)),
+        "volume": format_volume_card(volume_dict(volume, await load_nodes(session, book.id))),
         "unit": format_unit(unit_dict(unit)),
         "neighbors": "\n".join(neighbors),
         "story_so_far": await story_so_far(
@@ -618,7 +632,7 @@ async def volume_recap_blocks(session: AsyncSession, book: Book, volume: Volume)
     return {
         "volume_index": str(volume.index),
         "volume_title": volume.title,
-        "volume": format_volume_card(volume_dict(volume)),
+        "volume": format_volume_card(volume_dict(volume, await load_nodes(session, book.id))),
         "units": "\n\n".join(fit_entries(entries, UNIT_RECAP_BUDGET * 3)) or "（暂无）",
         "characters": character_states(await _characters(session, book.id)),
         "ledger": format_ledger(relevant_ledger(ledger, volume.index)),

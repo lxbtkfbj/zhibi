@@ -82,6 +82,7 @@ async def get_settings(book: Book = Depends(get_book)):
 
 
 LABELS = {
+    "setup_mode": "开书方式",
     "title_style": "书名风格",
     "title_custom": "书名要求",
     "person": "人称",
@@ -99,6 +100,8 @@ LABELS = {
     "trial_read": "前 3 章试读",
 }
 VALUES = {
+    "oneshot": "一口气出方案",
+    "puzzle": "逐块确认",
     "short": "经典短书名",
     "tomato": "番茄长书名",
     "chief": "交给主编",

@@ -3,11 +3,12 @@ import clsx from 'clsx'
 import { AlertTriangle, Check, ChevronDown, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
-import type { Concept, InterviewQuestion, LiveDraft, MeetingMessage, PlotUnit, Speaker, Spine, StoryThread } from '../../api/types'
+import type { Concept, InterviewQuestion, LiveDraft, MeetingMessage, PlotUnit, Speaker, StoryThread } from '../../api/types'
 import { TypingDots } from '../../components/ui'
 import { ROLE_META } from '../../lib/roles'
 import { isFresh, useTypewriter } from '../../lib/team'
 import { artifactTarget } from '../../lib/workspace'
+import { spineArtifactNodes } from '../../lib/storyMap'
 import { useBookContext } from './context'
 
 export function RoleAvatar({
@@ -288,25 +289,18 @@ export function ArtifactBody({ message }: { message: MeetingMessage }) {
     )
   }
   if (type === 'spine') {
-    const sp = data as Spine
+    const nodes = spineArtifactNodes(data)
     return (
       <div className="space-y-2 text-ink-2">
-        <p>
-          <span className="font-medium text-ink">开篇：</span>
-          {sp.opening}
-        </p>
         <ol className="space-y-1 border-l border-line-2 pl-3">
-          {sp.milestones?.map((m) => (
-            <li key={m.index}>
-              <span className="font-medium text-chief">{m.title}</span>
-              <span className="text-xs text-ink-2">（第{m.volume}卷）</span> {m.event}
+          {nodes.map((node, i) => (
+            <li key={i}>
+              <span className={node.kind === 'ending' ? 'font-medium text-seal' : node.kind === 'opening' ? 'font-medium text-ink' : 'font-medium text-chief'}>{node.title}：</span>
+              {node.volume != null && <span className="text-xs text-ink-2">（第{node.volume}卷）</span>} {node.event || '（未定）'}
             </li>
           ))}
         </ol>
-        <p>
-          <span className="font-medium text-seal">结局：</span>
-          {sp.ending}
-        </p>
+        {!nodes.length && <p>（暂无关键节点）</p>}
       </div>
     )
   }

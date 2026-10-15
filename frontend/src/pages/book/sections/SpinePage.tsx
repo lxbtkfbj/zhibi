@@ -1,9 +1,10 @@
-import { Flag, Route } from 'lucide-react'
+import { Flag } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { useUpdateBook } from '../../../api/hooks'
-import type { Milestone, Spine } from '../../../api/types'
+import { useNodeMutations, useNodes, useUpdateBook } from '../../../api/hooks'
+import type { Spine } from '../../../api/types'
 import { EditableText } from '../../../components/Editable'
-import { Card, Reveal } from '../../../components/ui'
+import { Button, Card, ErrorText, Reveal, Skeleton } from '../../../components/ui'
+import { NODE_STATUS } from '../../../lib/storyMap'
 import { useBookContext } from '../context'
 import { FieldBlock, Locked, PageHeader } from './common'
 
@@ -33,13 +34,16 @@ const endMarker = (tone: 'ink' | 'seal') => (
 export function SpinePage() {
   const { book, bookId, working } = useBookContext()
   const update = useUpdateBook(bookId)
+  const query = useNodes(bookId)
+  const { update: updateNode } = useNodeMutations(bookId)
   const spine: Spine = book.spine ?? {}
-  const milestones = spine.milestones ?? []
+  const nodes = query.data ?? []
   const save = (patch: Partial<Spine>) => update.mutateAsync({ spine: patch })
-  const saveMilestone = (index: number, patch: Partial<Milestone>) =>
-    save({ milestones: milestones.map((m, i) => (i === index ? { ...m, ...patch } : m)) })
 
-  if (!spine.ending && !milestones.length) {
+  if (query.isLoading) return <Skeleton className="h-64" />
+  if (query.isError) return <div><ErrorText error={query.error} /><Button variant="soft" onClick={() => void query.refetch()}>重新加载节点</Button></div>
+
+  if (!nodes.length) {
     const subtitle = {
       setting_up: '设定做完后，主编会先定开篇、结局和中间的关键转折，再写分卷大纲。',
       awaiting_approval: '这本书开书时还没有这一步。可以在拍板时提意见：「补上主线骨架：开篇、结局和关键转折」。',
@@ -75,39 +79,39 @@ export function SpinePage() {
         </section>
       </Reveal>
 
-      <Node marker={endMarker('ink')} delay={0.04}>
-        <Card className="p-5">
-          <p className="mb-1.5 text-xs tracking-[0.15em] text-ink-2">开篇</p>
-          <EditableText value={spine.opening ?? ''} onSave={(opening) => save({ opening })} locked={working} multiline className="text-[15px] leading-relaxed" />
-        </Card>
-      </Node>
-      {milestones.map((m, i) => (
+      {nodes.map((node, i) => (
         <Node
-          key={m.index}
-          delay={0.06 + 0.04 * i}
-          marker={
-            <span className="flex size-8 items-center justify-center rounded-md bg-chief font-serif text-sm font-bold text-paper-2">{m.index}</span>
+          key={node.id}
+          delay={0.04 + 0.04 * i}
+          last={i === nodes.length - 1}
+          marker={node.kind === 'opening' ? endMarker('ink') : node.kind === 'ending' ? endMarker('seal') :
+            <span className="flex size-8 items-center justify-center rounded-md bg-chief font-serif text-sm font-bold text-paper-2">{node.index}</span>
           }
         >
-          <Card hover className="p-5">
-            <div className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <EditableText value={m.title} onSave={(title) => saveMilestone(i, { title })} locked={working} className="font-serif text-lg font-bold" />
-              <span className="text-xs text-ink-2">约第 {m.volume} 卷</span>
-            </div>
-            <EditableText value={m.event} onSave={(event) => saveMilestone(i, { event })} locked={working} multiline className="text-[15px] leading-relaxed" />
-            <div className="mt-4 flex gap-2 border-t border-line pt-3 text-[14px]">
-              <Route className="mt-1 size-3.5 shrink-0 text-chief" />
-              <EditableText value={m.change} onSave={(change) => saveMilestone(i, { change })} locked={working} multiline className="flex-1 text-ink-2" />
-            </div>
-          </Card>
+          <div data-testid={`story-node-${node.id}`}>
+            <Card hover className={node.kind === 'ending' ? 'border-seal/25 p-5' : 'p-5'}>
+              <div className="mb-3 flex items-start justify-between gap-4 text-xs text-ink-2">
+                <span>节点 {node.index}{node.kind === 'opening' ? ' · 开篇' : node.kind === 'ending' ? ' · 结局' : ''}{node.volume != null ? ` · 约第 ${node.volume} 卷` : ''}</span>
+                <span className="shrink-0 text-chief">{NODE_STATUS[node.status]}</span>
+              </div>
+              <div className="mb-4">
+                <EditableText value={node.title} onSave={(title) => updateNode.mutateAsync({ id: node.id, title })} locked={working} placeholder="（未命名节点）" className="font-serif text-lg font-bold" />
+              </div>
+              <FieldBlock label="发生什么">
+                <EditableText value={node.event} onSave={(event) => updateNode.mutateAsync({ id: node.id, event })} locked={working} multiline />
+              </FieldBlock>
+              <div className="mt-4 grid gap-4 border-t border-line pt-3">
+                <FieldBlock label="之前得先有">
+                  <EditableText value={node.prerequisite} onSave={(prerequisite) => updateNode.mutateAsync({ id: node.id, prerequisite })} locked={working} multiline className="text-ink-2" />
+                </FieldBlock>
+                <FieldBlock label="之后变成">
+                  <EditableText value={node.consequence} onSave={(consequence) => updateNode.mutateAsync({ id: node.id, consequence })} locked={working} multiline className="text-ink-2" />
+                </FieldBlock>
+              </div>
+            </Card>
+          </div>
         </Node>
       ))}
-      <Node marker={endMarker('seal')} delay={0.06 + 0.04 * milestones.length} last>
-        <Card className="border-seal/25 p-5">
-          <p className="mb-1.5 text-xs tracking-[0.15em] text-seal">结局</p>
-          <EditableText value={spine.ending ?? ''} onSave={(ending) => save({ ending })} locked={working} multiline className="font-serif text-[16px] leading-relaxed" />
-        </Card>
-      </Node>
     </div>
   )
 }

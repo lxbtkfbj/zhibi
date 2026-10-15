@@ -4,6 +4,8 @@ import math
 import re
 from typing import Any
 
+from app.agents.context import foreshadow_code
+
 
 def unit_hint(chapter_count: int) -> str:
     """一卷大约拆几个剧情单元（每单元 5-15 章，平均七八章）。"""
@@ -40,7 +42,7 @@ def attach_new_foreshadowings(
     by_index = {u.get("index"): u for u in units}
     out = []
     for f in fresh:
-        ref = f"F{f['seq']}"
+        ref = foreshadow_code(f)
         payoff_unit = f.get("payoff_unit") or 0
         item = {
             **f,
@@ -76,11 +78,17 @@ def relevant_ledger(ledger: list[dict[str, Any]], volume: int) -> list[dict[str,
     ]
 
 
-REF = re.compile(r"F(\d+)", re.I)
+REF = re.compile(r"[FE](\d+)", re.I)
+SECRET_REF = re.compile(r"S(\d+)", re.I)
 
 
 def ref_seq(ref: str) -> int | None:
     match = REF.search(ref or "")
+    return int(match.group(1)) if match else None
+
+
+def secret_seq(ref: str) -> int | None:
+    match = SECRET_REF.search(ref or "")
     return int(match.group(1)) if match else None
 
 
@@ -105,7 +113,7 @@ def schedule_issues(
             if seq:
                 done.setdefault(seq, set()).add(a.get("action", ""))
     for f in ledger:
-        status, code = f.get("status", "planned"), f"F{f.get('seq')}"
+        status, code = f.get("status", "planned"), foreshadow_code(f)
         if status in ("abandoned", "resolved"):
             continue
         actions = done.get(f.get("seq"), set())

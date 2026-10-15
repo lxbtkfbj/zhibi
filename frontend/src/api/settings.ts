@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { get, patch, put } from './client'
 
 export interface WritingSettings {
+  setup_mode: 'puzzle' | 'oneshot'
   title_style: 'short' | 'tomato' | 'chief' | 'custom'
   title_custom: string
   person: 'first' | 'second' | 'third'

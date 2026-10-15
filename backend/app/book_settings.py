@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class BookSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    setup_mode: Literal["puzzle", "oneshot"] = "oneshot"
     title_style: Literal["short", "tomato", "chief", "custom"] = "short"
     title_custom: str = Field("", max_length=5000)
     person: Literal["first", "second", "third"] = "third"

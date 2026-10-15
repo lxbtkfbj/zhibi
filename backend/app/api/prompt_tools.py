@@ -29,23 +29,33 @@ def _entry(name: str) -> tuple:
 
 
 async def _last_calls(session: AsyncSession) -> dict:
-    rows = (await session.execute(text("""
+    rows = (
+        await session.execute(
+            text("""
         SELECT DISTINCT ON (prompt_name) prompt_name, id, created_at
         FROM llm_calls
         CROSS JOIN LATERAL jsonb_array_elements_text(
             COALESCE(request->'prompt_names', '[]'::jsonb)
         ) AS names(prompt_name)
         ORDER BY prompt_name, id DESC
-    """))).mappings()
+    """)
+        )
+    ).mappings()
     return {row["prompt_name"]: {"id": row["id"], "created_at": row["created_at"]} for row in rows}
 
 
 def _meta(row: tuple, override: PromptOverride | None, last: dict | None) -> dict:
     name, title, group, role, when = row
     return {
-        "name": name, "title": title, "group": group, "role": role, "when": when,
-        "customized": override is not None, "updated_at": override.updated_at if override else None,
-        "last_call": last, "variables": variables(name),
+        "name": name,
+        "title": title,
+        "group": group,
+        "role": role,
+        "when": when,
+        "customized": override is not None,
+        "updated_at": override.updated_at if override else None,
+        "last_call": last,
+        "variables": variables(name),
     }
 
 
@@ -74,7 +84,9 @@ async def save_prompt(name: str, body: PromptIn, session: AsyncSession = Session
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     await session.execute(
-        insert(PromptOverride).values(name=name, content=body.content).on_conflict_do_update(
+        insert(PromptOverride)
+        .values(name=name, content=body.content)
+        .on_conflict_do_update(
             index_elements=[PromptOverride.name], set_={"content": body.content, "updated_at": func.now()}
         )
     )
@@ -93,8 +105,18 @@ async def restore_prompt(name: str, session: AsyncSession = SessionDep) -> dict:
 
 
 CALL_COLUMNS = (
-    "id", "book_id", "role", "purpose", "model", "profile_name", "prompt_tokens", "completion_tokens",
-    "latency_ms", "ok", "error", "created_at",
+    "id",
+    "book_id",
+    "role",
+    "purpose",
+    "model",
+    "profile_name",
+    "prompt_tokens",
+    "completion_tokens",
+    "latency_ms",
+    "ok",
+    "error",
+    "created_at",
 )
 
 
@@ -122,7 +144,10 @@ async def list_calls(
     if before is not None:
         query = query.where(LlmCall.id < before)
     rows = (await session.execute(query.order_by(LlmCall.id.desc()).limit(limit + 1))).mappings().all()
-    return {"items": [dict(row) for row in rows[:limit]], "next_before": rows[limit - 1]["id"] if len(rows) > limit else None}
+    return {
+        "items": [dict(row) for row in rows[:limit]],
+        "next_before": rows[limit - 1]["id"] if len(rows) > limit else None,
+    }
 
 
 @router.get("/llm-calls/{call_id}")
@@ -135,13 +160,23 @@ async def get_call(call_id: int, session: AsyncSession = SessionDep) -> dict:
 
 @router.get("/usage")
 async def usage(session: AsyncSession = SessionDep) -> dict:
-    query = select(
-        LlmCall.book_id, func.coalesce(Book.title, "未关联书籍").label("book_title"), LlmCall.role,
-        func.count(LlmCall.id).label("calls"), token_sum(LlmCall.prompt_tokens).label("prompt_tokens"),
-        token_sum(LlmCall.completion_tokens).label("completion_tokens"),
-    ).outerjoin(Book, LlmCall.book_id == Book.id).group_by(
-        LlmCall.book_id, Book.title, LlmCall.role,
-    ).order_by(Book.title, LlmCall.role)
+    query = (
+        select(
+            LlmCall.book_id,
+            func.coalesce(Book.title, "未关联书籍").label("book_title"),
+            LlmCall.role,
+            func.count(LlmCall.id).label("calls"),
+            token_sum(LlmCall.prompt_tokens).label("prompt_tokens"),
+            token_sum(LlmCall.completion_tokens).label("completion_tokens"),
+        )
+        .outerjoin(Book, LlmCall.book_id == Book.id)
+        .group_by(
+            LlmCall.book_id,
+            Book.title,
+            LlmCall.role,
+        )
+        .order_by(Book.title, LlmCall.role)
+    )
     items = [dict(row) for row in (await session.execute(query)).mappings()]
     total = {key: sum_known(row[key] for row in items) for key in ("calls", "prompt_tokens", "completion_tokens")}
     return {"items": items, "total": total}

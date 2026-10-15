@@ -10,7 +10,8 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
-from app.prompts import _load, track_rendered
+from app.prompts import load as load_prompt
+from app.prompts import track_rendered
 
 GENERAL = "general"
 # 按顺序匹配：类型和标签里每一组词都至少出现一个，就用这套打法；都不匹配时用通用版
@@ -148,7 +149,7 @@ def parse(key: str, text: str) -> Playbook:
 def load(key: str) -> Playbook:
     if key not in {GENERAL, *(rule[0] for rule in RULES)}:
         raise ValueError(f"未知题材打法：{key}")
-    return parse(key, _load(f"playbooks.{key}"))
+    return parse(key, load_prompt(f"playbooks.{key}"))
 
 
 def pick(concept: dict[str, Any] | None, selection: str = "auto") -> Playbook:

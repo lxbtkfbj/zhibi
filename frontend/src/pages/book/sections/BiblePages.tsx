@@ -5,7 +5,7 @@ import { motion } from 'motion/react'
 import { type ReactNode, useMemo, useState } from 'react'
 import { useBible, useBibleMutations } from '../../../api/hooks'
 import type { Character, ForeshadowingStatus } from '../../../api/types'
-import { EditableList, EditableText } from '../../../components/Editable'
+import { EditableText } from '../../../components/Editable'
 import { Badge, Button, Card, EmptyState, ErrorText, inputClass, Sheet, Skeleton } from '../../../components/ui'
 import type { Tone } from '../../../lib/status'
 import { useBookContext } from '../context'
@@ -92,9 +92,6 @@ function CharacterSheet({ character, onClose }: { character: Character; onClose:
             {field('处境', 'condition')}
           </div>
         </div>
-        <FieldBlock label="秘密">
-          <EditableList items={character.secrets} onSave={(secrets) => save({ secrets })} locked={locked} />
-        </FieldBlock>
         {field('备注', 'notes')}
         <ErrorText error={update.error ?? remove.error} />
       </div>
@@ -121,7 +118,7 @@ export function CharactersPage() {
       <PageHeader
         eyebrow="设定库"
         title="人物"
-        subtitle="每个人想要什么、藏着什么秘密、现在在哪。写章节时设定师会自动更新他们的状态。"
+        subtitle="每个人想要什么、有什么经历、现在在哪。写章节时设定师会自动更新他们的状态。"
         action={
           !locked && (
             <Button size="sm" variant="soft" onClick={add} loading={create.isPending}>
@@ -384,7 +381,7 @@ export function ForeshadowingPage() {
           <Stagger key={f.id} i={i}>
             <Card hover className="group p-5 @lg/manuscript:p-6">
               <div className="mb-4 flex items-start gap-3">
-                <span className="mt-1 w-10 shrink-0 font-serif text-xl leading-none font-bold text-ink-2">F{f.seq || i + 1}</span>
+                <span className="mt-1 w-10 shrink-0 font-serif text-xl leading-none font-bold text-ink-2">{f.code}</span>
                 <EditableText value={f.description} onSave={(v) => update.mutateAsync({ id: f.id, description: v })} locked={locked} multiline className="flex-1 font-serif text-[17px] font-bold" />
                 {locked ? (
                   <Badge tone={F_STATUS[f.status].tone}>{F_STATUS[f.status].label}</Badge>

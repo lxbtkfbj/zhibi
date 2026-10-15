@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, computed_field, field_validator
 
 
 class ORM(BaseModel):
@@ -121,6 +121,7 @@ class BookDetail(BookSummary):
     style_reference: str
     concept: dict
     spine: dict
+    setup_progress: dict = {}
     requirements: list[str] = []
     trial_read_done: bool = False
     active_job: JobOut | None = None
@@ -164,6 +165,10 @@ class UnitOut(ORM):
     resolution: str = ""
     status: str = "planned"
     recap: str = ""
+    reveals: list[dict] = []
+    editor_note: str = ""
+    techniques: list[str] = []
+    plan_issues: list[str] = []
 
 
 class UnitPatch(BaseModel):
@@ -174,6 +179,16 @@ class UnitPatch(BaseModel):
     climax: str | None = None
     outcome: str | None = None
     key_events: list[str] | None = None
+    reveals: list[dict] | None = None
+    editor_note: str | None = None
+    techniques: list[str] | None = None
+
+    @field_validator("reveals", "editor_note", "techniques")
+    @classmethod
+    def annotations_not_null(cls, value):
+        if value is None:
+            raise ValueError("揭晓、编辑批注和技巧不能为空值")
+        return value
 
 
 class VolumeOut(ORM):
@@ -192,6 +207,10 @@ class VolumeOut(ORM):
     status: str
     recap: str = ""
     units: list[UnitOut]
+    target_node_id: uuid.UUID | None = None
+    reaches_node: bool = False
+    editor_note: str = ""
+    techniques: list[str] = []
 
 
 class VolumePatch(BaseModel):
@@ -204,6 +223,17 @@ class VolumePatch(BaseModel):
     power_range: str | None = None
     new_characters: list[str] | None = None
     chapter_count: int | None = Field(None, ge=0, le=1000)
+    target_node_id: uuid.UUID | None = None
+    reaches_node: bool | None = None
+    editor_note: str | None = None
+    techniques: list[str] | None = None
+
+    @field_validator("reaches_node", "editor_note", "techniques")
+    @classmethod
+    def annotations_not_null(cls, value):
+        if value is None:
+            raise ValueError("节点进度、编辑批注和技巧不能为空值")
+        return value
 
 
 class OutlineOut(BaseModel):
@@ -289,7 +319,6 @@ class CharacterBase(BaseModel):
     goal: str = ""
     location: str = ""
     condition: str = ""
-    secrets: list[str] = []
     notes: str = ""
     is_alive: bool = True
 
@@ -312,7 +341,6 @@ class CharacterPatch(BaseModel):
     goal: str | None = None
     location: str | None = None
     condition: str | None = None
-    secrets: list[str] | None = None
     notes: str | None = None
     is_alive: bool | None = None
 
@@ -354,6 +382,8 @@ class RelationshipPatch(BaseModel):
 
 
 class ForeshadowingBase(BaseModel):
+    kind: Literal["伏笔", "期待"] = "伏笔"
+    node_id: uuid.UUID | None = None
     description: str = Field(min_length=1)
     span: Literal["短", "中", "长"] = "中"
     plant_plan: str = ""
@@ -370,8 +400,15 @@ class ForeshadowingOut(ForeshadowingBase, ORM):
     resolved_chapter: int | None
     hint_chapters: list[int] = []
 
+    @computed_field
+    @property
+    def code(self) -> str:
+        return f"{'E' if self.kind == '期待' else 'F'}{self.seq}"
+
 
 class ForeshadowingPatch(BaseModel):
+    kind: Literal["伏笔", "期待"] | None = None
+    node_id: uuid.UUID | None = None
     description: str | None = Field(None, min_length=1)
     span: Literal["短", "中", "长"] | None = None
     plant_plan: str | None = None
@@ -380,12 +417,145 @@ class ForeshadowingPatch(BaseModel):
     payoff_volume: int | None = Field(None, ge=1)
     status: Literal["planned", "planted", "resolved", "abandoned"] | None = None
 
+    @field_validator("kind")
+    @classmethod
+    def kind_not_null(cls, value):
+        if value is None:
+            raise ValueError("台账类型不能为空")
+        return value
+
+
+# ---------- 关键节点、人物锚点与信息差 ----------
+
+
+NodeStatus = Literal["pinned", "pencil", "empty"]
+AnchorKind = Literal["登场", "确认关系", "翻脸", "高光", "退场", "其他"]
+ReaderKnowledge = Literal["知道", "不知道", "部分"]
+
+
+class NodeCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=100)
+    event: str = ""
+    prerequisite: str = ""
+    consequence: str = ""
+    volume: int | None = Field(None, ge=1)
+    status: NodeStatus = "pinned"
+    after_node_id: uuid.UUID | None = None
+
+
+class NodePatch(BaseModel):
+    title: str | None = Field(None, max_length=100)
+    event: str | None = None
+    prerequisite: str | None = None
+    consequence: str | None = None
+    volume: int | None = Field(None, ge=1)
+    status: NodeStatus | None = None
+    editor_note: str | None = None
+
+    @field_validator("title", "event", "prerequisite", "consequence", "status", "editor_note")
+    @classmethod
+    def text_not_null(cls, value):
+        if value is None:
+            raise ValueError("节点文字和状态不能为空值")
+        return value
+
+
+class NodeOrder(BaseModel):
+    ids: list[uuid.UUID]
+
+
+class AnchorCreate(BaseModel):
+    node_id: uuid.UUID
+    character_id: uuid.UUID
+    kind: AnchorKind
+    note: str = ""
+
+
+class AnchorPatch(BaseModel):
+    node_id: uuid.UUID | None = None
+    character_id: uuid.UUID | None = None
+    kind: AnchorKind | None = None
+    note: str | None = None
+
+    @field_validator("node_id", "character_id", "kind", "note")
+    @classmethod
+    def not_null(cls, value):
+        if value is None:
+            raise ValueError("锚点字段不能为空值")
+        return value
+
+
+class AnchorOut(AnchorCreate, ORM):
+    id: uuid.UUID
+    character_name: str = ""
+
+
+class NodeOut(ORM):
+    id: uuid.UUID
+    index: int = Field(validation_alias=AliasChoices("index", "position"))
+    kind: Literal["opening", "milestone", "ending"]
+    title: str
+    event: str
+    prerequisite: str
+    consequence: str
+    volume: int | None
+    status: NodeStatus
+    origin: Literal["ai", "author"]
+    editor_note: str
+    techniques: list[str]
+    anchors: list[AnchorOut] = []
+
+
+class Knower(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    since_chapter: int | None = Field(None, ge=1)
+    how: str = ""
+
+
+class SecretCreate(BaseModel):
+    title: str = Field("", max_length=100)
+    truth: str = ""
+    knowers: list[Knower] = []
+    reader_knows: ReaderKnowledge | None = None
+    reveal_plan: str = ""
+    node_id: uuid.UUID | None = None
+    status: Literal["hidden", "public"] = "hidden"
+
+
+class SecretPatch(BaseModel):
+    title: str | None = Field(None, max_length=100)
+    truth: str | None = None
+    knowers: list[Knower] | None = None
+    reader_knows: ReaderKnowledge | None = None
+    reveal_plan: str | None = None
+    node_id: uuid.UUID | None = None
+    status: Literal["hidden", "public"] | None = None
+
+    @field_validator("title", "truth", "knowers", "reveal_plan", "status")
+    @classmethod
+    def not_null(cls, value):
+        if value is None:
+            raise ValueError("信息差文字、知情人和状态不能为空值")
+        return value
+
+
+class SecretOut(SecretCreate, ORM):
+    id: uuid.UUID
+    seq: int
+    created_chapter: int | None = None
+
+    @computed_field
+    @property
+    def code(self) -> str:
+        return f"S{self.seq}"
+
 
 class BibleOut(BaseModel):
     characters: list[CharacterOut]
     relationships: list[RelationshipOut]
     world_entries: list[WorldEntryOut]
     foreshadowings: list[ForeshadowingOut]
+    secrets: list[SecretOut] = []
 
 
 # ---------- 任务与会议室 ----------

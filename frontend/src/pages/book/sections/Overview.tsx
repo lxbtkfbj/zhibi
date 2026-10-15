@@ -1,6 +1,6 @@
 import { BookMarked, Flag, Lightbulb, MessageCircleQuestion, Route, Users } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { useBible, useOutline } from '../../../api/hooks'
+import { useBible, useNodes, useOutline } from '../../../api/hooks'
 import { Cloud } from '../../../components/decor'
 import { Button, Card, CountUp, Reveal } from '../../../components/ui'
 import { cleanTitle, cleanVolumeTitle, totalChapters } from '../../../lib/status'
@@ -56,9 +56,11 @@ export function Overview() {
   const { book, bookId } = useBookContext()
   const { data: outline } = useOutline(bookId)
   const { data: bible } = useBible(bookId)
+  const { data: nodes = [] } = useNodes(bookId)
   const base = `/books/${bookId}`
   const concept = book.concept
-  const spine = book.spine ?? {}
+  const opening = nodes.find((node) => node.kind === 'opening')
+  const ending = nodes.find((node) => node.kind === 'ending')
   const first = outline?.volumes[0]
   const chapters = first?.units.reduce((sum, u) => sum + u.chapter_count, 0) || first?.chapter_count || 0
   const total = totalChapters(concept, outline?.volumes ?? [])
@@ -128,14 +130,14 @@ export function Overview() {
         </Reveal>
       )}
 
-      {spine.ending && (
+      {nodes.length > 0 && (
         <Reveal delay={0.17} className="mt-8">
           <section className="border-b border-line pb-8">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <h3 className="flex flex-wrap items-center gap-2 font-serif text-lg font-bold">
                 <Route className="size-4 text-chief" />
                 主线骨架
-                <span className="text-sm font-normal text-ink-2">{spine.milestones?.length ?? 0} 个关键转折</span>
+                <span className="text-sm font-normal text-ink-2">{nodes.filter((node) => node.kind === 'milestone').length} 个关键转折</span>
               </h3>
               <Link to={`${base}/spine`} className="text-sm text-ink-2 hover:text-ink">
                 完整主线 →
@@ -147,14 +149,14 @@ export function Overview() {
                   <Flag className="size-3.5" />
                   开篇
                 </p>
-                <p className="line-clamp-4 text-[14px] leading-relaxed">{spine.opening}</p>
+                <p className="line-clamp-4 text-[14px] leading-relaxed">{opening?.event || '（未定）'}</p>
               </div>
               <div className="border-l border-line pl-4">
                 <p className="mb-1 flex items-center gap-1.5 text-xs text-seal">
                   <Flag className="size-3.5" />
                   结局
                 </p>
-                <p className="line-clamp-4 text-[14px] leading-relaxed">{spine.ending}</p>
+                <p className="line-clamp-4 text-[14px] leading-relaxed">{ending?.event || '（未定）'}</p>
               </div>
             </div>
           </section>

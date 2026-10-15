@@ -50,22 +50,56 @@ export interface Concept {
   chapter_words?: number
 }
 
-export interface Milestone {
-  index: number
-  title: string
-  volume: number
-  event: string
-  change: string
-}
-
-/** 主线骨架：开篇、结局与中间的关键转折。 */
+/** 主线元信息；关键节点以节点接口为唯一事实来源。 */
 export interface Spine {
   core_conflict?: string
   theme?: string
   protagonist_arc?: string
-  opening?: string
-  ending?: string
-  milestones?: Milestone[]
+}
+
+export interface NodeAnchor {
+  id: string
+  node_id: string
+  character_id: string
+  character_name: string
+  kind: '登场' | '确认关系' | '翻脸' | '高光' | '退场' | '其他'
+  note: string
+}
+
+export interface StoryNode {
+  id: string
+  index: number
+  kind: 'opening' | 'milestone' | 'ending'
+  title: string
+  event: string
+  prerequisite: string
+  consequence: string
+  volume: number | null
+  status: 'pinned' | 'pencil' | 'empty'
+  origin: 'ai' | 'author'
+  editor_note: string
+  techniques: string[]
+  anchors: NodeAnchor[]
+}
+
+export interface Secret {
+  id: string
+  seq: number
+  code: string
+  title: string
+  truth: string
+  knowers: { name: string; since_chapter: number | null; how: string }[]
+  reader_knows: '知道' | '不知道' | '部分' | null
+  reveal_plan: string
+  node_id: string | null
+  status: 'hidden' | 'public'
+  created_chapter: number | null
+}
+
+export interface SetupProgress {
+  mode?: 'puzzle' | 'oneshot'
+  current?: 'concept' | 'nodes' | 'cast' | 'fill' | 'first_volume' | null
+  pieces?: Partial<Record<'concept' | 'nodes' | 'cast' | 'fill' | 'first_volume', string>>
 }
 
 export interface BookSummary {
@@ -85,6 +119,7 @@ export interface BookDetail extends BookSummary {
   style_reference: string
   concept: Concept
   spine: Spine
+  setup_progress: SetupProgress
   /** 作者的要求：动笔前的回答、插话、拍板与试读意见 */
   requirements: string[]
   trial_read_done: boolean
@@ -229,7 +264,6 @@ export interface Character {
   goal: string
   location: string
   condition: string
-  secrets: string[]
   notes: string
   is_alive: boolean
   first_appearance_chapter: number | null
@@ -254,8 +288,11 @@ export type ForeshadowingStatus = 'planned' | 'planted' | 'resolved' | 'abandone
 
 export interface Foreshadowing {
   id: string
-  /** 书内编号，F{seq} */
+  /** 伏笔与期待共用书内序号；界面用 code 显示 F / E 前缀。 */
   seq: number
+  kind: '伏笔' | '期待'
+  node_id: string | null
+  code: string
   description: string
   /** 短：一个单元内收；中：一卷内收；长：跨卷 */
   span: '短' | '中' | '长'
@@ -274,6 +311,7 @@ export interface Bible {
   relationships: Relationship[]
   world_entries: WorldEntry[]
   foreshadowings: Foreshadowing[]
+  secrets: Secret[]
 }
 
 export interface MeetingMessage {

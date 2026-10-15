@@ -52,11 +52,16 @@ class OpenAIHandler(BaseHTTPRequestHandler):
         if (body.get("tools") and self.server.reject_tools) or (
             body.get("response_format") and self.server.reject_json
         ):
-            self.send_json(400, {"error": {
-                "message": self.server.error_code,
-                "type": "invalid_request_error",
-                "code": self.server.error_code,
-            }})
+            self.send_json(
+                400,
+                {
+                    "error": {
+                        "message": self.server.error_code,
+                        "type": "invalid_request_error",
+                        "code": self.server.error_code,
+                    }
+                },
+            )
             return
         if body.get("stream"):
             chunks = [
@@ -64,32 +69,58 @@ class OpenAIHandler(BaseHTTPRequestHandler):
                 {"index": 0, "delta": {"content": "第二段"}, "finish_reason": None},
                 {"index": 0, "delta": {}, "finish_reason": "stop"},
             ]
-            events = [{
-                "id": "fake-stream", "object": "chat.completion.chunk", "created": 1,
-                "model": "fake-chat", "choices": [choice],
-            } for choice in chunks]
-            events.append({
-                "id": "fake-stream", "object": "chat.completion.chunk", "created": 1,
-                "model": "fake-chat", "choices": [],
-                "usage": {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6},
-            })
+            events = [
+                {
+                    "id": "fake-stream",
+                    "object": "chat.completion.chunk",
+                    "created": 1,
+                    "model": "fake-chat",
+                    "choices": [choice],
+                }
+                for choice in chunks
+            ]
+            events.append(
+                {
+                    "id": "fake-stream",
+                    "object": "chat.completion.chunk",
+                    "created": 1,
+                    "model": "fake-chat",
+                    "choices": [],
+                    "usage": {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6},
+                }
+            )
             payload = "".join(f"data: {json.dumps(event, ensure_ascii=False)}\n\n" for event in events)
             self.send_body(200, (payload + "data: [DONE]\n\n").encode(), "text/event-stream")
             return
         message = {"role": "assistant", "content": '{"answer":"ok"}'}
         finish_reason = "stop"
         if body.get("tools"):
-            message = {"role": "assistant", "content": None, "tool_calls": [{
-                "id": "call_fake", "type": "function", "function": {
-                    "name": body["tools"][0]["function"]["name"], "arguments": '{"answer":"ok"}',
-                },
-            }]}
+            message = {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_fake",
+                        "type": "function",
+                        "function": {
+                            "name": body["tools"][0]["function"]["name"],
+                            "arguments": '{"answer":"ok"}',
+                        },
+                    }
+                ],
+            }
             finish_reason = "tool_calls"
-        self.send_json(200, {
-            "id": "fake-completion", "object": "chat.completion", "created": 1,
-            "model": "fake-chat", "choices": [{"index": 0, "message": message, "finish_reason": finish_reason}],
-            "usage": {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6},
-        })
+        self.send_json(
+            200,
+            {
+                "id": "fake-completion",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "fake-chat",
+                "choices": [{"index": 0, "message": message, "finish_reason": finish_reason}],
+                "usage": {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6},
+            },
+        )
 
     def send_json(self, status, body):
         self.send_body(status, json.dumps(body).encode(), "application/json")
@@ -134,8 +165,13 @@ async def close_router(router):
 
 def run_on_two_loops(module, server, mode):
     profile = module.ResolvedProfile(
-        name="HTTP regression", provider="openai_compatible", base_url=server.base_url,
-        api_key="fake-test-key", model="fake-chat", structured_method="json_mode", timeout_s=10,
+        name="HTTP regression",
+        provider="openai_compatible",
+        base_url=server.base_url,
+        api_key="fake-test-key",
+        model="fake-chat",
+        structured_method="json_mode",
+        timeout_s=10,
     )
     loops = []
     calls = []
@@ -154,9 +190,9 @@ def run_on_two_loops(module, server, mode):
                 result = await router.structured("chief", NetworkAnswer, "Return JSON.", "hello", purpose="loop-test")
                 assert result.answer == "ok"
             else:
-                result = "".join([part async for part in router.stream_text(
-                    "writer", "Write text.", "hello", purpose="loop-test"
-                )])
+                result = "".join(
+                    [part async for part in router.stream_text("writer", "Write text.", "hello", purpose="loop-test")]
+                )
                 assert result == "第一段第二段"
         finally:
             await close_router(router)
@@ -178,8 +214,12 @@ def test_remote_http_clients_do_not_cross_event_loops(fake_openai, mode):
 async def seed_profile(sessionmaker, server, *, method="function_calling"):
     async with sessionmaker() as session:
         profile = LlmProfile(
-            name="HTTP fallback", provider="openai_compatible", base_url=server.base_url,
-            model="fake-chat", structured_method=method, timeout_s=10,
+            name="HTTP fallback",
+            provider="openai_compatible",
+            base_url=server.base_url,
+            model="fake-chat",
+            structured_method=method,
+            timeout_s=10,
         )
         session.add(profile)
         await session.flush()
@@ -218,10 +258,13 @@ async def test_unsupported_tools_fallback_persists_and_next_task_skips_tools(
         assert [call.request["method"] for call in calls] == ["function_calling", "json_mode", "json_mode"]
 
 
-@pytest.mark.parametrize("error_code,reject_json", [
-    ("unsupported_tools", True),
-    ("context_length_exceeded", False),
-])
+@pytest.mark.parametrize(
+    "error_code,reject_json",
+    [
+        ("unsupported_tools", True),
+        ("context_length_exceeded", False),
+    ],
+)
 async def test_failed_or_unrelated_fallback_does_not_persist(fake_openai, sessionmaker, error_code, reject_json):
     fake_openai.reject_tools = True
     fake_openai.reject_json = reject_json

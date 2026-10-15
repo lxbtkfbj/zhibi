@@ -24,8 +24,9 @@ class Book(UUIDPk, Timestamps, Base):
     genre: Mapped[str] = mapped_column(String(100), default="")
     # 主编定下的概念：卖点、主角钩子、基调等
     concept: Mapped[dict] = mapped_column(JSONB, default=dict)
-    # 主线骨架：开篇、结局、全书关键转折
+    # 主线骨架：核心矛盾、主题、主角成长弧；关键节点以 story_nodes 为准
     spine: Mapped[dict] = mapped_column(JSONB, default=dict)
+    setup_progress: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     settings: Mapped[dict] = mapped_column(JSONB, default=default_settings)
     author_requirements: Mapped[list["AuthorRequirement"]] = relationship(
         back_populates="book",
@@ -93,6 +94,10 @@ class Volume(UUIDPk, Timestamps, Base):
     new_characters: Mapped[list] = mapped_column(JSONB, default=list)
     # 本卷预计章数（拆剧情单元之前的规划）
     chapter_count: Mapped[int] = mapped_column(Integer, default=0)
+    target_node_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("story_nodes.id", ondelete="SET NULL"))
+    reaches_node: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    editor_note: Mapped[str] = mapped_column(Text, default="", server_default="")
+    techniques: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
     # planned：只有总纲卡片；detailed：已拆单元待拍板；approved：作者已批准；done：已写完
     status: Mapped[str] = mapped_column(String(20), default="planned")
     # 一卷写完后设定师写的卷回顾，供后面各卷的规划和写作回顾前情
@@ -127,6 +132,10 @@ class PlotUnit(UUIDPk, Timestamps, Base):
     # 本单元用到的套路（核心套路在前）与高潮的破局手法，统计全书用了几次、防止重复
     tropes: Mapped[list] = mapped_column(JSONB, default=list)
     resolution: Mapped[str] = mapped_column(Text, default="")
+    reveals: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
+    editor_note: Mapped[str] = mapped_column(Text, default="", server_default="")
+    techniques: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
+    plan_issues: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
     # planned：还没出章纲；outlined：章纲已出；done：本单元写完
     status: Mapped[str] = mapped_column(String(20), default="planned")
     # 单元写完后设定师写的单元回顾
