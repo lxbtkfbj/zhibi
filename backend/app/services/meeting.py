@@ -113,3 +113,15 @@ class Emitter:
 
     async def artifact(self, speaker: str, title: str, payload: dict) -> None:
         await self.say(speaker, title, kind="artifact", payload=payload)
+
+    async def draft(self, chapter: int, title: str, mode: str, text: str, *, done: bool = False) -> None:
+        """写手正在写的正文（写到哪了），只推给网页实时显示，不进数据库。
+
+        mode：write 写正文 / extend 接着写 / ending 改结尾；text 是这一章到目前为止的全文。
+        """
+        await publish(
+            self.redis,
+            self.book_id,
+            "draft",
+            {"job_id": str(self.job_id), "chapter": chapter, "title": title, "mode": mode, "text": text, "done": done},
+        )

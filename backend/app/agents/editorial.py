@@ -204,9 +204,47 @@ async def plan_chapters(llm: LLMRouter, blocks: dict[str, str]) -> s.ChapterPlan
     return await llm.structured("chief", s.ChapterPlanDraft, persona("chief"), user, purpose="写作·章纲")
 
 
+async def prepare_chapter(llm: LLMRouter, blocks: dict[str, str]) -> s.ChapterMaterials:
+    """写之前设定师读章纲，从设定库和前文里挑出这一章用得上的资料。"""
+    user = render("prepare_chapter", **blocks)
+    return await llm.structured("lorekeeper", s.ChapterMaterials, persona("lorekeeper"), user, purpose="写作·备资料")
+
+
 def write_chapter(llm: LLMRouter, blocks: dict[str, str]) -> AsyncIterator[str]:
     user = render("write_chapter", **blocks)
     return llm.stream_text("writer", persona("writer"), user, purpose="写作·正文")
+
+
+def extend_chapter(llm: LLMRouter, blocks: dict[str, str], words: int, missing: int) -> AsyncIterator[str]:
+    """字数明显不够时让写手接着写。"""
+    user = render("extend_chapter", **blocks, words=str(words), missing=str(missing))
+    return llm.stream_text("writer", persona("writer"), user, purpose="写作·续写")
+
+
+def rewrite_ending(
+    llm: LLMRouter, blocks: dict[str, str], body: str, ending: str, reason: str, hook: str
+) -> AsyncIterator[str]:
+    """结尾写成总结式时，让写手只重写结尾。"""
+    user = render(
+        "rewrite_ending",
+        **blocks,
+        body=body,
+        ending=ending,
+        reason=reason,
+        hook=hook or "章纲没写钩子，就停在一个让读者想看下一章的悬念上",
+        ending_words=str(max(150, min(600, len(ending)))),
+    )
+    return llm.stream_text("writer", persona("writer"), user, purpose="写作·改结尾")
+
+
+async def recap_unit(llm: LLMRouter, blocks: dict[str, str]) -> s.StoryRecap:
+    user = render("recap_unit", **blocks)
+    return await llm.structured("lorekeeper", s.StoryRecap, persona("lorekeeper"), user, purpose="写作·单元回顾")
+
+
+async def recap_volume(llm: LLMRouter, blocks: dict[str, str]) -> s.StoryRecap:
+    user = render("recap_volume", **blocks)
+    return await llm.structured("lorekeeper", s.StoryRecap, persona("lorekeeper"), user, purpose="写作·卷回顾")
 
 
 async def review_chapter(llm: LLMRouter, blocks: dict[str, str]) -> s.ChapterReview:

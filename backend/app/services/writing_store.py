@@ -1,4 +1,4 @@
-"""写作阶段的入库：卷纲、章纲、定稿后的设定变化。都是校验后的增量修改，不整体重建。"""
+"""写作阶段的入库：卷纲、章纲、定稿后的设定变化（以及重写时撤销）。都是校验后的增量修改，不整体重建。"""
 
 import uuid
 from typing import Any
@@ -10,6 +10,14 @@ from app.agents import schemas as s
 from app.agents.planning import ref_seq
 from app.models import Chapter, Character, Foreshadowing, PlotUnit, Volume
 from app.services.setup_store import FORESHADOW_FIELDS, UNIT_FIELDS
+
+# 定稿时设定师会改的人物状态、伏笔进展；记下改前改后的值，重写时据此撤销
+CHARACTER_STATE = ("location", "condition", "abilities", "is_alive")
+LEDGER_STATE = ("status", "planted_chapter", "hint_chapters", "resolved_chapter")
+
+
+def _state(row: Any, keys: tuple[str, ...]) -> dict[str, Any]:
+    return {k: (list(getattr(row, k) or []) if k == "hint_chapters" else getattr(row, k)) for k in keys}
 
 
 async def save_volume_plan(
@@ -97,26 +105,45 @@ async def create_chapters(
 async def apply_digest(
     session: AsyncSession, book_id: uuid.UUID, chapter: Chapter, digest: s.ChapterDigest
 ) -> dict[str, int]:
-    """把设定师提取的变化写进设定库：只认设定库里已有的人物和台账里已有的伏笔编号。"""
+    """把设定师提取的变化写进设定库：只认设定库里已有的人物和台账里已有的伏笔编号。
+
+    每处改动都记下改之前和改之后的值（chapter.bible_changes），重写这一章时据此撤销。
+    这一章以前记过的改动（重写后重新提取时）先撤销再写。
+    """
+    await revert_chapter(session, book_id, chapter)
+    log: dict[str, list] = {"characters": [], "created": [], "foreshadowings": []}
     characters = {
         c.name: c
         for c in (await session.execute(select(Character).where(Character.book_id == book_id))).scalars().all()
     }
+    # 重写前面的章节时，后面的章节改过的人物状态更新，不能被这一章的旧状态盖掉
+    later = set()
+    for changes in (
+        await session.execute(
+            select(Chapter.bible_changes).where(
+                Chapter.book_id == book_id, Chapter.status == "final", Chapter.index > chapter.index
+            )
+        )
+    ).scalars():
+        for item in (changes or {}).get("characters") or []:
+            after = item.get("after") or {}
+            later |= {(item.get("name"), k) for k, v in (item.get("before") or {}).items() if after.get(k) != v}
     updated = created = 0
     for change in digest.character_updates:
         row = characters.get(change.name.strip())
         if row is None:
             continue
-        touched = False
+        before = _state(row, CHARACTER_STATE)
         for key in ("location", "condition", "abilities"):
             value = getattr(change, key).strip()
-            if value and value != getattr(row, key):
+            if value and value != getattr(row, key) and (row.name, key) not in later:
                 setattr(row, key, value)
-                touched = True
-        if not change.is_alive and row.is_alive:
+        if not change.is_alive and row.is_alive and (row.name, "is_alive") not in later:
             row.is_alive = False
-            touched = True
-        updated += touched
+        after = _state(row, CHARACTER_STATE)
+        if after != before:
+            log["characters"].append({"name": row.name, "before": before, "after": after})
+            updated += 1
     for person in digest.new_characters:
         name = person.name.strip()
         if not name or name in characters:
@@ -131,6 +158,7 @@ async def apply_digest(
         )
         session.add(row)
         characters[name] = row
+        log["created"].append(name)
         created += 1
 
     ledger = {
@@ -140,22 +168,30 @@ async def apply_digest(
     moved = 0
     for change in digest.foreshadow_updates:
         row = ledger.get(ref_seq(change.ref) or -1)
-        if row is None or row.status in ("resolved", "abandoned"):
+        if row is None or row.status == "abandoned":
             continue
-        if change.action == "埋下" and row.status == "planned":
+        before = _state(row, LEDGER_STATE)
+        if row.status == "resolved":
+            # 已经收了的伏笔只补记埋在哪一章（重写前面的章节后会出现这种情况）
+            if change.action == "埋下" and not row.planted_chapter:
+                row.planted_chapter = chapter.index
+        elif change.action == "埋下" and row.status == "planned":
             row.status, row.planted_chapter = "planted", chapter.index
         elif change.action == "提醒" and chapter.index not in (row.hint_chapters or []):
-            row.hint_chapters = [*(row.hint_chapters or []), chapter.index]
+            row.hint_chapters = sorted([*(row.hint_chapters or []), chapter.index])
             if row.status == "planned":
                 row.status, row.planted_chapter = "planted", chapter.index
         elif change.action == "回收":
             row.status, row.resolved_chapter = "resolved", chapter.index
             row.planted_chapter = row.planted_chapter or chapter.index
-        else:
+        after = _state(row, LEDGER_STATE)
+        if after == before:
             continue
+        log["foreshadowings"].append({"seq": row.seq, "before": before, "after": after})
         moved += 1
 
     chapter.summary = digest.summary.strip()
+    chapter.bible_changes = log
     chapter.status = "final"
     await session.flush()
     if chapter.unit_id:
@@ -169,3 +205,92 @@ async def apply_digest(
             if unit is not None:
                 unit.status = "done"
     return {"characters_updated": updated, "characters_created": created, "foreshadowings": moved}
+
+
+async def later_finals(session: AsyncSession, book_id: uuid.UUID, index: int) -> int:
+    """这一章后面已经定稿了几章。"""
+    return int(
+        await session.scalar(
+            select(func.count())
+            .select_from(Chapter)
+            .where(Chapter.book_id == book_id, Chapter.status == "final", Chapter.index > index)
+        )
+        or 0
+    )
+
+
+async def revert_chapter(session: AsyncSession, book_id: uuid.UUID, chapter: Chapter) -> dict[str, int]:
+    """撤销这一章定稿时记进设定库和伏笔台账的改动。
+
+    只改回「现在还是这一章改成的样子」的字段；后面的章节又改过的保持不动。这一章新建的人物，
+    后面没有定稿的章节时才删掉（后面的章节可能已经写到这个人）。
+    """
+    log = chapter.bible_changes or {}
+    out = {"characters": 0, "removed": 0, "foreshadowings": 0}
+    if not any(log.get(k) for k in ("characters", "created", "foreshadowings")):
+        chapter.bible_changes = {}
+        return out
+    later = await later_finals(session, book_id, chapter.index)
+    characters = {
+        c.name: c
+        for c in (await session.execute(select(Character).where(Character.book_id == book_id))).scalars().all()
+    }
+    for item in reversed(log.get("characters") or []):
+        row = characters.get(item.get("name", ""))
+        if row is None:
+            continue
+        changed = False
+        for key, before in (item.get("before") or {}).items():
+            if key in CHARACTER_STATE and getattr(row, key) == (item.get("after") or {}).get(key):
+                setattr(row, key, before)
+                changed = True
+        out["characters"] += changed
+    for name in log.get("created") or []:
+        row = characters.get(name)
+        if row is not None and row.first_appearance_chapter == chapter.index and not later:
+            await session.delete(row)
+            out["removed"] += 1
+    ledger = {
+        f.seq: f
+        for f in (await session.execute(select(Foreshadowing).where(Foreshadowing.book_id == book_id))).scalars().all()
+    }
+    for item in reversed(log.get("foreshadowings") or []):
+        row = ledger.get(item.get("seq"))
+        if row is None:
+            continue
+        before, after = item.get("before") or {}, item.get("after") or {}
+        changed = False
+        for key in LEDGER_STATE:
+            if key not in before:
+                continue
+            if key == "hint_chapters":
+                current = list(row.hint_chapters or [])
+                if chapter.index in current and chapter.index not in (before.get(key) or []):
+                    row.hint_chapters = [c for c in current if c != chapter.index]
+                    changed = True
+            elif getattr(row, key) == after.get(key) and getattr(row, key) != before[key]:
+                setattr(row, key, before[key])
+                changed = True
+        out["foreshadowings"] += changed
+    chapter.bible_changes = {}
+    await session.flush()
+    return out
+
+
+async def reopen_chapter(session: AsyncSession, book_id: uuid.UUID, chapter: Chapter) -> dict[str, int]:
+    """作者要重写一章已定稿的章节：撤销它记进设定库的改动，章节回到写作中；所在单元和卷的回顾作废，重写后重新写。"""
+    changes = await revert_chapter(session, book_id, chapter)
+    chapter.status = "drafting"
+    chapter.attempts = 0
+    if chapter.unit_id:
+        unit = await session.get(PlotUnit, chapter.unit_id)
+        if unit is not None:
+            unit.status, unit.recap = "outlined", ""
+    if chapter.volume_id:
+        volume = await session.get(Volume, chapter.volume_id)
+        if volume is not None:
+            volume.recap = ""
+            if volume.status == "done":
+                volume.status = "approved"
+    await session.flush()
+    return changes

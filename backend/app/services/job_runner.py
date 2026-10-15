@@ -36,6 +36,7 @@ GRAPHS: dict[str, tuple[Callable[[], StateGraph], Callable[[dict], dict]]] = {
         lambda p: book_setup.initial_state(p.get("idea", ""), p.get("style_reference", ""), bool(p.get("ask"))),
     ),
     "write_book": (write_book.build_write_graph, write_book.initial_state),
+    "rewrite_chapter": (write_book.build_rewrite_graph, write_book.rewrite_initial_state),
 }
 
 BOOK_STATUS_WHILE_RUNNING = {"book_setup": "setting_up", "write_book": "writing"}

@@ -204,6 +204,12 @@ export function useJobActions(bookId: string) {
       onSuccess: setJob,
     }),
     note: useMutation({ mutationFn: (content: string) => post<MeetingMessage>(`/books/${bookId}/notes`, { content }) }),
+    /** 按作者的意见重写一章已定稿的章节；后面还有定稿章节时要 confirm。 */
+    rewrite: useMutation({
+      mutationFn: ({ index, feedback, confirm }: { index: number; feedback: string; confirm: boolean }) =>
+        post<Job>(`/books/${bookId}/chapters/${index}/rewrite`, { feedback, confirm }),
+      onSuccess: setJob,
+    }),
     resume: useMutation({ mutationFn: (jobId: string) => post<Job>(`/jobs/${jobId}/resume`), onSuccess: setJob }),
     cancel: useMutation({ mutationFn: (jobId: string) => post<Job>(`/jobs/${jobId}/cancel`), onSuccess: setJob }),
   }

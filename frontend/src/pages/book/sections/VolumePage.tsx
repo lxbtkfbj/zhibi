@@ -203,6 +203,12 @@ function UnitCard({
             )}
           </div>
         </div>
+        {unit.recap && (
+          <div className="mt-5 rounded-xl bg-lore-soft/50 px-4 py-3">
+            <p className="mb-1 text-xs tracking-[0.15em] text-lore">单元回顾 · 设定师写于这一单元写完时</p>
+            <p className="font-serif text-[14px] leading-relaxed text-ink-2">{unit.recap}</p>
+          </div>
+        )}
         {chapters.length > 0 && (
           <div className="mt-5 border-t border-line pt-3">
             <p className="mb-1.5 text-xs tracking-[0.15em] text-ink-3">章纲</p>
@@ -308,6 +314,14 @@ export function VolumePage() {
           )}
         </Card>
       </Reveal>
+      {volume.recap && (
+        <Reveal>
+          <Card className="mb-10 p-5 sm:p-6">
+            <p className="mb-1.5 text-xs tracking-[0.15em] text-lore">卷回顾 · 这一卷写完后设定师写的，后面各卷规划和写作都靠它记住前情</p>
+            <p className="font-serif text-[15px] leading-relaxed whitespace-pre-wrap text-ink-2">{volume.recap}</p>
+          </Card>
+        </Reveal>
+      )}
       {volume.units.length > 0 ? (
         <div>
           {volume.units.map((unit, i) => (

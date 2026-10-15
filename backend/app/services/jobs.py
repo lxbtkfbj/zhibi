@@ -3,7 +3,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Book, Job
+from app.models import Book, Chapter, Job
 
 ACTIVE_STATUSES = ("queued", "running", "waiting_author")
 BUSY_STATUSES = ("queued", "running")
@@ -24,6 +24,23 @@ def new_write_job(book: Book, until: str, count: int) -> Job:
         kind="write_book",
         thread_id=f"write-{book.id}-{uuid.uuid4().hex[:8]}",
         params={"until": until, "count": count},
+    )
+
+
+def new_rewrite_job(book: Book, chapter: Chapter, feedback: str) -> Job:
+    """作者按自己的意见重写一章已定稿的章节。"""
+    return Job(
+        book_id=book.id,
+        kind="rewrite_chapter",
+        thread_id=f"rewrite-{book.id}-{chapter.index}-{uuid.uuid4().hex[:8]}",
+        params={
+            "chapter_id": str(chapter.id),
+            "index": chapter.index,
+            "title": chapter.title,
+            "unit_id": str(chapter.unit_id) if chapter.unit_id else "",
+            "volume_id": str(chapter.volume_id) if chapter.volume_id else "",
+            "feedback": feedback,
+        },
     )
 
 

@@ -1,6 +1,8 @@
+import re
 import uuid
+from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from redis.asyncio import Redis
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +21,7 @@ from app.schemas import (
     ChapterPatch,
     JobOut,
     OutlineOut,
+    RewriteRequest,
     ThreadOut,
     ThreadPatch,
     UnitOut,
@@ -27,7 +30,7 @@ from app.schemas import (
     VolumePatch,
     WriteRequest,
 )
-from app.services import jobs
+from app.services import jobs, writing_store
 from app.services.meeting import post_message
 
 router = APIRouter(tags=["books"])
@@ -247,6 +250,108 @@ async def update_chapter(
     await session.commit()
     await session.refresh(chapter)
     return ChapterOut.model_validate(chapter)
+
+
+@router.post("/books/{book_id}/chapters/{index}/rewrite", response_model=JobOut, status_code=201)
+async def rewrite_chapter(
+    index: int,
+    body: RewriteRequest,
+    book: Book = Depends(get_book),
+    session: AsyncSession = SessionDep,
+    redis: Redis = Depends(get_redis),
+) -> JobOut:
+    """按作者的意见重写一章已定稿的章节：撤销它原来记进设定库和伏笔台账的变化，重写后重新提取。
+
+    后面还有已定稿的章节时，后面的章节不会跟着改，需要作者确认（confirm）。
+    """
+    chapter = await _chapter(session, book.id, index)
+    if chapter.status != "final":
+        raise HTTPException(409, "只有已定稿的章节可以按意见重写；还没定稿的章节会在写到时按流程处理")
+    current = await jobs.active_job(session, book.id)
+    if current is not None and current.status in jobs.ACTIVE_STATUSES:
+        raise HTTPException(409, "编辑部手上还有没做完的事，先处理完再重写")
+    later = await writing_store.later_finals(session, book.id, index)
+    if later and not body.confirm:
+        raise HTTPException(
+            409,
+            f"第{index}章后面已经定稿了 {later} 章。重写这一章后，后面的章节不会跟着改，可能接不上；确认后再重写。",
+        )
+    feedback = body.feedback.strip()
+    job = jobs.new_rewrite_job(book, chapter, feedback)
+    session.add(job)
+    await session.commit()
+    await session.refresh(job)
+    await post_message(
+        session,
+        redis,
+        book_id=book.id,
+        job_id=job.id,
+        speaker="author",
+        kind="speech",
+        content=f"第{index}章《{chapter.title}》按我的意见重写：{feedback}",
+    )
+    jobs.enqueue(job.id)
+    return JobOut.model_validate(job)
+
+
+VOLUME_PREFIX = re.compile(r"^第[一二三四五六七八九十百\d]+卷\s*[：:、.．\s]\s*")
+
+
+def export_text(book: Book, volumes: list[Volume], chapters: list[Chapter]) -> str:
+    """全书 TXT：书名，然后按卷、按章排，每章带标题，段首空两格。"""
+    lines = [book.title or "未命名", ""]
+    logline = (book.concept or {}).get("logline", "")
+    if logline:
+        lines += [logline, ""]
+
+    def add(chapter: Chapter) -> None:
+        lines.extend([f"第{chapter.index}章 {chapter.title}".rstrip(), ""])
+        lines.extend(f"　　{p.strip()}" for p in chapter.content.split("\n") if p.strip())
+        lines.append("")
+
+    placed: set[uuid.UUID] = set()
+    for volume in volumes:
+        rows = [c for c in chapters if c.volume_id == volume.id]
+        if not rows:
+            continue
+        title = VOLUME_PREFIX.sub("", volume.title).strip() or volume.title
+        lines.extend(["", f"第{volume.index}卷 {title}".rstrip(), ""])
+        for chapter in rows:
+            add(chapter)
+            placed.add(chapter.id)
+    rest = [c for c in chapters if c.id not in placed]
+    if rest:
+        lines.append("")
+        for chapter in rest:
+            add(chapter)
+    return "\n".join(lines).rstrip() + "\n"
+
+
+@router.get("/books/{book_id}/export.txt")
+async def export_book(book: Book = Depends(get_book), session: AsyncSession = SessionDep) -> Response:
+    """一键导出全书已定稿的章节（按卷、按章，带标题）。"""
+    chapters = list(
+        (
+            await session.execute(
+                select(Chapter).where(Chapter.book_id == book.id, Chapter.status == "final").order_by(Chapter.index)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not chapters:
+        raise HTTPException(409, "还没有定稿的章节可以导出")
+    volumes = list(
+        (await session.execute(select(Volume).where(Volume.book_id == book.id).order_by(Volume.index))).scalars().all()
+    )
+    # 带 BOM：Windows 上的老阅读器也能认出是 UTF-8
+    body = "﻿" + export_text(book, volumes, chapters)
+    name = quote(f"{book.title or '未命名'}.txt")
+    return Response(
+        content=body.encode("utf-8"),
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename=\"book.txt\"; filename*=UTF-8''{name}"},
+    )
 
 
 WRITE_LABEL = {"count": "写 {count} 章", "volume": "写完这一卷", "book": "一直写到完本"}

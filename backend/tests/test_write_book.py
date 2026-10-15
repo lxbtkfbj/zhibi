@@ -167,6 +167,11 @@ async def test_whole_volume_then_next_volume_plan(sessionmaker, monkeypatch):
         for unit in units:
             count = await session.scalar(select(func.count()).select_from(Chapter).where(Chapter.unit_id == unit.id))
             assert count == unit.chapter_count
+        # 每个单元写完都有单元回顾，一卷写完有卷回顾
+        assert all(u.recap for u in units)
+        assert first.recap.startswith("第1卷经历了「捡灯」、「执法堂」")
+        purposes = (await session.execute(select(LlmCall.purpose).where(LlmCall.job_id == job_id))).scalars().all()
+        assert purposes.count("写作·单元回顾") == 4 and purposes.count("写作·卷回顾") == 1
 
     # 再写一章：先拆第二卷卷纲，等作者拍板
     prompts: list[str] = []
@@ -186,6 +191,8 @@ async def test_whole_volume_then_next_volume_plan(sessionmaker, monkeypatch):
     plan_prompt = next(p for p in prompts if "请为第 2 卷写「卷纲」" in p)
     assert "前面已经用过的高潮与破局方式" in plan_prompt and "外门考核" in plan_prompt
     assert "第31章" in plan_prompt
+    # 分层前情：第一卷的卷回顾 + 最近几章
+    assert "◆ 前面各卷回顾\n第1卷《杂役》：第1卷经历了" in plan_prompt and "◆ 最近几章" in plan_prompt
 
     async with sessionmaker() as session:
         second = (await session.execute(select(Volume).where(Volume.book_id == book_id, Volume.index == 2))).scalar()

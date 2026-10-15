@@ -277,7 +277,7 @@ function useResizableWidth() {
 
 /** 右侧编辑部面板：可拖动调宽，可收起为一条头像栏。 */
 export function TeamPanel() {
-  const { teamOpen, setTeamOpen, messages, working, connected } = useBookContext()
+  const { teamOpen, setTeamOpen, messages, working, connected, draft } = useBookContext()
   const { width, dragging, onPointerDown, reset } = useResizableWidth()
 
   return (
@@ -319,7 +319,7 @@ export function TeamPanel() {
             会议记录
             <span className="h-px flex-1 bg-line" />
           </div>
-          <MeetingFeed messages={messages} working={working} className="min-h-0 flex-1 px-4 pb-6" />
+          <MeetingFeed messages={messages} working={working} draft={draft} className="min-h-0 flex-1 px-4 pb-6" />
           <NoteComposer />
         </div>
       ) : (
@@ -336,14 +336,14 @@ export function TeamPanel() {
 
 /** 窄屏：编辑部以全屏面板显示。 */
 export function TeamSheetBody({ onNavigate }: { onNavigate?: () => void }) {
-  const { messages, working } = useBookContext()
+  const { messages, working, draft } = useBookContext()
   return (
     <div className="-mx-6 -my-4 flex h-full flex-col">
       <div className="space-y-3 px-6 pt-4 pb-3">
         <Roster />
         <ActionCard onNavigate={onNavigate} />
       </div>
-      <MeetingFeed messages={messages} working={working} className="min-h-0 flex-1 px-6 pb-6" />
+      <MeetingFeed messages={messages} working={working} draft={draft} className="min-h-0 flex-1 px-6 pb-6" />
       <NoteComposer />
     </div>
   )

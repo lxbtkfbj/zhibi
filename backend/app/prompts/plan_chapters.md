@@ -12,8 +12,8 @@
 【上一个单元的结果 / 下一个单元的目标】
 {{neighbors}}
 
-【前情：最近几章】
-{{recent}}
+【前情提要】
+{{story_so_far}}
 
 【出场人物当前状态】
 {{characters}}

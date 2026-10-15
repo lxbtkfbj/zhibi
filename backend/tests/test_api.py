@@ -330,3 +330,33 @@ async def test_write_chapters_and_read_them(client, queued):
     res = await client.patch(f"/api/books/{book_id}/chapters/2", json={"content": "作者 改过 的正文"})
     assert res.json()["word_count"] == 7
     assert (await client.get(f"/api/books/{book_id}/chapters/99")).status_code == 404
+    assert chapter["materials"]["notes"]  # 设定师写之前备的资料
+
+    # 一键导出 TXT：按卷、按章，带标题
+    res = await client.get(f"/api/books/{book_id}/export.txt")
+    assert res.status_code == 200 and res.headers["content-type"].startswith("text/plain")
+    assert "filename*=UTF-8''" in res.headers["content-disposition"]
+    text = res.content.decode("utf-8-sig")
+    assert text.startswith(book["title"])
+    assert f"第1卷 {first['title']}" in text
+    assert f"第1章 {listing[0]['title']}\n\n　　" in text and "　　作者 改过 的正文" in text
+    assert text.index("第1章 ") < text.index("第2章 ") and "第3章" not in text  # 只导出定稿的
+
+    # 按作者的意见重写：只有定稿的章节可以；后面还有定稿章节时要确认
+    rewrite = f"/api/books/{book_id}/chapters/{{}}/rewrite"
+    assert (await client.post(rewrite.format(3), json={"feedback": "再改改"})).status_code == 409
+    res = await client.post(rewrite.format(1), json={"feedback": "开头再紧一点"})
+    assert res.status_code == 409 and "后面已经定稿了 1 章" in res.json()["detail"]
+    res = await client.post(rewrite.format(1), json={"feedback": "开头再紧一点", "confirm": True})
+    assert res.status_code == 201 and res.json()["kind"] == "rewrite_chapter"
+    # 重写进行中不能再开一轮
+    assert (await client.post(rewrite.format(2), json={"feedback": "x"})).status_code == 409
+    await run_queued(queued)
+    assert (await client.get(f"/api/jobs/{res.json()['id']}")).json()["status"] == "succeeded"
+    chapter = (await client.get(f"/api/books/{book_id}/chapters/1")).json()
+    assert chapter["status"] == "final" and "（按作者的意见改：开头再紧一点）" in chapter["content"]
+
+
+async def test_export_needs_final_chapters(client, queued):
+    res = await client.post("/api/books", json={"idea": "一个能看见别人寿命的少年"})
+    assert (await client.get(f"/api/books/{res.json()['book']['id']}/export.txt")).status_code == 409

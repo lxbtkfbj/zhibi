@@ -393,6 +393,32 @@ class ChapterDigest(Lenient):
     remark: str = remark_field()
 
 
+class StoryRecap(Lenient):
+    """一个剧情单元或一卷写完后设定师写的回顾，供后面的规划和写作回顾前情。"""
+
+    recap: str = Field(
+        description="回顾正文：按时间顺序写清发生了什么、结果如何、人物关系和实力有什么变化、留下了哪些悬念和没收的伏笔"
+    )
+    remark: str = remark_field()
+
+
+class ChapterMaterials(Lenient):
+    """写一章之前，设定师读章纲，从设定库和前文里挑出这一章用得上的资料。"""
+
+    characters: list[str] = Field(
+        default_factory=list, description="这一章会出场或被提到、写手需要看完整资料的人物（用设定库里的姓名）"
+    )
+    world: list[str] = Field(default_factory=list, description="这一章用得上的设定条目名称（用设定库里的名称）")
+    chapters: list[int] = Field(
+        default_factory=list, description="写这一章需要回顾的前文章节号，最多 5 个，只选真正有关联的"
+    )
+    notes: list[str] = Field(
+        default_factory=list,
+        description="提醒写手的注意事项，最多 5 条：人物此刻的伤势和处境、谁知道什么秘密、力量体系的限制、容易写错的细节",
+    )
+    remark: str = remark_field()
+
+
 SETUP_PARTS = ("concept", "lore", "spine", "threads", "outline", "first_volume")
 SetupTarget = Literal["concept", "lore", "spine", "threads", "outline", "first_volume"]
 

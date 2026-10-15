@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react'
-import type { BookDetail, Job, MeetingMessage } from '../../api/types'
+import type { BookDetail, Job, LiveDraft, MeetingMessage } from '../../api/types'
 
 export interface BookContextValue {
   bookId: string
@@ -7,6 +7,8 @@ export interface BookContextValue {
   job: Job | null
   messages: MeetingMessage[]
   connected: boolean
+  /** 写手正在写的正文（实时）；写完一段后 done 为 true */
+  draft: LiveDraft | null
   working: boolean
   /** 等作者拍板：开书方案、卷纲、试读或卡住的章节 */
   waiting: boolean

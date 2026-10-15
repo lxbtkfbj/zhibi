@@ -1,11 +1,11 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { keys } from '../api/hooks'
-import type { BookDetail, Job, MeetingMessage } from '../api/types'
+import type { BookDetail, Job, LiveDraft, MeetingMessage } from '../api/types'
 
 const SETTLED = new Set(['waiting_author', 'succeeded', 'failed', 'cancelled'])
 // 写作过程中这些产出一到，就刷新大纲、目录和进度，不必等整轮写完
-const REFRESH_ON = new Set(['volume_plan', 'chapter_plan', 'chapter_draft', 'chapter_final'])
+const REFRESH_ON = new Set(['volume_plan', 'chapter_plan', 'chapter_draft', 'chapter_polish', 'chapter_materials', 'chapter_final', 'unit_recap', 'volume_recap'])
 
 /**
  * 会议室实时消息。连接时服务器先补发历史，再推送新消息；
@@ -15,6 +15,8 @@ export function useMeeting(bookId: string) {
   // 消息按书分开存放，切换到另一本书时不会短暂显示上一本的消息
   const [state, setState] = useState<{ bookId: string; messages: MeetingMessage[] }>({ bookId, messages: [] })
   const [connected, setConnected] = useState(false)
+  // 写手正在写的正文：每条推送都带着这一章到目前为止的全文，中途打开页面也能接上
+  const [draft, setDraft] = useState<{ bookId: string; draft: LiveDraft | null }>({ bookId, draft: null })
   const qc = useQueryClient()
 
   useEffect(() => {
@@ -37,10 +39,14 @@ export function useMeeting(bookId: string) {
         if (message.payload?.type === 'chapter_final') qc.invalidateQueries({ queryKey: keys.bible(bookId) })
       }
     })
+    source.addEventListener('draft', (event) => {
+      setDraft({ bookId, draft: JSON.parse((event as MessageEvent).data) as LiveDraft })
+    })
     source.addEventListener('job', (event) => {
       const job = JSON.parse((event as MessageEvent).data) as Job
       qc.setQueryData<BookDetail>(keys.book(bookId), (old) => (old ? { ...old, active_job: job } : old))
       if (SETTLED.has(job.status)) {
+        setDraft({ bookId, draft: null })
         const all = [keys.book(bookId), keys.outline(bookId), keys.bible(bookId), keys.threads(bookId), keys.chapters(bookId), keys.usage(bookId), keys.books]
         for (const key of all) {
           qc.invalidateQueries({ queryKey: key })
@@ -50,5 +56,9 @@ export function useMeeting(bookId: string) {
     return () => source.close()
   }, [bookId, qc])
 
-  return { messages: state.bookId === bookId ? state.messages : [], connected }
+  return {
+    messages: state.bookId === bookId ? state.messages : [],
+    connected,
+    draft: draft.bookId === bookId ? draft.draft : null,
+  }
 }

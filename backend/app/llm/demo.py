@@ -792,6 +792,48 @@ def _section(text: str, name: str) -> str:
     return found.group(1) if found else ""
 
 
+def _materials(user: str) -> s.ChapterMaterials:
+    """演示：章纲点名的人物之外再补上老瞎子；挑出章纲里提到的设定条目和青灯；第 3 章以后回顾一下第 1 章。"""
+    outline = _section(user, "本章章纲") + _section(user, "所在剧情单元")
+    # 人物名单每行以【姓名】开头，不能用 _section 截
+    people = _match(r"【设定库：人物名单[^】]*】\n(.*?)\n\n【", user)
+    roster = re.findall(r"^【(.+?)】", people, re.M)
+    named = (_match(r"出场人物：(.+)", outline) or "").split("、")
+    characters = [n for n in roster if n in named or n == "老瞎子"]
+    world = [n for n in re.findall(r"^- \[[^\]]+\] (.+?)：", _section(user, "设定库：设定条目目录"), re.M)]
+    world = [n for n in world if n in outline or n == "青灯"]
+    index = int(_match(r"马上要写第 (\d+) 章", user) or 1)
+    hero = re.search(r"^【陆远】[^\n]*?状态：([^；\n]+)", people, re.M)
+    notes = ["陆远每点一次青灯就折一日寿元，不能随手乱用"]
+    if hero:
+        notes.append(f"陆远此刻：{hero.group(1)}")
+    return s.ChapterMaterials(
+        characters=characters,
+        world=world,
+        chapters=[1] if index > 3 else [],
+        notes=notes,
+        remark="资料备好了：人物、用得上的设定和要回顾的前文都在里面。",
+    )
+
+
+def _recap(user: str) -> s.StoryRecap:
+    """演示回顾：按各章摘要（或各单元回顾）串起来。"""
+    if "请写一份单元回顾" in user:
+        title = _match(r"剧情单元「(.+?)」写完了", user)
+        lines = re.findall(r"^第(\d+)章《[^》]*》：(.+)$", _section(user, "这个单元各章的摘要"), re.M)
+        first, last = (lines[0][1][:40], lines[-1][1][:40]) if lines else ("", "")
+        recap = f"「{title}」共 {len(lines)} 章：{first}……到单元结束时，{last}。留下的悬念：灯火里那个只剩三天寿元的人是谁。"
+        return s.StoryRecap(recap=recap, remark=f"「{title}」的单元回顾写好了。")
+    volume = _match(r"第 (\d+) 卷《", user)
+    units = re.findall(r"^单元(\d+)「(.+?)」", _section(user, "这一卷各单元的回顾"), re.M)
+    recap = (
+        f"第{volume}卷经历了"
+        + "、".join(f"「{t}」" for _, t in units)
+        + "几段，陆远从杂役一路走进外门，青灯的秘密仍然只有他自己知道。"
+    )
+    return s.StoryRecap(recap=recap, remark=f"第{volume}卷的卷回顾写好了，后面拆卷纲时会带上。")
+
+
 async def respond(schema: type[BaseModel], system: str, user: str) -> BaseModel:
     await asyncio.sleep(DELAY_S)
     handlers = {
@@ -811,32 +853,99 @@ async def respond(schema: type[BaseModel], system: str, user: str) -> BaseModel:
         s.ChapterReview: lambda: _review(user),
         s.ConsistencyReport: lambda: s.ConsistencyReport(issues=[], remark="对过设定库了，没有矛盾。"),
         s.ChapterDigest: lambda: _digest(user),
+        s.ChapterMaterials: lambda: _materials(user),
+        s.StoryRecap: lambda: _recap(user),
     }
     if schema not in handlers:
         raise NotImplementedError(f"演示模式暂不支持 {schema.__name__}")
     return handlers[schema]()
 
 
+FILLER = [
+    "风从寒原上吹下来，陆远把手缩进袖子里，指节冻得发白。",
+    "院子里的积雪被踩得发黑，远处传来执事的吆喝声，一声比一声近。",
+    "他把青灯藏在怀里，灯身贴着胸口，竟有一丝若有若无的暖意。",
+    "对面的人笑了笑，那笑意却没有到眼睛里。陆远心里有数，脸上却装得更怯了几分。",
+    "灯火一跳，那人头顶的数字又少了一截。陆远垂下眼，把这个数字记在心里。",
+    "他想起老瞎子说过的话：看得见的东西未必是真的，看不见的才要命。",
+    "有人在背后窃窃私语，声音压得很低，却刚好能让他听见。",
+    "陆远在心里把每一步都过了一遍，像猎户在雪地里辨认兽迹。",
+    "檐下的冰棱滴着水，一滴，又一滴，像是谁在暗处数着时辰。",
+    "他没有急着开口，只是慢慢把袖口理平，等对方先沉不住气。",
+]
+FORESHADOW_LINES = {
+    "埋下": "他没有多想，只是把这件事压在了心底。",
+    "提醒": "这件事他一直没忘，此刻又想了起来。",
+    "回收": "直到这一刻，他才明白当初那一幕是什么意思。",
+}
+
+
+def _filler(start: int, size: int) -> list[str]:
+    """演示用的填充段落，凑够字数。"""
+    paragraphs, total, i = [], 0, start
+    while total < size:
+        paragraph = "".join(FILLER[(i + k) % len(FILLER)] for k in range(3))
+        paragraphs.append(paragraph)
+        total += len(paragraph)
+        i += 1
+    return paragraphs
+
+
 def _chapter_text(user: str) -> str:
-    """演示正文：按章纲把场景、爽点和钩子串成几段，并标出伏笔动作，供设定师「提取」。"""
+    """演示正文：按章纲把场景、爽点和钩子串起来，写出本章要处理的伏笔并标出动作，供设定师「提取」。
+
+    为了演示写完后的检查：第 4 章初稿故意写短（会被要求接着写），第 5 章初稿用总结式结尾（会被要求改结尾）。
+    """
     outline = _section(user, "本章章纲")
+    index = int(_match(r"请写第 (\d+) 章", user) or 0)
     title = _match(r"请写第 \d+ 章《(.+?)》", user)
     scenes = re.findall(r"^\d+\. (.+)$", outline, re.M)
-    cool = _match(r"爽点：(.+)", outline)
-    hook = _match(r"结尾钩子：(.+)", outline)
-    marks = "".join(f"（伏笔·{act}{ref}）" for act, ref in re.findall(r"(埋下|提醒|回收)(F\d+)", outline))
-    paragraphs = [
-        f"（演示模式{'·重写稿' if '【上一稿】' in user else ''}）{title}。"
-        + ("（重写稿）" if "【上一稿】" in user else ""),
-        *[f"{scene}。风从寒原上吹下来，陆远把手缩进袖子里，指节冻得发白。他没有说话，只是看着。" for scene in scenes],
-        f"{cool}。那一刻，周围的人都没反应过来，只有他自己知道，这一步他已经算了很久。{marks}",
-        f"{hook}。",
-    ]
+    cool = _match(r"爽点：([^\n]+)", outline)
+    hook = _hook(user)
+    target = int(_match(r"字数约 (\d+) 字", user) or 3000)
+    rewrite = "【上一稿】" in user
+    items = re.findall(r"^- (埋下|提醒|回收)(F\d+)［[^］]*］([^（\n]+)", _section(user, "本章要处理的伏笔"), re.M)
+    if not items:
+        items = [(act, ref, "") for act, ref in re.findall(r"(埋下|提醒|回收)(F\d+)", outline)]
+    author = _match(r"- \[作者\] ([^\n]+)", _section(user, "修改要求"))
+    head = [f"（演示模式{'·重写稿' if rewrite else ''}）{title}。" + ("（重写稿）" if rewrite else "")]
+    if author:
+        head.append(f"（按作者的意见改：{author}）")
+    head += [f"{scene}。{FILLER[i % len(FILLER)]}" for i, scene in enumerate(scenes)]
+    head.append(f"{cool}。那一刻，周围的人都没反应过来，只有他自己知道，这一步他已经算了很久。")
+    head += [f"{desc.strip() or '那件旧事'}——{FORESHADOW_LINES[act]}（伏笔·{act}{ref}）" for act, ref, desc in items]
+    short = index == 4 and not rewrite
+    goal = int(target * (0.35 if short else 0.85)) - sum(len(p) for p in head)
+    paragraphs = head + _filler(index, goal)
+    if not short:
+        paragraphs.append(f"{hook}。")
+    if index == 5 and not rewrite:
+        paragraphs.append("他知道，一切才刚刚开始。")
     return "\n\n".join(paragraphs)
 
 
+def _continuation(user: str) -> str:
+    """演示续写：补足字数，最后停在章纲的钩子上。"""
+    missing = int(_match(r"补足约 (\d+) 字", user) or 800)
+    hook = _hook(user)
+    return "\n\n".join([*_filler(7, missing - len(hook)), f"{hook}。"])
+
+
+def _new_ending(user: str) -> str:
+    return f"话音未落，院门外忽然传来一声闷响，有人重重地摔在了雪地里。\n\n{_hook(user)}。"
+
+
+def _hook(user: str) -> str:
+    """章纲里的结尾钩子（只取那一行）。"""
+    return _match(r"结尾钩子：([^\n]+)", _section(user, "本章章纲"))
+
+
 async def stream_text(system: str, user: str) -> AsyncIterator[str]:
-    if "【本章章纲】" in user:
+    if "请接着往下写" in user:
+        text = _continuation(user)
+    elif "请只重写结尾" in user:
+        text = _new_ending(user)
+    elif "【本章章纲】" in user:
         text = _chapter_text(user)
     else:
         text = (

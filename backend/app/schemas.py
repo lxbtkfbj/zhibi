@@ -162,6 +162,7 @@ class UnitOut(ORM):
     tropes: list[str] = []
     resolution: str = ""
     status: str = "planned"
+    recap: str = ""
 
 
 class UnitPatch(BaseModel):
@@ -188,6 +189,7 @@ class VolumeOut(ORM):
     new_characters: list[str] = []
     chapter_count: int
     status: str
+    recap: str = ""
     units: list[UnitOut]
 
 
@@ -249,12 +251,19 @@ class ChapterBrief(ORM):
 class ChapterOut(ChapterBrief):
     content: str
     review: dict
+    materials: dict = {}
     updated_at: datetime
 
 
 class ChapterPatch(BaseModel):
     title: str | None = Field(None, min_length=1, max_length=200)
     content: str | None = None
+
+
+class RewriteRequest(BaseModel):
+    feedback: str = Field(min_length=1, max_length=4000)
+    # 后面还有已定稿的章节时，作者要确认知道「后面的章节不会跟着改」
+    confirm: bool = False
 
 
 class WriteRequest(BaseModel):

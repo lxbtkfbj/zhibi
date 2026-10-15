@@ -2,10 +2,12 @@ import clsx from 'clsx'
 import { AlertTriangle, Check, ChevronDown, X } from 'lucide-react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
-import type { Concept, InterviewQuestion, MeetingMessage, PlotUnit, Speaker, Spine, StoryThread } from '../../api/types'
+import { Link } from 'react-router-dom'
+import type { Concept, InterviewQuestion, LiveDraft, MeetingMessage, PlotUnit, Speaker, Spine, StoryThread } from '../../api/types'
 import { TypingDots } from '../../components/ui'
 import { ROLE_META } from '../../lib/roles'
 import { isFresh, useTypewriter } from '../../lib/team'
+import { useBookContext } from './context'
 
 export function RoleAvatar({
   speaker,
@@ -101,6 +103,23 @@ interface ChapterData {
   characters_updated?: number
   characters_created?: number
   foreshadowings?: number
+}
+interface MaterialsData {
+  index: number
+  characters: string[]
+  world: string[]
+  chapters: number[]
+  notes: string[]
+}
+interface PolishData {
+  index: number
+  action: 'extend' | 'ending'
+  before?: number
+  after?: number | string
+  reason?: string
+}
+interface RecapData {
+  recap: string
 }
 interface CritiqueData {
   verdict: 'pass' | 'revise'
@@ -422,6 +441,37 @@ function ArtifactBody({ message }: { message: MeetingMessage }) {
       </div>
     )
   }
+  if (type === 'chapter_materials') {
+    const c = data as MaterialsData
+    return (
+      <div className="space-y-1.5 text-ink-2">
+        {c.characters.length > 0 && <p><span className="text-ink-3">人物：</span>{c.characters.join('、')}</p>}
+        {c.world.length > 0 && <p><span className="text-ink-3">设定：</span>{c.world.join('、')}</p>}
+        {c.chapters.length > 0 && <p><span className="text-ink-3">回顾前文：</span>{c.chapters.map((i) => `第${i}章`).join('、')}</p>}
+        {c.notes.length > 0 && (
+          <ul className="list-inside list-disc space-y-0.5">
+            {c.notes.map((n) => (
+              <li key={n}>{n}</li>
+            ))}
+          </ul>
+        )}
+      </div>
+    )
+  }
+  if (type === 'chapter_polish') {
+    const c = data as PolishData
+    return c.action === 'extend' ? (
+      <p className="text-ink-2">初稿只有 {c.before} 字，写手对照章纲把没写足的场景补上，现在 {c.after} 字。</p>
+    ) : (
+      <div className="space-y-1.5 text-ink-2">
+        <p>原来的结尾是总结式的（「{c.reason}」），改成停在钩子上：</p>
+        <p className="font-serif leading-relaxed">…{String(c.after ?? '')}</p>
+      </div>
+    )
+  }
+  if (type === 'unit_recap' || type === 'volume_recap') {
+    return <p className="font-serif leading-relaxed whitespace-pre-wrap text-ink-2">{(data as RecapData).recap}</p>
+  }
   if (type === 'chapter_review') {
     const c = data as CritiqueData
     return (
@@ -515,6 +565,36 @@ function Speech({ message }: { message: MeetingMessage }) {
   )
 }
 
+const DRAFT_MODE: Record<LiveDraft['mode'], string> = { write: '正在写', extend: '字数不够，正在接着写', ending: '正在改写结尾' }
+
+/** 写手正在写的正文：显示最后一小段，跟着推送实时变长。 */
+function LiveDraftRow({ draft }: { draft: LiveDraft }) {
+  const { bookId } = useBookContext()
+  const tail = draft.text.slice(-240)
+  return (
+    <div className="flex gap-2.5">
+      <RoleAvatar speaker="writer" working />
+      <div className="min-w-0 flex-1">
+        <p className="mb-1 text-xs text-ink-3">
+          <span className={clsx('font-medium', ROLE_META.writer.text)}>写手</span> · {DRAFT_MODE[draft.mode]}第{draft.chapter}章《{draft.title}》 ·{' '}
+          {draft.text.replace(/\s/g, '').length} 字
+        </p>
+        <div className="rounded-2xl rounded-tl-md bg-card px-3.5 py-2.5 shadow-[var(--shadow-paper)] ring-1 ring-line">
+          <p className="font-serif text-[13.5px] leading-relaxed whitespace-pre-wrap text-ink-2">
+            <span className="caret">
+              {tail.length < draft.text.length && '…'}
+              {tail}
+            </span>
+          </p>
+          <Link to={`/books/${bookId}/chapter/${draft.chapter}`} className="mt-1.5 inline-block text-xs text-seal hover:underline">
+            在阅读页看全文 →
+          </Link>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function MessageRow({ message, live }: { message: MeetingMessage; live: boolean }) {
   const meta = ROLE_META[message.speaker] ?? ROLE_META.system
 
@@ -575,23 +655,27 @@ export function MeetingFeed({
   working,
   className,
   autoScroll = true,
+  draft,
 }: {
   messages: MeetingMessage[]
   working: boolean
   className?: string
   autoScroll?: boolean
+  /** 写手正在写的正文，显示在最后 */
+  draft?: LiveDraft | null
 }) {
   const scroller = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
   const reduce = useReducedMotion()
 
+  const writing = working && draft && !draft.done ? draft : null
   useEffect(() => {
     const el = scroller.current
     if (el && autoScroll && stick.current) el.scrollTo({ top: el.scrollHeight, behavior: reduce ? 'auto' : 'smooth' })
-  }, [messages.length, autoScroll, reduce])
+  }, [messages.length, autoScroll, reduce, writing?.text.length])
 
   const lastIndex = messages.length - 1
-  const liveStatus = working && messages[lastIndex]?.kind === 'status'
+  const liveStatus = working && !writing && messages[lastIndex]?.kind === 'status'
 
   return (
     <div
@@ -612,7 +696,8 @@ export function MeetingFeed({
           <MessageRow message={m} live={liveStatus && i === lastIndex} />
         </motion.div>
       ))}
-      {working && !liveStatus && (
+      {writing && <LiveDraftRow draft={writing} />}
+      {working && !liveStatus && !writing && (
         <div className="flex items-center gap-2 pl-12 text-ink-3">
           <TypingDots />
         </div>

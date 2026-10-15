@@ -58,7 +58,7 @@ function StampOverlay({ show }: { show: boolean }) {
 export function BookLayout() {
   const { bookId = '' } = useParams()
   const { data: book, isLoading, error } = useBook(bookId)
-  const { messages, connected } = useMeeting(bookId)
+  const { messages, connected, draft } = useMeeting(bookId)
   const [teamOpen, setTeamOpenState] = useState(readTeamPref)
   const [navOpen, setNavOpen] = useState(false)
   const [teamSheet, setTeamSheet] = useState(false)
@@ -121,7 +121,7 @@ export function BookLayout() {
     )
   }
 
-  const ctx: BookContextValue = { bookId, book, job, messages, connected, working, waiting, asking, teamOpen, setTeamOpen, celebrate }
+  const ctx: BookContextValue = { bookId, book, job, messages, connected, draft, working, waiting, asking, teamOpen, setTeamOpen, celebrate }
 
   return (
     <BookContext.Provider value={ctx}>

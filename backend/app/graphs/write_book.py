@@ -6,15 +6,22 @@
   审稿做专项审稿（反派是否降智、爽点节奏、伏笔排期、套路重复，套路超限和伏笔漏排由程序直接查）→
   有严重问题主编自动改一轮 → 存库 → 作者拍板（提意见则主编按意见改，再拍板）
 - 下一个剧情单元还没有章纲 → 主编出这个单元的章纲
-- 有章纲、还没定稿的章节 → 写手写正文 → 审稿与设定师并行检查 → 不合格退回重写（最多两次，
+- 有章纲、还没定稿的章节 → 设定师读章纲备资料 → 写手写正文（流式，写到哪了实时推给网页）→
+  字数明显不够就接着写、结尾写成总结就改写结尾 → 审稿与设定师并行检查 → 不合格退回重写（最多两次，
   仍不合格交给作者）→ 设定师把本章带来的变化写进设定库和伏笔台账 → 定稿
+- 一个单元写完，设定师写单元回顾；一卷写完，写卷回顾。后面的规划和写作靠这些回顾记住前情。
 - 新书写完前 3 章，请作者试读一次；一卷写完进入下一卷；写够这一轮的章数或全书写完就停。
 作者随时可以插话：每写完一步都会读到，之后的规划和正文都按作者的话来。
+
+另有一张小图 build_rewrite_graph：作者对已定稿的某一章提意见，撤销这一章原来记进设定库的变化 →
+按意见重写（同样经过续写、改结尾、审稿）→ 重新提取变化定稿 → 重写受影响的单元、卷回顾。
 """
 
 import operator
 import re
+import time
 import uuid
+from collections.abc import AsyncIterator
 from typing import Annotated, Any, Literal, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -31,7 +38,18 @@ from app.graphs.deps import GraphDeps
 from app.llm.router import LLMError
 from app.models import Book, Chapter, MeetingMessage, PlotUnit, Volume
 from app.services import setup_store, writing_store
-from app.services.writing_context import chapter_blocks, chapter_plan_blocks, prior_units, volume_blocks
+from app.services.writing_context import (
+    SENTENCE,
+    chapter_blocks,
+    chapter_plan_blocks,
+    chapter_words,
+    material_blocks,
+    pick_materials,
+    prior_units,
+    unit_recap_blocks,
+    volume_blocks,
+    volume_recap_blocks,
+)
 
 # 审稿不合格时最多自动重写几次；之后交给作者
 MAX_REWRITES = 2
@@ -41,6 +59,15 @@ ASPECT_NAMES = {"villain": "反派智商", "rhythm": "爽点节奏", "foreshadow
 # 新书写完前几章请作者试读
 TRIAL_READ_AFTER = 3
 UNTIL = ("count", "volume", "book")
+# 写完后检查：字数不到目标的七成就让写手接着写（最多两次）；结尾写成总结就改写结尾（一次）
+SHORT_RATIO = 0.7
+MAX_EXTENSIONS = 2
+# 改结尾时给写手看结尾之前的多少字
+ENDING_CONTEXT = 1500
+# 写手写到哪了推给网页：每多写这么多字、或者隔这么久推一次
+DRAFT_PUSH_CHARS = 200
+DRAFT_PUSH_S = 0.6
+RECAP_STEPS = ("recap_unit", "recap_volume")
 
 
 class WriteState(TypedDict, total=False):
@@ -51,7 +78,8 @@ class WriteState(TypedDict, total=False):
     written: int
     start_volume: int
     notes_seen: int
-    # 下一步：plan_volume / volume_gate / plan_chapters / write / trial_gate / finalize / chapter_gate / done
+    # 下一步：plan_volume / volume_gate / plan_chapters / write / recap_unit / recap_volume / trial_gate /
+    # finalize / chapter_gate / done
     step: str
     volume_id: str
     volume_index: int
@@ -63,6 +91,12 @@ class WriteState(TypedDict, total=False):
     # 本章已经重写了几次，以及给写手的修改要求
     attempt: int
     revision: str
+    # 作者对这一章的意见（重写已定稿的章节时）：之后每次重写都要落实
+    author_note: str
+    # 写完后的检查：续写了几次、结尾改过没有、下一步（extend 接着写 / fix_ending 改结尾 / 空：送审）
+    extensions: int
+    ending_fixed: bool
+    polish: str
     review: dict
     consistency: dict
     blocking: list[str]
@@ -99,7 +133,10 @@ async def _requirement(session: AsyncSession, book_id: uuid.UUID, line: str) -> 
 
 
 async def decide(session: AsyncSession, book_id: uuid.UUID, state: WriteState) -> dict:
-    """根据数据库里的进度决定下一步。顺手把写完的单元、卷标记为完成。"""
+    """根据数据库里的进度决定下一步。顺手把写完的单元、卷标记为完成。
+
+    这一轮的章数写够了也先把该写的单元回顾、卷回顾写完再停，免得下一轮开头才补。
+    """
     book = await session.get(Book, book_id)
     if book is None:
         raise ValueError("书不存在")
@@ -109,22 +146,32 @@ async def decide(session: AsyncSession, book_id: uuid.UUID, state: WriteState) -
     if book.source == "new" and not book.trial_read_done and finals >= TRIAL_READ_AFTER:
         return {"step": "trial_gate"}
     until, written, target = state.get("until", "count"), state.get("written", 0), state.get("target", 1)
-    if until == "count" and written >= target:
+    decision = await _next_step(session, book, state)
+    if until == "count" and written >= target and decision["step"] not in RECAP_STEPS:
         return {"step": "done", "reason": f"这一轮计划的 {target} 章都定稿了。"}
+    return decision
 
+
+async def _has_finals(session: AsyncSession, volume_id: uuid.UUID) -> bool:
+    found = await session.scalar(
+        select(Chapter.id).where(Chapter.volume_id == volume_id, Chapter.status == "final").limit(1)
+    )
+    return found is not None
+
+
+async def _next_step(session: AsyncSession, book: Book, state: WriteState) -> dict:
+    until = state.get("until", "count")
     volumes = list(
-        (await session.execute(select(Volume).where(Volume.book_id == book_id).order_by(Volume.index))).scalars().all()
+        (await session.execute(select(Volume).where(Volume.book_id == book.id).order_by(Volume.index))).scalars().all()
     )
     for volume in volumes:
+        here = {"volume_id": str(volume.id), "volume_index": volume.index, "volume_title": volume.title}
         if volume.status == "done":
+            if not volume.recap.strip() and await _has_finals(session, volume.id):
+                return {**here, "step": "recap_volume"}  # 早先写完、还没有卷回顾的卷，补上
             continue
         start = state.get("start_volume") or volume.index
-        out = {
-            "start_volume": start,
-            "volume_id": str(volume.id),
-            "volume_index": volume.index,
-            "volume_title": volume.title,
-        }
+        out = {**here, "start_volume": start}
         if until == "volume" and volume.index > start:
             return {**out, "step": "done", "reason": f"第{start}卷写完了。"}
         units = list(
@@ -154,14 +201,17 @@ async def decide(session: AsyncSession, book_id: uuid.UUID, state: WriteState) -
                 "chapter_title": chapter.title,
             }
         for unit in units:
-            if unit.status == "done":
-                continue
-            has_chapters = await session.scalar(
-                select(func.count()).select_from(Chapter).where(Chapter.unit_id == unit.id)
-            )
-            if not has_chapters:
-                return {**out, "step": "plan_chapters", "unit_id": str(unit.id)}
-            unit.status = "done"
+            if unit.status != "done":
+                has_chapters = await session.scalar(
+                    select(func.count()).select_from(Chapter).where(Chapter.unit_id == unit.id)
+                )
+                if not has_chapters:
+                    return {**out, "step": "plan_chapters", "unit_id": str(unit.id)}
+                unit.status = "done"
+            if not unit.recap.strip():
+                return {**out, "step": "recap_unit", "unit_id": str(unit.id)}
+        if not volume.recap.strip():
+            return {**out, "step": "recap_volume"}
         volume.status = "done"
     book.status = "completed"
     return {"step": "done", "reason": "全书写完了！"}
@@ -543,6 +593,23 @@ async def plan_chapters_node(state: WriteState, runtime: Runtime[GraphDeps]) -> 
 
 HEADING = re.compile(r"^\s*(第[0-9一二三四五六七八九十百千零〇两]+章[^\n]*|#+[^\n]*)\n+")
 ENDING = re.compile(r"\n*[（(]?\s*(本章完|未完待续|本章结束)[^\n]*$")
+# 总结式结尾的常见说法：只在最后一段里找
+SUMMARY_ENDING = re.compile(
+    r"一切(?:才)?(?:刚刚)?(?:开始|拉开序幕)"
+    r"|新的(?:征程|篇章|旅程|开始)"
+    r"|(?:拉开|揭开)了?(?:序幕|帷幕)"
+    r"|命运的齿轮"
+    r"|等待着?(?:他|她|他们|她们|我)?的(?:将是|会是)"
+    r"|未来(?:的路)?(?:会|将)(?:怎样|如何)"
+    r"|前方的路(?:还很长|漫漫)|路还很长"
+    r"|从此以后"
+    r"|总而言之|总之，"
+    r"|回想(?:起)?(?:今天|这一天|这一切)"
+    r"|(?:暗暗|默默|在心里)(?:发誓|下定决心)"
+    r"|暴风雨(?:前的宁静|即将来临)"
+)
+SUMMARY_SCAN = 160
+SENTENCE_END = re.compile(r"[。！？!?…」”』）)]$")
 
 
 def clean_text(text: str) -> str:
@@ -555,10 +622,104 @@ def word_count(text: str) -> int:
     return len(re.sub(r"\s", "", text))
 
 
+def split_ending(text: str, size: int = 150) -> tuple[str, str]:
+    """把正文分成「结尾之前」和「结尾」：从最后往前取 1-3 段，凑够 size 字左右；只有一段时按句子切。"""
+    paragraphs = [p.strip() for p in text.split("\n") if p.strip()]
+    if len(paragraphs) >= 2:
+        tail: list[str] = []
+        while len(paragraphs) > 1 and len(tail) < 3 and sum(len(p) for p in tail) < size:
+            tail.insert(0, paragraphs.pop())
+        return "\n\n".join(paragraphs), "\n\n".join(tail)
+    sentences = SENTENCE.findall(text.strip())
+    tail_sentences: list[str] = []
+    while len(sentences) > 1 and sum(len(x) for x in tail_sentences) < size:
+        tail_sentences.insert(0, sentences.pop())
+    return "".join(sentences).strip(), "".join(tail_sentences).strip()
+
+
+def summary_ending(text: str) -> str:
+    """结尾是不是总结式的：最后一段里出现「一切才刚刚开始」这类说法时，返回那句说法。"""
+    paragraphs = [p.strip() for p in text.split("\n") if p.strip()]
+    if not paragraphs:
+        return ""
+    match = SUMMARY_ENDING.search(paragraphs[-1][-SUMMARY_SCAN:])
+    return match.group(0) if match else ""
+
+
+def polish_step(text: str, target: int, extensions: int, ending_fixed: bool) -> str:
+    """写完之后还要做什么：字数明显不够就接着写，结尾写成总结就改结尾，都没问题就送审。"""
+    if word_count(text) < target * SHORT_RATIO and extensions < MAX_EXTENSIONS:
+        return "extend"
+    if not ending_fixed and summary_ending(text):
+        return "fix_ending"
+    return ""
+
+
+def join_text(text: str, addition: str) -> str:
+    addition = addition.strip()
+    if not addition:
+        return text
+    head = text.rstrip()
+    return head + ("\n\n" if SENTENCE_END.search(head) else "") + addition
+
+
+async def _stream_draft(
+    d: GraphDeps, chunks: AsyncIterator[str], *, index: int, title: str, mode: str, prefix: str = ""
+) -> str:
+    """把写手的流式输出拼起来，同时把写到哪了推给网页（只走 Redis，不进数据库）。"""
+    parts: list[str] = []
+    size = pushed = 0
+    last = time.monotonic()
+    async for chunk in chunks:
+        parts.append(chunk)
+        size += len(chunk)
+        now = time.monotonic()
+        if size - pushed >= DRAFT_PUSH_CHARS or (now - last >= DRAFT_PUSH_S and size > pushed):
+            await d.emit.draft(index, title, mode, prefix + "".join(parts))
+            pushed, last = size, now
+    text = "".join(parts)
+    await d.emit.draft(index, title, mode, prefix + text, done=True)
+    return text
+
+
+def _revision(state: WriteState) -> str:
+    """给写手的修改要求：作者对这一章的意见（重写已定稿章节时）始终在最前面。"""
+    revision, note = state.get("revision", ""), state.get("author_note", "").strip()
+    if note and note not in revision:
+        revision = f"- [作者] {note}" + (f"\n{revision}" if revision else "")
+    return revision
+
+
+async def prepare_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
+    """写之前设定师读章纲，从设定库和前文里挑出这一章用得上的资料。备过的（续跑、重写）不再备。"""
+    d = runtime.context
+    await d.check_cancel()
+    async with d.sessionmaker() as session:
+        chapter = await session.get(Chapter, uuid.UUID(state["chapter_id"]))
+        if chapter.materials:
+            return {}
+        blocks = await material_blocks(session, await session.get(Book, d.book_id), chapter)
+        index, title = chapter.index, chapter.title
+    await d.emit.status("lorekeeper", f"设定师正在为第{index}章备资料…")
+    result = await editorial.prepare_chapter(d.llm, blocks)
+    async with d.sessionmaker() as session:
+        chapter = await session.get(Chapter, uuid.UUID(state["chapter_id"]))
+        materials = await pick_materials(session, d.book_id, chapter.index, result.model_dump())
+        chapter.materials = materials
+        await session.commit()
+    counts = f"人物 {len(materials['characters'])} 位、设定 {len(materials['world'])} 条、前文 {len(materials['chapters'])} 章"
+    await d.emit.artifact(
+        "lorekeeper",
+        f"第{index}章《{title}》的资料备好了：{counts}",
+        {"type": "chapter_materials", "data": {"index": index, "title": title, **materials}},
+    )
+    return {}
+
+
 async def write_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
     d = runtime.context
     await d.check_cancel()
-    revision = state.get("revision", "")
+    revision = _revision(state)
     async with d.sessionmaker() as session:
         chapter = await session.get(Chapter, uuid.UUID(state["chapter_id"]))
         book = await session.get(Book, d.book_id)
@@ -574,10 +735,10 @@ async def write_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
         )
         chapter.status = "drafting"
         await session.commit()
-        index, title = chapter.index, chapter.title
+        index, title, target = chapter.index, chapter.title, chapter_words(book)
     await d.emit.status("writer", f"写手正在{'重写' if rewriting else '写'}第{index}章《{title}》…")
-    parts = [chunk async for chunk in editorial.write_chapter(d.llm, blocks)]
-    text = clean_text("".join(parts))
+    raw = await _stream_draft(d, editorial.write_chapter(d.llm, blocks), index=index, title=title, mode="write")
+    text = clean_text(raw)
     if not text:
         raise LLMError("写手没有写出正文")
     async with d.sessionmaker() as session:
@@ -593,7 +754,105 @@ async def write_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
             "data": {"index": index, "title": title, "words": word_count(text), "excerpt": text[:160]},
         },
     )
-    return {"review": {}, "consistency": {}}
+    return {
+        "review": {},
+        "consistency": {},
+        "extensions": 0,
+        "ending_fixed": False,
+        "polish": polish_step(text, target, 0, False),
+    }
+
+
+def route_drafted(state: WriteState) -> str | list[str]:
+    """写完（或续写、改结尾之后）：还要补字或改结尾就去做，否则审稿与设定检查并行。"""
+    return state.get("polish") or ["review", "check"]
+
+
+async def _load_draft(d: GraphDeps, chapter_id: str) -> tuple[Chapter, dict[str, str], int]:
+    async with d.sessionmaker() as session:
+        chapter = await session.get(Chapter, uuid.UUID(chapter_id))
+        book = await session.get(Book, d.book_id)
+        return chapter, await chapter_blocks(session, book, chapter), chapter_words(book)
+
+
+async def _save_text(d: GraphDeps, chapter_id: str, text: str) -> None:
+    async with d.sessionmaker() as session:
+        chapter = await session.get(Chapter, uuid.UUID(chapter_id))
+        chapter.content = text
+        chapter.word_count = word_count(text)
+        await session.commit()
+
+
+async def extend_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
+    """字数明显不够：写手从最后一句接着写，把章纲里没写足的场景补上。"""
+    d = runtime.context
+    await d.check_cancel()
+    chapter, blocks, target = await _load_draft(d, state["chapter_id"])
+    text, index, title = chapter.content, chapter.index, chapter.title
+    words = word_count(text)
+    await d.emit.status("writer", f"第{index}章只写了 {words} 字（目标约 {target} 字），写手接着往下写…")
+    raw = await _stream_draft(
+        d,
+        editorial.extend_chapter(d.llm, blocks, words, max(300, target - words)),
+        index=index,
+        title=title,
+        mode="extend",
+        prefix=text.rstrip() + "\n\n",
+    )
+    new_text = join_text(text, clean_text(raw))
+    await _save_text(d, state["chapter_id"], new_text)
+    extensions = state.get("extensions", 0) + 1
+    await d.emit.artifact(
+        "writer",
+        f"第{index}章续写到 {word_count(new_text)} 字",
+        {
+            "type": "chapter_polish",
+            "data": {
+                "index": index,
+                "title": title,
+                "action": "extend",
+                "before": words,
+                "after": word_count(new_text),
+            },
+        },
+    )
+    return {
+        "extensions": extensions,
+        "polish": polish_step(new_text, target, extensions, state.get("ending_fixed", False)),
+    }
+
+
+async def fix_ending_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
+    """结尾写成了总结：写手只重写结尾，停在章纲的钩子上。"""
+    d = runtime.context
+    await d.check_cancel()
+    chapter, blocks, target = await _load_draft(d, state["chapter_id"])
+    text, index, title = chapter.content, chapter.index, chapter.title
+    body, ending = split_ending(text)
+    reason = summary_ending(text)
+    await d.emit.status("writer", f"第{index}章的结尾写成了总结（「{reason}」），写手改写结尾…")
+    raw = await _stream_draft(
+        d,
+        editorial.rewrite_ending(
+            d.llm, blocks, body[-ENDING_CONTEXT:], ending, reason, (chapter.outline or {}).get("hook", "")
+        ),
+        index=index,
+        title=title,
+        mode="ending",
+        prefix=body.rstrip() + "\n\n",
+    )
+    new_ending = clean_text(raw)
+    new_text = join_text(body, new_ending) if new_ending else text
+    await _save_text(d, state["chapter_id"], new_text)
+    await d.emit.artifact(
+        "writer",
+        f"第{index}章改写了结尾",
+        {
+            "type": "chapter_polish",
+            "data": {"index": index, "title": title, "action": "ending", "reason": reason, "after": new_ending[-160:]},
+        },
+    )
+    return {"ending_fixed": True, "polish": polish_step(new_text, target, state.get("extensions", 0), True)}
 
 
 async def review_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
@@ -697,7 +956,14 @@ async def chapter_gate_node(state: WriteState, runtime: Runtime[GraphDeps]) -> C
 async def finalize_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
     d = runtime.context
     await d.check_cancel()
-    done = {"written": state.get("written", 0) + 1, "attempt": 0, "revision": "", "review": {}, "consistency": {}}
+    done = {
+        "written": state.get("written", 0) + 1,
+        "attempt": 0,
+        "revision": "",
+        "review": {},
+        "consistency": {},
+        "polish": "",
+    }
     async with d.sessionmaker() as session:
         chapter = await session.get(Chapter, uuid.UUID(state["chapter_id"]))
         if chapter.status == "final":
@@ -723,6 +989,73 @@ async def finalize_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
     return done
 
 
+async def _unit_recap(d: GraphDeps, unit_id: str) -> None:
+    """设定师写单元回顾（已经写过就跳过）。"""
+    async with d.sessionmaker() as session:
+        unit = await session.get(PlotUnit, uuid.UUID(unit_id))
+        if unit is None or unit.recap.strip():
+            return
+        blocks = await unit_recap_blocks(session, await session.get(Book, d.book_id), unit)
+        label = f"第{blocks['volume_index']}卷第{unit.index}单元「{unit.title}」"
+        fallback = unit.outcome
+    await d.emit.status("lorekeeper", f"{label}写完了，设定师正在写单元回顾…")
+    result = await editorial.recap_unit(d.llm, blocks)
+    recap = result.recap.strip() or f"（设定师没有写出回顾，按卷纲结果）{fallback}"
+    async with d.sessionmaker() as session:
+        unit = await session.get(PlotUnit, uuid.UUID(unit_id))
+        unit.recap = recap
+        await session.commit()
+    await d.emit.artifact(
+        "lorekeeper",
+        f"{label}单元回顾",
+        {
+            "type": "unit_recap",
+            "data": {
+                "volume": int(blocks["volume_index"]),
+                "unit": int(blocks["unit_index"]),
+                "title": blocks["unit_title"],
+                "recap": recap,
+            },
+        },
+    )
+
+
+async def _volume_recap(d: GraphDeps, volume_id: str) -> None:
+    """设定师写卷回顾（已经写过就跳过）。"""
+    async with d.sessionmaker() as session:
+        volume = await session.get(Volume, uuid.UUID(volume_id))
+        if volume is None or volume.recap.strip():
+            return
+        blocks = await volume_recap_blocks(session, await session.get(Book, d.book_id), volume)
+        index, title, fallback = volume.index, volume.title, volume.summary
+    await d.emit.status("lorekeeper", f"第{index}卷写完了，设定师正在写卷回顾…")
+    result = await editorial.recap_volume(d.llm, blocks)
+    recap = result.recap.strip() or f"（设定师没有写出回顾，按卷纲概要）{fallback}"
+    async with d.sessionmaker() as session:
+        volume = await session.get(Volume, uuid.UUID(volume_id))
+        volume.recap = recap
+        await session.commit()
+    if result.remark:
+        await d.emit.say("lorekeeper", result.remark)
+    await d.emit.artifact(
+        "lorekeeper",
+        f"第{index}卷《{title}》卷回顾",
+        {"type": "volume_recap", "data": {"volume": index, "title": title, "recap": recap}},
+    )
+
+
+async def recap_unit_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
+    await runtime.context.check_cancel()
+    await _unit_recap(runtime.context, state["unit_id"])
+    return {}
+
+
+async def recap_volume_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
+    await runtime.context.check_cancel()
+    await _volume_recap(runtime.context, state["volume_id"])
+    return {}
+
+
 async def trial_gate_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
     # interrupt 之前不要放有副作用的代码：恢复执行时本节点会从头重跑
     decision = interrupt({"kind": "trial_read", "chapters": TRIAL_READ_AFTER})
@@ -746,6 +1079,113 @@ async def trial_gate_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dic
     return {}
 
 
+# ---------- 作者重写已定稿的章节 ----------
+
+
+def rewrite_initial_state(params: dict) -> WriteState:
+    return {
+        "until": "count",
+        "target": 1,
+        "written": 0,
+        "notes_seen": 0,
+        "chapter_id": params["chapter_id"],
+        "chapter_index": int(params.get("index") or 0),
+        "chapter_title": params.get("title", ""),
+        "unit_id": params.get("unit_id") or "",
+        "volume_id": params.get("volume_id") or "",
+        "attempt": 0,
+        "revision": "",
+        "feedback": "",
+        "author_note": str(params.get("feedback", "")).strip(),
+    }
+
+
+async def reopen_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
+    """撤销这一章原来记进设定库和伏笔台账的变化，章节回到写作中。续跑时已经重开过就跳过。"""
+    d = runtime.context
+    await d.check_cancel()
+    async with d.sessionmaker() as session:
+        chapter = await session.get(Chapter, uuid.UUID(state["chapter_id"]))
+        if chapter.status != "final":
+            return {}
+        later = await writing_store.later_finals(session, d.book_id, chapter.index)
+        changes = await writing_store.reopen_chapter(session, d.book_id, chapter)
+        await session.commit()
+        index = chapter.index
+    if any(changes.values()):
+        undone = f"人物状态 {changes['characters']} 处、伏笔进展 {changes['foreshadowings']} 条" + (
+            f"、新人物 {changes['removed']} 位" if changes["removed"] else ""
+        )
+        note = f"设定师先撤掉了第{index}章原来记进设定库的变化（{undone}），重写后重新提取。"
+    else:
+        note = f"第{index}章原来没有改动设定库里还作数的内容，直接重写，写完重新提取。"
+    await d.emit.status("lorekeeper", note)
+    if later:
+        await d.emit.say(
+            "chief",
+            f"提醒一下：第{index}章后面已经定稿了 {later} 章，这次只重写第{index}章，后面的章节不会跟着改，"
+            "改动大的话后文可能接不上，需要的话再逐章重写。",
+        )
+    return {}
+
+
+async def wrap_rewrite_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
+    """重写定稿后：所在单元、卷已经写完的，重新写回顾。"""
+    d = runtime.context
+    if state.get("unit_id"):
+        async with d.sessionmaker() as session:
+            unit = await session.get(PlotUnit, uuid.UUID(state["unit_id"]))
+            unit_done = unit is not None and unit.status == "done"
+        if unit_done:
+            await _unit_recap(d, state["unit_id"])
+    if state.get("volume_id"):
+        async with d.sessionmaker() as session:
+            statuses = (
+                (
+                    await session.execute(
+                        select(PlotUnit.status).where(PlotUnit.volume_id == uuid.UUID(state["volume_id"]))
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        if statuses and all(x == "done" for x in statuses):
+            await _volume_recap(d, state["volume_id"])
+            async with d.sessionmaker() as session:
+                volume = await session.get(Volume, uuid.UUID(state["volume_id"]))
+                volume.status = "done"
+                await session.commit()
+    await d.emit.say("system", f"第{state.get('chapter_index')}章按作者的意见重写好了。", kind="decision")
+    return {}
+
+
+# ---------- 建图 ----------
+
+
+def _chapter_loop(graph: StateGraph) -> None:
+    """一章从备资料到定稿的部分，写书主循环和重写小图共用。"""
+    for name, node in (
+        ("prepare", prepare_node),
+        ("write", write_node),
+        ("extend", extend_node),
+        ("fix_ending", fix_ending_node),
+        ("review", review_node),
+        ("check", check_node),
+        ("judge", judge_node),
+        ("chapter_gate", chapter_gate_node),
+        ("finalize", finalize_node),
+    ):
+        graph.add_node(name, node)
+    graph.add_edge("prepare", "write")
+    # 写完先查字数和结尾：要补就补、要改就改，然后审稿与设定检查并行，两边都做完再判定
+    for source in ("write", "extend", "fix_ending"):
+        graph.add_conditional_edges(source, route_drafted, ["extend", "fix_ending", "review", "check"])
+    graph.add_edge(["review", "check"], "judge")
+    graph.add_conditional_edges(
+        "judge", route_judge, {"write": "write", "finalize": "finalize", "chapter_gate": "chapter_gate"}
+    )
+
+
 def build_write_graph() -> StateGraph:
     graph = StateGraph(WriteState, context_schema=GraphDeps)
     graph.add_node("dispatch", dispatch_node)
@@ -758,13 +1198,10 @@ def build_write_graph() -> StateGraph:
     graph.add_node("save_volume", save_volume_node)
     graph.add_node("volume_gate", volume_gate_node)
     graph.add_node("plan_chapters", plan_chapters_node)
-    graph.add_node("write", write_node)
-    graph.add_node("review", review_node)
-    graph.add_node("check", check_node)
-    graph.add_node("judge", judge_node)
-    graph.add_node("chapter_gate", chapter_gate_node)
-    graph.add_node("finalize", finalize_node)
+    graph.add_node("recap_unit", recap_unit_node)
+    graph.add_node("recap_volume", recap_volume_node)
     graph.add_node("trial_gate", trial_gate_node)
+    _chapter_loop(graph)
 
     graph.add_edge(START, "dispatch")
     graph.add_conditional_edges(
@@ -774,12 +1211,14 @@ def build_write_graph() -> StateGraph:
             "plan_volume": "plan_volume",
             "volume_gate": "volume_gate",
             "plan_chapters": "plan_chapters",
-            "write": "write",
+            "write": "prepare",
+            "recap_unit": "recap_unit",
+            "recap_volume": "recap_volume",
             "trial_gate": "trial_gate",
             "done": END,
         },
     )
-    for source in ("save_volume", "plan_chapters", "finalize", "trial_gate"):
+    for source in ("save_volume", "plan_chapters", "finalize", "trial_gate", "recap_unit", "recap_volume"):
         graph.add_edge(source, "dispatch")
     # 拆卷纲：想方向 → 各方向并行起草 → 比稿 →（融合）→ 专项审稿 →（自动改一轮）→ 存库 → 回到 dispatch 等拍板
     graph.add_conditional_edges("plan_volume", route_planned, ["draft_pitch", "revise_volume"])
@@ -788,11 +1227,17 @@ def build_write_graph() -> StateGraph:
     graph.add_edge("merge_pitches", "audit_volume")
     graph.add_conditional_edges("audit_volume", route_audited, ["revise_volume", "save_volume"])
     graph.add_edge("revise_volume", "save_volume")
-    # 审稿与设定检查并行，两边都做完再判定
-    graph.add_edge("write", "review")
-    graph.add_edge("write", "check")
-    graph.add_edge(["review", "check"], "judge")
-    graph.add_conditional_edges(
-        "judge", route_judge, {"write": "write", "finalize": "finalize", "chapter_gate": "chapter_gate"}
-    )
+    return graph
+
+
+def build_rewrite_graph() -> StateGraph:
+    """作者按自己的意见重写一章已定稿的章节：撤销原来的设定变化 → 备资料 → 重写 → 审稿 → 定稿 → 重写回顾。"""
+    graph = StateGraph(WriteState, context_schema=GraphDeps)
+    graph.add_node("reopen", reopen_node)
+    graph.add_node("wrap_rewrite", wrap_rewrite_node)
+    _chapter_loop(graph)
+    graph.add_edge(START, "reopen")
+    graph.add_edge("reopen", "prepare")
+    graph.add_edge("finalize", "wrap_rewrite")
+    graph.add_edge("wrap_rewrite", END)
     return graph

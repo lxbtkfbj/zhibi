@@ -6,8 +6,8 @@
 【相关设定】
 {{world}}
 
-【前情：最近几章】
-{{recent}}
+【前情提要】
+{{story_so_far}}
 
 【正文】
 {{content}}

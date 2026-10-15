@@ -73,6 +73,8 @@ class Volume(UUIDPk, Timestamps, Base):
     chapter_count: Mapped[int] = mapped_column(Integer, default=0)
     # planned：只有总纲卡片；detailed：已拆单元待拍板；approved：作者已批准；done：已写完
     status: Mapped[str] = mapped_column(String(20), default="planned")
+    # 一卷写完后设定师写的卷回顾，供后面各卷的规划和写作回顾前情
+    recap: Mapped[str] = mapped_column(Text, default="")
 
     book: Mapped[Book] = relationship(back_populates="volumes")
     units: Mapped[list["PlotUnit"]] = relationship(
@@ -105,6 +107,8 @@ class PlotUnit(UUIDPk, Timestamps, Base):
     resolution: Mapped[str] = mapped_column(Text, default="")
     # planned：还没出章纲；outlined：章纲已出；done：本单元写完
     status: Mapped[str] = mapped_column(String(20), default="planned")
+    # 单元写完后设定师写的单元回顾
+    recap: Mapped[str] = mapped_column(Text, default="")
 
     volume: Mapped[Volume] = relationship(back_populates="units")
     chapters: Mapped[list["Chapter"]] = relationship(order_by="Chapter.index", viewonly=True)
@@ -128,6 +132,10 @@ class Chapter(UUIDPk, Timestamps, Base):
     summary: Mapped[str] = mapped_column(Text, default="")
     # 最近一轮审稿与设定检查的结果
     review: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # 写之前设定师为这一章备的资料：人物、设定条目、要回顾的前文、注意事项
+    materials: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # 定稿时这一章对设定库和伏笔台账做的改动（改之前的值），重写这一章时据此撤销
+    bible_changes: Mapped[dict] = mapped_column(JSONB, default=dict)
     # 本章重写过几次
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     # generated / imported

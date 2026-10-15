@@ -131,6 +131,8 @@ export interface PlotUnit {
   resolution: string
   /** planned：还没出章纲；outlined：章纲已出；done：写完 */
   status: 'planned' | 'outlined' | 'done'
+  /** 单元写完后设定师写的单元回顾 */
+  recap: string
 }
 
 export interface Volume {
@@ -149,6 +151,8 @@ export interface Volume {
   chapter_count: number
   /** planned：只有总纲卡片；detailed：卷纲待拍板；approved：已批准；done：已写完 */
   status: 'planned' | 'detailed' | 'approved' | 'done'
+  /** 一卷写完后设定师写的卷回顾 */
+  recap: string
   units: PlotUnit[]
 }
 
@@ -184,8 +188,17 @@ export interface ReviewIssue {
   severity: 'high' | 'medium' | 'low'
 }
 
+/** 写之前设定师为这一章备的资料。 */
+export interface ChapterMaterials {
+  characters?: string[]
+  world?: string[]
+  chapters?: number[]
+  notes?: string[]
+}
+
 export interface Chapter extends ChapterBrief {
   content: string
+  materials: ChapterMaterials
   review: {
     review?: { verdict: 'pass' | 'revise'; highlights: string[]; issues: ReviewIssue[]; remark?: string }
     consistency?: { issues: ReviewIssue[]; remark?: string }
@@ -272,6 +285,17 @@ export interface MeetingMessage {
   content: string
   payload: { type: string; data: unknown } | null
   created_at: string | null
+}
+
+/** 写手正在写的正文（实时推送，不进数据库）。text 是这一章到目前为止的全文。 */
+export interface LiveDraft {
+  job_id: string
+  chapter: number
+  title: string
+  /** write 写正文；extend 字数不够接着写；ending 改写结尾 */
+  mode: 'write' | 'extend' | 'ending'
+  text: string
+  done: boolean
 }
 
 export interface Usage {
