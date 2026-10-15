@@ -43,7 +43,7 @@
 .settings-preview p { color: var(--color-ink-3); font-size: 12px; margin-top: 5px; }
 .settings-preview pre { margin-top: 12px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--color-ink); font: inherit; font-size: 13px; line-height: 1.8; }
 .settings-modal-overlay { position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center; background: var(--color-overlay); padding: 18px; }
-.settings-modal { width: 760px; max-width: 100%; height: 560px; max-height: calc(100dvh - 36px); display: flex; flex-direction: column; overflow: hidden; background: var(--color-paper-2); border: 1px solid var(--color-divider); border-radius: 12px; box-shadow: var(--shadow-lift); }
+.settings-modal { width: 1040px; max-width: 100%; height: 760px; max-height: calc(100dvh - 36px); display: flex; flex-direction: column; overflow: hidden; background: var(--color-paper-2); border: 1px solid var(--color-divider); border-radius: 12px; box-shadow: var(--shadow-lift); }
 .settings-modal-heading { display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; padding: 14px 20px; border-bottom: 1px solid var(--color-divider); }
 .settings-modal-heading h2 { font-size: 17px; font-weight: 600; }
 .settings-modal-body { display: flex; flex: 1; min-height: 0; }

@@ -40,8 +40,8 @@ test.describe.serial('设置改版：独立数据库演示验收', () => {
     const dialog = page.getByRole('dialog', { name: '设置', exact: true })
     await expect(dialog).toBeVisible()
     const box = (await dialog.boundingBox())!
-    expect(Math.abs(box.width - 760)).toBeLessThan(2)
-    expect(Math.abs(box.height - 560)).toBeLessThan(2)
+    expect(Math.abs(box.width - 1040)).toBeLessThan(2)
+    expect(Math.abs(box.height - 760)).toBeLessThan(2)
     expect(Math.abs(box.x + box.width / 2 - 720)).toBeLessThan(2)
     await page.getByRole('button', { name: '＋ 添加', exact: true }).click()
     await expect(page.getByRole('dialog')).toHaveCount(1)

@@ -89,13 +89,20 @@ try {
 
   await modal.getByRole('group', { name: '力度', exact: true }).getByRole('button', { name: '自定义', exact: true }).click()
   await expect(modal.getByRole('switch', { name: '卷纲专项审稿' })).toBeVisible()
-  for (const width of [1440, 390]) {
-    await page.setViewportSize({ width, height: 900 })
+  for (const [width, height] of [[1440, 1000], [1127, 886], [1366, 768], [1024, 600], [686, 993], [390, 844]]) {
+    await page.setViewportSize({ width, height })
     await expect.poll(() => modal.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
     const box = await modal.boundingBox()
-    assert.ok(box.x >= 0 && box.x + box.width <= width)
-    await page.screenshot({ path: resolve(artifacts, `settings-defaults-${width}.png`) })
+    const margin = width <= 600 ? 10 : 18
+    assert.ok(Math.abs(box.width - Math.min(1040, width - 2 * margin)) < 1)
+    assert.ok(Math.abs(box.height - Math.min(width <= 600 ? 640 : 760, height - 2 * margin)) < 1)
+    assert.ok(Math.abs(box.x + box.width / 2 - width / 2) < 1, 'Dialog stays horizontally centered')
+    assert.ok(Math.abs(box.y + box.height / 2 - height / 2) < 1, 'Dialog stays vertically centered')
+    const close = await modal.getByRole('button', { name: '关闭设置' }).boundingBox()
+    assert.ok(close.x >= margin && close.x + close.width <= width - margin)
+    assert.ok(close.y >= margin && close.y + close.height <= height - margin, 'Close button remains on screen')
+    await page.screenshot({ path: resolve(artifacts, `settings-defaults-${width}x${height}.png`) })
   }
   assert.deepEqual(errors, [])
-  console.log('PASS custom effort shows four subrows; dark settings fit desktop and 390px screens')
+  console.log('PASS enlarged 1040x760 modal stays centered and fits all six desktop, short-height, and mobile viewports')
 } finally { await browser.close() }
