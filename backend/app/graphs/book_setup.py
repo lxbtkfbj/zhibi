@@ -27,6 +27,7 @@ from app.agents.context import (
     planned_chapters,
 )
 from app.agents.planning import attach_new_foreshadowings, fit_chapter_counts, relevant_ledger, unit_hint
+from app.agents.playbook import pick, playbook_text
 from app.graphs.deps import GraphDeps
 from app.models import Book, MeetingMessage, Volume
 from app.services import setup_store
@@ -258,8 +259,12 @@ async def threads_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     d = runtime.context
     await d.check_cancel()
     current, instruction = _revising(state, "threads")
+    playbook = pick(state.get("concept")).name
     await d.emit.status(
-        "chief", "主编正在修改线索…" if instruction else "主编正在做线索规划：主线、感情线、反派线、谜团线…"
+        "chief",
+        "主编正在修改线索…"
+        if instruction
+        else f"主编正在做线索规划（题材打法：{playbook}）：主线、感情线、反派线、谜团线…",
     )
     result = await editorial.draft_threads(
         d.llm, state["concept"], state["lore"], state.get("spine") or {}, requirements(state), current, instruction
@@ -328,6 +333,8 @@ def first_volume_blocks(state: SetupState) -> dict[str, str]:
         "used_climaxes": "（暂无）",
         "characters": "\n".join(format_character_state(c) for c in lore.get("characters", [])) or "（暂无）",
         "ledger": format_ledger(relevant_ledger(ledger, 1)),
+        "trope_usage": "（还没用过任何套路，这是第一卷）",
+        "playbook": playbook_text(state.get("concept"), "volume"),
         "requirements": requirements(state),
         "unit_hint": unit_hint(chapter_count),
         "chapter_count": str(chapter_count or "若干"),

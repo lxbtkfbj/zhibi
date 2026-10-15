@@ -1,7 +1,10 @@
 """写书主循环：分层滚动规划，从第一卷一直写到完本。
 
 每一轮先看「下一步该做什么」（数据库为准，断点续跑、换任务都能接上）：
-- 当前这一卷还只有总纲卡片 → 主编拆卷纲（剧情单元、线索节拍、伏笔排期）→ 作者拍板
+- 当前这一卷还只有总纲卡片 → 拆卷纲：主编先想 2-3 个不同方向，每个方向并行各拆一份完整卷纲 →
+  审稿按爽点、线索交织、反派智商、新意打分比稿，选出最好的一份（必要时主编把别的方案的长处融进来）→
+  审稿做专项审稿（反派是否降智、爽点节奏、伏笔排期、套路重复，套路超限和伏笔漏排由程序直接查）→
+  有严重问题主编自动改一轮 → 存库 → 作者拍板（提意见则主编按意见改，再拍板）
 - 下一个剧情单元还没有章纲 → 主编出这个单元的章纲
 - 有章纲、还没定稿的章节 → 写手写正文 → 审稿与设定师并行检查 → 不合格退回重写（最多两次，
   仍不合格交给作者）→ 设定师把本章带来的变化写进设定库和伏笔台账 → 定稿
@@ -9,27 +12,32 @@
 作者随时可以插话：每写完一步都会读到，之后的规划和正文都按作者的话来。
 """
 
+import operator
 import re
 import uuid
-from typing import Literal, TypedDict
+from typing import Annotated, Any, Literal, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
-from langgraph.types import Command, interrupt
+from langgraph.types import Command, Overwrite, Send, interrupt
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents import editorial
-from app.agents.context import format_revision
-from app.agents.planning import attach_new_foreshadowings, fit_chapter_counts
+from app.agents.context import format_direction, format_pitches, format_revision
+from app.agents.planning import attach_new_foreshadowings, fit_chapter_counts, schedule_issues
+from app.agents.playbook import Playbook, pick, repetition_issues
 from app.graphs.deps import GraphDeps
 from app.llm.router import LLMError
 from app.models import Book, Chapter, MeetingMessage, PlotUnit, Volume
 from app.services import setup_store, writing_store
-from app.services.writing_context import chapter_blocks, chapter_plan_blocks, volume_blocks
+from app.services.writing_context import chapter_blocks, chapter_plan_blocks, prior_units, volume_blocks
 
 # 审稿不合格时最多自动重写几次；之后交给作者
 MAX_REWRITES = 2
+# 拆卷纲时最多比几份方案
+MAX_PITCHES = 3
+ASPECT_NAMES = {"villain": "反派智商", "rhythm": "爽点节奏", "foreshadow": "伏笔排期", "repetition": "套路重复"}
 # 新书写完前几章请作者试读
 TRIAL_READ_AFTER = 3
 UNTIL = ("count", "volume", "book")
@@ -60,6 +68,15 @@ class WriteState(TypedDict, total=False):
     blocking: list[str]
     # 作者对卷纲的修改意见
     feedback: str
+    # 卷纲比稿：主编想的几个方向、并行拆出的各份方案、审稿选中的方案和融合建议
+    directions: list[dict]
+    pitches: Annotated[list[dict], operator.add]
+    chosen_pitch: int
+    merge_note: str
+    # 正在打磨、还没存库的卷纲；专项审稿要求的修改；交给作者拍板时还没解决的问题
+    volume_draft: dict
+    volume_fix: str
+    open_issues: list[str]
 
 
 def initial_state(params: dict) -> WriteState:
@@ -186,17 +203,228 @@ def route_step(state: WriteState) -> str:
     return state.get("step") or "done"
 
 
+async def _volume_context(d: GraphDeps, volume_id: str) -> tuple[Volume, Playbook, dict[str, str]]:
+    """拆卷纲各步共用的上下文：这一卷、这本书的题材打法、拼好的各段提示词。"""
+    async with d.sessionmaker() as session:
+        book = await session.get(Book, d.book_id)
+        volume = await session.get(Volume, uuid.UUID(volume_id))
+        blocks = await volume_blocks(session, book, volume)
+        return volume, pick(book.concept), blocks
+
+
+def _unit_brief(u: dict[str, Any]) -> dict[str, Any]:
+    keys = ("index", "title", "chapter_count", "climax", "tropes", "resolution")
+    return {k: u.get(k) for k in keys}
+
+
+def _issue_line(issue: dict[str, Any]) -> str:
+    where = f"第{issue['unit']}单元：" if issue.get("unit") else ""
+    return f"[{ASPECT_NAMES.get(issue.get('aspect', ''), '其他')}] {where}{issue['problem']}——{issue['suggestion']}"
+
+
+def _serious(issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [i for i in issues if i.get("severity") in ("high", "medium")]
+
+
 async def plan_volume_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
+    """拆卷纲第一步：主编先想 2-3 个不同方向，接下来每个方向并行各拆一份完整卷纲。"""
+    if state.get("feedback"):
+        return {}  # 旧版检查点：作者意见交给 revise_volume 处理
+    d = runtime.context
+    await d.check_cancel()
+    volume, _, blocks = await _volume_context(d, state["volume_id"])
+    index = volume.index
+    await d.emit.status("chief", f"主编正在为第{index}卷想几个不同的拆法…")
+    result = await editorial.volume_directions(d.llm, blocks, purpose=f"写作·第{index}卷比稿方向")
+    directions = [x.model_dump() for x in result.directions if x.name.strip() or x.idea.strip()][:MAX_PITCHES]
+    if not directions:
+        directions = [{"name": "贴着卡片拆", "idea": "按本卷卡片稳扎稳打地拆。", "difference": ""}]
+    await d.emit.say("chief", result.remark)
+    await d.emit.artifact(
+        "chief",
+        f"第{index}卷想了 {len(directions)} 个方向，各拆一份来比稿",
+        {"type": "volume_directions", "data": {"volume": index, "directions": directions}},
+    )
+    return {
+        "directions": directions,
+        "pitches": Overwrite([]),
+        "chosen_pitch": 0,
+        "merge_note": "",
+        "volume_draft": {},
+        "volume_fix": "",
+        "open_issues": [],
+    }
+
+
+def route_planned(state: WriteState) -> list[Send] | str:
+    if state.get("feedback"):
+        return "revise_volume"
+    return [
+        Send("draft_pitch", {"volume_id": state["volume_id"], "pitch": i, "direction": direction})
+        for i, direction in enumerate(state.get("directions") or [], start=1)
+    ]
+
+
+async def draft_pitch_node(task: dict, runtime: Runtime[GraphDeps]) -> dict:
+    """按一个方向拆一份完整卷纲。几份方案并行起草，结果汇总到 pitches。"""
+    d = runtime.context
+    await d.check_cancel()
+    pitch, direction = task["pitch"], task["direction"]
+    volume, _, blocks = await _volume_context(d, task["volume_id"])
+    index, name = volume.index, direction.get("name", "")
+    await d.emit.status("chief", f"主编正在按「{name}」拆第{index}卷（方案{pitch}）…")
+    result = await editorial.plan_volume(
+        d.llm, {**blocks, "direction": format_direction(direction)}, {}, "", purpose=f"写作·第{index}卷方案{pitch}"
+    )
+    plan = result.model_dump(exclude={"remark"})
+    plan["units"] = fit_chapter_counts(plan["units"], volume.chapter_count)
+    await d.emit.artifact(
+        "chief",
+        f"方案{pitch}「{name}」：{len(plan['units'])} 个剧情单元",
+        {
+            "type": "volume_pitch",
+            "data": {
+                "volume": index,
+                "pitch": pitch,
+                "name": name,
+                "idea": direction.get("idea", ""),
+                "remark": result.remark,
+                "units": [_unit_brief(u) for u in plan["units"]],
+            },
+        },
+    )
+    return {"pitches": [{"pitch": pitch, "direction": direction, "plan": plan}]}
+
+
+async def judge_pitches_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
+    """审稿比稿：按爽点、线索交织、反派智商、新意打分，选出最好的一份。"""
+    d = runtime.context
+    await d.check_cancel()
+    pitches = sorted(state.get("pitches") or [], key=lambda p: p["pitch"])
+    if not pitches:
+        raise LLMError("主编没有拆出卷纲方案")
+    if len(pitches) == 1:
+        return {"volume_draft": pitches[0]["plan"], "chosen_pitch": pitches[0]["pitch"], "merge_note": ""}
+    volume, playbook, blocks = await _volume_context(d, state["volume_id"])
+    index = volume.index
+    await d.emit.status("reviewer", f"审稿正在给第{index}卷的 {len(pitches)} 份方案比稿…")
+    result = await editorial.judge_pitches(
+        d.llm, {**blocks, "playbook": playbook.text("review")}, pitches, purpose=f"写作·第{index}卷比稿"
+    )
+    scores = {s.pitch: s for s in result.scores}
+    known = [p["pitch"] for p in pitches]
+    winner = (
+        result.winner if result.winner in known else max(known, key=lambda k: scores[k].total if k in scores else 0)
+    )
+    chosen = next(p for p in pitches if p["pitch"] == winner)
+    merge = result.merge.strip()
+    rows = []
+    for p in pitches:
+        score = scores.get(p["pitch"])
+        row = {"pitch": p["pitch"], "name": p["direction"].get("name", "")}
+        if score is not None:
+            row.update(score.model_dump(exclude={"pitch"}), total=score.total)
+        rows.append(row)
+    await d.emit.say("reviewer", result.remark)
+    await d.emit.artifact(
+        "reviewer",
+        f"比稿结果：方案{winner}「{chosen['direction'].get('name', '')}」胜出"
+        + ("，再融合其他方案的长处" if merge else ""),
+        {"type": "pitch_scores", "data": {"volume": index, "winner": winner, "merge": merge, "scores": rows}},
+    )
+    return {"volume_draft": chosen["plan"], "chosen_pitch": winner, "merge_note": merge}
+
+
+def route_judged(state: WriteState) -> str:
+    return "merge_pitches" if state.get("merge_note") else "audit_volume"
+
+
+async def merge_pitches_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
+    """主编按审稿的建议，把其他方案里更好的单元或设计融进选中的方案。"""
+    d = runtime.context
+    await d.check_cancel()
+    chosen = state.get("chosen_pitch", 0)
+    others = [p for p in sorted(state.get("pitches") or [], key=lambda p: p["pitch"]) if p["pitch"] != chosen]
+    volume, _, blocks = await _volume_context(d, state["volume_id"])
+    index = volume.index
+    await d.emit.status("chief", f"主编正在把其他方案的长处融进方案{chosen}…")
+    instructions = (
+        f"审稿比稿后的融合建议：{state.get('merge_note', '')}\n\n可以借鉴的其他方案：\n{format_pitches(others)}"
+    )
+    result = await editorial.plan_volume(
+        d.llm, blocks, state.get("volume_draft") or {}, instructions, purpose=f"写作·第{index}卷融合方案"
+    )
+    plan = result.model_dump(exclude={"remark"})
+    plan["units"] = fit_chapter_counts(plan["units"], volume.chapter_count)
+    await d.emit.say("chief", result.remark)
+    return {"volume_draft": plan, "merge_note": ""}
+
+
+async def audit_volume_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
+    """专项审稿：反派是否降智、爽点节奏、伏笔排期、套路重复。套路超限、伏笔漏排由程序直接查。"""
+    d = runtime.context
+    await d.check_cancel()
+    plan = state.get("volume_draft") or {}
+    volume, playbook, blocks = await _volume_context(d, state["volume_id"])
+    index = volume.index
+    async with d.sessionmaker() as session:
+        prior = await prior_units(session, d.book_id, index)
+        ledger = await setup_store.load_ledger(session, d.book_id)
+    units = plan.get("units") or []
+    found = [
+        *repetition_issues(playbook, prior, units),
+        *schedule_issues(units, plan.get("new_foreshadowings") or [], ledger, index),
+    ]
+    await d.emit.status("reviewer", f"审稿正在给第{index}卷做专项审稿：反派智商、爽点节奏、伏笔排期、套路重复…")
+    result = await editorial.audit_volume(
+        d.llm,
+        {**blocks, "playbook": playbook.text("review")},
+        plan,
+        [_issue_line(i) for i in found],
+        purpose=f"写作·第{index}卷专项审稿",
+    )
+    reviewed = [i.model_dump() for i in result.issues]
+    serious = _serious(found) + (_serious(reviewed) if result.verdict == "revise" else [])
+    checks = [c.model_dump() for c in result.checks]
+    for check in checks:
+        # 程序查出了问题的那一项不能算过关
+        if any(i["aspect"] == check["aspect"] for i in _serious(found)):
+            check["ok"] = False
+    await d.emit.say("reviewer", result.remark)
+    await d.emit.artifact(
+        "reviewer",
+        f"第{index}卷专项审稿：" + (f"{len(serious)} 个问题要改" if serious else "通过"),
+        {
+            "type": "volume_audit",
+            "data": {
+                "volume": index,
+                "verdict": "revise" if serious else "pass",
+                "checks": checks,
+                "issues": [*found, *reviewed],
+            },
+        },
+    )
+    if not serious:
+        return {"volume_fix": ""}
+    await d.emit.status("chief", f"主编采纳专项审稿的意见，先把第{index}卷卷纲改一轮。")
+    return {"volume_fix": "\n".join(f"- {_issue_line(i)}" for i in serious)}
+
+
+def route_audited(state: WriteState) -> str:
+    return "revise_volume" if state.get("volume_fix") else "save_volume"
+
+
+async def revise_volume_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
+    """修改卷纲：按专项审稿的意见自动改一轮，或者按作者拍板时提的意见改。"""
     d = runtime.context
     await d.check_cancel()
     feedback = state.get("feedback", "")
-    async with d.sessionmaker() as session:
-        book = await session.get(Book, d.book_id)
-        volume = await session.get(Volume, uuid.UUID(state["volume_id"]))
-        blocks = await volume_blocks(session, book, volume)
-        ledger = await setup_store.load_ledger(session, d.book_id)
-        current: dict = {}
-        if feedback:
+    volume, _, blocks = await _volume_context(d, state["volume_id"])
+    index = volume.index
+    if feedback:
+        # 作者可能在网页上改过卷纲，以数据库里的当前版本为准
+        async with d.sessionmaker() as session:
+            ledger = await setup_store.load_ledger(session, d.book_id)
             units = (
                 (
                     await session.execute(
@@ -208,37 +436,63 @@ async def plan_volume_node(state: WriteState, runtime: Runtime[GraphDeps]) -> di
             )
             current = {
                 "units": [setup_store.unit_dict(u) for u in units],
-                "new_foreshadowings": [f for f in ledger if f["plant_volume"] == volume.index and f["span"] != "长"],
+                "new_foreshadowings": [f for f in ledger if f["plant_volume"] == index and f["span"] != "长"],
             }
-        index, target = volume.index, volume.chapter_count
-    await d.emit.status(
-        "chief",
-        f"主编正在按你的意见修改第{index}卷卷纲…" if feedback else f"主编正在拆第{index}卷：剧情单元、线索交织与伏笔…",
-    )
-    result = await editorial.plan_volume(d.llm, blocks, current, feedback, purpose=f"写作·第{index}卷卷纲")
-    plan = result.model_dump(exclude={"remark"})
-    units = fit_chapter_counts(plan["units"], target)
-    fresh = setup_store.assign_seqs(plan["new_foreshadowings"], ledger)
-    units, fresh = attach_new_foreshadowings(units, fresh, index)
-    async with d.sessionmaker() as session:
-        volume = await session.get(Volume, uuid.UUID(state["volume_id"]))
-        await writing_store.save_volume_plan(session, d.book_id, volume, units, fresh, replace_new=bool(feedback))
-        await session.commit()
+        await d.emit.status("chief", f"主编正在按你的意见修改第{index}卷卷纲…")
+        instructions, purpose = feedback, f"写作·第{index}卷按作者意见修改"
+    else:
+        current = state.get("volume_draft") or {}
+        await d.emit.status("chief", f"主编正在按专项审稿的意见修改第{index}卷卷纲…")
+        instructions, purpose = state.get("volume_fix", ""), f"写作·第{index}卷按专项审稿修改"
+    result = await editorial.plan_volume(d.llm, blocks, current, instructions, purpose=purpose)
     await d.emit.say("chief", result.remark)
+    return {"volume_draft": result.model_dump(exclude={"remark"}), "volume_fix": ""}
+
+
+async def save_volume_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
+    """卷纲定下来：对齐章数，给新伏笔编号并写进对应单元，存库，然后等作者拍板。"""
+    d = runtime.context
+    feedback = state.get("feedback", "")
+    plan = state.get("volume_draft") or {}
+    async with d.sessionmaker() as session:
+        book = await session.get(Book, d.book_id)
+        volume = await session.get(Volume, uuid.UUID(state["volume_id"]))
+        index = volume.index
+        ledger = await setup_store.load_ledger(session, d.book_id)
+        units = fit_chapter_counts(plan.get("units") or [], volume.chapter_count)
+        fresh = setup_store.assign_seqs(plan.get("new_foreshadowings") or [], ledger)
+        units, fresh = attach_new_foreshadowings(units, fresh, index)
+        await writing_store.save_volume_plan(session, d.book_id, volume, units, fresh, replace_new=bool(feedback))
+        # 改完还剩的问题（程序能查的那部分）交给作者拍板时一并看到
+        prior = await prior_units(session, d.book_id, index)
+        remaining = [
+            *repetition_issues(pick(book.concept), prior, units),
+            *schedule_issues(units, [], await setup_store.load_ledger(session, d.book_id), index),
+        ]
+        await session.commit()
     await d.emit.artifact(
         "chief",
         f"第{index}卷拆成 {len(units)} 个剧情单元，新埋伏笔 {len(fresh)} 条",
         {"type": "volume_plan", "data": {"volume": index, "units": units, "new_foreshadowings": fresh}},
     )
-    return {"feedback": ""}
+    return {
+        "feedback": "",
+        "directions": [],
+        "pitches": Overwrite([]),
+        "volume_draft": {},
+        "open_issues": [_issue_line(i) for i in _serious(remaining)],
+    }
 
 
 async def volume_gate_node(
     state: WriteState, runtime: Runtime[GraphDeps]
-) -> Command[Literal["plan_volume", "dispatch"]]:
+) -> Command[Literal["revise_volume", "dispatch"]]:
     # interrupt 之前不要放有副作用的代码：恢复执行时本节点会从头重跑
     index = state.get("volume_index", 0)
-    decision = interrupt({"kind": "volume_review", "volume": index, "title": state.get("volume_title", "")})
+    pending: dict[str, Any] = {"kind": "volume_review", "volume": index, "title": state.get("volume_title", "")}
+    if state.get("open_issues"):
+        pending["issues"] = state["open_issues"]
+    decision = interrupt(pending)
     d = runtime.context
     feedback = str(decision.get("feedback", "")).strip()
     async with d.sessionmaker() as session:
@@ -248,11 +502,11 @@ async def volume_gate_node(
                 volume.status = "approved"
             await session.commit()
             await d.emit.say("system", f"作者批准了第{index}卷卷纲，开写。", kind="decision")
-            return Command(goto="dispatch")
+            return Command(goto="dispatch", update={"open_issues": []})
         # 卷纲的修改意见也要记住，免得以后的规划又改回去
         await _requirement(session, d.book_id, f"第{index}卷卷纲的修改意见：{feedback}")
         await session.commit()
-    return Command(goto="plan_volume", update={"feedback": feedback or "请整体再打磨一遍。"})
+    return Command(goto="revise_volume", update={"feedback": feedback or "请整体再打磨一遍。"})
 
 
 async def plan_chapters_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
@@ -496,6 +750,12 @@ def build_write_graph() -> StateGraph:
     graph = StateGraph(WriteState, context_schema=GraphDeps)
     graph.add_node("dispatch", dispatch_node)
     graph.add_node("plan_volume", plan_volume_node)
+    graph.add_node("draft_pitch", draft_pitch_node)
+    graph.add_node("judge_pitches", judge_pitches_node)
+    graph.add_node("merge_pitches", merge_pitches_node)
+    graph.add_node("audit_volume", audit_volume_node)
+    graph.add_node("revise_volume", revise_volume_node)
+    graph.add_node("save_volume", save_volume_node)
     graph.add_node("volume_gate", volume_gate_node)
     graph.add_node("plan_chapters", plan_chapters_node)
     graph.add_node("write", write_node)
@@ -519,8 +779,15 @@ def build_write_graph() -> StateGraph:
             "done": END,
         },
     )
-    for source in ("plan_volume", "plan_chapters", "finalize", "trial_gate"):
+    for source in ("save_volume", "plan_chapters", "finalize", "trial_gate"):
         graph.add_edge(source, "dispatch")
+    # 拆卷纲：想方向 → 各方向并行起草 → 比稿 →（融合）→ 专项审稿 →（自动改一轮）→ 存库 → 回到 dispatch 等拍板
+    graph.add_conditional_edges("plan_volume", route_planned, ["draft_pitch", "revise_volume"])
+    graph.add_edge("draft_pitch", "judge_pitches")
+    graph.add_conditional_edges("judge_pitches", route_judged, ["merge_pitches", "audit_volume"])
+    graph.add_edge("merge_pitches", "audit_volume")
+    graph.add_conditional_edges("audit_volume", route_audited, ["revise_volume", "save_volume"])
+    graph.add_edge("revise_volume", "save_volume")
     # 审稿与设定检查并行，两边都做完再判定
     graph.add_edge("write", "review")
     graph.add_edge("write", "check")

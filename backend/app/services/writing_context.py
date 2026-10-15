@@ -23,6 +23,7 @@ from app.agents.context import (
     format_volume_card,
 )
 from app.agents.planning import ref_seq, relevant_ledger, unit_hint
+from app.agents.playbook import pick, usage_text
 from app.models import Book, Chapter, Character, PlotUnit, Volume, WorldEntry
 from app.services.setup_store import load_ledger, load_threads, unit_dict, volume_dict
 
@@ -135,17 +136,25 @@ def requirements_of(book: Book) -> str:
     return format_requirements(list(book.requirements or []), [])
 
 
-async def used_climaxes(session: AsyncSession, book_id: uuid.UUID, before_volume: int) -> str:
+async def prior_units(session: AsyncSession, book_id: uuid.UUID, before_volume: int) -> list[dict[str, Any]]:
+    """前面各卷的剧情单元（按卷、单元顺序），统计套路、检查重复用。"""
     rows = (
         await session.execute(
-            select(Volume.index, PlotUnit.index, PlotUnit.title, PlotUnit.climax)
+            select(Volume.index, PlotUnit)
             .join(Volume, PlotUnit.volume_id == Volume.id)
             .where(PlotUnit.book_id == book_id, Volume.index < before_volume)
             .order_by(Volume.index, PlotUnit.index)
         )
     ).all()
-    rows = rows[-USED_CLIMAXES:]
-    return "\n".join(f"- 第{v}卷单元{u}「{t}」：{c}" for v, u, t, c in rows) or "（暂无）"
+    return [{"volume": v, **unit_dict(u)} for v, u in rows]
+
+
+def used_climaxes(prior: list[dict[str, Any]]) -> str:
+    lines = []
+    for u in prior[-USED_CLIMAXES:]:
+        how = f"（破局：{u['resolution']}）" if u.get("resolution") else ""
+        lines.append(f"- 第{u['volume']}卷单元{u['index']}「{u['title']}」：{u['climax']}{how}")
+    return "\n".join(lines) or "（暂无）"
 
 
 async def volume_blocks(session: AsyncSession, book: Book, volume: Volume) -> dict[str, str]:
@@ -172,6 +181,8 @@ async def volume_blocks(session: AsyncSession, book: Book, volume: Volume) -> di
     ) + 1
     ledger = await load_ledger(session, book.id)
     characters = await _characters(session, book.id)
+    prior = await prior_units(session, book.id, volume.index)
+    playbook = pick(book.concept)
     return {
         "volume_index": str(volume.index),
         "concept": format_concept(book.concept or {}),
@@ -180,7 +191,9 @@ async def volume_blocks(session: AsyncSession, book: Book, volume: Volume) -> di
         "volume": format_volume_card(volume_dict(volume)),
         "neighbors": "\n\n".join(neighbors),
         "story_so_far": await recent_summaries(session, book.id, first_chapter, count=8),
-        "used_climaxes": await used_climaxes(session, book.id, volume.index),
+        "used_climaxes": used_climaxes(prior),
+        "trope_usage": usage_text(playbook, prior),
+        "playbook": playbook.text("volume"),
         "characters": character_states(characters),
         "ledger": format_ledger(relevant_ledger(ledger, volume.index)),
         "requirements": requirements_of(book),
@@ -220,6 +233,8 @@ async def chapter_plan_blocks(
         "recent": await recent_summaries(session, book.id, first_chapter),
         "characters": character_states(await _characters(session, book.id)),
         "ledger": format_ledger(ledger_for_refs(ledger, refs, volume.index)),
+        # 套路库只带本单元用到的套路，省篇幅
+        "playbook": pick(book.concept).text("chapters", tropes=list(unit.tropes or [])),
         "requirements": requirements_of(book),
     }
 

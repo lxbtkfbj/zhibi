@@ -159,6 +159,8 @@ class UnitOut(ORM):
     key_events: list[str]
     thread_beats: list[ThreadStepOut] = []
     foreshadow_actions: list[ForeshadowStepOut] = []
+    tropes: list[str] = []
+    resolution: str = ""
     status: str = "planned"
 
 

@@ -19,10 +19,13 @@ export function decisionCopy(pending: Pending | null | undefined, bookId: string
       return {
         eyebrow: '下一步 · 卷纲拍板',
         title: `第${pending.volume}卷《${cleanVolumeTitle(pending.title)}》的卷纲拆好了`,
-        hint: '主编把这一卷拆成了剧情单元，排好了线索和伏笔。哪里不对可以直接在卷纲里改，或者告诉主编怎么改；满意就盖章开写。',
+        hint: pending.issues?.length
+          ? '主编把这一卷拆成了剧情单元；审稿查出的下面几处还没改干净，你看看要不要管。哪里不对可以直接在卷纲里改，或者告诉主编怎么改；满意就盖章开写。'
+          : '主编把这一卷拆成了剧情单元，比稿选出这一版，审稿又专门查过反派、节奏、伏笔和套路重复。哪里不对可以直接在卷纲里改，或者告诉主编怎么改；满意就盖章开写。',
         approve: '批准开写',
         placeholder: '例如：第三单元太拖，压缩一下；女主在这一卷多一些戏份',
         links: [[`第${pending.volume}卷卷纲`, `${base}/volume/${pending.volume}`], ['线索', `${base}/threads`]],
+        issues: pending.issues,
       }
     case 'trial_read':
       return {

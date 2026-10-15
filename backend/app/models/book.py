@@ -100,6 +100,9 @@ class PlotUnit(UUIDPk, Timestamps, Base):
     thread_beats: Mapped[list] = mapped_column(JSONB, default=list)
     # [{ref, action, detail}]：本单元对伏笔台账的动作（ref 如 F3；action 埋下 / 提醒 / 回收）
     foreshadow_actions: Mapped[list] = mapped_column(JSONB, default=list)
+    # 本单元用到的套路（核心套路在前）与高潮的破局手法，统计全书用了几次、防止重复
+    tropes: Mapped[list] = mapped_column(JSONB, default=list)
+    resolution: Mapped[str] = mapped_column(Text, default="")
     # planned：还没出章纲；outlined：章纲已出；done：本单元写完
     status: Mapped[str] = mapped_column(String(20), default="planned")
 

@@ -7,6 +7,7 @@ from app.agents.context import (
     format_concept,
     format_lore,
     format_outline,
+    format_pitches,
     format_revision,
     format_spine,
     format_style,
@@ -14,6 +15,7 @@ from app.agents.context import (
     format_volume_plan,
     planned_chapters,
 )
+from app.agents.playbook import playbook_text
 from app.llm.router import LLMRouter
 from app.prompts import render
 
@@ -71,6 +73,7 @@ async def draft_threads(
         concept=format_concept(concept),
         lore=format_lore(lore),
         spine=format_spine(spine),
+        playbook=playbook_text(concept, "threads"),
         requirements=requirements,
         revision=format_revision("当前线索", format_threads(current), instructions) if current else "",
     )
@@ -94,6 +97,7 @@ async def draft_outline(
         lore=format_lore(lore),
         spine=format_spine(spine),
         threads=format_threads(threads),
+        playbook=playbook_text(concept, "outline"),
         requirements=requirements,
         chapter_hint=f"（约 {chapters} 章）" if chapters else "",
         revision=format_revision("当前总纲", format_outline(current), instructions) if current else "",
@@ -104,13 +108,39 @@ async def draft_outline(
 async def plan_volume(
     llm: LLMRouter, blocks: dict[str, str], current: dict, instructions: str, *, purpose: str
 ) -> s.VolumePlanDraft:
-    """卷纲：开书时拆第一卷、写作中拆后面各卷共用。blocks 是拼好的各段上下文。"""
+    """卷纲：开书时拆第一卷、写作中拆后面各卷、比稿时按某个方向拆，都用这一个。blocks 是拼好的各段上下文。"""
     user = render(
         "plan_volume",
-        **blocks,
+        **{"direction": "", **blocks},
         revision=format_revision("当前卷纲", format_volume_plan(current), instructions) if current else "",
     )
     return await llm.structured("chief", s.VolumePlanDraft, persona("chief"), user, purpose=purpose)
+
+
+async def volume_directions(llm: LLMRouter, blocks: dict[str, str], *, purpose: str) -> s.VolumeDirections:
+    user = render("volume_directions", **blocks)
+    return await llm.structured("chief", s.VolumeDirections, persona("chief"), user, purpose=purpose)
+
+
+async def judge_pitches(
+    llm: LLMRouter, blocks: dict[str, str], pitches: list[dict], *, purpose: str
+) -> s.PitchJudgement:
+    """审稿比稿：pitches 是 [{pitch, direction, plan}]。"""
+    user = render("judge_pitches", **blocks, pitch_count=str(len(pitches)), pitches=format_pitches(pitches))
+    return await llm.structured("reviewer", s.PitchJudgement, persona("reviewer"), user, purpose=purpose)
+
+
+async def audit_volume(
+    llm: LLMRouter, blocks: dict[str, str], plan: dict, found: list[str], *, purpose: str
+) -> s.VolumeAudit:
+    """卷纲专项审稿。found 是程序已经查出的问题。"""
+    user = render(
+        "audit_volume",
+        **blocks,
+        plan=format_volume_plan(plan),
+        found="\n".join(f"- {line}" for line in found) or "（没有）",
+    )
+    return await llm.structured("reviewer", s.VolumeAudit, persona("reviewer"), user, purpose=purpose)
 
 
 async def critique_setup(llm: LLMRouter, idea: str, requirements: str, setup: dict[str, dict]) -> s.SetupCritique:
@@ -118,6 +148,7 @@ async def critique_setup(llm: LLMRouter, idea: str, requirements: str, setup: di
         "setup_critique",
         idea=idea,
         requirements=requirements,
+        playbook=playbook_text(setup.get("concept"), "review"),
         **{k: PART_FORMATTERS[k](setup.get(k) or {}) for k in s.SETUP_PARTS},
     )
     return await llm.structured("reviewer", s.SetupCritique, persona("reviewer"), user, purpose="开书·审稿")

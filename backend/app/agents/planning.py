@@ -82,3 +82,52 @@ REF = re.compile(r"F(\d+)", re.I)
 def ref_seq(ref: str) -> int | None:
     match = REF.search(ref or "")
     return int(match.group(1)) if match else None
+
+
+def schedule_issues(
+    units: list[dict[str, Any]], fresh: list[dict[str, Any]], ledger: list[dict[str, Any]], volume: int
+) -> list[dict[str, Any]]:
+    """卷纲的伏笔排期检查（程序算的，不靠模型）。
+
+    台账里计划在本卷埋下、回收的伏笔有没有排进单元；本卷新埋的伏笔，埋和收的单元是否存在、先后是否颠倒。
+    """
+    issues: list[dict[str, Any]] = []
+
+    def add(problem: str, suggestion: str, unit: int = 0) -> None:
+        issues.append(
+            {"aspect": "foreshadow", "unit": unit, "problem": problem, "suggestion": suggestion, "severity": "medium"}
+        )
+
+    done: dict[int, set[str]] = {}
+    for u in units:
+        for a in u.get("foreshadow_actions") or []:
+            seq = ref_seq(a.get("ref", ""))
+            if seq:
+                done.setdefault(seq, set()).add(a.get("action", ""))
+    for f in ledger:
+        status, code = f.get("status", "planned"), f"F{f.get('seq')}"
+        if status in ("abandoned", "resolved"):
+            continue
+        actions = done.get(f.get("seq"), set())
+        if f.get("plant_volume") == volume and status == "planned" and "埋下" not in actions:
+            add(
+                f"{code}「{f.get('description', '')}」计划在本卷埋下，卷纲里没有安排",
+                f"把{code}排进某个单元的伏笔动作（埋下）",
+            )
+        due = status == "planted" or f.get("plant_volume") == volume
+        if f.get("payoff_volume") == volume and due and "回收" not in actions:
+            add(
+                f"{code}「{f.get('description', '')}」计划在本卷回收，卷纲里没有安排",
+                f"把{code}排进某个单元的伏笔动作（回收）",
+            )
+    count = len(units)
+    for f in fresh:
+        plant, payoff = int(f.get("plant_unit") or 1), int(f.get("payoff_unit") or 0)
+        name = f"新伏笔「{f.get('description', '')}」"
+        if plant > count:
+            add(f"{name}埋在第{plant}单元，本卷只有 {count} 个单元", "改到存在的单元里埋下")
+        elif payoff and payoff > count:
+            add(f"{name}在第{payoff}单元回收，本卷只有 {count} 个单元", "改到存在的单元回收，或者改成下一卷回收", plant)
+        elif payoff and payoff < plant:
+            add(f"{name}回收（第{payoff}单元）比埋下（第{plant}单元）还早", "调整埋下或回收的单元", plant)
+    return issues

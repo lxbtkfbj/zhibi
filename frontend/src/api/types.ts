@@ -15,7 +15,7 @@ export interface InterviewQuestion {
 export type Pending =
   | { kind: 'setup_questions'; questions: InterviewQuestion[] }
   | { kind: 'setup_review'; round: number; title?: string }
-  | { kind: 'volume_review'; volume: number; title: string }
+  | { kind: 'volume_review'; volume: number; title: string; issues?: string[] }
   | { kind: 'trial_read'; chapters: number }
   | { kind: 'chapter_stuck'; chapter: number; title: string; issues: string[] }
 
@@ -126,6 +126,9 @@ export interface PlotUnit {
   key_events: string[]
   thread_beats: ThreadStep[]
   foreshadow_actions: ForeshadowStep[]
+  /** 本单元用到的套路（核心套路在前）与高潮的破局手法 */
+  tropes: string[]
+  resolution: string
   /** planned：还没出章纲；outlined：章纲已出；done：写完 */
   status: 'planned' | 'outlined' | 'done'
 }

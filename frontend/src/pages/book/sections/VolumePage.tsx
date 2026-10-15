@@ -182,6 +182,20 @@ function UnitCard({
                 <ThreadChips steps={unit.thread_beats} />
               </FieldBlock>
             )}
+            {(unit.tropes?.length > 0 || unit.resolution) && (
+              <FieldBlock label="套路与破局">
+                <ul className="flex flex-wrap gap-1.5">
+                  {unit.tropes?.map((t) => (
+                    <li key={t} className="rounded-full bg-chief-soft px-2.5 py-0.5 text-xs text-chief">
+                      {t}
+                    </li>
+                  ))}
+                  {unit.resolution && (
+                    <li className="rounded-full px-2.5 py-0.5 text-xs text-ink-3 ring-1 ring-line">破局 · {unit.resolution}</li>
+                  )}
+                </ul>
+              </FieldBlock>
+            )}
             {unit.foreshadow_actions.length > 0 && (
               <FieldBlock label="伏笔">
                 <ForeshadowChips actions={unit.foreshadow_actions} />

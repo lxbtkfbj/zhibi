@@ -60,6 +60,8 @@ UNIT_FIELDS = (
     "key_events",
     "thread_beats",
     "foreshadow_actions",
+    "tropes",
+    "resolution",
 )
 FORESHADOW_FIELDS = ("description", "span", "plant_plan", "payoff_plan", "plant_volume", "payoff_volume")
 

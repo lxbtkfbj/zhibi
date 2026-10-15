@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { AlertTriangle, ChevronDown } from 'lucide-react'
+import { AlertTriangle, Check, ChevronDown, X } from 'lucide-react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
 import type { Concept, InterviewQuestion, MeetingMessage, PlotUnit, Speaker, Spine, StoryThread } from '../../api/types'
@@ -48,10 +48,45 @@ interface OutlineData {
   volumes: { index: number; title: string; summary: string; stage?: string; antagonist?: string; chapter_count?: number }[]
   foreshadowings?: { seq: number; description: string; plant_volume?: number; payoff_volume?: number }[]
 }
+type UnitBrief = Pick<PlotUnit, 'index' | 'title' | 'chapter_count' | 'climax'> & Partial<Pick<PlotUnit, 'tropes' | 'resolution'>>
 interface VolumePlanData {
   volume: number
-  units: Pick<PlotUnit, 'index' | 'title' | 'chapter_count' | 'climax'>[]
+  units: UnitBrief[]
   new_foreshadowings: { seq: number; description: string }[]
+}
+interface DirectionsData {
+  volume: number
+  directions: { name: string; idea: string; difference?: string }[]
+}
+interface PitchData {
+  volume: number
+  pitch: number
+  name: string
+  idea: string
+  remark?: string
+  units: UnitBrief[]
+}
+interface ScoreRow {
+  pitch: number
+  name: string
+  cool?: number
+  weaving?: number
+  villain?: number
+  novelty?: number
+  total?: number
+  comment?: string
+}
+interface ScoresData {
+  volume: number
+  winner: number
+  merge: string
+  scores: ScoreRow[]
+}
+interface AuditData {
+  volume: number
+  verdict: 'pass' | 'revise'
+  checks: { aspect: string; ok: boolean; comment: string }[]
+  issues: { aspect: string; unit: number; problem: string; suggestion: string; severity: 'high' | 'medium' | 'low' }[]
 }
 interface ChapterPlanData {
   unit: string
@@ -82,6 +117,140 @@ const TARGET_NAME: Record<string, string> = {
   first_volume: '第一卷卷纲',
 }
 const SEVERITY: Record<string, string> = { high: '严重', medium: '中等', low: '轻微' }
+const ASPECT_NAME: Record<string, string> = { villain: '反派智商', rhythm: '爽点节奏', foreshadow: '伏笔排期', repetition: '套路重复' }
+const SCORE_COLUMNS: [keyof ScoreRow, string][] = [
+  ['cool', '爽点'],
+  ['weaving', '线索'],
+  ['villain', '反派'],
+  ['novelty', '新意'],
+]
+
+function TropeTags({ tropes, resolution }: { tropes?: string[]; resolution?: string }) {
+  if (!tropes?.length && !resolution) return null
+  return (
+    <span className="mx-1 inline-flex flex-wrap gap-1 align-middle">
+      {tropes?.map((t) => (
+        <span key={t} className="rounded bg-chief-soft px-1.5 py-px text-[11px] text-chief">
+          {t}
+        </span>
+      ))}
+      {resolution && <span className="rounded px-1.5 py-px text-[11px] text-ink-3 ring-1 ring-line">破局·{resolution}</span>}
+    </span>
+  )
+}
+
+function UnitList({ units }: { units: UnitBrief[] }) {
+  return (
+    <ol className="space-y-1.5 text-ink-2">
+      {units.map((u) => (
+        <li key={u.index}>
+          <span className="font-medium text-ink">
+            {u.index}. {u.title}
+          </span>
+          <span className="text-xs text-ink-3"> 约 {u.chapter_count} 章</span>
+          <TropeTags tropes={u.tropes} resolution={u.resolution} /> {u.climax}
+        </li>
+      ))}
+    </ol>
+  )
+}
+
+function PitchScores({ data }: { data: ScoresData }) {
+  const best = Math.max(1, ...data.scores.map((r) => r.total ?? 0))
+  return (
+    <div className="space-y-2.5">
+      <div className="scroll-thin overflow-x-auto">
+        <table className="w-full text-left tabular-nums">
+          <thead className="text-xs whitespace-nowrap text-ink-3">
+            <tr>
+              <th className="py-1 pr-2 font-normal">方案</th>
+              {SCORE_COLUMNS.map(([key, label]) => (
+                <th key={key} className="px-1.5 py-1 text-center font-normal">
+                  {label}
+                </th>
+              ))}
+              <th className="py-1 pl-2 font-normal">总分</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.scores.map((row) => {
+              const win = row.pitch === data.winner
+              return (
+                <tr key={row.pitch} className="border-t border-line">
+                  <td className="py-1.5 pr-2">
+                    <span className="flex items-center gap-1 whitespace-nowrap">
+                      <span className={clsx('font-medium', win ? 'text-seal' : 'text-ink')}>方案{row.pitch}</span>
+                      {win && <span className="rounded-sm border border-seal/40 px-1 text-[11px] leading-4 text-seal">胜出</span>}
+                    </span>
+                    <span className="block text-xs text-ink-3">{row.name}</span>
+                  </td>
+                  {SCORE_COLUMNS.map(([key]) => (
+                    <td key={key} className="px-1.5 text-center text-ink-2">
+                      {row[key] ?? '–'}
+                    </td>
+                  ))}
+                  <td className="py-1.5 pl-2">
+                    <span className="flex items-center gap-1.5">
+                      <span className={clsx('w-5 font-medium', win ? 'text-seal' : 'text-ink')}>{row.total ?? '–'}</span>
+                      <span className="h-1 w-12 overflow-hidden rounded-full bg-line">
+                        <span
+                          className={clsx('block h-full rounded-full transition-[width] duration-700', win ? 'bg-seal' : 'bg-line-2')}
+                          style={{ width: `${((row.total ?? 0) / best) * 100}%` }}
+                        />
+                      </span>
+                    </span>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      {data.scores
+        .filter((row) => row.comment)
+        .map((row) => (
+          <p key={row.pitch} className="text-ink-3">
+            <span className="text-ink-2">方案{row.pitch}：</span>
+            {row.comment}
+          </p>
+        ))}
+      {data.merge && (
+        <p className="rounded-lg bg-paper px-3 py-2 text-ink-2">
+          <span className="font-medium text-ink">融合：</span>
+          {data.merge}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function VolumeAudit({ data }: { data: AuditData }) {
+  return (
+    <div className="space-y-2">
+      <ul className="grid gap-1.5 sm:grid-cols-2">
+        {data.checks.map((c) => (
+          <li key={c.aspect} className="flex gap-2">
+            {c.ok ? <Check className="mt-1 size-3.5 shrink-0 text-lore" /> : <X className="mt-1 size-3.5 shrink-0 text-seal" />}
+            <span>
+              <span className="font-medium text-ink">{ASPECT_NAME[c.aspect] ?? c.aspect}</span>
+              <span className="text-ink-3"> · {c.comment}</span>
+            </span>
+          </li>
+        ))}
+      </ul>
+      {data.issues.map((issue, i) => (
+        <div key={i} className="rounded-lg bg-paper px-3 py-2">
+          <p className="text-xs text-ink-3">
+            {ASPECT_NAME[issue.aspect] ?? issue.aspect}
+            {issue.unit ? ` · 第${issue.unit}单元` : ''} · {SEVERITY[issue.severity]}
+          </p>
+          <p className="text-ink">{issue.problem}</p>
+          <p className="text-ink-2">→ {issue.suggestion}</p>
+        </div>
+      ))}
+    </div>
+  )
+}
 
 function ArtifactBody({ message }: { message: MeetingMessage }) {
   const { type, data } = message.payload ?? { type: '', data: null }
@@ -195,20 +364,38 @@ function ArtifactBody({ message }: { message: MeetingMessage }) {
     )
   }
   if (type === 'volume_plan') {
-    const v = data as VolumePlanData
+    return <UnitList units={(data as VolumePlanData).units} />
+  }
+  if (type === 'volume_directions') {
+    const d = data as DirectionsData
     return (
-      <ol className="space-y-1.5 text-ink-2">
-        {v.units.map((u) => (
-          <li key={u.index}>
-            <span className="font-medium text-ink">
-              {u.index}. {u.title}
+      <ol className="space-y-2">
+        {d.directions.map((dir, i) => (
+          <li key={i} className="flex gap-2.5">
+            <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-chief-soft font-serif text-xs text-chief">
+              {i + 1}
             </span>
-            <span className="text-xs text-ink-3"> 约 {u.chapter_count} 章</span> {u.climax}
+            <div>
+              <p className="font-medium text-ink">{dir.name}</p>
+              <p className="text-ink-2">{dir.idea}</p>
+              {dir.difference && <p className="text-xs text-ink-3">{dir.difference}</p>}
+            </div>
           </li>
         ))}
       </ol>
     )
   }
+  if (type === 'volume_pitch') {
+    const p = data as PitchData
+    return (
+      <div className="space-y-2">
+        {p.remark && <p className="text-ink-2">{p.remark}</p>}
+        <UnitList units={p.units} />
+      </div>
+    )
+  }
+  if (type === 'pitch_scores') return <PitchScores data={data as ScoresData} />
+  if (type === 'volume_audit') return <VolumeAudit data={data as AuditData} />
   if (type === 'chapter_plan') {
     const c = data as ChapterPlanData
     return (
@@ -286,8 +473,8 @@ function ArtifactBody({ message }: { message: MeetingMessage }) {
   return null
 }
 
-// 审稿意见、主线骨架、修改分工这类需要作者留意的，默认展开；提问在页面中间作答，这里收起
-const OPEN_BY_DEFAULT = new Set(['critique', 'spine', 'triage', 'threads'])
+// 审稿意见、主线骨架、修改分工、比稿结果这类需要作者留意的，默认展开；提问在页面中间作答，这里收起
+const OPEN_BY_DEFAULT = new Set(['critique', 'spine', 'triage', 'threads', 'volume_directions', 'pitch_scores', 'volume_audit'])
 
 function ArtifactCard({ message }: { message: MeetingMessage }) {
   const [open, setOpen] = useState(OPEN_BY_DEFAULT.has(message.payload?.type ?? ''))

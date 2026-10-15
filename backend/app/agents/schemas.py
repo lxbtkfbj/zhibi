@@ -216,6 +216,13 @@ class PlotUnitDraft(Lenient):
     foreshadow_actions: list[ForeshadowStep] = Field(
         default_factory=list, description="本单元对伏笔台账里已有伏笔的动作（埋下、提醒或回收）"
     )
+    tropes: list[str] = Field(
+        default_factory=list,
+        description="本单元用到的套路：核心套路写在第一个，最多再加一个；用题材打法「套路库」里的名称，如「拍卖会」",
+    )
+    resolution: str = Field(
+        default="", description="主角在高潮靠什么破局：从题材打法「破局手法」里选一类，只写类名，如「算计设局」"
+    )
 
 
 class NewForeshadowing(ForeshadowingDraft):
@@ -233,6 +240,86 @@ class VolumePlanDraft(Lenient):
         default_factory=list, description="本卷新埋的短线、中线伏笔，2-6 条"
     )
     remark: str = remark_field("这一卷怎么拆、节奏怎么起伏、最大的爽点在哪")
+
+
+class VolumeDirection(Lenient):
+    name: str = Field(description="方向名，4-8 字，如「借刀杀人」「感情线唱主角」")
+    idea: str = Field(description="这一稿怎么拆：主打什么套路、对手怎么谋划、高潮怎么打、感情线占多重，80-150 字")
+    difference: str = Field(default="", description="和其他方向最大的不同，一句话")
+
+
+class VolumeDirections(Lenient):
+    """拆卷纲之前，主编先想几个不同方向，每个方向各拆一份，交给审稿比稿。"""
+
+    directions: list[VolumeDirection] = Field(description="2-3 个方向，彼此要有实质差别")
+    remark: str = remark_field("这几个方向分别押在什么上")
+
+
+def _score(value: Any) -> Any:
+    """分数限制在 1-10：模型偶尔写成 0 分、11 分或「8分」。"""
+    if isinstance(value, str):
+        match = re.search(r"\d+", value)
+        value = int(match.group()) if match else 5
+    if isinstance(value, int | float):
+        return max(1, min(10, round(value)))
+    return value
+
+
+class PitchScore(Lenient):
+    pitch: int = Field(ge=1, description="方案序号，从 1 开始")
+    cool: int = Field(description="爽点，1-10 分：爽点够不够密、够不够足，卷末是不是全卷最大的高潮")
+    weaving: int = Field(description="线索交织，1-10 分：线索节拍是否都落到单元里，几条线是否互相牵动")
+    villain: int = Field(description="反派智商，1-10 分：对手的谋划是否合理，主角是不是赢在对手犯蠢")
+    novelty: int = Field(description="新意，1-10 分：和前面用过的套路、破局方式比有没有新东西")
+    comment: str = Field(description="一句话点评：最大的长处和短板")
+
+    @field_validator("cool", "weaving", "villain", "novelty", mode="before")
+    @classmethod
+    def _clamp(cls, value: Any) -> Any:
+        return _score(value)
+
+    @property
+    def total(self) -> int:
+        return self.cool + self.weaving + self.villain + self.novelty
+
+
+class PitchJudgement(Lenient):
+    """审稿比稿：给每份卷纲方案打分，选出最好的一份，必要时建议融合。"""
+
+    scores: list[PitchScore] = Field(description="每份方案一条")
+    winner: int = Field(ge=1, description="选中的方案序号")
+    merge: str = Field(
+        default="",
+        description="要从其他方案借来的内容：写清借哪个方案的哪个单元或哪个设计、放到选中方案的什么位置；不需要融合就留空",
+    )
+    remark: str = remark_field("为什么选这一份、它赢在哪里")
+
+
+AuditAspect = Literal["villain", "rhythm", "foreshadow", "repetition"]
+AUDIT_ASPECT_DESC = "villain 反派是否降智 / rhythm 爽点节奏 / foreshadow 伏笔排期 / repetition 套路重复"
+
+
+class AuditCheck(Lenient):
+    aspect: AuditAspect = Field(description=AUDIT_ASPECT_DESC)
+    ok: bool = Field(description="这一项是否过关")
+    comment: str = Field(description="一句话结论")
+
+
+class AuditIssue(Lenient):
+    aspect: AuditAspect = Field(description=AUDIT_ASPECT_DESC)
+    unit: int = Field(default=0, ge=0, description="问题出在第几个单元；整卷的问题填 0")
+    problem: str = Field(description="具体问题")
+    suggestion: str = Field(description="怎么改")
+    severity: Literal["high", "medium", "low"] = Field(description="high：必须改；medium：应该改；low：小建议")
+
+
+class VolumeAudit(Lenient):
+    """卷纲专项审稿：反派智商、爽点节奏、伏笔排期、套路重复。"""
+
+    verdict: Literal["pass", "revise"] = Field(description="pass：可以交给作者；revise：有必须修改的问题")
+    checks: list[AuditCheck] = Field(description="四项各一条")
+    issues: list[AuditIssue] = Field(default_factory=list, description="问题清单，最多 6 条，按严重程度排序")
+    remark: str = remark_field()
 
 
 class ChapterOutlineDraft(Lenient):

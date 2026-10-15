@@ -19,11 +19,13 @@ def _idea(user: str) -> str:
 
 
 def _concept(user: str) -> s.BookConcept:
+    # 点子里提到后宫时按后宫玄幻爽文来定，便于体验题材打法库的选择
+    harem = "后宫" in _idea(user)
     return s.BookConcept(
         title="青灯问道",
         alt_titles=["一灯照九州", "灯下问长生"],
-        genre="玄幻·修仙",
-        tags=["凡人流", "宗门", "智斗", "慢热成长"],
+        genre="玄幻·东方玄幻" if harem else "玄幻·修仙",
+        tags=["后宫", "爽文", "宗门", "智斗"] if harem else ["凡人流", "宗门", "智斗", "慢热成长"],
         logline=f"{_idea(user)}——杂役弟子陆远捡到一盏能照见他人寿元的青灯，从此在吃人的宗门里步步为营。",
         selling_points=[
             "青灯能看见他人剩余寿元，信息差带来的智斗爽感",
@@ -373,6 +375,8 @@ FIRST_VOLUME_UNITS = [
         key_events=["陆远挨打", "老瞎子塞给他一盏旧灯", "灯火照见寿元", "跟班暴毙"],
         thread_beats=[s.ThreadStep(thread="主线：青灯与寿元", beat="捡到青灯，确认能看见寿元")],
         foreshadow_actions=[s.ForeshadowStep(ref="F1", action="埋下", detail="挨打时随笔带过缺的小指")],
+        tropes=["以弱胜强"],
+        resolution="底牌显露",
     ),
     s.PlotUnitDraft(
         index=2,
@@ -385,6 +389,8 @@ FIRST_VOLUME_UNITS = [
         key_events=["被带去执法堂", "暗中观察寿元", "找到中毒证据", "当众对质"],
         thread_beats=[s.ThreadStep(thread="感情线：苏晚晴", beat="执法堂初见，互相怀疑")],
         foreshadow_actions=[s.ForeshadowStep(ref="F2", action="埋下", detail="远远看见宗主头顶只剩三年")],
+        tropes=["对质揭穿"],
+        resolution="算计设局",
     ),
     s.PlotUnitDraft(
         index=3,
@@ -397,6 +403,8 @@ FIRST_VOLUME_UNITS = [
         key_events=["追问老瞎子", "老瞎子病重", "坐化与遗言"],
         thread_beats=[s.ThreadStep(thread="谜团线：父母之死", beat="老瞎子留下半句遗言")],
         foreshadow_actions=[s.ForeshadowStep(ref="F3", action="埋下", detail="遗言只说了半句")],
+        tropes=["身份揭晓"],
+        resolution="借势借力",
     ),
     s.PlotUnitDraft(
         index=4,
@@ -408,16 +416,114 @@ FIRST_VOLUME_UNITS = [
         outcome="陆远成为外门弟子，发现考核中有人在偷偷收取寿元",
         key_events=["报名考核", "识破陷阱", "反制", "进入外门"],
         thread_beats=[s.ThreadStep(thread="反派线：玄冥宗高层", beat="赵乾在考核中设局")],
+        tropes=["比试竞赛"],
+        resolution="算计设局",
     ),
 ]
 
 UNIT_TEMPLATES = [
-    ("暗流", "查清对手的布局", "对手先一步设下圈套", "陆远看穿寿元的异常，反设一局", "对手吃了暗亏，却留下更大的隐患"),
-    ("交锋", "在比试中站稳脚跟", "对手借规则压人", "关键一战以弱胜强", "名声大振，也引来更强的敌人"),
-    ("夜探", "找到交易的证据", "守卫森严，线索真假难辨", "在最后一刻拿到账册", "账册指向一个没想到的人"),
-    ("围杀", "活着走出埋伏", "多方势力同时出手", "借敌人之间的矛盾脱身", "盟友受伤，陆远欠下人情"),
-    ("破局", "扭转被动局面", "对手掌握主动，步步紧逼", "底牌尽出的一场翻盘", "局势反转，主线向前推进一大步"),
+    (
+        "暗流",
+        "查清对手的布局",
+        "对手先一步设下圈套",
+        "陆远看穿寿元的异常，反设一局",
+        "对手吃了暗亏，却留下更大的隐患",
+        "对质揭穿",
+        "算计设局",
+    ),
+    (
+        "交锋",
+        "在比试中站稳脚跟",
+        "对手借规则压人",
+        "关键一战以弱胜强",
+        "名声大振，也引来更强的敌人",
+        "比试竞赛",
+        "底牌显露",
+    ),
+    (
+        "夜探",
+        "找到交易的证据",
+        "守卫森严，线索真假难辨",
+        "在最后一刻拿到账册",
+        "账册指向一个没想到的人",
+        "潜入调查",
+        "借势借力",
+    ),
+    (
+        "围杀",
+        "活着走出埋伏",
+        "多方势力同时出手",
+        "借敌人之间的矛盾脱身",
+        "盟友受伤，陆远欠下人情",
+        "绝境逃亡",
+        "算计设局",
+    ),
+    (
+        "破局",
+        "扭转被动局面",
+        "对手掌握主动，步步紧逼",
+        "底牌尽出的一场翻盘",
+        "局势反转，主线向前推进一大步",
+        "以弱胜强",
+        "底牌显露",
+    ),
 ]
+
+# 比稿时主编想的几个方向；方案几就把单元模板轮转几位，拆出来的卷纲各不相同
+DIRECTIONS = [
+    ("步步为营", "贴着本卷卡片走：每个单元一次信息差翻盘，对手一层层升级，卷末一战定位。", "最稳，节奏均匀"),
+    (
+        "借刀杀人",
+        "陆远不正面出手，借长老之间的矛盾让对手互相撕咬，自己坐收渔利；高潮是两派长老当众翻脸。",
+        "主角藏在幕后，智斗为主",
+    ),
+    (
+        "并肩查案",
+        "让苏晚晴的感情线唱主角：两人一明一暗查寿元交易，在互相试探里靠近；高潮是她为了陆远违抗执法堂。",
+        "感情线比重最大",
+    ),
+]
+
+
+def _revise_units(user: str, units: list[s.PlotUnitDraft]) -> list[s.PlotUnitDraft]:
+    """演示的修改稿：以当前版本为底（标题、关键事件、套路、伏笔动作都保留），再按修改要求改几处。"""
+    current = _section(user, "当前卷纲")
+    for m in re.finditer(r"单元(\d+)「([^」]*)」(.*?)(?=\n\n单元\d+「|\n\n本卷新埋|\Z)", current, re.S):
+        index, body = int(m.group(1)), m.group(3)
+        if not 1 <= index <= len(units):
+            continue
+        unit = units[index - 1]
+        unit.title = m.group(2)
+        # 每个字段只取一行（_match 带 re.S，这里必须用 [^\n] 防止吞掉后面几行）
+        for label, field in (("目标", "goal"), ("冲突", "conflict"), ("高潮", "climax"), ("结果", "outcome")):
+            setattr(unit, field, _match(rf"\n{label}：([^\n]+)", body) or getattr(unit, field))
+        events = _match(r"\n关键事件：([^\n]+)", body)
+        if events:
+            unit.key_events = events.split(" → ")
+        tropes, resolution = _match(r"\n套路：([^\n]+?)；", body), _match(r"；破局：([^\n]+)", body)
+        if tropes and tropes != "未标":
+            unit.tropes = tropes.split("、")
+        if resolution and resolution != "未标":
+            unit.resolution = resolution
+        unit.foreshadow_actions = [
+            s.ForeshadowStep(ref=ref, action=act) for act, ref in re.findall(r"(埋下|提醒|回收)(F\d+)", body)
+        ]
+    fix = _section(user, "修改要求")
+    for ref, act in re.findall(r"(F\d+)「[^」]*」计划在本卷(埋下|回收)", fix):
+        target = units[0] if act == "埋下" else units[-1]
+        target.foreshadow_actions.append(s.ForeshadowStep(ref=ref, action=act, detail="按审稿意见补排"))
+    if "反派智商" in fix:
+        units[min(2, len(units) - 1)].key_events.insert(2, "对手提前布下假账册当诱饵，陆远将计就计")
+    # 套路重复：换成和前后单元都不一样的套路
+    for index in {int(x) for x in re.findall(r"第(\d+)单元和上一个单元的核心套路都是", fix)}:
+        if not 1 <= index <= len(units):
+            continue
+        # 前一个、后一个单元的套路，以及审稿点名重复的套路，都要避开
+        near = {(units[i].tropes or [""])[0] for i in (index - 2, index) if 0 <= i < len(units)}
+        near |= set(re.findall(r"核心套路都是「(.+?)」", fix))
+        template = next(t for t in UNIT_TEMPLATES if t[5] not in near)
+        units[index - 1].tropes, units[index - 1].resolution = [template[5]], template[6]
+    return units
 
 
 def _volume_plan(user: str) -> s.VolumePlanDraft:
@@ -455,9 +561,11 @@ def _volume_plan(user: str) -> s.VolumePlanDraft:
         )
     count = int(_match(r"必须等于本卷预计的 (\d+) 章", user) or 30)
     n = max(3, round(count / 10))
+    direction = _match(r"【这一稿的方向：(.+?)】", user)
+    shift = next((i for i, d in enumerate(DIRECTIONS) if d[0] == direction), 0)
     units = []
     for i in range(n):
-        name, goal, conflict, climax, outcome = UNIT_TEMPLATES[i % len(UNIT_TEMPLATES)]
+        name, goal, conflict, climax, outcome, trope, resolution = UNIT_TEMPLATES[(i + shift) % len(UNIT_TEMPLATES)]
         units.append(
             s.PlotUnitDraft(
                 index=i + 1,
@@ -469,8 +577,21 @@ def _volume_plan(user: str) -> s.VolumePlanDraft:
                 outcome=outcome,
                 key_events=["起因", "试探", "冲突升级", "高潮", "收尾与钩子"],
                 thread_beats=[s.ThreadStep(thread="主线：青灯与寿元", beat=f"第{volume}卷第{i + 1}段推进")],
+                tropes=[trope],
+                resolution=resolution,
             )
         )
+    remark = (
+        f"第{volume}卷按「{direction}」拆成 {n} 段，前面蓄势，最后一段是全卷最大的高潮。"
+        if direction
+        else f"第{volume}卷我拆成 {n} 段，前面蓄势，最后一段是全卷最大的高潮。"
+    )
+    if revising:
+        units = _revise_units(user, units)
+        remark = f"第{volume}卷按意见改好了：给对手补了后手，重复的套路换掉了，漏排的伏笔也排进去了。"
+        if "融合建议" in _section(user, "修改要求"):
+            units[1].key_events.insert(1, "苏晚晴暗中提醒陆远小心长老")
+            remark = f"第{volume}卷以选中的方案为底，把另一份方案里苏晚晴暗中提醒的戏融进了第二段。"
     return s.VolumePlanDraft(
         units=units,
         new_foreshadowings=[
@@ -483,7 +604,59 @@ def _volume_plan(user: str) -> s.VolumePlanDraft:
                 payoff_unit=n,
             )
         ],
-        remark=f"第{volume}卷我拆成 {n} 段，前面蓄势，最后一段是全卷最大的高潮。",
+        remark=remark,
+    )
+
+
+def _directions() -> s.VolumeDirections:
+    return s.VolumeDirections(
+        directions=[s.VolumeDirection(name=n, idea=idea, difference=diff) for n, idea, diff in DIRECTIONS],
+        remark="这一卷我想了三种拆法：一种稳扎稳打，一种让陆远躲在幕后借刀杀人，一种让苏晚晴的感情线唱主角。各拆一份，请审稿比一比。",
+    )
+
+
+def _judge(user: str) -> s.PitchJudgement:
+    pitches = sorted({int(x) for x in re.findall(r"【方案(\d+)：", user)}) or [1]
+    table = {
+        1: (7, 6, 6, 5, "稳，但套路都是前面用过的"),
+        2: (8, 7, 9, 8, "对手之间的博弈最好看"),
+        3: (7, 8, 6, 7, "感情线细腻，反派偏弱"),
+    }
+    scores = []
+    for p in pitches:
+        cool, weaving, villain, novelty, comment = table.get(p, (6, 6, 6, 6, "中规中矩"))
+        scores.append(
+            s.PitchScore(pitch=p, cool=cool, weaving=weaving, villain=villain, novelty=novelty, comment=comment)
+        )
+    winner = 2 if 2 in pitches else pitches[0]
+    return s.PitchJudgement(
+        scores=scores,
+        winner=winner,
+        merge="把方案3里苏晚晴暗中提醒陆远的那场戏放进选中方案的第二单元，感情线不断档" if 3 in pitches else "",
+        remark=f"方案{winner}赢在反派会算计：长老之间互相下套，陆远在夹缝里翻盘，比单纯打脸好看。",
+    )
+
+
+def _audit() -> s.VolumeAudit:
+    # 演示：专项审稿总会挑出一个反派智商的问题，便于看到自动修改一轮
+    return s.VolumeAudit(
+        verdict="revise",
+        checks=[
+            s.AuditCheck(aspect="villain", ok=False, comment="第三单元的对手守着账册却不设防，像在等主角来拿"),
+            s.AuditCheck(aspect="rhythm", ok=True, comment="小高潮一个接一个，卷末最燃"),
+            s.AuditCheck(aspect="foreshadow", ok=True, comment="新伏笔埋收都排进了单元"),
+            s.AuditCheck(aspect="repetition", ok=True, comment="和第一卷的套路错开了"),
+        ],
+        issues=[
+            s.AuditIssue(
+                aspect="villain",
+                unit=3,
+                problem="对手明知陆远在查账册，却没有任何防备",
+                suggestion="让对手提前布下假账册当诱饵，陆远将计就计",
+                severity="medium",
+            )
+        ],
+        remark="整体能打，就是第三单元的对手太好对付了，得给他一手后招。",
     )
 
 
@@ -628,6 +801,9 @@ async def respond(schema: type[BaseModel], system: str, user: str) -> BaseModel:
         s.ThreadsDraft: _threads,
         s.OutlineDraft: _outline,
         s.VolumePlanDraft: lambda: _volume_plan(user),
+        s.VolumeDirections: _directions,
+        s.PitchJudgement: lambda: _judge(user),
+        s.VolumeAudit: _audit,
         s.SetupCritique: _critique,
         s.InterviewDraft: _interview,
         s.RevisionTriage: lambda: _absorb(user) if "【作者刚才的插话】" in user else _triage(user),

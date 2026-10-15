@@ -189,6 +189,9 @@ def format_unit(u: dict[str, Any]) -> str:
     ]
     if u.get("thread_beats"):
         lines.append(f"推进线索：{format_steps(u['thread_beats'])}")
+    if u.get("tropes") or u.get("resolution"):
+        tropes = "、".join(t for t in u.get("tropes") or [] if t) or "未标"
+        lines.append(f"套路：{tropes}；破局：{u.get('resolution') or '未标'}")
     if u.get("foreshadow_actions"):
         lines.append(
             "伏笔："
@@ -217,6 +220,26 @@ def format_volume_plan(plan: dict[str, Any]) -> str:
             for f in fresh
         )
     return text
+
+
+def format_direction(d: dict[str, Any]) -> str:
+    """比稿时某一份方案的方向，告诉主编这一稿要往哪拆。"""
+    if not d:
+        return ""
+    lines = [f"【这一稿的方向：{d.get('name', '')}】", f"思路：{d.get('idea', '')}"]
+    if d.get("difference"):
+        lines.append(f"和其他方向的区别：{d['difference']}")
+    lines.append("请沿着这个方向拆这一卷，和其他方向拉开差距；本卷卡片的卷末目标、线索节拍和作者的要求仍要落实。")
+    return "\n".join(lines)
+
+
+def format_pitches(pitches: list[dict[str, Any]]) -> str:
+    """比稿：每份方案的方向和完整卷纲。"""
+    return "\n\n".join(
+        f"【方案{p.get('pitch')}：{(p.get('direction') or {}).get('name', '')}】\n"
+        f"思路：{(p.get('direction') or {}).get('idea', '')}\n{format_volume_plan(p.get('plan') or {})}"
+        for p in pitches
+    )
 
 
 MAX_REQUIREMENTS = 40

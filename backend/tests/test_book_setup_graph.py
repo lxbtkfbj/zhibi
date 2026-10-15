@@ -238,6 +238,52 @@ async def test_interview_answers_become_requirements(sessionmaker, monkeypatch):
         assert "主角叫什么名字？——云澈" in prompts[name], name
 
 
+async def test_genre_playbook_goes_into_planning_prompts(sessionmaker, monkeypatch):
+    """点子是后宫玄幻：概念的类型和标签选中「后宫玄幻爽文」打法，线索、总纲、卷纲、审稿都按它来。"""
+    book_id, job_id = await make_job(sessionmaker, idea="后宫玄幻，一个能看见别人寿命的少年")
+    prompts: dict[str, str] = {}
+    original = demo.respond
+
+    async def capture(schema, system, user):
+        prompts.setdefault(schema.__name__, user)
+        return await original(schema, system, user)
+
+    monkeypatch.setattr(demo, "respond", capture)
+    await execute_job(job_id)
+    status, _, error = await job_status(sessionmaker, job_id)
+    assert status == "waiting_author", error
+
+    assert "【题材打法：后宫玄幻爽文" in prompts["ThreadsDraft"]
+    assert "女主登场节奏" in prompts["ThreadsDraft"] and "◆ 套路库" not in prompts["ThreadsDraft"]
+    assert "◆ 分卷" in prompts["OutlineDraft"] and "宗门大比（全书最多 3 次）" in prompts["OutlineDraft"]
+    volume = prompts["VolumePlanDraft"]
+    assert "◆ 破局手法" in volume and "退婚打脸（全书最多 1 次）" in volume
+    assert "【套路使用情况】\n（还没用过任何套路，这是第一卷）" in volume
+    assert "◆ 套路上限" in prompts["SetupCritique"]
+    async with sessionmaker() as session:
+        statuses = (
+            (
+                await session.execute(
+                    select(MeetingMessage.content).where(
+                        MeetingMessage.job_id == job_id, MeetingMessage.kind == "status"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        # 第一卷的单元标上了套路和破局手法，后面各卷据此统计、防重复
+        units = (await session.execute(select(PlotUnit).where(PlotUnit.book_id == book_id))).scalars().all()
+    assert any("题材打法：后宫玄幻爽文" in s for s in statuses)
+    assert all(u.tropes and u.resolution for u in units)
+
+    # 普通修仙文用通用打法
+    _, plain_job = await make_job(sessionmaker)
+    prompts.clear()
+    await execute_job(plain_job)
+    assert "【题材打法：通用" in prompts["ThreadsDraft"]
+
+
 async def test_note_mid_run_revises_finished_parts(sessionmaker, monkeypatch):
     book_id, job_id = await make_job(sessionmaker)
     prompts: list[tuple[str, str]] = []
