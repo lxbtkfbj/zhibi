@@ -10,10 +10,10 @@ export interface InterviewQuestion {
   recommended: number
 }
 
-export type PieceKey = 'concept' | 'nodes' | 'cast' | 'fill' | 'first_volume'
+export type PieceKey = 'concept' | 'protagonist' | 'world' | 'segment' | 'first_volume'
 export type SetupPiece = PieceKey
 export type PieceStatus = 'todo' | 'drafting' | 'waiting' | 'confirmed' | 'done'
-export type SetupTarget = 'concept' | 'spine' | 'lore' | 'outline' | 'threads' | 'first_volume'
+export type SetupTarget = 'concept' | 'protagonist' | 'world' | 'segment' | 'volumes' | 'first_volume'
 
 export interface AuthorChoice {
   topic: string
@@ -27,7 +27,9 @@ export interface BookDirection {
   titles?: string[]
   logline: string
   protagonist: string
+  drive?: string
   golden_finger: string
+  core_loop?: string
   opening: string
   selling_points: string[]
   stage_ladder: string
@@ -60,10 +62,10 @@ export interface NodeUpdateProposal {
  * volume_review 某一卷的卷纲拍板；trial_read 前几章试读；chapter_stuck 某章重写两次仍未通过。
  */
 export type Pending =
-  | { kind: 'setup_questions'; questions: InterviewQuestion[] }
-  | { kind: 'setup_review'; round: number; title?: string }
-  | { kind: 'setup_directions'; reference?: string; directions: BookDirection[]; recommended: number; length: InterviewQuestion & { chapter_words?: number } }
-  | { kind: 'setup_piece'; piece: PieceKey; round: number; warnings?: string[]; decisions?: AuthorChoice[]; suggestions?: SetupSuggestion[]; unlock_requests?: { target: SetupTarget; reason: string }[]; candidates?: { node_id: string; nodes: NodeCandidate[] } | null }
+  | { kind: 'setup_questions'; flow?: number; questions: InterviewQuestion[] }
+  | { kind: 'setup_review'; flow?: number; round: number; title?: string }
+  | { kind: 'setup_directions'; flow?: number; reference?: string; directions: BookDirection[]; recommended: number; length: InterviewQuestion & { chapter_words?: number } }
+  | { kind: 'setup_piece'; flow?: number; flags?: Record<string, string[]>; review?: { question: string; problem: string; suggestion: string }[]; piece: PieceKey; round: number; warnings?: string[]; decisions?: AuthorChoice[]; suggestions?: SetupSuggestion[]; unlock_requests?: { target: SetupTarget; reason: string }[]; candidates?: { node_id: string; nodes: NodeCandidate[] } | null }
   | { kind: 'volume_review'; volume: number; title: string; issues?: string[]; node_update?: NodeUpdateProposal | null; node_conflict?: string }
   | { kind: 'trial_read'; chapters: number }
   | { kind: 'chapter_stuck'; chapter: number; title: string; issues: string[] }
@@ -92,6 +94,8 @@ export interface Concept {
   logline?: string
   selling_points?: string[]
   protagonist_hook?: string
+  core_loop?: string
+  benchmark?: string
   tone?: string
   /** 全书计划总字数，单位万字 */
   target_length?: number

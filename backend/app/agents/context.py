@@ -18,7 +18,16 @@ def format_concept(c: dict[str, Any]) -> str:
             f"类型：{c.get('genre', '')}；标签：{'、'.join(c.get('tags', []))}",
             f"一句话简介：{c.get('logline', '')}",
             f"核心卖点：\n{_lines(c.get('selling_points', []))}",
-            f"主角钩子：{c.get('protagonist_hook', '')}",
+            *[
+                f"{label}：{c[key]}"
+                for label, key in (
+                    ("目标读者", "target_reader"),
+                    ("对标", "benchmark"),
+                    ("核心循环", "core_loop"),
+                    ("主角钩子", "protagonist_hook"),
+                )
+                if c.get(key)
+            ],
             f"基调：{c.get('tone', '')}",
             f"篇幅：{format_length(c)}",
         ]
@@ -352,6 +361,52 @@ def format_spine(spine: dict[str, Any], world: dict | None = None) -> str:
     )
 
 
+def format_segment_part(segment: dict, world: dict | None = None) -> str:
+    """第一段的完整当前版本，修改时也要带上开篇五项。"""
+    if not segment:
+        return "（暂无）"
+    blocks = [format_spine(segment, world)]
+    nodes = segment.get("nodes") or []
+    info = (nodes[1].get("segment") or {}) if len(nodes) > 1 else {}
+    if info:
+        blocks.append("这一段的规划：\n" + format_segment_info(info, world))
+    opening = format_opening(info.get("opening"))
+    if opening:
+        blocks.append("开篇：\n" + opening.split("\n", 1)[1])
+    blocks.append("信息差：\n" + format_secrets(segment.get("secrets") or []))
+    blocks.append("这一段的长线期待：\n" + format_ledger(segment.get("expectations") or []))
+    return "\n\n".join(blocks)
+
+
+def format_volumes_part(volumes: dict) -> str:
+    """这一段的分卷、线索和按节点分组的人物出场。"""
+    if not volumes:
+        return "（暂无）"
+    anchors: dict[int, list[str]] = {}
+    titles: dict[int, str] = {}
+    for anchor in volumes.get("anchors") or []:
+        if anchor.get("node_title"):
+            titles[anchor.get("node", 0)] = anchor["node_title"]
+        anchors.setdefault(anchor.get("node", 0), []).append(
+            f"{anchor.get('character', '')} {anchor.get('kind', '')}"
+            + (f"——{anchor['note']}" if anchor.get("note") else "")
+        )
+    return "\n\n".join(
+        [
+            "分卷：\n" + ("\n\n".join(format_volume_card(v) for v in volumes.get("volumes") or []) or "（暂无）"),
+            "线索：\n" + format_threads(volumes),
+            "人物出场：\n"
+            + (
+                "\n".join(
+                    f"- 节点 {node}" + (f"「{titles[node]}」" if titles.get(node) else "") + "：" + "；".join(items)
+                    for node, items in sorted(anchors.items())
+                )
+                or "（暂无）"
+            ),
+        ]
+    )
+
+
 def format_threads(threads: dict[str, Any] | list[dict[str, Any]], volume: int | None = None) -> str:
     """线索列表；给了 volume 时只列出这一卷前后的节拍，控制篇幅。"""
     items = threads.get("threads", []) if isinstance(threads, dict) else threads
@@ -479,7 +534,10 @@ def format_volume_plan(plan: dict[str, Any]) -> str:
     """卷纲：剧情单元 + 本卷新埋的伏笔。"""
     if not plan:
         return "（暂无）"
-    text = format_units(plan.get("units", []))
+    heading = [
+        f"{label}：{plan[key]}" for label, key in (("这一卷想做成", "want"), ("卷首处境", "pressure")) if plan.get(key)
+    ]
+    text = ("\n".join(heading) + "\n\n" if heading else "") + format_units(plan.get("units", []))
     fresh = plan.get("new_foreshadowings") or []
     if fresh:
         text += "\n\n本卷新埋的伏笔：\n" + "\n".join(
@@ -512,7 +570,9 @@ def format_direction_choice(direction: dict[str, Any] | None) -> str:
         "【作者选定的方向】",
         f"方向「{direction.get('name', '')}」：{direction.get('logline', '')}",
         f"主角：{direction.get('protagonist', '')}",
+        *([f"驱动力：{direction['drive']}"] if direction.get("drive") else []),
         f"金手指：{direction.get('golden_finger', '')}",
+        *([f"核心循环：{direction['core_loop']}"] if direction.get("core_loop") else []),
         f"开局：{direction.get('opening', '')}",
         f"卖点：{'；'.join(direction.get('selling_points') or [])}",
         f"舞台阶梯：{direction.get('stage_ladder', '')}",
@@ -572,9 +632,8 @@ def format_target_node(volume: dict[str, Any], nodes: list[dict[str, Any]]) -> s
 
 def format_locked(state: dict[str, Any]) -> str:
     from app.agents.setup_puzzle import PIECE_NAMES, PIECE_ORDER
-    from app.services.setup_store import spine_from_legacy
 
-    nodes = spine_from_legacy(state.get("spine") or {}).get("nodes") or []
+    nodes = (state.get("segment") or {}).get("nodes") or []
     pinned = [
         f"节点 {index}「{node.get('title', '')}」"
         for index, node in enumerate(nodes, 1)

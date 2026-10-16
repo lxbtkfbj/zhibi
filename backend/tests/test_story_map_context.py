@@ -142,5 +142,5 @@ def test_volume_unit_and_chapter_fields():
 
 
 def test_first_volume_context_reads_new_opening():
-    blocks = first_volume_blocks({"spine": {"nodes": [{"kind": "opening", "event": "新的开篇"}]}})
+    blocks = first_volume_blocks({"segment": {"nodes": [{"kind": "opening", "event": "新的开篇"}]}})
     assert "开篇设计：新的开篇" in blocks["story_so_far"]

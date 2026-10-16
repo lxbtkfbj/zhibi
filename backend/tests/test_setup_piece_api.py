@@ -31,7 +31,7 @@ def queued(monkeypatch):
     return calls
 
 
-async def gate(sessionmaker, *, kind="setup_piece", piece="nodes", confirmed=("concept",), status="waiting_author"):
+async def gate(sessionmaker, *, kind="setup_piece", piece="segment", confirmed=("concept",), status="waiting_author"):
     async with sessionmaker() as session:
         book = Book(
             title="接口拼图测试",
@@ -172,7 +172,7 @@ async def test_piece_revise_flips_and_feedback_are_durable(client, sessionmaker,
     book_id, job_id, nodes = await gate(sessionmaker)
     body = {
         "action": "revise",
-        "piece": "nodes",
+        "piece": "segment",
         "node_id": str(nodes[1]),
         "feedback": "  转折提前  ",
         "flips": [{"topic": "感情线", "choice": "单女主"}],
@@ -186,7 +186,7 @@ async def test_piece_revise_flips_and_feedback_are_durable(client, sessionmaker,
 @pytest.mark.parametrize("action", ["confirm", "delegate", "candidates", "fill", "revise"])
 async def test_piece_supported_actions(client, sessionmaker, queued, action):
     book_id, job_id, nodes = await gate(sessionmaker)
-    body = {"action": action, "piece": "nodes"}
+    body = {"action": action, "piece": "segment"}
     if action in ("candidates", "fill", "revise"):
         body["node_id"] = str(nodes[1])
     if action == "fill":
@@ -199,8 +199,8 @@ async def test_piece_supported_actions(client, sessionmaker, queued, action):
     assert (
         messages[-1]["content"]
         == {
-            "confirm": "确认「关键节点」，下一块。",
-            "delegate": "「关键节点」交给编辑部定。",
+            "confirm": "确认「第一段」，下一块。",
+            "delegate": "「第一段」交给编辑部定。",
             "candidates": "给节点 2 出 3 个候选。",
             "fill": "节点 2：中间要有一场宗门大比",
             "revise": "请修改节点 2「待补」。",
@@ -211,13 +211,13 @@ async def test_piece_supported_actions(client, sessionmaker, queued, action):
 @pytest.mark.parametrize(
     "body,expected",
     [
-        ({"action": "confirm", "piece": "cast"}, 409),
-        ({"action": "revise", "piece": "nodes", "feedback": " "}, 422),
-        ({"action": "candidates", "piece": "nodes"}, 422),
-        ({"action": "fill", "piece": "nodes"}, 422),
-        ({"action": "reopen", "piece": "nodes"}, 422),
-        ({"action": "unlock", "piece": "cast"}, 422),
-        ({"action": "revise", "piece": "nodes", "flips": [{"topic": " ", "choice": "x"}]}, 422),
+        ({"action": "confirm", "piece": "world"}, 409),
+        ({"action": "revise", "piece": "segment", "feedback": " "}, 422),
+        ({"action": "candidates", "piece": "segment"}, 422),
+        ({"action": "fill", "piece": "segment"}, 422),
+        ({"action": "reopen", "piece": "segment"}, 422),
+        ({"action": "unlock", "piece": "world"}, 422),
+        ({"action": "revise", "piece": "segment", "flips": [{"topic": " ", "choice": "x"}]}, 422),
     ],
 )
 async def test_piece_rejects_invalid_and_stale_requests(client, sessionmaker, queued, body, expected):
@@ -231,15 +231,16 @@ async def test_piece_cross_book_current_piece_and_pinned_guards(client, sessionm
     _, job_id, nodes = await gate(sessionmaker)
     path = f"/api/jobs/{job_id}/piece"
     assert (
-        await client.post(path, json={"action": "fill", "piece": "nodes", "node_id": str(nodes[3])})
+        await client.post(path, json={"action": "fill", "piece": "segment", "node_id": str(nodes[3])})
     ).status_code == 422
     assert (
-        await client.post(path, json={"action": "fill", "piece": "nodes", "node_id": str(nodes[2])})
+        await client.post(path, json={"action": "fill", "piece": "segment", "node_id": str(nodes[2])})
     ).status_code == 409
-    _, cast_job, cast_nodes = await gate(sessionmaker, piece="cast", confirmed=("concept", "nodes"))
+    _, cast_job, cast_nodes = await gate(sessionmaker, piece="world", confirmed=("concept", "segment"))
     assert (
         await client.post(
-            f"/api/jobs/{cast_job}/piece", json={"action": "candidates", "piece": "cast", "node_id": str(cast_nodes[1])}
+            f"/api/jobs/{cast_job}/piece",
+            json={"action": "candidates", "piece": "world", "node_id": str(cast_nodes[1])},
         )
     ).status_code == 422
     assert not queued
@@ -247,26 +248,28 @@ async def test_piece_cross_book_current_piece_and_pinned_guards(client, sessionm
 
 @pytest.mark.parametrize("action", ["reopen", "unlock"])
 async def test_reopen_previously_confirmed_piece(client, sessionmaker, queued, action):
-    book_id, job_id, _ = await gate(sessionmaker, piece="fill", confirmed=("concept", "nodes", "cast"))
+    book_id, job_id, _ = await gate(
+        sessionmaker, piece="first_volume", confirmed=("concept", "protagonist", "world", "segment")
+    )
     response = await client.post(
-        f"/api/jobs/{job_id}/piece", json={"action": action, "piece": "nodes", "feedback": "节点顺序按作者新想法调整"}
+        f"/api/jobs/{job_id}/piece", json={"action": action, "piece": "segment", "feedback": "节点顺序按作者新想法调整"}
     )
     assert response.status_code == 200, response.text
     assert await requirements(sessionmaker, book_id) == {("节点顺序按作者新想法调整", "note")}
-    assert queued[-1][1]["piece"] == "nodes"
+    assert queued[-1][1]["piece"] == "segment"
 
 
 async def test_unconfirmed_piece_cannot_reopen_and_wrong_gate_is_409(client, sessionmaker, queued):
-    _, job_id, _ = await gate(sessionmaker, piece="fill", confirmed=("concept",))
+    _, job_id, _ = await gate(sessionmaker, piece="first_volume", confirmed=("concept",))
     assert (
-        await client.post(f"/api/jobs/{job_id}/piece", json={"action": "reopen", "piece": "nodes"})
+        await client.post(f"/api/jobs/{job_id}/piece", json={"action": "reopen", "piece": "segment"})
     ).status_code == 422
     assert (
         await client.post(f"/api/jobs/{job_id}/directions", json={"action": "redo", "feedback": "换方向"})
     ).status_code == 409
     _, wrong, _ = await gate(sessionmaker, status="running")
     assert (
-        await client.post(f"/api/jobs/{wrong}/piece", json={"action": "confirm", "piece": "nodes"})
+        await client.post(f"/api/jobs/{wrong}/piece", json={"action": "confirm", "piece": "segment"})
     ).status_code == 409
     assert not queued
 
@@ -274,7 +277,7 @@ async def test_unconfirmed_piece_cannot_reopen_and_wrong_gate_is_409(client, ses
 async def test_double_submit_only_enqueues_once(client, sessionmaker, queued):
     book_id, job_id, _ = await gate(sessionmaker)
     responses = await asyncio.gather(
-        *[client.post(f"/api/jobs/{job_id}/piece", json={"action": "confirm", "piece": "nodes"}) for _ in range(2)]
+        *[client.post(f"/api/jobs/{job_id}/piece", json={"action": "confirm", "piece": "segment"}) for _ in range(2)]
     )
     assert sorted(response.status_code for response in responses) == [200, 409]
     assert len(queued) == 1

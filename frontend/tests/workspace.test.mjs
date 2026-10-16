@@ -4,12 +4,10 @@ import { artifactTarget, composerRoute, conversationContains, currentTarget, dir
 const job = { id: 'job', kind: 'book_setup', status: 'running', pending: null }
 const msg = (type, data = {}, extra = {}) => ({ id: 1, job_id: 'job', kind: 'artifact', speaker: 'chief', content: '', payload: { type, data }, ...extra })
 
-test('开书左栏共用地图路径的两块只选中当前块，其他三块保持路由判断', () => {
-  for (const current of ['nodes', 'fill', 'cast', null]) {
-    assert.equal(puzzleSidebarActive('nodes', current), current === 'nodes')
-    assert.equal(puzzleSidebarActive('fill', current), current === 'fill')
+test('新五块左栏一律按路由匹配，不按当前工作块覆盖导航状态', () => {
+  for (const current of ['concept', 'protagonist', 'world', 'segment', 'first_volume', null]) {
+    for (const piece of ['concept', 'protagonist', 'world', 'segment', 'first_volume']) assert.equal(puzzleSidebarActive(piece, current), undefined)
   }
-  for (const piece of ['concept', 'cast', 'first_volume']) assert.equal(puzzleSidebarActive(piece, piece), undefined)
 })
 
 test('写作顶栏用真实卷位置和距节点章数，并保留工作、等待、失败状态', () => {
@@ -36,7 +34,7 @@ test('写作顶栏兼容旧卷、未开写、最后一段及完结', () => {
   assert.equal(progressText(book,[],null,null,{...writing,volumes:[{...volume,target_node_id:'deleted-node'}]}), '第 1 卷 · 已定稿 1 章 · 正在写最后一段，离结局还有 1 章 · 编辑部空闲')
   assert.equal(progressText({...book,chapters_final:2},[],null,null,{...writing,chapters:[chapter,{...chapter,id:'c2',index:2}]}), '第 1 卷 · 已定稿 2 章 · 全书完结')
 })
-for (const [type, suffix] of [['concept', '/concept'], ['lore', '/characters'], ['spine', '/spine'], ['threads', '/threads'], ['outline', '/spine']]) {
+for (const [type, suffix] of [['protagonist', '/protagonist'], ['world', '/world'], ['segment', '/spine'], ['segment_volumes', '/spine'], ['concept', '/concept'], ['lore', '/characters'], ['spine', '/spine'], ['threads', '/threads'], ['outline', '/spine']]) {
   test(`setup follows ${type}`, () => assert.equal(currentTarget('book', job, [msg(type)], null).path, `/books/book${suffix}`))
 }
 test('setup defaults to overview and ignores artifacts from previous jobs', () => assert.equal(currentTarget('book', job, [msg('lore', {}, { job_id: 'old' })], null).path, '/books/book'))
@@ -79,7 +77,7 @@ test('rewrite is anchored to the author request even when review references anot
 
 test('puzzle pending routes each piece and direction selection', () => {
   assert.deepEqual(pendingTarget({kind:'setup_directions'}, 'book'), {path:'/books/book',label:'开书方向'})
-  for (const [piece, suffix, number, name] of [['concept','/concept',1,'定调'],['nodes','/spine',2,'关键节点'],['cast','/characters',3,'人物上轴'],['fill','/spine',4,'填中间'],['first_volume','/volume/1',5,'第一卷']]) {
+  for (const [piece, suffix, number, name] of [['concept','/concept',1,'定调'],['protagonist','/protagonist',2,'主角'],['world','/world',3,'世界与人'],['segment','/spine',4,'第一段'],['first_volume','/volume/1',5,'第一卷']]) {
     assert.deepEqual(pendingTarget({kind:'setup_piece',piece}, 'book'), {path:`/books/book${suffix}`,label:`第 ${number} 块：${name}`})
   }
 })
@@ -89,25 +87,25 @@ test('puzzle artifacts have human stage labels', () => {
   assert.deepEqual(artifactTarget(msg('outline'),'book'), {path:'/books/book/spine',label:'填中间'})
 })
 test('puzzle progress distinguishes work, confirmation, direction selection and legacy mode', () => {
-  const book = {active_job:job,setup_progress:{mode:'puzzle',current:'nodes'},chapters_final:0,status:'setting_up'}
+  const book = {active_job:job,setup_progress:{mode:'puzzle',current:'segment'},chapters_final:0,status:'setting_up'}
   const messages = [msg('',{}, {kind:'status',content:'主编在定节点…'})]
-  assert.equal(progressText(book,messages,null,null), '开书 · 第 2 块「关键节点」· 主编在定节点')
-  assert.equal(progressText({...book,active_job:{...job,status:'waiting_author',pending:{kind:'setup_piece',piece:'nodes'}}},[],null,null), '等你确认：关键节点')
+  assert.equal(progressText(book,messages,null,null), '开书 · 第 4 块「第一段」· 主编在定节点')
+  assert.equal(progressText({...book,active_job:{...job,status:'waiting_author',pending:{kind:'setup_piece',piece:'segment'}}},[],null,null), '等你确认：第一段')
   assert.equal(progressText({...book,active_job:{...job,status:'waiting_author',pending:{kind:'setup_directions'}}},[],null,null), '等你选择：开书方向')
   assert.equal(progressText({...book,setup_progress:{mode:'oneshot'}},messages,null,null),'开书中 · 主编在定节点')
 })
 test('node conversation routing revises waiting pieces and never grants a removed prefix', () => {
   const selection = nodeFeedback({id:'node-3',index:3,title:'飞升神界'})
-  const waiting = {...job,status:'waiting_author',pending:{kind:'setup_piece',piece:'nodes'}}
+  const waiting = {...job,status:'waiting_author',pending:{kind:'setup_piece',piece:'segment'}}
   assert.equal(selection.prefix, '关于节点 3「飞升神界」：')
-  assert.deepEqual(composerRoute(waiting,`${selection.prefix}换个敌人`,selection),{kind:'piece',action:'revise',piece:'nodes',node_id:'node-3'})
-  assert.deepEqual(composerRoute(waiting,'换个敌人',selection),{kind:'piece',action:'revise',piece:'nodes'})
+  assert.deepEqual(composerRoute(waiting,`${selection.prefix}换个敌人`,selection),{kind:'piece',action:'revise',piece:'segment',node_id:'node-3'})
+  assert.deepEqual(composerRoute(waiting,'换个敌人',selection),{kind:'piece',action:'revise',piece:'segment'})
   assert.equal(retainedNodeFeedback('',selection),null)
-  assert.deepEqual(composerRoute(waiting,selection.prefix,null),{kind:'piece',action:'revise',piece:'nodes'})
+  assert.deepEqual(composerRoute(waiting,selection.prefix,null),{kind:'piece',action:'revise',piece:'segment'})
   assert.deepEqual(composerRoute(job,selection.prefix,selection),{kind:'note'})
   assert.deepEqual(composerRoute(null,selection.prefix,selection),{kind:'note'})
   assert.deepEqual(composerRoute({...waiting,pending:{kind:'setup_directions'}},'换一批',selection),{kind:'directions',action:'redo'})
-  for (const piece of ['concept','cast','fill','first_volume']) {
+  for (const piece of ['concept','protagonist','world','first_volume']) {
     assert.deepEqual(composerRoute({...waiting,pending:{kind:'setup_piece',piece}},`${selection.prefix}换个敌人`,selection),{kind:'piece',action:'revise',piece})
   }
 })

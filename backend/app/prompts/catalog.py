@@ -8,12 +8,12 @@ from app.prompts import VARIABLE, canonical_name, default_content
 CATALOG = [
     ("setup_interview", "动笔前提问", "开书", "chief", "开书前了解作者的点子"),
     ("setup_directions", "开书方向", "开书", "chief", "逐块确认模式下先给作者几个方向"),
-    ("setup_concept", "定书的概念", "开书", "chief", "起书名、确定概念与篇幅"),
-    ("setup_spine", "定关键节点", "开书", "chief", "规划故事主线"),
+    ("setup_concept", "定调", "开书", "chief", "开书第一步：定调"),
+    ("setup_protagonist", "定主角", "开书", "chief", "开书第二步：主角卡"),
+    ("setup_world", "世界、第一张地图和这里的人", "开书", "lorekeeper", "开书第三步：世界与人"),
+    ("setup_segment", "第一段怎么走与全书方向", "开书", "chief", "开书第四步：第一段的走向"),
+    ("split_segment", "这一段分卷与线索", "开书", "chief", "开书第四步分卷；写作中定下一段后分卷"),
     ("setup_node_slot", "节点候选与补空位", "开书", "chief", "作者要换节点或补空位时"),
-    ("setup_lore", "建世界观、人物与信息差", "开书", "lorekeeper", "创建或修改世界观与人物"),
-    ("setup_outline", "全书总纲（填中间）", "开书", "chief", "规划全书分卷"),
-    ("setup_threads", "线索规划", "开书", "chief", "规划各条线索"),
     ("setup_critique", "审开书方案", "开书", "reviewer", "审阅完整开书方案"),
     ("setup_triage", "处理作者意见", "开书", "chief", "收到开书方案修改意见时"),
     ("setup_notes", "处理作者插话", "开书", "chief", "开书进行中处理插话与设置修改"),
@@ -43,6 +43,12 @@ CATALOG = [
 BY_NAME = {row[0]: row for row in CATALOG}
 
 VARIABLE_LABELS = {
+    "protagonist": "主角卡",
+    "segment": "这一段",
+    "volumes": "分卷与线索",
+    "focus": "这次审什么",
+    "opening": "开篇落地",
+    "volume_hint": "分卷提示",
     "chosen_direction": "作者选定的方向",
     "previous": "上一轮的方向",
     "slot": "要补的位置",

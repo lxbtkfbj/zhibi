@@ -63,9 +63,11 @@ export function ConceptPage() {
               <EditableList items={concept.selling_points ?? []} onSave={(selling_points) => save({ selling_points })} locked={working} />
             </FieldBlock>
             <div className="space-y-7">
-              <FieldBlock label="主角钩子">
+              {concept.protagonist_hook && <FieldBlock label="主角钩子">
                 <EditableText value={concept.protagonist_hook ?? ''} onSave={(protagonist_hook) => save({ protagonist_hook })} locked={working} multiline />
-              </FieldBlock>
+              </FieldBlock>}
+              <FieldBlock label="核心循环"><EditableText value={concept.core_loop ?? ''} onSave={(core_loop) => save({ core_loop })} locked={working} multiline /></FieldBlock>
+              <FieldBlock label="对标"><EditableText value={concept.benchmark ?? ''} onSave={(benchmark) => save({ benchmark })} locked={working} multiline /></FieldBlock>
               <FieldBlock label="基调与文风">
                 <EditableText value={concept.tone ?? ''} onSave={(tone) => save({ tone })} locked={working} multiline />
               </FieldBlock>

@@ -86,16 +86,16 @@ export function SpinePage() {
   const spine: Spine = book.spine ?? {}
   const nodes = query.data ?? []
   const position = writingPosition(nodes, outline?.volumes ?? [], chapters)
-  const complete = isWritingComplete(outline?.volumes ?? [], chapters)
+  const complete = isWritingComplete(outline?.volumes ?? [], chapters, nodes)
   const writing = chapters.some(chapter => chapter.status === 'final')
   const setup = book.status === 'setting_up' || (job?.kind === 'book_setup' && ['queued', 'running', 'waiting_author'].includes(job.status))
   const pending = job?.status === 'waiting_author' && job.pending?.kind === 'setup_piece' ? job.pending : null
-  const canRequestNodes = !writing && setup && pending?.piece === 'nodes'
+  const canRequestNodes = !writing && setup && pending?.piece === 'segment'
   const busy = working || pieceAction.isPending || mutations.create.isPending || mutations.update.isPending || mutations.remove.isPending || mutations.reorder.isPending
   const counts = nodeCounts(nodes)
   const bands = segments(nodes, outline?.volumes ?? [])
   const candidateKey = JSON.stringify(pending?.candidates ?? null)
-  const candidates = !writing && candidateKey !== dismissedCandidates ? pending?.candidates : null
+  const candidates = canRequestNodes && candidateKey !== dismissedCandidates ? pending?.candidates : null
   const longThreads = (bible.data?.foreshadowings ?? []).filter(item => item.span === '长').sort((a, b) => Number(b.kind === '期待') - Number(a.kind === '期待') || a.seq - b.seq)
   const save = (patch: Partial<Spine>) => update.mutateAsync({ spine: patch })
   const run = async (action: () => Promise<unknown>) => {
@@ -105,7 +105,7 @@ export function SpinePage() {
   }
   const requestNode = async (node: StoryNode, action: 'fill' | 'candidates', feedback?: string) => {
     if (!job || !canRequestNodes) return
-    await run(async () => { await pieceAction.mutateAsync({ jobId: job.id, action, piece: 'nodes', node_id: node.id, feedback }); if (action === 'candidates') setDismissedCandidates('') })
+    await run(async () => { await pieceAction.mutateAsync({ jobId: job.id, action, piece: 'segment', node_id: node.id, feedback }); if (action === 'candidates') setDismissedCandidates('') })
   }
   const insertAfter = (node: StoryNode) => {
     if (canRequestNodes) void run(() => mutations.create.mutateAsync({ title: '留一个空位', status: 'empty', after_node_id: node.id, volume: node.volume }))
@@ -134,8 +134,8 @@ export function SpinePage() {
   if (query.isError) return <div><ErrorText error={query.error} /><Button variant="soft" onClick={() => void query.refetch()}>重新加载节点</Button></div>
 
   return <div data-testid="story-puzzle-board">
-    <PieceDecisions piece="nodes" /><PieceDecisions piece="fill" />
-    <PageHeader eyebrow="全书地图" title={setup && book.setup_progress?.pieces?.nodes !== 'confirmed' ? '关键节点' : '从开篇到结局'} subtitle={<><span className="block" data-testid="node-counts">{counts.total} 个节点 · {counts.pinned} 铁钉 · {counts.pencil} 暂定 · {counts.empty} 留空</span><span className="mt-1 block text-sm">先钉住故事的重要转折，再把人物与每一卷放到合适的位置。</span></>} />
+    <PieceDecisions piece="segment" />
+    <PageHeader eyebrow="全书地图" title={setup && book.setup_progress?.pieces?.segment !== 'confirmed' ? '第一段' : '从开篇到结局'} subtitle={<><span className="block" data-testid="node-counts">{counts.total} 个节点 · {counts.pinned} 铁钉 · {counts.pencil} 暂定 · {counts.empty} 留空</span><span className="mt-1 block text-sm">先钉住故事的重要转折，再把人物与每一卷放到合适的位置。</span></>} />
     {writing && <div className="mb-8 border-b border-line pb-6"><StoryMapStrip nodes={nodes} volumes={outline?.volumes ?? []} chapters={chapters} onNodeSelect={node => manualNavigate(`/books/${bookId}/spine#story-node-${node.id}`)} /></div>}
     <Locked locked={working} />
     <ErrorText error={error} />
@@ -162,7 +162,7 @@ export function SpinePage() {
             </div>
             {!!node.anchors?.length && <div className="mt-4 flex flex-wrap gap-2">{node.anchors.map(anchor => <span key={anchor.id} tabIndex={0} className="group/anchor relative rounded-full bg-lore-soft px-2.5 py-1 text-xs text-lore focus-visible:outline-2 focus-visible:outline-lore" title={anchor.note}>{anchor.character_name} · {anchor.kind}{anchor.note && <span role="tooltip" className="pointer-events-none absolute bottom-full left-0 z-10 mb-2 hidden w-56 rounded-lg border border-line-2 bg-card p-3 text-xs leading-relaxed text-ink shadow-[var(--shadow-paper)] group-hover/anchor:block group-focus/anchor:block">{anchor.note}</span>}</span>)}</div>}
             <div className="mt-4 border-t border-line pt-3 text-xs text-ink-2"><p className="mb-1">批注</p><EditableText value={node.editor_note} onSave={editor_note => mutations.update.mutateAsync({ id: node.id, editor_note })} locked={busy} multiline placeholder="（暂无批注）" className="text-xs" />{!!node.techniques?.length && <div className="mt-2 flex flex-wrap gap-1.5">{node.techniques.map(name => <TechniqueChip key={name} name={name} />)}</div>}</div>
-            {!writing && node.status === 'empty' && <><EmptyNodeForm disabled={busy || !canRequestNodes} onFill={feedback => requestNode(node, 'fill', feedback)} onCandidates={() => void requestNode(node, 'candidates')} />{!canRequestNodes && !working && <p className="mt-2 text-xs leading-relaxed text-ink-2">请先重新打开「关键节点」，再让编辑部补全这个空位。</p>}</>}
+            {!writing && canRequestNodes && node.status === 'empty' && <><EmptyNodeForm disabled={busy} onFill={feedback => requestNode(node, 'fill', feedback)} onCandidates={() => void requestNode(node, 'candidates')} /></>}
             <div className="mt-4 flex flex-wrap items-center gap-1 border-t border-line pt-2">
               {node.status !== 'empty' && <NodeAction label={`${node.status === 'pinned' ? '改暂定' : '钉死'}节点 ${node.index}`} disabled={busy} onClick={() => void run(() => mutations.update.mutateAsync({ id: node.id, status: node.status === 'pinned' ? 'pencil' : 'pinned' }))}>{node.status === 'pinned' ? <PinOff className="size-4" /> : <Pin className="size-4" />}</NodeAction>}
               <NodeAction label={`改节点 ${node.index}「${node.title}」`} disabled={busy} onClick={() => requestNodeFeedback(node)}><MessageSquare className="size-4" /></NodeAction>

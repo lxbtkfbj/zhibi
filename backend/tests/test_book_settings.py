@@ -349,7 +349,7 @@ async def test_delete_invalidates_author_feedback_but_preserves_reviewer_instruc
             "requirements_ledger_ready": True,
             "feedback": "让主角永远失败",
             "feedback_sources": ["让主角永远失败"],
-            "instructions": {"concept": "审稿要求修复逻辑。改成失意者的故事。", "lore": "审稿要求修复人物年龄矛盾。"},
+            "instructions": {"concept": "审稿要求修复逻辑。改成失意者的故事。", "world": "审稿要求修复人物年龄矛盾。"},
             "instruction_sources": {"concept": ["让主角永远失败"]},
             "instruction_fallbacks": {"concept": "审稿要求修复逻辑。"},
         },
@@ -357,7 +357,7 @@ async def test_delete_invalidates_author_feedback_but_preserves_reviewer_instruc
     )
     assert current["feedback"] == ""
     assert current["feedback_sources"] == []
-    assert current["instructions"] == {"concept": "审稿要求修复逻辑。", "lore": "审稿要求修复人物年龄矛盾。"}
+    assert current["instructions"] == {"concept": "审稿要求修复逻辑。", "world": "审稿要求修复人物年龄矛盾。"}
 
 
 @pytest.mark.parametrize("kind", ["trial_read", "volume_review"])

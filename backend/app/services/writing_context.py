@@ -20,9 +20,12 @@ from app.agents.context import (
     format_character_state,
     format_concept,
     format_ledger,
+    format_opening,
+    format_protagonist,
     format_requirements,
     format_reveals,
     format_secrets,
+    format_segment_info,
     format_spine,
     format_style,
     format_target_node,
@@ -518,6 +521,13 @@ async def volume_blocks(
     )
     prev = next((v for v in volumes if v.index == volume.index - 1), None)
     following = next((v for v in volumes if v.index == volume.index + 1), None)
+    target = next((node for node in nodes if str(node.get("id")) == str(volume.target_node_id)), {})
+    segment = target.get("segment") or {}
+    no_following = (
+        "无（后面的卷写到再定）"
+        if segment and target.get("kind") != "ending" and not segment.get("finale")
+        else "无（这是最后一卷）"
+    )
     neighbors = []
     if prev is not None:
         units = list(
@@ -529,9 +539,7 @@ async def volume_blocks(
         neighbors.append(f"上一卷：{format_volume_card(volume_dict(prev, nodes))}\n各单元结果：\n{recap}")
     else:
         neighbors.append("上一卷：无（这是第一卷）")
-    neighbors.append(
-        "下一卷：" + (format_volume_card(volume_dict(following, nodes)) if following else "无（这是最后一卷）")
-    )
+    neighbors.append("下一卷：" + (format_volume_card(volume_dict(following, nodes)) if following else no_following))
     first_chapter = (
         await session.scalar(select(func.coalesce(func.max(Chapter.index), 0)).where(Chapter.book_id == book.id))
     ) + 1
@@ -556,10 +564,18 @@ async def volume_blocks(
         return True, float("inf"), secret["seq"]
 
     hidden_secrets.sort(key=reveal_distance)
+    protagonist = next((_char_dict(character) for character in characters if character.role_type == "主角"), None)
     return {
+        "segment": format_segment_info(segment, book.world)
+        if segment
+        else "（这本书开书时还没有分段规划，按本卷卡片和走向的节点规划）",
+        "protagonist": format_protagonist(
+            book.protagonist or {}, protagonist, hook=(book.concept or {}).get("protagonist_hook", "")
+        ),
+        "opening": format_opening(segment["opening"]) if volume.index == 1 and segment.get("opening") else "",
         "volume_index": str(volume.index),
         "concept": format_concept({**(book.concept or {}), "chapter_words": chapter_words(book)}),
-        "spine": format_spine({**(book.spine or {}), "nodes": nodes}),
+        "spine": format_spine({**(book.spine or {}), "nodes": nodes}, book.world),
         "threads": format_threads(await load_threads(session, book.id), volume=volume.index),
         "volume": format_volume_card(volume_dict(volume, nodes)),
         "target_node": format_target_node(volume_dict(volume, nodes), nodes),

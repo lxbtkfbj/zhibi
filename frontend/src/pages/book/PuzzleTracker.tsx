@@ -21,7 +21,7 @@ export function PuzzleTracker() {
   const counts = nodeCounts(nodes)
   if (!progress.show) return null
   const current = progress.pieces.find(piece => piece.key === progress.current) ?? progress.pieces[0]
-  const name = (key: string, label: string) => key === 'nodes' ? `节点 ${counts.pinned}/${counts.total}` : label
+  const name = (key: string, label: string) => key === 'segment' ? `第一段 ${counts.pinned}/${counts.total}` : label
   return <section aria-label="开书拼图进度" data-testid="puzzle-tracker" className="shrink-0 border-b border-divider bg-paper-2 px-4 py-3">
     <button type="button" aria-expanded={expanded} aria-controls="puzzle-pieces" onClick={() => setExpanded(value => !value)} className="flex w-full items-center gap-2 text-left text-sm text-chief md:hidden">
       <span>{current.number} {name(current.key, current.name)} · {progress.choosing ? '等你选方向' : PIECE_STATUS_LABELS[current.status]}</span><ChevronDown className={clsx('ml-auto size-4', expanded && 'rotate-180')} />

@@ -1,4 +1,4 @@
-"""第二包任务 1：新字段只做加法，旧方案与写作卷纲不会清掉作者数据。"""
+"""第二包任务 2：新五步往返与写作卷纲不会清掉作者维护字段。"""
 
 from copy import deepcopy
 
@@ -20,7 +20,8 @@ async def seed(session):
         book.id,
         {
             "concept": {"title": "归途"},
-            "spine": {
+            "protagonist": book.protagonist,
+            "segment": {
                 "nodes": [
                     {"kind": "opening", "title": "失踪"},
                     {
@@ -38,8 +39,8 @@ async def seed(session):
                     {"kind": "ending", "title": "团圆"},
                 ]
             },
-            "lore": {"characters": [{"name": "林岚", "goal": "找回妹妹", "want": "先找到城里的线人"}]},
-            "outline": {
+            "world": {**book.world, "characters": [{"name": "林岚", "goal": "找回妹妹", "want": "先找到城里的线人"}]},
+            "volumes": {
                 "volumes": [
                     {
                         "index": 1,
@@ -67,12 +68,12 @@ async def test_setup_roundtrip_preserves_new_fields_ids_and_existing_shape(sessi
             for model in (StoryNode, Character, Volume, PlotUnit)
         }
         original = deepcopy(await load_setup(session, book.id))
-        assert set(original) == {"concept", "spine", "lore", "threads", "outline", "first_volume"}
+        assert set(original) == {"concept", "protagonist", "world", "segment", "volumes", "first_volume"}
         await save_setup(session, book.id, original)
         await session.commit()
         assert await load_setup(session, book.id) == original
         assert book.protagonist == {"name": "林岚", "pursuit": "找回妹妹"}
-        assert book.world == {"surface": "超凡藏在暗处"}
+        assert book.world["surface"] == "超凡藏在暗处"
         assert (character.aliases, character.notes, character.is_alive) == (["小岚"], "作者备注", False)
         for model, ids in identities.items():
             assert (
@@ -89,8 +90,8 @@ async def test_setup_missing_or_null_text_fields_preserve_existing_values(sessio
         original = deepcopy(await load_setup(session, book.id))
         payload = deepcopy(original)
         for item, fields in (
-            (payload["lore"]["characters"][0], ("want",)),
-            (payload["outline"]["volumes"][0], ("want", "pressure")),
+            (payload["world"]["characters"][0], ("want",)),
+            (payload["volumes"]["volumes"][0], ("want", "pressure")),
             (payload["first_volume"]["units"][0], ("loop",)),
         ):
             for field in fields:
@@ -98,12 +99,12 @@ async def test_setup_missing_or_null_text_fields_preserve_existing_values(sessio
                     item.pop(field)
                 else:
                     item[field] = None
-        for node in payload["spine"]["nodes"]:
+        for node in payload["segment"]["nodes"]:
             node.pop("segment")
         if whole_setup:
             await save_setup(session, book.id, payload)
         else:
-            for piece in ("nodes", "cast", "fill", "first_volume"):
+            for piece in ("world", "segment", "first_volume"):
                 await save_piece(session, book.id, piece, payload)
         await session.commit()
         assert await load_setup(session, book.id) == original
@@ -113,15 +114,16 @@ async def test_setup_empty_text_fields_explicitly_clear_values(sessionmaker):
     async with sessionmaker() as session:
         book = await seed(session)
         payload = await load_setup(session, book.id)
-        payload["lore"]["characters"][0]["want"] = ""
-        payload["outline"]["volumes"][0].update(want="", pressure="")
+        payload["world"]["characters"][0]["want"] = ""
+        payload["volumes"]["volumes"][0].update(want="", pressure="")
+        payload["first_volume"].update(want="", pressure="")
         payload["first_volume"]["units"][0]["loop"] = ""
         await save_setup(session, book.id, payload)
         await session.commit()
         loaded = await load_setup(session, book.id)
-        assert loaded["lore"]["characters"][0]["want"] == ""
-        assert loaded["outline"]["volumes"][0]["want"] == ""
-        assert loaded["outline"]["volumes"][0]["pressure"] == ""
+        assert loaded["world"]["characters"][0]["want"] == ""
+        assert loaded["volumes"]["volumes"][0]["want"] == ""
+        assert loaded["volumes"]["volumes"][0]["pressure"] == ""
         assert loaded["first_volume"]["units"][0]["loop"] == ""
 
 

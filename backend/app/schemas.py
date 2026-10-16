@@ -635,7 +635,7 @@ class Decision(BaseModel):
     feedback: str = Field("", max_length=5000)
 
 
-SetupPiece = Literal["concept", "nodes", "cast", "fill", "first_volume"]
+SetupPiece = Literal["concept", "protagonist", "world", "segment", "first_volume"]
 
 
 class DirectionDecision(BaseModel):

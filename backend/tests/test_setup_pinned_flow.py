@@ -9,6 +9,7 @@ from sqlalchemy import select
 from app.agents import editorial, schemas
 from app.config import get_settings
 from app.graphs.book_setup import build_setup_graph
+from app.llm import demo
 from app.models import Book, Job, StoryNode
 from tests import test_setup_puzzle_flow as puzzle_flow
 
@@ -18,12 +19,12 @@ flow = puzzle_flow.flow
 @pytest.fixture
 def aggressive_node_rewrite(monkeypatch):
     """首次起草用演示模型；修改时故意改写所有节点，检验程序而非模型自觉保护铁钉。"""
-    original = editorial.draft_spine
+    original = editorial.draft_segment
     calls = []
 
-    async def rewrite(llm, concept, requirements, current, instruction, **kwargs):
+    async def rewrite(llm, concept, protagonist, world, requirements, current, instruction, **kwargs):
         if not current:
-            return await original(llm, concept, requirements, current, instruction, **kwargs)
+            return await original(llm, concept, protagonist, world, requirements, current, instruction, **kwargs)
         calls.append(instruction)
         items = [
             schemas.StoryNodeDraft(
@@ -39,26 +40,41 @@ def aggressive_node_rewrite(monkeypatch):
             )
             for index, node in enumerate(current["nodes"], 1)
         ]
-        return schemas.StorySpine(
-            core_conflict=current["core_conflict"],
-            theme=current["theme"],
-            protagonist_arc=current["protagonist_arc"],
-            nodes=items,
-            remark="节点修改完成。",
+        return demo._segment("").model_copy(
+            update={
+                "core_conflict": current["core_conflict"],
+                "theme": current["theme"],
+                "protagonist_arc": current["protagonist_arc"],
+                "nodes": items,
+                "remark": "节点修改完成。",
+            }
         )
 
-    monkeypatch.setattr(editorial, "draft_spine", rewrite)
+    monkeypatch.setattr(editorial, "draft_segment", rewrite)
     return calls
 
 
 async def setup_waiting(flow, mode):
     if mode == "puzzle":
         book_id, job_id = await puzzle_flow.new_puzzle(flow)
-        await puzzle_flow.confirm(flow, job_id, "concept")
+        for piece in ("concept", "protagonist", "world"):
+            await puzzle_flow.confirm(flow, job_id, piece)
     else:
         result = await flow("POST", "/books", {"idea": "一个少年捡到青灯", "mode": "oneshot"})
         book_id, job_id = result["book"]["id"], result["job"]["id"]
         assert (await flow("GET", f"/jobs/{job_id}"))["pending"]["kind"] == "setup_review"
+    before = await flow("GET", f"/books/{book_id}/nodes")
+    for index in range(4):
+        await flow(
+            "POST",
+            f"/books/{book_id}/nodes",
+            {
+                "title": f"作者远景{index}",
+                "event": "作者已经想到的远景",
+                "status": "pencil",
+                "after_node_id": before[1]["id"],
+            },
+        )
     before = await flow("GET", f"/books/{book_id}/nodes")
     for item in before[1:3]:
         await flow("PATCH", f"/nodes/{item['id']}", {"status": "pinned"})
@@ -110,7 +126,7 @@ async def test_demo_without_node_model_substitution_revises_named_pin(flow, sess
         f"/jobs/{job_id}/piece",
         {
             "action": "revise",
-            "piece": "nodes",
+            "piece": "segment",
             "node_id": before[1]["id"],
             "feedback": "发生什么改为主角主动救出师父",
         },
@@ -126,7 +142,7 @@ async def test_named_pin_http_persistence_and_one_round_permission(flow, session
         path = f"/jobs/{job_id}/piece"
         body = {
             "action": "revise",
-            "piece": "nodes",
+            "piece": "segment",
             "node_id": before[1]["id"],
             "feedback": "改成主角主动救出师父",
         }
@@ -149,7 +165,7 @@ async def test_named_pin_http_persistence_and_one_round_permission(flow, session
         # 再次调用节点模型，但只修改暂定卡片；上轮铁钉授权不得复用。
         body = {
             "action": "revise",
-            "piece": "nodes",
+            "piece": "segment",
             "node_id": before[3]["id"],
             "feedback": "只调整这张暂定卡片的铺垫",
         }
@@ -218,7 +234,7 @@ async def test_pencil_revision_keeps_author_inserted_pins_after_delete_and_reord
         f"/jobs/{job_id}/piece",
         {
             "action": "revise",
-            "piece": "nodes",
+            "piece": "segment",
             "node_id": selected["id"],
             "feedback": "发生什么改为先救下被困的同门",
         },

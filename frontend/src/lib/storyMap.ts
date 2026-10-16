@@ -2,9 +2,9 @@ import type { ChapterBrief, PieceKey, PieceStatus, SetupProgress, SetupTarget, S
 
 export const PIECES = [
   { key: 'concept', name: '定调', path: '/concept', number: '①' },
-  { key: 'nodes', name: '关键节点', path: '/spine', number: '②' },
-  { key: 'cast', name: '人物上轴', path: '/characters', number: '③' },
-  { key: 'fill', name: '填中间', path: '/spine', number: '④' },
+  { key: 'protagonist', name: '主角', path: '/protagonist', number: '②' },
+  { key: 'world', name: '世界与人', path: '/world', number: '③' },
+  { key: 'segment', name: '第一段', path: '/spine', number: '④' },
   { key: 'first_volume', name: '第一卷', path: '/volume/1', number: '⑤' },
 ] as const satisfies readonly { key: PieceKey; name: string; path: string; number: string }[]
 
@@ -13,7 +13,7 @@ export const PIECE_STATUS_LABELS: Record<PieceStatus, string> = {
 }
 
 export const targetPiece: Record<SetupTarget, PieceKey> = {
-  concept: 'concept', spine: 'nodes', lore: 'cast', outline: 'fill', threads: 'fill', first_volume: 'first_volume',
+  concept: 'concept', protagonist: 'protagonist', world: 'world', segment: 'segment', volumes: 'segment', first_volume: 'first_volume',
 }
 
 /** 旧书没有进度时五块均未开始，不从产出或章数臆测确认状态。 */
@@ -89,7 +89,9 @@ function volumeWritingComplete(volume: Volume, chapters: ChapterBrief[]): boolea
 }
 
 /** 计划章数可能偏少；比例达到 1 不代表仍有草稿或未写章节的书已经完结。 */
-export function isWritingComplete(volumes: Volume[], chapters: ChapterBrief[]): boolean {
+export function isWritingComplete(volumes: Volume[], chapters: ChapterBrief[], nodes: StoryNode[] = []): boolean {
+  const last = [...volumes].sort((a, b) => a.index - b.index).at(-1)
+  if (nodes.some(node => node.segment) && nodes.find(node => node.id === last?.target_node_id)?.kind !== 'ending') return false
   return volumes.length > 0 && chapters.some(chapter => chapter.status === 'final') &&
     chapters.every(chapter => chapter.status === 'final') && volumes.every(volume => volumeWritingComplete(volume, chapters))
 }
@@ -129,11 +131,12 @@ export function writingPosition(nodes: StoryNode[], volumes: Volume[], chapters:
   return result
 }
 
-export function writingPositionText(position: WritingPosition, volumes: Volume[], chapters: ChapterBrief[]): string {
+export function writingPositionText(position: WritingPosition, volumes: Volume[], chapters: ChapterBrief[], nodes: StoryNode[] = []): string {
   if (position.volume == null) return ''
   const total = volumes.reduce((sum, volume) => sum + plannedVolumeChapters(volume), 0)
   const done = chapters.filter(chapter => chapter.status === 'final').length
-  if (isWritingComplete(volumes, chapters)) return '全书完结'
+  if (isWritingComplete(volumes, chapters, nodes)) return '全书完结'
+  if (isWritingComplete(volumes, chapters)) return '这一段已写完，下一段待规划'
   const current = `第 ${position.volume} 卷 ${position.doneInVolume}/${position.volumeChapters} 章`
   if (position.nextNode) return `${current} · 离「${position.nextNode.title}」还有 ${position.chaptersToNode ?? 0} 章`
   // 历史卷没有目标节点时只呈现确实知道的章数，不臆测正在接近哪个节点。
@@ -271,7 +274,7 @@ export function outlineArtifact(data: unknown) {
 export function directionsArtifact(data: unknown) {
   const draft = object(data)
   return rows(draft.directions).map(d => ({
-    name: text(d.name), logline: text(d.logline), protagonist: text(d.protagonist), golden_finger: text(d.golden_finger),
+    name: text(d.name), logline: text(d.logline), protagonist: text(d.protagonist), drive: text(d.drive), golden_finger: text(d.golden_finger), core_loop: text(d.core_loop),
     opening: text(d.opening), stage_ladder: text(d.stage_ladder), tone: text(d.tone), reader: text(d.reader), difference: text(d.difference),
     selling_points: Array.isArray(d.selling_points) ? d.selling_points.filter((p): p is string => typeof p === 'string') : [],
     ...editorialMeta(d),

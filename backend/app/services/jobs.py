@@ -7,6 +7,14 @@ from app.models import Book, Chapter, Job
 
 ACTIVE_STATUSES = ("queued", "running", "waiting_author")
 BUSY_STATUSES = ("queued", "running")
+LEGACY_SETUP_MESSAGE = (
+    "这个开书任务是按旧流程开的，开书流程已经更新。请点「按新流程重开」："
+    "保留你的点子、作者要求、已选的方向和已确认的定调，其余按新步骤重做。"
+)
+
+
+def is_legacy_setup(job: Job) -> bool:
+    return job.kind == "book_setup" and (job.params or {}).get("flow") != 2
 
 
 def new_setup_job(book: Book, ask: bool = False, mode: str | None = None) -> Job:
@@ -15,6 +23,7 @@ def new_setup_job(book: Book, ask: bool = False, mode: str | None = None) -> Job
         kind="book_setup",
         thread_id=f"setup-{book.id}-{uuid.uuid4().hex[:8]}",
         params={
+            "flow": 2,
             "idea": book.idea,
             "style_reference": book.style_reference,
             "ask": ask,

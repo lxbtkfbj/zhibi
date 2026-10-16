@@ -107,13 +107,13 @@ async def test_new_default_does_not_reinterpret_legacy_books(client, sessionmake
 
 
 def test_demo_concept_reflects_author_flip_and_cross_piece_fix():
-    from app.llm.demo import _concept, _critique
+    from app.llm.demo import _concept, _critique, _protagonist
 
     concept = _concept("【作者的点子】\n跨块审稿演示\n\n把「感情线」改成「从欢喜冤家开始」")
     assert concept.decisions[0].chosen == "从欢喜冤家开始"
     assert "从欢喜冤家开始" in concept.selling_points[-1]
     critique = _critique("跨块审稿演示\n【第一卷卷纲】\n已经做好")
-    issue = next(i for i in critique.issues if i.target == "concept")
-    revised = _concept(f"【作者的点子】\n跨块审稿演示\n\n{issue.suggestion}")
-    assert "每次点灯消耗一天寿元" in revised.protagonist_hook
-    assert not any(i.target == "concept" for i in _critique(revised.model_dump_json()).issues)
+    issue = next(i for i in critique.issues if i.target == "protagonist")
+    revised = _protagonist(f"【修改要求】\n{issue.suggestion}")
+    assert "每次点灯消耗一天寿元" in revised.finger
+    assert not any(i.target == "protagonist" for i in _critique("跨块审稿演示\n" + revised.model_dump_json()).issues)

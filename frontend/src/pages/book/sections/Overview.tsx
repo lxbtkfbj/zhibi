@@ -5,6 +5,7 @@ import { Cloud } from '../../../components/decor'
 import { StoryMapStrip } from '../../../components/StoryMapStrip'
 import { Button, Card, CountUp, Reveal } from '../../../components/ui'
 import { cleanTitle, cleanVolumeTitle, totalChapters } from '../../../lib/status'
+import { needsSetupRestart } from '../../../lib/setupPresentation'
 import { directionProgressText } from '../../../lib/workspace'
 import { useBookContext } from '../context'
 import { InterviewForm, ResumeControls } from '../Decision'
@@ -13,6 +14,7 @@ import { PageHeader } from './common'
 
 function NextStep() {
   const { book, job, bookId, messages } = useBookContext()
+  if (needsSetupRestart(book, job)) return null
   if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_directions') {
     return <DirectionSelection key={`${job.id}-${job.updated_at}`} job={job} pending={job.pending} />
   }
@@ -132,9 +134,9 @@ export function Overview() {
           <section className="@2xl/manuscript:col-span-2">
             <h3 className="mb-3 flex flex-wrap items-center gap-2 font-serif text-lg font-bold">
               <Users className="size-4 text-lore" />
-              主角钩子
+              {concept.core_loop ? '核心循环' : concept.protagonist_hook ? '主角钩子' : '基调与文风'}
             </h3>
-            <p className="font-serif text-[17px] leading-relaxed text-ink-2">「{concept.protagonist_hook}」</p>
+            <p className="font-serif text-[17px] leading-relaxed text-ink-2">{concept.core_loop || concept.protagonist_hook || concept.tone}</p>
             <p className="mt-4 text-sm text-ink-2">基调：{concept.tone}</p>
           </section>
         </Reveal>

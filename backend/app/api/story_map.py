@@ -1,6 +1,7 @@
 """全书关键节点、人物锚点、信息差与术语表的读写接口。"""
 
 import uuid
+from copy import deepcopy
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.glossary import terms
 from app.api.deps import SessionDep, ensure_idle, get_book
-from app.models import Book, Character, NodeAnchor, Secret, StoryNode
+from app.models import Book, Character, Foreshadowing, NodeAnchor, Secret, StoryNode, Volume
 from app.schemas import (
     AnchorCreate,
     AnchorOut,
@@ -63,6 +64,54 @@ def _renumber(nodes: list[StoryNode]) -> None:
         node.position = index
 
 
+def _opening_segment(book: Book, nodes: list[StoryNode]) -> tuple[uuid.UUID, dict] | None:
+    """仅新流程开书中的第一段随节点拓扑变更；已开完的书和旧书保持原规则。"""
+    if book.status not in {"setting_up", "awaiting_approval"} or (book.setup_progress or {}).get("flow") != 2:
+        return None
+    endpoint = next((node for node in nodes if (node.segment or {}).get("number") == 1), None)
+    return (endpoint.id, deepcopy(endpoint.segment)) if endpoint else None
+
+
+async def _rebind_opening_segment(
+    session: AsyncSession,
+    book: Book,
+    nodes: list[StoryNode],
+    previous: tuple[uuid.UUID, dict] | None,
+) -> None:
+    """作者仍可插入、删除、重排；第一段的规划和分卷始终跟随新的第二个节点。"""
+    if previous is None:
+        return
+    if len(nodes) < 2 or nodes[1].kind != "milestone":
+        raise HTTPException(409, "第一段至少要保留一个终点节点，请先新增一个节点再删除。")
+    old_id, segment = previous
+    endpoint = nodes[1]
+    # 先分配作者新建节点的稳定 ID，后续只移动段规划及关联，不覆盖任何节点文案。
+    await session.flush()
+    volumes = list(
+        await session.scalars(select(Volume).where(Volume.book_id == book.id, Volume.target_node_id == old_id))
+    )
+    expectations = list(
+        await session.scalars(
+            select(Foreshadowing).where(
+                Foreshadowing.book_id == book.id,
+                Foreshadowing.kind == "期待",
+                Foreshadowing.span == "长",
+                Foreshadowing.node_id == old_id,
+                Foreshadowing.description == segment.get("wait", ""),
+            )
+        )
+    )
+    for node in nodes:
+        node.segment = deepcopy(segment) if node is endpoint else None
+    for volume in volumes:
+        volume.target_node_id = endpoint.id
+    for expectation in expectations:
+        expectation.node_id = endpoint.id
+    if volumes and endpoint.status != "pinned":
+        endpoint.volume = max(volume.index for volume in volumes)
+    await session.flush()
+
+
 async def _anchor_out(session: AsyncSession, anchor: NodeAnchor) -> AnchorOut:
     out = AnchorOut.model_validate(anchor)
     character = await session.get(Character, anchor.character_id)
@@ -97,9 +146,10 @@ def _allow_empty(book: Book, status: str | None) -> None:
 @router.post("/books/{book_id}/nodes", response_model=NodeOut, status_code=201)
 async def create_node(body: NodeCreate, book: Book = Depends(get_book), session: AsyncSession = SessionDep):
     await ensure_idle(session, book.id)
-    await _lock_book(session, book.id)
+    book = await _lock_book(session, book.id)
     _allow_empty(book, body.status)
     nodes = await _nodes(session, book.id)
+    segment = _opening_segment(book, nodes)
     if body.after_node_id is not None:
         insert_at = next((i + 1 for i, node in enumerate(nodes) if node.id == body.after_node_id), None)
         if insert_at is None:
@@ -111,6 +161,7 @@ async def create_node(body: NodeCreate, book: Book = Depends(get_book), session:
     _validate_order(nodes)
     _renumber(nodes)
     session.add(node)
+    await _rebind_opening_segment(session, book, nodes, segment)
     await session.commit()
     await session.refresh(node)
     return await _node_out(session, node)
@@ -139,25 +190,31 @@ async def update_node(node_id: uuid.UUID, body: NodePatch, session: AsyncSession
 async def delete_node(node_id: uuid.UUID, session: AsyncSession = SessionDep):
     node = await _row(session, StoryNode, node_id)
     await ensure_idle(session, node.book_id)
-    await _lock_book(session, node.book_id)
+    book = await _lock_book(session, node.book_id)
     if node.kind in {"opening", "ending"}:
         raise HTTPException(409, "开篇和结局不能删")
-    nodes = [row for row in await _nodes(session, node.book_id) if row.id != node.id]
-    await session.delete(node)
+    previous_nodes = await _nodes(session, node.book_id)
+    segment = _opening_segment(book, previous_nodes)
+    nodes = [row for row in previous_nodes if row.id != node.id]
     _renumber(nodes)
+    # 在删除旧终点触发外键清理之前重连段内卷和期待；秘密、锚点仍按原节点处理。
+    await _rebind_opening_segment(session, book, nodes, segment)
+    await session.delete(node)
     await session.commit()
 
 
 @router.post("/books/{book_id}/nodes/order", response_model=list[NodeOut])
 async def order_nodes(body: NodeOrder, book: Book = Depends(get_book), session: AsyncSession = SessionDep):
     await ensure_idle(session, book.id)
-    await _lock_book(session, book.id)
+    book = await _lock_book(session, book.id)
     nodes = {node.id: node for node in await _nodes(session, book.id)}
     if len(body.ids) != len(nodes) or set(body.ids) != set(nodes):
         raise HTTPException(422, "必须提交本书全部节点且不能重复")
+    segment = _opening_segment(book, list(nodes.values()))
     ordered = [nodes[node_id] for node_id in body.ids]
     _validate_order(ordered)
     _renumber(ordered)
+    await _rebind_opening_segment(session, book, ordered, segment)
     await session.commit()
     return [await _node_out(session, node) for node in ordered]
 

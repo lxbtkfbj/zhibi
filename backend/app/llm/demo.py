@@ -44,20 +44,25 @@ def _concept(user: str) -> s.BookConcept:
         instructions = user
     feelings = re.findall(r"(?:把)?「感情线」改成[：:]?\s*[「]?([^」\n]+)", instructions)
     feeling = feelings[-1].strip() if feelings else _match(r"感情线：([^\n]+)", current) or "并肩查案慢慢靠近"
-    cost = "每次点灯消耗一天寿元，必须权衡救人与自保"
-    revised_cost = cost in instructions
+    cost = _match(r"核心循环补充[：:]([^\n]+)", instructions)
+    revised_cost = bool(cost)
     concept = s.BookConcept(
         title=title,
         alt_titles=alt_titles,
         genre="玄幻·东方玄幻" if harem else "玄幻·修仙",
         tags=["后宫", "爽文", "宗门", "智斗"] if harem else ["凡人流", "宗门", "智斗", "慢热成长"],
-        logline=f"{_idea(user)}——杂役弟子陆远捡到一盏能照见他人寿元的青灯，从此在吃人的宗门里步步为营。",
+        logline="杂役陆远凭青灯窥见寿元，在吃人的宗门里搜证翻盘，追查父母死因。",
         selling_points=[
             "青灯能看见他人剩余寿元，信息差带来的智斗爽感",
             "杂役翻身，每次突破都用计谋而非奇遇",
             f"宗门内斗与正邪两道的灰色地带；感情线：{feeling}",
         ],
-        protagonist_hook=cost if revised_cost else "陆远知道每个人还能活多久，却必须装作什么都不知道",
+        core_loop=cost
+        if revised_cost
+        else "靠近寿元异常的人，查证一桩寿元交易，用信息差翻盘并追回父母旧案的一条线索；读者每轮看到弱者以证据扳倒强者。",
+        benchmark="借鉴信息差驱动的单元悬疑，人物与具体案件另写"
+        if any(x in _idea(user) for x in ("对标", "借用", "《"))
+        else "",
         tone="冷静克制，带一点黑色幽默，节奏紧凑",
         target_length=length,
         target_volumes=8,
@@ -82,7 +87,7 @@ def _concept(user: str) -> s.BookConcept:
             concept.title = selected or candidates[0]
             concept.alt_titles = [candidate for candidate in candidates if candidate != concept.title]
         for field, label in (
-            ("protagonist_hook", "金手指"),
+            ("core_loop", "核心循环"),
             ("stage_ladder", "舞台阶梯"),
             ("tone", "基调"),
             ("target_reader", "目标读者"),
@@ -101,14 +106,16 @@ def _concept(user: str) -> s.BookConcept:
             concept.tags = ["经营", "怪谈", "信息差", "悬疑"]
         concept.remark = f"我沿用作者选中的方向和设定，书名定为《{concept.title}》，按 {length} 万字安排后续拼图。"
     # 方向只是初始基底，不能在之后修改时盖回作者已经改好的概念。
-    current_hook = _match(r"(?:^|\n)主角钩子：([^\n]+)", current)
+    current_hook = _match(r"(?:^|\n)核心循环：([^\n]+)", current)
     if current_hook:
-        concept.protagonist_hook = current_hook
-    current_points = re.findall(r"^- (.+)$", _match(r"核心卖点：\n(.*?)\n主角钩子：", current), re.M)
+        concept.core_loop = current_hook
+    current_points = re.findall(
+        r"^- (.+)$", _match(r"核心卖点：\n(.*?)(?=\n(?:目标读者|对标|核心循环|主角钩子|基调)：)", current), re.M
+    )
     if current_points:
         concept.selling_points = current_points
     if revised_cost:
-        concept.protagonist_hook = cost
+        concept.core_loop = cost
     if feelings:
         if any("感情线：" in point for point in concept.selling_points):
             concept.selling_points = [
@@ -117,11 +124,72 @@ def _concept(user: str) -> s.BookConcept:
         else:
             prefix = "宗门内斗与正邪两道的灰色地带" if concept.genre.startswith("玄幻") else "在主线追查中逐渐建立信任"
             concept.selling_points.append(f"{prefix}；感情线：{feeling}")
+    if "测试提醒" in user:
+        concept.target_reader = ""
     return concept
 
 
-def _lore(user: str = "") -> s.LoreDraft:
-    return s.LoreDraft(
+def _protagonist(user: str = "") -> s.ProtagonistDraft:
+    current = _section(user, "当前主角卡")
+    name = _match(r"姓名：([^\n]+)", current) or "陆远"
+    instruction = _section(user, "修改要求")
+    rename = _match(
+        r"(?:主角)?(?:名字|姓名)?改(?:叫|名为|成|为)[：: ]*[「]?([\u4e00-\u9fff]{2,4})[」]?(?:[。；，\n]|$)",
+        instruction,
+    )
+    if rename:
+        name = rename
+    card = s.ProtagonistDraft(
+        name=name,
+        start="宗门最底层的杂役，受伤也得做工，唯一的亲人死因不明；他记得每次被克扣的口粮，却不敢轻易讨回。",
+        trigger="赵乾的跟班要把他交去试药，救过他的老人也将被清退；他必须在考核前拿到外门名额。",
+        pursuit="查清父母死于兽潮背后的真相，让那些拿穷人性命做交易的人无法再害人。",
+        root="父母把活命的机会留给了他，老瞎子又在饥寒时给过他饭吃；他害怕眼看在乎的人再次消失。",
+        personality="谨慎多疑，遇事先忍，表面冷静却格外护短。",
+        style="先收集证据再借对方的规矩破局，不在没把握时逞强。",
+        bottom_line="不拿无辜者的性命换取自己活路。",
+        voice="话短，常先问一句凭什么；示范：账要算清，人我先带走。",
+        finger="青灯照见眼前人的剩余寿元，第一阶段只能近距离看见；必须接近危险人物才能取证，目前只有自己知道。",
+        flaw="不愿向别人求助，常把风险全揽在自己身上。",
+        arc_end="从只求自保，成长为愿意信任同伴、保护他人的人。",
+        cared=[
+            s.CaredPerson(name="老瞎子", relation="救过他的老人", why="饥寒时留给他半个馒头，是他在杂役院唯一的依靠")
+        ],
+        interlock="他要追查父母死因，青灯让他发现寿元异常；每次靠近危险、搜证翻盘，都能追回一条与父母有关的线索。",
+        decisions=[
+            s.AuthorChoice(
+                topic="金手指的限制",
+                chosen="必须靠近危险人物",
+                alternatives=["只能在夜里看见寿元"],
+                why="取证本身就迫使主角冒险",
+            )
+        ],
+        remark="先定下他为什么必须行动；每轮寿元异常都连着他要追查的旧事。",
+    )
+    if "测试提醒" in user:
+        card.voice = ""
+    if "每次点灯消耗一天寿元，必须权衡救人与自保" in instruction:
+        card.finger = "每次点灯消耗一天寿元，必须权衡救人与自保"
+    return card
+
+
+def _world(user: str = "") -> s.WorldDraft:
+    result = s.WorldDraft(
+        surface="修行与寿元交易的传言公开存在，杂役知道有超凡力量，却不知道寿元异常与宗门利益的联系。",
+        power="修行靠吐纳、药草与灵脉，入门分炼气一至三层，往上是筑基；越一层需靠情报和准备，硬碰筑基没有胜算。修炼过度会损伤身体，只有资源与时间一起积累才能突破。更高的层级写到再定。",
+        first_map=s.MapDraft(
+            name="玄冥宗杂役院",
+            powers="杂役管事管口粮；外门赵乾把持名额；执法堂苏晚晴查冤案；周长老偏护自己的家族。",
+            ceiling="赵乾已筑基，院中杂役只能炼气，正面无法抗衡。",
+            rules="外门考核允许实名申诉，但败诉者要服双倍杂役。",
+            start="陆远是受伤也得干活的底层杂役，没有报名资源。",
+            gains="考核名额、外门身份与查阅旧档的机会。",
+        ),
+        trouble="赵乾的跟班克扣陆远口粮，逼他去试药。",
+        opponent="赵乾想垄断外门名额，陆远查药碗会动他的账；他握有长老关系和考核名单，先取消陆远报名资格，再逼他冒险举证。",
+        far_maps=[s.FarMap(name="北境寒原", line="旧村和寿元交易的线索可能在这里交汇")],
+        shadow="宗门祭典上的长明灯与失踪杂役的名单相连，背后的人尚未现身。",
+        mystery="父母当年真的死于兽潮吗，为什么旧物上有与宗门相同的契约印记？",
         world_entries=[
             s.WorldEntryDraft(
                 category="力量体系",
@@ -238,149 +306,68 @@ def _lore(user: str = "") -> s.LoreDraft:
                 source="苏晚晴", target="赵乾", kind="对立", description="苏晚晴在执法堂多次查赵乾，都被长老压下"
             ),
         ],
-        anchors=[
-            s.NodeAnchorDraft(character=name, node=number, kind="登场", note="进入故事并和主角的目标发生关联")
-            for name, number in [
-                ("陆远", 1),
-                ("苏晚晴", 2),
-                ("赵乾", 2),
-                ("老瞎子", 1),
-                ("宗主厉沧海", 3),
-                ("周长老", 3),
-            ]
-        ],
-        secrets=[
-            s.SecretDraft(
-                title=title,
-                truth=truth,
-                knowers=knowers,
-                reader_knows=reader,
-                reveal_plan="在对应节点通过对质和证据揭开，迫使知情者重新站队",
-                node=number,
-            )
-            for title, truth, knowers, reader, number in [
-                ("青灯的持有人", "青灯已经到了陆远手中，点灯能看见他人的寿元", ["陆远"], "知道", 3),
-                ("宗主剩余寿元", "厉沧海只剩三年寿元，正在以宗门弟子的寿元准备续命", ["陆远", "宗主厉沧海"], "知道", 7),
-                ("苏家灭门真相", "苏晚晴的家族被血河教灭门，留下的账册可以查出幕后交易", ["苏晚晴"], "部分", 5),
-                ("赵乾寿元交易", "赵乾私下用败者的寿元与血河教交换修炼资源", ["赵乾"], "不知道", 3),
-                ("老人的青灯来历", "老瞎子曾是青灯上一任主人，知道逆转寿元契约的方法", ["老瞎子"], "不知道", 6),
-            ]
-        ],
         decisions=[
             s.AuthorChoice(
                 topic="主要对手",
-                chosen="从赵乾查到宗主",
-                alternatives=["宗主先以恩人出现"],
-                why="反派逐层出现，成长才有分量",
+                chosen="赵乾先赢一次",
+                alternatives=["管事先卡报名资格"],
+                why="让阻力落在具体的人和利益上",
             )
         ],
-        remark="主角叫陆远，金手指是一盏能照见寿元的青灯，但每次点燃都要烧掉他自己一天寿命；头号反派是宗主厉沧海。力量体系我设计成「突破要烧寿元」，这样青灯就不只是外挂，而是整个世界的命门。",
+        remark="先围绕杂役院的小地图与外门名额，远处只留下线索。",
     )
+    for character in result.characters:
+        character.want = "拿到外门考核资格并保护老人" if character.role_type == "主角" else "守住眼前的资源和在乎的人"
+    if "测试提醒" in user:
+        result.power = ""
+    return result
 
 
-def _spine(user: str = "") -> s.StorySpine:
-    events = [
-        (
-            "开篇",
-            "寒夜捡灯",
-            1,
-            "老瞎子把青灯交给受伤的陆远，灯火第一次照见别人的死期",
-            "陆远陷入杂役院的欺压",
-            "陆远得到危险的信息优势",
-        ),
-        (
-            "节点",
-            "外门考核",
-            1,
-            "陆远借寿元信息拆穿考核陷阱，和苏晚晴合力查明跟班死亡原因",
-            "青灯能力已验证，药碗证据已找齐",
-            "陆远进入外门，赵乾把他当作真正的对手",
-        ),
-        (
-            "节点",
-            "生死擂台",
-            2,
-            "陆远在生死擂正面击败赵乾，当众留下寿元交易的证据",
-            "主角具备迎战实力，赵乾已立下赌约",
-            "败者交易暴露，调查走出宗门",
-        ),
-        (
-            "节点",
-            "寒原追查",
-            3,
-            "陆远追到寒原旧村，发现兽潮和寿元契约的联系",
-            "盟友建立信任，旧村路线与证人得到保护",
-            "父母死亡不再是天灾，主角决定追究责任",
-        ),
-        (
-            "节点",
-            "血河潜入",
-            4,
-            "陆远与苏晚晴潜入血河总坛，抢出灭门交易账册",
-            "已掌握换岗规律，能识别伪造的账册",
-            "双方结成牢固同盟，幕后交易有了实证",
-        ),
-        (
-            "节点",
-            "契约印记",
-            5,
-            "陆远对照账册发现缺失的小指是幼时被取走寿元的印记",
-            "老瞎子的遗言、账册与童年证据已经对上",
-            "主角不再只求自保，要阻止更多人被收割",
-        ),
-        (
-            "节点",
-            "宗主真相",
-            6,
-            "陆远揭开宗主的续命计划，联合弟子准备反制寿元大阵",
-            "主角有足够盟友与证据，也找到大阵的阵眼",
-            "宗门内斗公开化，大典成为最后倒计时",
-        ),
-        (
-            "节点",
-            "青灯燃尽",
-            7,
-            "化神大典上陆远燃尽青灯逆转寿元大阵，厉沧海遭到反噬",
-            "苏晚晴能守住阵眼，陆远明白青灯真正代价",
-            "宗主坐化，寿元交易终结，陆远失去青灯",
-        ),
-        (
-            "结局",
-            "重建家园",
-            8,
-            "陆远与苏晚晴归还受害者的寿元，在寒原重建杂役院",
-            "大阵已被摧毁，受害者与剩余资源妥善安置",
-            "主角失去外挂却拥有可以共同生活的家园",
-        ),
-    ]
-    current = _section(user, "当前主线骨架") or _section(user, "当前关键节点")
-    refs = {title: int(index) for index, title in re.findall(r"节点\s+(\d+)「([^」]+)」", current)}
-    known = [name for name, _ in terms()]
+def _segment(user: str = "") -> s.SegmentDraft:
+    current = _section(user, "当前第一段的走向")
     nodes = [
         s.StoryNodeDraft(
-            ref=refs.get(title, 0),
-            kind=kind,
-            title=title,
-            volume=volume,
-            event=event,
-            prerequisite=prerequisite,
-            consequence=consequence,
-            editor_note="先把主角必须付出的代价摆出来，再让这一节点改变局面。",
-            techniques=known[3:5],
-        )
-        for kind, title, volume, event, prerequisite, consequence in events
+            kind="开篇",
+            title="寒夜捡灯",
+            volume=1,
+            event="受伤的陆远将被赶去试药，老瞎子递来一盏青灯，灯火照见跟班只剩两天寿元。",
+            prerequisite="杂役院的欺压已让陆远无路可退。",
+            consequence="陆远获得危险的信息优势。",
+        ),
+        s.StoryNodeDraft(
+            kind="节点",
+            title="外门考核",
+            volume=2,
+            event="陆远与苏晚晴在外门考核当众拆穿赵乾的寿元陷阱，拿到外门名额和父母旧案的档案入口。",
+            prerequisite="青灯能力经过验证，药碗与账册证据对上，苏晚晴愿意作证。",
+            consequence="陆远离开杂役院，追查指向北境旧村与更大的交易。",
+        ),
+        s.StoryNodeDraft(
+            kind="结局",
+            title="重建家园",
+            volume=8,
+            event="陆远查清父母之死，让性命不再被买卖，与同伴重建能够共同生活的家园。",
+            prerequisite="长线追求与核心谜团得到回答。",
+            consequence="主角能信任他人，也能守住在乎的人。",
+        ),
     ]
-    instruction = _match(r"【修改要求】\n(.*?)(?=\n\n请在当前版本|\n\n要求：|\Z)", user)
-    if re.search(r"只改节点\s*\d+", instruction):
-        # 卡片定向修改按当前快照回填，不能凭初始九节点重新引入作者已经删掉的节点。
+    far = _match(r"远景[：:]([^\n]+)", user)
+    if far:
+        nodes.insert(
+            2,
+            s.StoryNodeDraft(
+                kind="节点", title=far[:16], event=far, volume=5, prerequisite="写到再定", consequence="写到再定"
+            ),
+        )
+    # 修改时采用完整的当前节点快照，不能重新添回作者删掉的节点或丢掉作者新增节点。
+    if current:
         snapshot = []
         for match in re.finditer(
-            r"^节点\s+(\d+)「([^」]*)」([^\n［]*)［(?:铁钉|暂定|留空)(?:｜约第 (\d+) 卷)?］(?:发生：)?([^\n]*)((?:\n  [^\n]*)*)",
+            r"^节点\s+(\d+)「([^」]*)」([^\n［]*)［(?:铁钉|暂定|留空)(?:｜约第 (\d+) 卷)?(?:｜[^］]*)?］(?:发生：)?([^\n]*)((?:\n  [^\n]*)*)",
             current,
             re.M,
         ):
             index, title, label, volume, event, details = match.groups()
-            existing = next((node for node in nodes if node.ref == int(index)), None)
             snapshot.append(
                 s.StoryNodeDraft(
                     ref=int(index),
@@ -390,33 +377,64 @@ def _spine(user: str = "") -> s.StorySpine:
                     event=event,
                     prerequisite=_match(r"之前得先有：([^\n]*)", details),
                     consequence=_match(r"之后变成：([^\n]*)", details),
-                    editor_note=existing.editor_note if existing else "",
-                    techniques=existing.techniques if existing else [],
                 )
             )
         if snapshot:
             nodes = snapshot
-    revised_pins = _revise_demo_pins(nodes, current, user)
+    revised = _revise_demo_pins(nodes, current, user)
+    known = [name for name, _ in terms()]
+    for node in nodes:
+        node.editor_note = "先摆出主角必须付出的代价，再让节点改变处境。"
+        node.techniques = known[3:5]
     if "测试提醒" in user:
-        nodes[3].prerequisite = ""
-    return s.StorySpine(
-        core_conflict="陆远想查清父母之死，而宗门高层靠收割寿元续命",
-        theme="命数不该被买卖",
-        protagonist_arc="从只求自保到愿意保护别人",
+        nodes[1].prerequisite = ""
+    return s.SegmentDraft(
+        opening=s.OpeningPlan(
+            scene="第一章从陆远受伤后仍被逼去试药的夜晚切入，老瞎子递来青灯，欺压者头顶的数字忽然跳动。",
+            pressure="赵乾的跟班逼他顶试药名额，老人也面临被赶走，他没有公开反抗的本钱。",
+            first_win="第 2 章陆远借寿元异常避开毒药，还把试药名单的疑点留了证。",
+            finger="第 1 章夜里第一次点灯，看见跟班只剩两日寿元，不懂原因只能先藏起来。",
+            hook="第 3 章跟班提前暴毙，执法堂却在药碗上找到陆远的名字。",
+        ),
+        goal="三个月内拿到外门考核名额，拆穿赵乾的寿元陷阱。",
+        goal_link="进入外门才能查旧档，追到父母当年兽潮中的去向。",
+        wait=s.ExpectationDraft(
+            description="陆远要在外门考核当众拆穿赵乾并拿到名额",
+            plant_plan="赵乾公示名单，当众断言杂役没有资格",
+            payoff_plan="陆远不仅拿到名额，还拿出寿元交易的证据",
+            plant_volume=1,
+            payoff_volume=2,
+            node=2,
+        ),
+        reveal="药碗与考核账册都牵涉寿元交易，父母旧物有同样的印记；究竟是谁把旧村和宗门连起来？",
+        secrets=[
+            s.SecretDraft(
+                title="青灯的持有人",
+                truth="陆远用青灯看见寿元异常",
+                knowers=["陆远"],
+                reader_knows="知道",
+                reveal_plan="陆远向苏晚晴解释取证异常",
+                node=2,
+            ),
+            s.SecretDraft(
+                title="赵乾的药碗",
+                truth="药碗上的火漆属于外门库房",
+                knowers=["赵乾"],
+                reader_knows="不知道",
+                reveal_plan="考核时当众对照账册",
+                node=2,
+            ),
+        ],
         nodes=nodes,
+        core_conflict="陆远想查清父母之死，而幕后的人靠收割寿元续命",
+        theme="命数不该被买卖",
+        protagonist_arc="从只求自保到信任同伴、保护他人",
         decisions=[
             s.AuthorChoice(
-                topic="故事收束",
-                chosen="失去青灯但重建家园",
-                alternatives=["保留青灯继续守护"],
-                why="让胜利有代价，成长才可信",
+                topic="故事收束", chosen="失去青灯但重建家园", alternatives=["保留青灯继续守护"], why="结局先留一句方向"
             )
         ],
-        remark=(
-            "演示模式已按本轮点名要求修改节点事件，其他铁钉仍由程序保护。"
-            if revised_pins
-            else "九个节点从捡灯走到重建家园，铁钉由程序原样保留，其余节点按序号衔接。"
-        ),
+        remark="已按本轮点名要求修改节点，其他铁钉由程序保护。" if revised else "第一段只走到外门考核，结局先定方向。",
     )
 
 
@@ -428,7 +446,7 @@ def _revise_demo_pins(nodes: list[s.StoryNodeDraft], current: str, user: str) ->
     targets = allowed | selected
     changed = False
     for match in re.finditer(
-        r"^节点\s+(\d+)「([^」]*)」([^\n［]*)［(铁钉|暂定)(?:｜约第 (\d+) 卷)?］发生：[^\n]*((?:\n  [^\n]*)*)",
+        r"^节点\s+(\d+)「([^」]*)」([^\n［]*)［(铁钉|暂定)(?:｜约第 (\d+) 卷)?(?:｜[^］]*)?］发生：[^\n]*((?:\n  [^\n]*)*)",
         current,
         re.M,
     ):
@@ -471,137 +489,86 @@ def _revise_demo_pins(nodes: list[s.StoryNodeDraft], current: str, user: str) ->
     return changed
 
 
-def _threads() -> s.ThreadsDraft:
-    return s.ThreadsDraft(
+def _segment_volumes(user: str = "") -> s.SegmentVolumesDraft:
+    known = [name for name, _ in terms()]
+    result = s.SegmentVolumesDraft(
+        volumes=[
+            s.VolumeDraft(
+                index=i,
+                title="杂役" if i == 1 else "外门考核",
+                stage="玄冥宗杂役院与考核场",
+                summary="陆远循寿元异常查药碗、夺回报名资格" if i == 1 else "携证据参加考核，揭穿赵乾的陷阱",
+                want="拿到报名资格与药碗证据，为考核翻盘铺路" if i == 1 else "在外门考核当众拆穿赵乾并夺得名额",
+                pressure="陆远被栽赃并遭取消报名资格" if i == 1 else "赵乾控制考核名单与证人，盟友也被威胁",
+                goal="取得报名资格和可追查的账册" if i == 1 else "进入外门，拿到旧档入口",
+                climax="当众举证保住报名资格" if i == 1 else "考核终场揭穿寿元交易",
+                antagonist="赵乾要垄断名额，先取消陆远报名资格",
+                power_range="炼气一层到三层，学会比对寿元异常",
+                chapter_count=31 if i == 1 else 30,
+                target_node=2,
+                reaches_node=i == 2,
+                editor_note="卷末为这一段的终点再铺一层条件。",
+                techniques=known[3:5],
+            )
+            for i in (1, 2)
+        ],
         threads=[
             s.ThreadDraft(
-                name="主线：青灯与寿元",
-                kind="主线",
-                characters=["陆远", "宗主厉沧海"],
-                summary="陆远靠青灯看见寿元，从自保到揭开玄冥宗收割寿元的真相，最终燃尽青灯破掉寿元大阵。",
-                beats=[
-                    s.ThreadBeat(volume=1, beat="捡到青灯，确认能看见寿元，借信息差活下来并进入外门"),
-                    s.ThreadBeat(volume=2, beat="外门大比中发现有人在比试里偷取败者寿元"),
-                    s.ThreadBeat(volume=3, beat="查到宗主与血河教交易寿元，自己也只剩三年可活"),
-                    s.ThreadBeat(volume=4, beat="化神大典上燃尽青灯，以自身寿元反噬大阵"),
-                ],
-            ),
-            s.ThreadDraft(
-                name="感情线：苏晚晴",
-                kind="感情线",
-                characters=["陆远", "苏晚晴"],
-                summary="从执法堂里的互相怀疑，到并肩查案，再到寒原上一起重建杂役院。",
-                beats=[
-                    s.ThreadBeat(volume=1, beat="执法堂初见，互相怀疑；陆远替她洗清一桩冤案，她欠下人情"),
-                    s.ThreadBeat(volume=2, beat="生死擂前她暗中提醒陆远，两人第一次并肩"),
-                    s.ThreadBeat(volume=3, beat="得知灭门真相后她一度迁怒陆远，又在血河教总坛救下他"),
-                    s.ThreadBeat(volume=4, beat="大典上她守住阵眼，结局与陆远一起离开宗门"),
-                ],
-            ),
-            s.ThreadDraft(
-                name="反派线：玄冥宗高层",
-                kind="反派线",
-                characters=["赵乾", "宗主厉沧海"],
-                summary="从赵乾的跟班，到赵乾本人，再到幕后的宗主，对手一层比一层深。",
-                beats=[
-                    s.ThreadBeat(volume=1, beat="赵乾的跟班欺压陆远，赵乾在考核中设局"),
-                    s.ThreadBeat(volume=2, beat="赵乾在生死擂上被击败，背后长老开始盯上陆远"),
-                    s.ThreadBeat(volume=3, beat="宗主借血河教之手清理知情人，陆远成为目标"),
-                    s.ThreadBeat(volume=4, beat="宗主发动寿元大阵，最终坐化"),
-                ],
-            ),
-            s.ThreadDraft(
-                name="谜团线：父母之死",
-                kind="谜团线",
-                characters=["陆远", "老瞎子"],
-                summary="兽潮、缺失的小指与老瞎子的遗言，一步步指向幼时的寿元契约。",
-                beats=[
-                    s.ThreadBeat(volume=1, beat="老瞎子坐化前留下半句遗言"),
-                    s.ThreadBeat(volume=3, beat="小指的契约印记揭开父母之死与宗门交易的关系"),
-                ],
-            ),
+                name=name,
+                kind=kind,
+                characters=people,
+                summary=line,
+                beats=[s.ThreadBeat(volume=1, beat=first), s.ThreadBeat(volume=2, beat=second)],
+            )
+            for name, kind, people, line, first, second in [
+                (
+                    "主线：青灯与寿元",
+                    "主线",
+                    ["陆远", "赵乾"],
+                    "循寿元异常查清父母旧事，远处写到再定",
+                    "借青灯取证并保住名额",
+                    "揭穿考核交易，拿到旧档入口",
+                ),
+                (
+                    "感情线：苏晚晴",
+                    "感情线",
+                    ["陆远", "苏晚晴"],
+                    "从怀疑到并肩追查",
+                    "执法堂互相试探",
+                    "考核时公开作证",
+                ),
+                (
+                    "反派线：赵乾",
+                    "反派线",
+                    ["赵乾", "周长老"],
+                    "守住垄断名额和资源的利益",
+                    "取消陆远报名资格，先赢一局",
+                    "考核设局，被陆远证据反制",
+                ),
+            ]
         ],
-        remark="我把这本书拆成四条线：主线是青灯与寿元，苏晚晴一条感情线，反派从赵乾一路升级到宗主，再加一条父母之死的谜团线。第三卷是几条线的交汇点。",
-    )
-
-
-def _outline(user: str = "") -> s.OutlineDraft:
-    total = int(_match(r"合计约 (\d+) 章", user) or 333)
-    counts = [31, 90, 36, 36, 35, 35, 35, 35]
-    if total != sum(counts):
-        counts = [max(1, total // 8)] * 8
-        counts[-1] += total - sum(counts)
-    known = [name for name, _ in terms()]
-    nodes = _spine().nodes
-    volumes = [
-        s.VolumeDraft(
-            index=i,
-            title=("杂役" if i == 1 else "生死擂" if i == 2 else node.title),
-            stage="玄冥宗 → 北境寒原 → 血河总坛 → 宗主峰",
-            summary=node.event,
-            goal=node.consequence,
-            climax=node.event,
-            antagonist="赵乾及其背后的宗门长老" if i < 4 else "宗主厉沧海与血河教",
-            power_range="修为随着证据与盟友积累逐步提高",
-            chapter_count=counts[i - 1],
-            target_node=i + 1,
-            reaches_node=True,
-            editor_note="这卷铺齐下个大事件的条件，再用卷末高潮兑现。",
-            techniques=known[3:5],
-        )
-        for i, node in enumerate(nodes[1:], 1)
-    ]
-    truths = [
-        "陆远左手缺的小指，是幼时被血河教取走寿元的契约印记",
-        "宗主只剩三年寿元",
-        "老瞎子的半句遗言",
-        "药碗上的火漆属于外门库房",
-        "苏家的旧账册还有另一半",
-    ]
-    foreshadowings = [
-        s.ForeshadowingDraft(
-            description=value,
-            span="长",
-            plant_plan="用一个看似普通的细节带过",
-            payoff_plan="关键证据出现后重新解释这个细节",
-            plant_volume=1 if i < 3 else 2,
-            payoff_volume=5 if i in (0, 2) else 6 if i == 1 else 4,
-            node=6 if i in (0, 2) else 7 if i == 1 else 5,
-        )
-        for i, value in enumerate(truths)
-    ]
-    expectations = [
-        s.ExpectationDraft(
-            description="陆远要在生死擂当众击败赵乾",
-            plant_plan="赵乾立下生死擂赌约",
-            payoff_plan="不只赢擂台，还拿到寿元交易证据",
-            plant_volume=1,
-            payoff_volume=2,
-            node=3,
-        ),
-        s.ExpectationDraft(
-            description="陆远要查清父母之死，给被害者一个交代",
-            plant_plan="主角对着旧信承诺查清真相",
-            payoff_plan="不只找到凶手，还终结收割寿元的规则",
-            plant_volume=1,
-            payoff_volume=7,
-            node=8,
-        ),
-    ]
-    return s.OutlineDraft(
-        volumes=volumes,
-        foreshadowings=foreshadowings,
-        expectations=expectations,
+        anchors=[
+            s.NodeAnchorDraft(
+                character=name,
+                node=1 if name in {"陆远", "老瞎子"} else 2,
+                kind="登场",
+                note="在第一段与主角的目标发生关联",
+            )
+            for name in ["陆远", "老瞎子", "苏晚晴", "赵乾", "宗主厉沧海", "周长老"]
+        ],
         decisions=[
             s.AuthorChoice(
                 topic="前期节奏",
-                chosen="第一卷短、第二卷展开",
-                alternatives=["两卷均衡推进"],
-                why="先让主角有一次完整翻身，再加深冲突",
+                chosen="先查药碗再考核",
+                alternatives=["查案与考核交叉"],
+                why="两卷走完第一段，不排远处的卷",
             )
         ],
-        remark=f"八卷合计 {total} 章，开篇之后每个节点都由一卷到达，长线伏笔与期待分开编号。",
+        remark="第一段分两卷，31 章加 30 章，每卷都走向外门考核。",
     )
+    if "测试提醒" in user:
+        result.volumes[0].want = ""
+    return result
 
 
 FIRST_VOLUME_UNITS = [
@@ -642,21 +609,21 @@ FIRST_VOLUME_UNITS = [
         climax="老瞎子坐化前留下半句遗言",
         outcome="陆远得知青灯与宗主有关，决定进入外门",
         key_events=["追问老瞎子", "老瞎子病重", "坐化与遗言"],
-        thread_beats=[s.ThreadStep(thread="谜团线：父母之死", beat="老瞎子留下半句遗言")],
+        thread_beats=[s.ThreadStep(thread="主线：青灯与寿元", beat="老瞎子留下与父母旧案有关的半句遗言")],
         foreshadow_actions=[s.ForeshadowStep(ref="F3", action="埋下", detail="遗言只说了半句")],
         tropes=["身份揭晓"],
         resolution="借势借力",
     ),
     s.PlotUnitDraft(
         index=4,
-        title="外门考核",
+        title="夺回报名资格",
         chapter_count=10,
-        goal="通过外门考核",
-        conflict="赵乾在考核中设局",
-        climax="陆远将计就计，借寿元信息让设局者自食其果",
-        outcome="陆远成为外门弟子，发现考核中有人在偷偷收取寿元",
-        key_events=["报名考核", "识破陷阱", "反制", "进入外门"],
-        thread_beats=[s.ThreadStep(thread="反派线：玄冥宗高层", beat="赵乾在考核中设局")],
+        goal="追回被赵乾取消的外门考核报名资格",
+        conflict="赵乾把持名单，周长老拒绝受理证据",
+        climax="陆远借公示规矩当众举证，逼对方归还报名资格",
+        outcome="陆远拿回资格和一角账册，真正的外门考核在下一卷开始",
+        key_events=["报名被拒", "找到名单疑点", "当众举证", "追回资格"],
+        thread_beats=[s.ThreadStep(thread="反派线：赵乾", beat="赵乾先取消资格，又被迫接受陆远报名")],
         tropes=["比试竞赛"],
         resolution="算计设局",
     ),
@@ -857,10 +824,18 @@ def _base_volume_plan(user: str) -> s.VolumePlanDraft:
 def _volume_plan(user: str) -> s.VolumePlanDraft:
     plan = _base_volume_plan(user)
     volume = int(_match(r"请为第 (\d+) 卷写「卷纲」", user) or 1)
+    plan.want = (
+        "拿到报名资格与药碗证据，为外门考核翻盘铺路" if volume == 1 else "完成本卷取证与反击，为这一段终点创造条件"
+    )
+    plan.pressure = "陆远遭栽赃并被取消报名资格" if volume == 1 else "盟友被迫退场，主角必须独自守住证据"
     known = [name for name, _ in terms()]
     expectations = dict(re.findall(r"^- (E\d+)［([^］]*)］", _section(user, "伏笔与期待台账") or user, re.M))
     secrets = re.findall(r"^- (S\d+)「", user, re.M)
+    valid_refs = set(re.findall(r"^- ([FE]\d+)［", _section(user, "伏笔与期待台账") or user, re.M))
     for i, unit in enumerate(plan.units):
+        # 模板示例编号不是台账编号；新伏笔由程序分配后补排，避免 F1 与新书 E1 混用。
+        unit.foreshadow_actions = [action for action in unit.foreshadow_actions if action.ref in valid_refs]
+        unit.loop = "发现寿元异常，冒险搜证，以信息差翻盘，追回父母旧案的一条线索。"
         unit.editor_note = "先让读者看到主角的目标，再把对手的阻力变成一次有代价的翻盘。"
         unit.techniques = known[3:5]
         for ref, metadata in expectations.items():
@@ -894,6 +869,8 @@ def _volume_plan(user: str) -> s.VolumePlanDraft:
             payoff_unit=len(plan.units),
         )
     ]
+    if "测试提醒" in user:
+        plan.pressure = ""
     if "测试节点调整" in user:
         plan.node_update = s.NodeUpdate(
             title="顺势破局",
@@ -1023,8 +1000,10 @@ def _book_directions(user: str) -> s.BookDirections:
                 titles=[f"{titles[0]}：{hero}{advantage}", f"{titles[1]}：从无人看好到掌握主动"]
                 if title_rule.startswith("番茄式长书名")
                 else titles,
-                logline=f"{idea}；{hero}以{advantage}破局，追出幕后操盘者",
+                logline=f"{hero}以{advantage}破局，追出幕后操盘者",
                 protagonist=f"{hero}，处境艰难却不肯放弃判断，表面退让而心里有自己的底线",
+                drive="开局受人逼迫，必须查明旧案、守住身边的人",
+                core_loop=f"调查异常、取得线索、以{advantage}翻盘，逐步追出旧案真相",
                 golden_finger=power,
                 opening=opening,
                 selling_points=[advantage, "把只有主角知道的线索变成反击筹码"],
@@ -1206,37 +1185,58 @@ def _digest(user: str) -> s.ChapterDigest:
 
 
 def _critique(user: str = "") -> s.SetupCritique:
-    if _section(user, "第一卷卷纲").strip().startswith("（还没做）"):
+    focus = _match(r"【这次审什么】([^\n]*)", user)
+    piece = "protagonist" if "只审「主角卡」" in focus else "segment" if "只审「第一段" in focus else ""
+    if piece:
+        issues = []
+        if "单块审稿演示" in user:
+            issues = [
+                s.ReviewIssue(
+                    target=piece,
+                    question="drive" if piece == "protagonist" else "goal",
+                    problem="目标还可以更明确地连到当下选择",
+                    suggestion="补充选择背后的具体期限和对象",
+                    severity="medium",
+                ),
+                s.ReviewIssue(
+                    target=piece,
+                    question="person" if piece == "protagonist" else "opening",
+                    problem="场面细节可以留给作者微调",
+                    suggestion="作者可选一个更喜欢的说话或切入细节",
+                    severity="low",
+                ),
+            ]
         return s.SetupCritique(
-            verdict="pass",
-            highlights=["关键节点的前提和后果能连起来"],
-            issues=[],
-            remark="已完成的节点可以交给作者确认，后面的部分等做完再审。",
+            verdict="revise" if issues else "pass",
+            highlights=["驱动力、金手指和核心循环相互咬合"],
+            issues=issues,
+            remark="本次只看当前块，远处仍然只留方向。",
         )
     cross_piece = []
-    # 由验收点子显式开启，日常示例仍保持原审稿；解锁改好后不再重复建议。
     if "跨块审稿演示" in user and "每次点灯消耗一天寿元，必须权衡救人与自保" not in user:
         cross_piece.append(
             s.ReviewIssue(
-                target="concept",
-                problem="概念的主角钩子还没有写清青灯的代价",
-                suggestion="主角钩子补充：每次点灯消耗一天寿元，必须权衡救人与自保",
+                target="protagonist",
+                question="",
+                problem="主角卡的金手指限制还可以更明确",
+                suggestion="金手指补充：每次点灯消耗一天寿元，必须权衡救人与自保",
                 severity="medium",
             )
         )
     return s.SetupCritique(
         verdict="revise",
-        highlights=["寿元信息差的设定和主角性格很搭", "第一卷每个单元都有明确的翻盘点"],
+        highlights=["寿元信息差与主角追求相连", "第一卷每个单元都有翻盘点"],
         issues=[
             *cross_piece,
             s.ReviewIssue(
                 target="first_volume",
-                problem="第二单元「执法堂」8 章只围绕一个案子，中段容易拖",
+                question="units",
+                problem="第二单元「执法堂」围绕一个案子，中段容易拖",
                 suggestion="压缩到 6 章，并在中段加入赵乾的试探",
                 severity="medium",
             ),
         ],
-        remark="整体能打，但执法堂那段太长了，读者会在第 10 章左右流失。",
+        remark="整体可以开写，执法堂单元再紧凑一些。",
     )
 
 
@@ -1287,48 +1287,68 @@ def _pinned_revision(user: str, text: str) -> s.RevisionTriage | None:
     if not overrides:
         return None
     locked = _match(r"【作者已确认（锁定）的部分】([^\n]*)", user) or _section(user, "作者已确认（锁定）的部分")
-    if "关键节点" in locked:
+    if "第一段" in locked:
         return s.RevisionTriage(
-            unlock_requests=[s.UnlockRequest(target="spine", reason=f"作者要求调整：{text}")],
+            unlock_requests=[s.UnlockRequest(target="segment", reason=f"作者要求调整：{text}")],
             remark="你点名的铁钉节点在已经确认的部分，我先提出解锁请求，等你决定后再改。",
         )
     return s.RevisionTriage(
-        spine_instructions="；".join(f"作者要求改动铁钉节点 {index}" for index in overrides) + f"：{text}",
+        segment_instructions="；".join(f"作者要求改动铁钉节点 {index}" for index in overrides) + f"：{text}",
         pinned_overrides=overrides,
         remark="收到，你点名的铁钉节点按这次的意见修改，改完仍是铁钉，其他铁钉保持不变。",
     )
 
 
-def _absorb(user: str) -> s.RevisionTriage:
-    """演示：先处理点名的铁钉，再按人物或后续步骤安排插话。"""
-    text = _author_feedback(user, "作者刚才的插话")
+def _feedback_target(text: str) -> str:
+    if any(word in text for word in ("概念", "定调", "基调", "方向", "核心循环", "感情线")):
+        return "concept"
+    if any(word in text for word in ("主角", "驱动力", "金手指", "名字", "长线追求")):
+        return "protagonist"
+    if any(word in text for word in ("世界", "人物", "地图", "设定")):
+        return "world"
+    if any(word in text for word in ("节点", "开篇", "第一段", "结局")):
+        return "segment"
+    if any(word in text for word in ("分卷", "线索", "出场")):
+        return "volumes"
+    return "first_volume"
+
+
+def _feedback_revision(user: str, text: str) -> s.RevisionTriage:
     pinned_revision = _pinned_revision(user, text)
     if pinned_revision is not None:
         return pinned_revision
-    # format_locked 的块名按产品格式紧接标题，不能用只识别换行正文的 _section。
+    target = _feedback_target(text)
     locked = _match(r"【作者已确认（锁定）的部分】([^\n]*)", user) or _section(user, "作者已确认（锁定）的部分")
-    target = "concept" if any(word in text for word in ("概念", "基调", "方向")) else "lore"
-    if locked and ((target == "concept" and "定调" in locked) or (target == "lore" and "人物上轴" in locked)):
+    name = {
+        "concept": "定调",
+        "protagonist": "主角",
+        "world": "世界与人",
+        "segment": "第一段",
+        "volumes": "第一段",
+        "first_volume": "第一卷",
+    }[target]
+    if name in locked:
         return s.RevisionTriage(
             unlock_requests=[s.UnlockRequest(target=target, reason=f"作者要求调整：{text}")],
-            remark="这会影响已经确认的部分，我先提出解锁请求，等你决定后再改。",
+            remark="这会影响已经确认的部分，先请作者解锁，再按新要求修改。",
         )
-    if any(word in text for word in ("名字", "叫", "主角", "金手指", "人物")):
-        return s.RevisionTriage(
-            lore_instructions=f"按作者的插话修改人物：{text}",
-            remark=f"收到：{text[:40]}。人物已经定了，我让设定师先改一下，后面的步骤跟着同步。",
-        )
+    return s.RevisionTriage(
+        **{f"{target}_instructions": text}, remark=f"收到：{text[:40]}。只改对应部分，下游按新的内容同步检查。"
+    )
+
+
+def _absorb(user: str) -> s.RevisionTriage:
+    text = _author_feedback(user, "作者刚才的插话")
+    if any(
+        word in text
+        for word in ("节点", "主角", "金手指", "名字", "叫", "人物", "概念", "定调", "基调", "方向", "世界")
+    ):
+        return _feedback_revision(user, text)
     return s.RevisionTriage(remark=f"收到：{text[:40]}。已完成的部分不受影响，后面的步骤直接按你说的写。")
 
 
 def _triage(user: str) -> s.RevisionTriage:
-    text = _author_feedback(user, "作者意见") or "按审稿意见调整"
-    pinned_revision = _pinned_revision(user, text)
-    if pinned_revision is not None:
-        return pinned_revision
-    return s.RevisionTriage(
-        first_volume_instructions=text, remark=f"作者的意见我看了：{text[:40]}。主要影响第一卷卷纲，我来改。"
-    )
+    return _feedback_revision(user, _author_feedback(user, "作者意见") or "按审稿意见调整第一卷")
 
 
 def _match(pattern: str, text: str) -> str:
@@ -1390,10 +1410,10 @@ async def respond(schema: type[BaseModel], system: str, user: str) -> BaseModel:
         s.BookDirections: lambda: _book_directions(user),
         s.NodeCandidates: lambda: _node_candidates(user),
         s.BookConcept: lambda: _concept(user),
-        s.LoreDraft: lambda: _lore(user),
-        s.StorySpine: lambda: _spine(user),
-        s.ThreadsDraft: _threads,
-        s.OutlineDraft: lambda: _outline(user),
+        s.ProtagonistDraft: lambda: _protagonist(user),
+        s.WorldDraft: lambda: _world(user),
+        s.SegmentDraft: lambda: _segment(user),
+        s.SegmentVolumesDraft: lambda: _segment_volumes(user),
         s.VolumePlanDraft: lambda: _volume_plan(user),
         s.VolumeDirections: lambda: _directions(user),
         s.PitchJudgement: lambda: _judge(user),

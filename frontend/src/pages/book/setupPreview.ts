@@ -1,7 +1,7 @@
 import type { Job, MeetingMessage, Outline } from '../../api/types'
 import { artifactTarget } from '../../lib/workspace.ts'
 
-const SETUP_PREVIEWS = new Set(['directions', 'concept', 'lore', 'spine', 'threads', 'outline', 'volume_plan'])
+const SETUP_PREVIEWS = new Set(['directions', 'concept', 'protagonist', 'world', 'segment', 'segment_volumes', 'lore', 'spine', 'threads', 'outline', 'volume_plan'])
 
 /** 每块入库前展示本轮产出；只读快照绝不能写进可编辑的 query cache。 */
 export function setupPreviewForPath(

@@ -22,6 +22,7 @@ from app.graphs import book_setup, write_book
 from app.graphs.deps import GraphDeps, JobCancelled, cancel_key
 from app.llm.router import LLMError, LLMRouter
 from app.models import Book, Job
+from app.services.jobs import LEGACY_SETUP_MESSAGE
 from app.services.meeting import Emitter, job_dict, publish
 
 log = logging.getLogger(__name__)
@@ -140,8 +141,12 @@ async def _run(
             return
         kind, book_id, thread_id, params = job.kind, job.book_id, job.thread_id, dict(job.params or {})
 
-    build_graph, make_initial = GRAPHS[kind]
     emitter = Emitter(sm, redis, book_id, job_id)
+    if kind == "book_setup" and params.get("flow") != 2:
+        await emitter.say("system", LEGACY_SETUP_MESSAGE, kind="error")
+        await _update_job(sm, redis, job_id, status="failed", error=LEGACY_SETUP_MESSAGE, finished_at=datetime.now(UTC))
+        return
+    build_graph, make_initial = GRAPHS[kind]
     router.book_id = book_id
     deps = GraphDeps(
         sessionmaker=sm,
@@ -166,7 +171,20 @@ async def _run(
                 await emitter.status("system", "从上次中断的地方继续…")
                 graph_input = None
             else:
-                graph_input = make_initial(params)
+                if kind == "book_setup" and params.get("restart_from"):
+                    async with sm() as session:
+                        old = await session.get(Job, uuid.UUID(params["restart_from"]))
+                        book = await session.get(Book, book_id)
+                        concept = dict(book.concept or {}) if book else {}
+                    previous = (
+                        await saver.aget_tuple({"configurable": {"thread_id": old.thread_id}})
+                        if old is not None and old.book_id == book_id
+                        else None
+                    )
+                    old_values = previous.checkpoint.get("channel_values", {}) if previous else {}
+                    graph_input = book_setup.restart_state(params, old_values, concept)
+                else:
+                    graph_input = make_initial(params)
             async for _ in graph.astream(graph_input, config, context=deps, stream_mode="updates"):
                 pass
             snapshot = await graph.aget_state(config)

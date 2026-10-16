@@ -8,6 +8,7 @@ import type { Character, Foreshadowing, ForeshadowingStatus } from '../../../api
 import { EditableText } from '../../../components/Editable'
 import { Badge, Button, Card, EmptyState, ErrorText, inputClass, Sheet, Skeleton } from '../../../components/ui'
 import type { Tone } from '../../../lib/status'
+import { worldFields } from '../../../lib/setupPresentation'
 import { useBookContext } from '../context'
 import { PieceDecisions } from '../PieceDecisions'
 import { CharacterAnchors } from './CharacterAnchors'
@@ -124,10 +125,10 @@ export function CharactersPage() {
 
   return (
     <div>
-      <PieceDecisions piece="cast" />
-      {job?.status === 'waiting_author' && job.pending?.kind === 'setup_piece' && job.pending.piece === 'cast' && <div className="mb-5 rounded-xl border border-chief/20 bg-chief-soft/50 px-4 py-3 text-sm text-chief">
-        <p>这一块还包括世界观、人物关系和信息差</p>
-        <div className="mt-2 flex flex-wrap gap-4">{[['世界观', 'world'], ['人物关系', 'relations'], ['信息差', 'secrets']].map(([name, path]) => <a key={path} href={`/books/${bookId}/${path}`} onClick={event => { event.preventDefault(); manualNavigate(`/books/${bookId}/${path}`) }} className="underline underline-offset-4">{name} →</a>)}</div>
+      <PieceDecisions piece="world" />
+      {job?.status === 'waiting_author' && job.pending?.kind === 'setup_piece' && job.pending.piece === 'world' && <div className="mb-5 rounded-xl border border-chief/20 bg-chief-soft/50 px-4 py-3 text-sm text-chief">
+        <p>这一块还包括世界与地图、人物和人物关系</p>
+        <div className="mt-2 flex flex-wrap gap-4">{[['世界与地图', 'world'], ['人物关系', 'relations']].map(([name, path]) => <a key={path} href={`/books/${bookId}/${path}`} onClick={event => { event.preventDefault(); manualNavigate(`/books/${bookId}/${path}`) }} className="underline underline-offset-4">{name} →</a>)}</div>
       </div>}
       <PageHeader
         eyebrow="设定库"
@@ -201,6 +202,7 @@ const CATEGORIES: Record<string, ReactNode> = {
 }
 
 export function WorldPage() {
+  const { book, manualNavigate } = useBookContext()
   const { bookId, locked, data, isLoading } = useBibleData()
   const { create, update, remove } = useBibleMutations(bookId, 'world_entries')
   const [category, setCategory] = useState('其他')
@@ -213,7 +215,9 @@ export function WorldPage() {
 
   return (
     <div>
+      <PieceDecisions piece="world" />
       <PageHeader eyebrow="设定库" title="世界观" subtitle="力量体系、势力、地理与规则。好的设定都有限制和代价。" />
+      {!!Object.keys(book.world ?? {}).length && <section aria-label="世界与地图" className="mb-8 space-y-5 border-b border-line pb-7">{worldFields(book.world).map(({ label, value }) => <FieldBlock key={label} label={label}><p className="text-sm leading-relaxed whitespace-pre-wrap">{value || '（未定）'}</p></FieldBlock>)}<div className="flex gap-4 text-sm text-chief">{[['这里的人', 'characters'], ['人物关系', 'relations']].map(([label, path]) => <a key={path} href={`/books/${bookId}/${path}`} onClick={event => { event.preventDefault(); manualNavigate(`/books/${bookId}/${path}`) }} className="underline underline-offset-4">{label} →</a>)}</div></section>}
       <Locked locked={locked} />
       {isLoading && <Skeleton className="h-48" />}
       <div className="space-y-9">

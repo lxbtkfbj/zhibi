@@ -81,11 +81,11 @@ import { PIECES, nodeCounts, pieceStatuses, segments } from '../src/lib/storyMap
 import { isWritingComplete, plannedVolumeChapters, storyMapNodeChapters, storyMapWritingIndex, visibleStoryMapNodes, writingPosition, writingPositionText } from '../src/lib/storyMap.ts'
 
 test('all five puzzle pieces have stable keys and destination paths', () => {
-  assert.deepEqual(PIECES.map(({key,path}) => [key,path]), [['concept','/concept'],['nodes','/spine'],['cast','/characters'],['fill','/spine'],['first_volume','/volume/1']])
+  assert.deepEqual(PIECES.map(({key,path}) => [key,path]), [['concept','/concept'],['protagonist','/protagonist'],['world','/world'],['segment','/spine'],['first_volume','/volume/1']])
 })
 test('piece statuses preserve confirmed, current, oneshot-done and missing legacy states', () => {
-  const result = pieceStatuses({current:'nodes',pieces:{concept:'confirmed',nodes:'waiting',fill:'done'}})
-  assert.equal(result.current,'nodes')
+  const result = pieceStatuses({current:'protagonist',pieces:{concept:'confirmed',protagonist:'waiting',segment:'done'}})
+  assert.equal(result.current,'protagonist')
   assert.deepEqual(result.pieces.map(piece=>piece.status),['confirmed','waiting','todo','done','todo'])
   assert.equal(result.pieces.filter(piece=>piece.current).length,1)
   assert.deepEqual(pieceStatuses(undefined).pieces.map(piece=>piece.status), Array(5).fill('todo'))

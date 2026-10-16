@@ -5,7 +5,7 @@ from copy import deepcopy
 import pytest
 
 from app.agents.context import format_direction_choice, format_locked, format_target_node
-from app.agents.setup_puzzle import clean_reveals, merge_nodes, normalize_lore, normalize_outline, piece_warnings
+from app.agents.setup_puzzle import clean_reveals, merge_nodes, normalize_secrets, normalize_volumes, piece_checks
 from app.services.setup_store import remap_node_refs
 
 
@@ -112,12 +112,12 @@ def test_unpersisted_node_refs_follow_snapshot_not_none_ids():
     merged = merge_nodes(
         [{"ref": 1, "kind": "开篇"}, {"kind": "节点"}, {"ref": 2, "kind": "节点"}, {"ref": 3, "kind": "结局"}], current
     )
-    setup = {"lore": {"anchors": [{"node": 2}]}, "outline": {"volumes": [{"target_node": 3}]}}
+    setup = {"volumes": {"anchors": [{"node": 2}], "volumes": [{"target_node": 3}]}}
     remapped = remap_node_refs(setup, current, merged)
     assert all(item["id"] is None for item in merged)
-    assert remapped["lore"]["anchors"][0]["node"] == 3
-    assert remapped["outline"]["volumes"][0]["target_node"] == 4
-    assert setup["lore"]["anchors"][0]["node"] == 2
+    assert remapped["volumes"]["anchors"][0]["node"] == 3
+    assert remapped["volumes"]["volumes"][0]["target_node"] == 4
+    assert setup["volumes"]["anchors"][0]["node"] == 2
 
 
 def test_lore_validates_names_nodes_and_preserves_secret_number():
@@ -134,36 +134,40 @@ def test_lore_validates_names_nodes_and_preserves_secret_number():
         ],
     }
     original = deepcopy(raw)
-    lore, dropped = normalize_lore(
-        raw, [node("开篇", "opening"), node("高光")], [{"seq": 7, "title": "身份", "status": "public"}]
+    nodes = [node("开篇", "opening"), node("高光")]
+    secrets, dropped = normalize_secrets(
+        raw["secrets"], raw["characters"], nodes, [{"seq": 7, "title": "身份", "status": "public"}]
     )
+    volumes, _, notes = normalize_volumes({"anchors": raw["anchors"]}, {"nodes": nodes}, raw["characters"], 1)
     assert raw == original
-    assert dropped == {"dropped_anchors": 2, "dropped_knowers": 1}
-    assert lore["anchors"] == [{"character": "林岚", "node": 2, "kind": "高光", "node_title": "高光"}]
-    assert [item["seq"] for item in lore["secrets"]] == [7, 8]
-    assert lore["secrets"][0]["knowers"] == [{"name": "林岚", "since_chapter": None, "how": "开书设定"}]
-    assert lore["secrets"][0]["status"] == "public" and lore["secrets"][1]["node"] == 0
+    assert dropped == 1
+    assert notes == [{"question": "cast", "text": "已丢弃 2 条不合法的人物锚点。"}]
+    assert volumes["anchors"] == [{"character": "林岚", "node": 2, "kind": "高光", "node_title": "高光"}]
+    assert [item["seq"] for item in secrets] == [7, 8]
+    assert secrets[0]["knowers"] == [{"name": "林岚", "since_chapter": None, "how": "开书设定"}]
+    assert secrets[0]["status"] == "public" and secrets[1]["node"] == 0
 
 
-def test_outline_normalization_never_changes_pin():
+def test_volumes_normalization_never_changes_pin():
     nodes = [node("a", "opening"), node("b", status="pinned", volume=2), node("c", "ending", volume=5)]
-    outline = {
+    segment = {"nodes": nodes, "expectations": [{"node": 2, "plant_volume": 99, "payoff_volume": 99}]}
+    part = {
         "volumes": [
-            {"index": 1, "target_node": 99, "reaches_node": True},
-            {"index": 3, "target_node": 2, "reaches_node": True},
-            {"index": 4, "target_node": 3, "reaches_node": True},
-        ],
-        "foreshadowings": [{"description": "伏笔", "node": 90}],
-        "expectations": [{"description": "期待"}],
+            {"index": 4, "target_node": 3, "chapter_count": -1},
+            {"index": 1, "target_node": 99},
+            {"index": 3, "target_node": 2},
+        ]
     }
-    before = deepcopy(nodes)
-    cleaned, changed, warnings = normalize_outline(outline, nodes)
-    assert nodes == before and changed[1] == before[1]
-    assert changed[2]["volume"] == 4
-    assert cleaned["volumes"][0]["target_node"] == 0 and not cleaned["volumes"][0]["reaches_node"]
-    assert any("铁钉" in item for item in warnings) and any("不存在" in item for item in warnings)
-    assert cleaned["foreshadowings"][0]["kind"] == "伏笔" and cleaned["foreshadowings"][0]["node"] == 0
-    assert cleaned["expectations"][0]["kind"] == "期待" and cleaned["expectations"][0]["span"] == "长"
+    before = deepcopy(segment)
+    cleaned, changed, notes = normalize_volumes(part, segment, [], 1)
+    assert segment == before and changed["nodes"][1] == before["nodes"][1]
+    assert changed["nodes"][2]["volume"] == 5
+    assert [v["index"] for v in cleaned["volumes"]] == [1, 2, 3]
+    assert [v["target_node"] for v in cleaned["volumes"]] == [2, 2, 2]
+    assert [v["reaches_node"] for v in cleaned["volumes"]] == [False, False, True]
+    assert all(v["chapter_count"] == 0 for v in cleaned["volumes"])
+    assert any("铁钉" in item["text"] for item in notes)
+    assert changed["expectations"][0]["plant_volume"] == changed["expectations"][0]["payoff_volume"] == 3
 
 
 def test_reveals_are_filtered_against_actual_secret_codes():
@@ -189,63 +193,47 @@ def test_reveals_are_filtered_against_actual_secret_codes():
 
 
 def valid_setup():
-    nodes = [
-        node(str(index), "opening" if index == 1 else "ending" if index == 9 else "milestone", volume=index)
-        for index in range(1, 10)
-    ]
+    from app.agents.setup_puzzle import normalize_segment, normalize_world
+    from app.llm import demo
+
+    concept = demo._concept("").model_dump()
+    protagonist = demo._protagonist("").model_dump()
+    world, _ = normalize_world(demo._world("").model_dump(), protagonist)
+    segment, _ = normalize_segment(demo._segment("").model_dump(), [], world["characters"], {}, world=world)
+    volumes, segment, _ = normalize_volumes(demo._segment_volumes("").model_dump(), segment, world["characters"], 1)
     return {
-        "concept": {"target_length": 9, "chapter_words": 1000, "target_volumes": 9},
-        "spine": {"nodes": nodes},
-        "lore": {
-            "characters": [
-                {"name": name, "role_type": role} for name, role in (("甲", "主角"), ("乙", "女主"), ("丙", "反派"))
-            ],
-            "anchors": [{"character": name, "node": 2} for name in ("甲", "乙", "丙")],
-            "secrets": [{"seq": index} for index in range(1, 5)],
+        "concept": concept,
+        "protagonist": protagonist,
+        "world": world,
+        "segment": segment,
+        "volumes": volumes,
+        "first_volume": {
+            "want": "拿到药田证据",
+            "pressure": "管事追债",
+            "units": [{"index": 1, "loop": "找线索拿证据", "foreshadow_actions": [{"ref": "E1", "action": "埋下"}]}],
         },
-        "outline": {
-            "volumes": [
-                {"index": index, "target_node": index, "reaches_node": True, "chapter_count": 10}
-                for index in range(1, 10)
-            ],
-            "expectations": [
-                {"seq": 1, "plant_volume": 1, "payoff_volume": 3},
-                {"seq": 2, "plant_volume": 3, "payoff_volume": 9},
-            ],
-        },
-        "first_volume": {"units": [{"index": 1, "foreshadow_actions": [{"ref": "E1", "action": "埋下"}]}]},
     }
 
 
 def test_valid_pieces_have_no_program_warnings():
-    for piece in ("nodes", "cast", "fill", "first_volume"):
-        assert piece_warnings(piece, valid_setup()) == []
+    from app.agents.setup_puzzle import PIECE_ORDER
+
+    for piece in PIECE_ORDER:
+        assert piece_checks(piece, valid_setup()) == []
 
 
-def test_program_warnings_cover_boundaries_gaps_empty_lore_and_schedule():
+def test_program_checks_cover_new_required_questions_without_remote_scope_requirements():
     setup = valid_setup()
-    setup["spine"]["nodes"] = [
-        node("a", "opening", volume=1),
-        node("b", status="empty", volume=6),
-        node("c", "ending", volume=3),
-    ]
-    warnings = piece_warnings("nodes", setup)
-    assert any("6–12" in text for text in warnings)
-    assert (
-        any("连续" in text for text in warnings)
-        and any("更早" in text for text in warnings)
-        and any("留空" in text for text in warnings)
-    )
-    setup["lore"].update(anchors=[], secrets=[])
-    assert any("已丢弃 2" in text for text in piece_warnings("cast", setup, {"dropped_anchors": 2}))
-    setup["outline"] = {
-        "volumes": [{"index": 1, "target_node": 3}, {"index": 2, "target_node": 2}],
-        "expectations": [{"description": "倒序", "plant_volume": 5, "payoff_volume": 2}],
-    }
-    warnings = piece_warnings("fill", setup)
-    assert all(any(keyword in text for text in warnings) for keyword in ("章数", "倒退", "少于 2", "晚于"))
+    setup["segment"]["nodes"][1]["status"] = "empty"
+    checks = piece_checks("segment", setup)
+    assert any("留空" in item["text"] for item in checks)
+    assert not any("6–12" in item["text"] or "全书" in item["text"] for item in checks)
+    setup["volumes"] = {"volumes": [{"index": 1}], "anchors": []}
+    checks = piece_checks("segment", setup)
+    assert {"volumes", "cast"} <= {item["question"] for item in checks}
+    assert all(any(keyword in item["text"] for item in checks) for keyword in ("章数", "想做成", "线索", "登场"))
     setup["first_volume"]["units"][0]["foreshadow_actions"] = [{"ref": "F1"}]
-    assert "没有安排期待动作" in piece_warnings("first_volume", setup)[0]
+    assert any("没有安排期待动作" in item["text"] for item in piece_checks("first_volume", setup))
 
 
 def test_context_direction_target_and_locked():
@@ -260,8 +248,8 @@ def test_context_direction_target_and_locked():
     assert "再下一个节点：节点 3「结局」：原事件" in text
     assert "更进一步" in format_target_node({"target_node": 2}, nodes)
     assert "没有标走向" in format_target_node({"target_node": 99}, nodes)
-    state = {"mode": "puzzle", "pieces": {"concept": "confirmed", "nodes": "confirmed"}, "spine": {"nodes": nodes}}
-    assert format_locked(state) == "【作者已确认（锁定）的部分】定调、关键节点\n其中铁钉节点：节点 2「飞升」"
+    state = {"mode": "puzzle", "pieces": {"concept": "confirmed", "segment": "confirmed"}, "segment": {"nodes": nodes}}
+    assert format_locked(state) == "【作者已确认（锁定）的部分】定调、第一段\n其中铁钉节点：节点 2「飞升」"
     assert format_locked({**state, "mode": "oneshot"}) == (
         "【作者钉死的节点】节点 2「飞升」（铁钉，不能擅自改；仅本轮作者明确点名时可按要求改，改完仍是铁钉）"
     )

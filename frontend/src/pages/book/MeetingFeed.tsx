@@ -1,3 +1,4 @@
+import { protagonistFields, segmentFields, worldFields, type SetupField } from '../../lib/setupPresentation'
 import { useReducedMotion } from '../../lib/appearance'
 import clsx from 'clsx'
 import { AlertTriangle, Check, ChevronDown, X } from 'lucide-react'
@@ -43,8 +44,10 @@ function time(iso: string | null) {
 
 // ---------- 产出卡片 ----------
 
-type UnitBrief = Pick<PlotUnit, 'index' | 'title' | 'chapter_count' | 'climax'> & Partial<Pick<PlotUnit, 'tropes' | 'resolution'>>
+type UnitBrief = Pick<PlotUnit, 'index' | 'title' | 'chapter_count' | 'climax'> & Partial<Pick<PlotUnit, 'tropes' | 'resolution' | 'loop'>>
 interface VolumePlanData {
+  want?: string
+  pressure?: string
   volume: number
   units: UnitBrief[]
   new_foreshadowings: { seq: number; description: string }[]
@@ -123,7 +126,11 @@ interface CritiqueData {
 }
 
 const TARGET_NAME: Record<string, string> = {
-  concept: '概念',
+  concept: '定调',
+  protagonist: '主角',
+  world: '世界与人',
+  segment: '第一段',
+  volumes: '第一段的分卷',
   lore: '世界观与人物',
   spine: '关键节点',
   threads: '线索',
@@ -156,13 +163,14 @@ function TropeTags({ tropes, resolution }: { tropes?: string[]; resolution?: str
 function UnitList({ units }: { units: UnitBrief[] }) {
   return (
     <ol className="space-y-1.5 text-ink-2">
-      {units.map((u) => (
+      {(units ?? []).map((u) => (
         <li key={u.index}>
           <span className="font-medium text-ink">
             {u.index}. {u.title}
           </span>
           <span className="text-xs text-ink-2"> 约 {u.chapter_count} 章</span>
           <TropeTags tropes={u.tropes} resolution={u.resolution} /> {u.climax}
+          {u.loop && <p className="mt-1 text-sm"><span className="mr-2 text-xs">核心循环</span>{u.loop}</p>}
         </li>
       ))}
     </ol>
@@ -274,6 +282,10 @@ function ArtifactAnnotation({ data }: { data: { editor_note?: string; techniques
   </div>
 }
 
+function SetupFields({ fields }: { fields: SetupField[] }) {
+  return <dl className="space-y-2">{fields.filter(item => item.value).map(({ label, value }) => <div key={label}><dt className="text-xs text-chief">{label}</dt><dd className="mt-0.5 whitespace-pre-wrap text-ink-2">{value}</dd></div>)}</dl>
+}
+
 export function ArtifactBody({ message }: { message: MeetingMessage }) {
   const { type, data } = message.payload ?? { type: '', data: null }
   if (type === 'questions') {
@@ -290,6 +302,13 @@ export function ArtifactBody({ message }: { message: MeetingMessage }) {
         ))}
       </ol>
     )
+  }
+  if (type === 'protagonist') return <SetupFields fields={protagonistFields(data)} />
+  if (type === 'world') return <div className="space-y-3"><SetupFields fields={worldFields(data)} /><ArtifactBody message={{ ...message, payload: { type: 'lore', data } }} /></div>
+  if (type === 'segment') return <div className="space-y-4"><SetupFields fields={segmentFields(data)} /><ArtifactBody message={{ ...message, payload: { type: 'spine', data } }} /></div>
+  if (type === 'segment_volumes') {
+    const draft = data && typeof data === 'object' ? data as { threads?: StoryThread[] } : {}
+    return <div className="space-y-4"><ArtifactBody message={{ ...message, payload: { type: 'outline', data } }} />{!!draft.threads?.length && <ArtifactBody message={{ ...message, payload: { type: 'threads', data } }} />}<ArtifactBody message={{ ...message, payload: { type: 'lore', data } }} /></div>
   }
   if (type === 'spine') {
     const nodes = spineArtifactNodes(data)
@@ -314,10 +333,11 @@ export function ArtifactBody({ message }: { message: MeetingMessage }) {
     )
   }
   if (type === 'concept') {
-    const c = data as Concept
+    const c = (data ?? {}) as Concept
     return (
       <div className="space-y-2">
         <p className="text-ink-2">{c.logline}</p>
+        {c.core_loop && <p className="text-ink-2"><span className="mr-2 text-xs text-chief">核心循环</span>{c.core_loop}</p>}
         <ul className="space-y-1 text-ink-2">
           {c.selling_points?.map((p) => (
             <li key={p} className="flex gap-2">
@@ -348,7 +368,7 @@ export function ArtifactBody({ message }: { message: MeetingMessage }) {
             </span>
           ))}
         </div>
-        <p className="text-ink-2">世界观：{l.world_entries.map((w) => w.name).join('、')}</p>
+        {!!l.world_entries.length && <p className="text-ink-2">世界观：{l.world_entries.map((w) => w.name).join('、')}</p>}
         {l.anchors.length > 0 && <section className="space-y-1 border-t border-line pt-2"><p className="font-medium text-ink">人物锚点</p>{l.anchors.map((a, i) => <p key={i} className="text-ink-2">{a.node ? `节点 ${a.node}：` : ''}{a.character} · {a.kind}{a.note ? `——${a.note}` : ''}</p>)}</section>}
         {l.secrets.length > 0 && <section className="space-y-2 border-t border-line pt-2"><p className="font-medium text-ink">信息差</p>{l.secrets.map((s, i) => <div key={i}><p><span className="font-medium text-ink">{s.code}「{s.title}」</span>：{s.truth}</p><p className="text-xs text-ink-2">知情人：{s.knowers.join('、') || '暂无'} · 读者：{s.reader_knows}</p>{s.reveal_plan && <p className="text-xs text-ink-2">揭开计划：{s.reveal_plan}</p>}</div>)}</section>}
       </div>
@@ -380,7 +400,7 @@ export function ArtifactBody({ message }: { message: MeetingMessage }) {
       <h3 className="mb-2 font-serif text-base font-bold text-ink">方向 {i + 1}「{direction.name}」</h3>
       <p className="mb-3">{direction.logline}</p>
       <dl className="space-y-1.5">{[
-        ['主角', direction.protagonist], ['金手指', direction.golden_finger], ['开局', direction.opening],
+        ['主角', direction.protagonist], ['驱动力', direction.drive], ['金手指', direction.golden_finger], ['核心循环', direction.core_loop], ['开局', direction.opening],
         ['卖点', direction.selling_points.join('；')], ['舞台阶梯', direction.stage_ladder], ['基调', direction.tone],
         ['目标读者', direction.reader], ['区别', direction.difference],
       ].filter(([, content]) => content).map(([label, content]) => <div key={label} className="flex gap-2"><dt className="min-w-14 shrink-0 pt-0.5 text-xs text-ink-2">{label}</dt><dd className="min-w-0">{content}</dd></div>)}</dl>
@@ -401,7 +421,8 @@ export function ArtifactBody({ message }: { message: MeetingMessage }) {
     )
   }
   if (type === 'volume_plan') {
-    return <UnitList units={(data as VolumePlanData).units} />
+    const plan = (data ?? {}) as VolumePlanData
+    return <div className="space-y-3"><SetupFields fields={[{ label: '这一卷想做成', value: plan.want ?? '' }, { label: '卷首处境', value: plan.pressure ?? '' }]} /><UnitList units={plan.units} /></div>
   }
   if (type === 'volume_directions') {
     const d = data as DirectionsData

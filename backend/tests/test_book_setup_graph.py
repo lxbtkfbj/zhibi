@@ -40,7 +40,7 @@ async def make_job(sessionmaker, idea="一个能看见别人寿命的少年", as
             book_id=book.id,
             kind="book_setup",
             thread_id=f"test-{uuid.uuid4()}",
-            params={"idea": idea, "ask": ask},
+            params={"flow": 2, "idea": idea, "ask": ask},
         )
         session.add(job)
         await session.commit()
@@ -55,22 +55,22 @@ async def job_status(sessionmaker, job_id):
 
 def test_cascade_rules():
     assert cascade({"concept": "改书名"})[0] == ORDER
-    assert cascade({"lore": "加一个人"})[0] == ["lore", "outline", "threads", "first_volume"]
-    assert cascade({"threads": "女主早点登场"})[0] == ["threads", "first_volume"]
-    queue, instructions = cascade({"first_volume": "压缩第二单元", "lore": " "})
+    assert cascade({"world": "加一个人"})[0] == ["world", "segment", "volumes", "first_volume"]
+    assert cascade({"volumes": "女主早点登场"})[0] == ["volumes", "first_volume"]
+    queue, instructions = cascade({"first_volume": "压缩第二单元", "world": " "})
     assert queue == ["first_volume"]
     assert instructions == {"first_volume": "压缩第二单元"}
-    queue, instructions = cascade({"outline": "第三卷换个舞台"})
-    assert queue == ["outline", "threads", "first_volume"]
-    assert instructions["outline"] == "第三卷换个舞台" and instructions["first_volume"]  # 下游自动同步
+    queue, instructions = cascade({"volumes": "第三卷换个舞台"})
+    assert queue == ["volumes", "first_volume"]
+    assert instructions["volumes"] == "第三卷换个舞台" and instructions["first_volume"]  # 下游自动同步
 
 
 def test_merge_plan_keeps_order_and_combines_instructions():
     queue, instructions = merge_plan(
-        ["outline"], {"outline": "压缩第二单元"}, ["lore", "outline"], {"lore": "改名", "outline": "同步"}
+        ["volumes"], {"volumes": "压缩第二单元"}, ["world", "volumes"], {"world": "改名", "volumes": "同步"}
     )
-    assert queue == ["lore", "outline"]
-    assert instructions == {"lore": "改名", "outline": "压缩第二单元\n同步"}
+    assert queue == ["world", "volumes"]
+    assert instructions == {"world": "改名", "volumes": "压缩第二单元\n同步"}
 
 
 async def test_setup_flow_to_approval(sessionmaker):
@@ -93,13 +93,14 @@ async def test_setup_flow_to_approval(sessionmaker):
             .scalars()
             .all()
         )
-        assert [v.status for v in volumes] == ["detailed", *(["planned"] * 7)]
+        assert [v.status for v in volumes] == ["detailed", "planned"]
         # 先定主线骨架（开篇、结局、关键转折），分卷按篇幅分配章数
         nodes = await load_nodes(session, book_id)
         assert nodes[0]["kind"] == "opening" and nodes[-1]["kind"] == "ending"
-        assert nodes[-1]["event"] and sum(n["kind"] == "milestone" for n in nodes) == 7
+        assert nodes[-1]["event"] and sum(n["kind"] == "milestone" for n in nodes) == 1
         assert not ({"opening", "ending", "milestones", "nodes"} & book.spine.keys())
-        assert sum(v.chapter_count for v in volumes) == 333
+        assert sum(v.chapter_count for v in volumes) == 61 < 333
+        assert nodes[1]["segment"]["number"] == 1 and nodes[-1]["segment"] is None
         # 审稿要求压缩第二单元，演示模型的修改版是 6 章；各单元章数之和仍等于第一卷的 31 章
         units = (
             (
@@ -114,7 +115,7 @@ async def test_setup_flow_to_approval(sessionmaker):
         assert sum(u.chapter_count for u in units) == volumes[0].chapter_count == 31
         # 线索、卷卡片与伏笔台账
         threads = (await session.execute(select(StoryThread).where(StoryThread.book_id == book_id))).scalars().all()
-        assert {t.kind for t in threads} >= {"主线", "感情线", "反派线", "谜团线"}
+        assert {t.kind for t in threads} >= {"主线", "感情线", "反派线"}
         assert volumes[1].antagonist and volumes[1].thread_beats
         ledger = (
             (
@@ -126,9 +127,9 @@ async def test_setup_flow_to_approval(sessionmaker):
             .all()
         )
         assert [f.seq for f in ledger] == list(range(1, len(ledger) + 1))
-        assert len([f for f in ledger if f.kind == "伏笔" and f.span == "长"]) == 5
-        assert len([f for f in ledger if f.kind == "期待" and f.span == "长"]) == 2
-        assert [f.span for f in ledger[:3]] == ["长", "长", "长"]
+        assert len([f for f in ledger if f.kind == "伏笔" and f.span == "长"]) == 0
+        assert len([f for f in ledger if f.kind == "期待" and f.span == "长"]) == 1
+        assert ledger[0].span == "长"
         # 第一卷新埋的伏笔：写进对应单元的伏笔动作
         short = [f for f in ledger if f.kind == "伏笔" and f.span != "长"]
         assert {"ref": f"F{short[0].seq}", "action": "回收", "detail": "执法堂对质时成为关键证据"} in units[
@@ -208,8 +209,8 @@ async def test_failure_then_resume_from_checkpoint(sessionmaker, monkeypatch):
             .all()
         )
     assert purposes.count("开书·概念") == 1
-    assert purposes.count("开书·主线骨架") == 1
-    assert purposes.count("开书·设定") == 2  # 失败调用也留记录；只重试尚未完成的设定步骤。
+    assert purposes.count("开书·主角卡") == 1
+    assert purposes.count("开书·世界与人") == 2  # 失败调用也留记录；只重试尚未完成的设定步骤。
 
 
 async def test_interview_answers_become_requirements(sessionmaker, monkeypatch):
@@ -240,10 +241,10 @@ async def test_interview_answers_become_requirements(sessionmaker, monkeypatch):
     # 作者的回答进入之后每一步的提示词
     for name in (
         "BookConcept",
-        "LoreDraft",
-        "StorySpine",
-        "ThreadsDraft",
-        "OutlineDraft",
+        "ProtagonistDraft",
+        "WorldDraft",
+        "SegmentDraft",
+        "SegmentVolumesDraft",
         "VolumePlanDraft",
         "SetupCritique",
     ):
@@ -265,9 +266,9 @@ async def test_genre_playbook_goes_into_planning_prompts(sessionmaker, monkeypat
     status, _, error = await job_status(sessionmaker, job_id)
     assert status == "waiting_author", error
 
-    assert "【题材打法：后宫玄幻爽文" in prompts["ThreadsDraft"]
-    assert "女主登场节奏" in prompts["ThreadsDraft"] and "◆ 套路库" not in prompts["ThreadsDraft"]
-    assert "◆ 分卷" in prompts["OutlineDraft"] and "宗门大比（全书最多 3 次）" in prompts["OutlineDraft"]
+    assert "【题材打法：后宫玄幻爽文" in prompts["SegmentVolumesDraft"]
+    assert "◆ 分卷" in prompts["SegmentVolumesDraft"]
+    assert "◆ 分卷" in prompts["SegmentVolumesDraft"] and "宗门大比（全书最多 3 次）" in prompts["SegmentVolumesDraft"]
     volume = prompts["VolumePlanDraft"]
     assert "◆ 破局手法" in volume and "退婚打脸（全书最多 1 次）" in volume
     assert "【套路使用情况】\n（还没用过任何套路，这是第一卷）" in volume
@@ -286,14 +287,14 @@ async def test_genre_playbook_goes_into_planning_prompts(sessionmaker, monkeypat
         )
         # 第一卷的单元标上了套路和破局手法，后面各卷据此统计、防重复
         units = (await session.execute(select(PlotUnit).where(PlotUnit.book_id == book_id))).scalars().all()
-    assert any("题材打法：后宫玄幻爽文" in s for s in statuses)
+    assert any("第一段" in s for s in statuses)
     assert all(u.tropes and u.resolution for u in units)
 
     # 普通修仙文用通用打法
     _, plain_job = await make_job(sessionmaker)
     prompts.clear()
     await execute_job(plain_job)
-    assert "【题材打法：通用" in prompts["ThreadsDraft"]
+    assert "【题材打法：通用" in prompts["SegmentVolumesDraft"]
 
 
 @pytest.mark.parametrize("thread", [None, "lorekeeper"])
@@ -304,7 +305,7 @@ async def test_note_mid_run_revises_finished_parts(sessionmaker, monkeypatch, th
 
     async def interject(schema, system, user):
         prompts.append((schema.__name__, user))
-        if schema.__name__ == "LoreDraft" and len(prompts) == 3:
+        if schema.__name__ == "WorldDraft" and len(prompts) == 3:
             # 节点已经完成、设定师正在建人物时，作者插了一句话
             async with sessionmaker() as session:
                 session.add(
@@ -327,19 +328,20 @@ async def test_note_mid_run_revises_finished_parts(sessionmaker, monkeypatch, th
 
     names = [name for name, _ in prompts]
     # 设定做完后读到插话 → 改人物 → 总纲、线索、第一卷同步；已经在上游的节点不重做。
-    assert names[:9] == [
+    assert names[:10] == [
         "BookConcept",
-        "StorySpine",
-        "LoreDraft",
+        "ProtagonistDraft",
+        "WorldDraft",
         "RevisionTriage",
-        "LoreDraft",
-        "OutlineDraft",
-        "ThreadsDraft",
+        "ProtagonistDraft",
+        "WorldDraft",
+        "SegmentDraft",
+        "SegmentVolumesDraft",
         "VolumePlanDraft",
         "SetupCritique",
     ]
     assert "主角名字改成云澈" in prompts[4][1] and "【修改要求】" in prompts[4][1]
-    assert names.count("StorySpine") == 1
+    assert names.count("SegmentDraft") == 1
     for name, user in prompts[6:]:
         assert "主角名字改成云澈" in user, name  # 之后每一步都带着作者的话
     async with sessionmaker() as session:
@@ -464,18 +466,19 @@ async def test_approval_keeps_late_targeted_note_without_replanning(sessionmaker
     ]
 
 
-async def test_old_checkpoint_gets_new_steps(sessionmaker, monkeypatch):
-    """旧版流程的检查点没有主线骨架、线索和第一卷卷纲：继续执行时补到对应位置。"""
+async def test_current_flow_fills_missing_parts_in_new_order(sessionmaker, monkeypatch):
+    """当前新流程缺项时按六个步骤补齐，旧流程由 runner 拦截。"""
     _, job_id = await make_job(sessionmaker)
     runtime = SimpleNamespace(context=SimpleNamespace(sessionmaker=sessionmaker, job_id=job_id))
     monkeypatch.setattr(book_setup, "mark_progress", AsyncMock())
-    update = await intake_node({"queue": ["lore", "outline"], "concept": {"title": "旧书"}}, runtime)
-    assert update["queue"] == ["spine", "lore", "outline", "threads", "first_volume"]
+    update = await intake_node({"queue": ["world", "volumes"], "concept": {"title": "旧书"}}, runtime)
+    assert update["queue"] == ["protagonist", "world", "segment", "volumes", "first_volume"]
     done = {
         "concept": {"title": "旧书"},
-        "lore": {"characters": []},
-        "spine": {"ending": "已有骨架"},
-        "threads": {"threads": [{"name": "主线"}]},
+        "world": {"characters": []},
+        "protagonist": {"name": "主角"},
+        "segment": {"nodes": [{"kind": "ending"}]},
+        "volumes": {"volumes": [{"index": 1}], "threads": [{"name": "主线"}]},
         "first_volume": {"units": [{"index": 1}]},
     }
-    assert "queue" not in await intake_node({"queue": ["outline"], **done}, runtime)
+    assert "queue" not in await intake_node({"queue": ["volumes"], **done}, runtime)

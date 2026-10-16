@@ -50,11 +50,16 @@ async def save_volume_plan(
     *,
     replace_new: bool,
     replace_expectations: bool = False,
+    want: str = "",
+    pressure: str = "",
 ) -> None:
     """保存某一卷的卷纲：剧情单元按序号对齐；本卷新埋的伏笔写进台账。
 
     replace_new：修改卷纲时，本卷上一版新埋、还没写到的伏笔若这一版不要了，就从台账删掉。
     """
+    for key, value in (("want", want), ("pressure", pressure)):
+        if value and value.strip():
+            setattr(volume, key, value)
     nodes = await load_nodes(session, book_id)
     node_ids = {index: uuid.UUID(node["id"]) for index, node in enumerate(nodes, 1)}
     units = clean_reveals(units, await load_secrets(session, book_id, nodes))

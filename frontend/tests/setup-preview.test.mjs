@@ -8,6 +8,10 @@ const message = (type, data = {}, overrides = {}) => ({
 })
 
 for (const [type, suffix, data] of [
+  ['protagonist', '/protagonist', { name: '陆远' }],
+  ['world', '/world', { surface: '公开修仙' }],
+  ['segment', '/spine', { nodes: [] }],
+  ['segment_volumes', '/spine', { volumes: [] }],
   ['concept', '/concept', { title: '书名' }],
   ['directions', '', { directions: [{ name: '方向一' }] }],
   ['lore', '/characters', { characters: [] }],
@@ -58,7 +62,7 @@ test('spine and outline share the map route while the latest snapshot stays read
   const spine = message('spine', { nodes: [{ title: '旧节点' }] })
   const outline = message('outline', { volumes: [{ title: '新分卷' }] }, { id: 2 })
   assert.equal(setupPreviewForPath('book', job, [spine, outline], '/books/book/spine'), outline)
-  assert.equal(setupPreviewForPath('book', { ...job, status: 'waiting_author', pending: { kind: 'setup_piece', piece: 'fill' } }, [spine, outline], '/books/book/spine'), null)
+  assert.equal(setupPreviewForPath('book', { ...job, status: 'waiting_author', pending: { kind: 'setup_piece', piece: 'segment' } }, [spine, outline], '/books/book/spine'), null)
 })
 
 test('choosing or redoing directions leaves overview loading visible instead of replaying old cards', () => {

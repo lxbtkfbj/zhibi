@@ -1,7 +1,5 @@
 """任务 6：设计方 schema 原文、模板搬运与演示方向的回归。"""
 
-import hashlib
-import json
 import re
 from pathlib import Path
 
@@ -58,16 +56,9 @@ def test_direction_new_fields_accept_old_outputs_without_shared_defaults():
 
 
 def test_task6_templates_are_moved_without_byte_changes_and_previous_is_registered():
-    evidence = json.loads((ROOT / "docs/第一包验收/任务6-提示词原文校验.json").read_text(encoding="utf-8-sig"))
-    assert {Path(record["target"]).name for record in evidence} == {
-        "setup_directions.md",
-        "setup_concept.md",
-        "setup_lore.md",
-    }
-    for record in evidence:
-        assert not (ROOT / record["source"]).exists()
-        assert hashlib.sha256((ROOT / record["target"]).read_bytes()).hexdigest() == record["source_sha256"]
-        assert record["source_sha256"] == record["target_sha256"]
+    # 第二包已再次替换方向和概念，并退役设定；第一包的原文证据保持不动。
+    # 第二包原文哈希在 test_setup_puzzle_prompts 中覆盖。
+    assert not (ROOT / "backend/app/prompts/setup_lore.md").exists()
     assert VARIABLE_LABELS["previous"] == "上一轮的方向"
     assert {item["name"]: item["label"] for item in variables("setup_directions")}["previous"] == "上一轮的方向"
 
@@ -85,7 +76,7 @@ async def test_demo_reference_triggers_and_two_distinct_title_candidates(idea):
         assert len(direction.titles) == len(set(direction.titles)) == 2
         assert not any("《" in title or "》" in title for title in direction.titles)
         assert 4 <= len(direction.name) <= 8
-        assert idea in direction.logline
+        assert direction.protagonist.split("，")[0] in direction.logline
     assert demo._book_directions(direction_prompt("一个少年靠判断改变命运")).reference == ""
 
 
@@ -103,7 +94,7 @@ def test_demo_redos_change_story_and_opening_but_preserve_borrowed_core():
         assert {d.golden_finger for d in result.directions} == {d.golden_finger for d in first.directions}
         assert {d.protagonist for d in result.directions} == {d.protagonist for d in first.directions}
         assert {d.stage_ladder for d in result.directions} == {"老城区 → 整座城市 → 省城 → 全国"}
-        assert all(idea in d.logline for d in result.directions)
+        assert all(d.protagonist.split("，")[0] in d.logline for d in result.directions)
         assert "换了主线冲突和开局" in result.remark
         previous_result = result
 
@@ -124,7 +115,7 @@ def test_demo_concept_preserves_chosen_direction_and_title():
     assert result.title == direction["title"]
     assert result.alt_titles == [direction["titles"][0]]
     assert result.logline == direction["logline"]
-    assert result.protagonist_hook == direction["golden_finger"]
+    assert result.core_loop == direction["core_loop"]
     assert result.stage_ladder == direction["stage_ladder"]
     assert result.genre == "悬疑·灵异"
 
@@ -159,19 +150,19 @@ def concept_revision_prompt():
 def test_demo_revision_overrides_initial_direction_without_losing_selected_title(concept_revision_prompt, change):
     render, direction = concept_revision_prompt
     initial = demo._concept(render())
-    cost = "每次点灯消耗一天寿元，必须权衡救人与自保"
+    cost = "调查寿元异常，追查父母旧案，每次搜证都要救回一个受害者"
     instructions = []
     if change in ("cost", "both"):
-        instructions.append("主角钩子补充：" + cost)
+        instructions.append("核心循环补充：" + cost)
     if change in ("feeling", "both"):
         instructions.append("把「感情线」改成「从欢喜冤家开始」")
     revised = demo._concept(render(current=initial, instructions="\n".join(instructions)))
     assert revised.title == initial.title == direction["title"]
     assert revised.stage_ladder == initial.stage_ladder == direction["stage_ladder"]
     if change in ("cost", "both"):
-        assert revised.protagonist_hook == cost
+        assert revised.core_loop == cost
     else:
-        assert revised.protagonist_hook == initial.protagonist_hook
+        assert revised.core_loop == initial.core_loop
     if change in ("feeling", "both"):
         assert "宗门内斗与正邪两道的灰色地带；感情线：从欢喜冤家开始" in revised.selling_points
         assert revised.decisions[0].chosen == "从欢喜冤家开始"
@@ -180,7 +171,7 @@ def test_demo_revision_overrides_initial_direction_without_losing_selected_title
         assert revised.selling_points == initial.selling_points
     # 下一次改别的内容，也不能把已采用的修订恢复成最初的方向。
     later = demo._concept(render(current=revised, instructions="开局节奏稍慢一些"))
-    assert later.protagonist_hook == revised.protagonist_hook
+    assert later.core_loop == revised.core_loop
     assert later.selling_points == revised.selling_points
     assert later.decisions[0].chosen == revised.decisions[0].chosen
 
@@ -189,16 +180,16 @@ def test_demo_historical_requirements_do_not_reapply_old_concept_edits(concept_r
     render, direction = concept_revision_prompt
     history = (
         "【作者的要求（以后面的为准）】\n"
-        "- 历史意见：主角钩子补充：每次点灯消耗一天寿元，必须权衡救人与自保\n"
+        "- 历史意见：核心循环补充：调查寿元异常，追查父母旧案，每次搜证都要救回一个受害者\n"
         "- 历史意见：把「感情线」改成「从欢喜冤家开始」\n\n"
     )
     initial = demo._concept(render(requirements=history))
-    assert initial.protagonist_hook == direction["golden_finger"]
+    assert initial.core_loop == direction["core_loop"]
     assert initial.selling_points == direction["selling_points"]
     assert initial.decisions[0].chosen == "并肩查案慢慢靠近"
     revised = demo._concept(
-        render(current=initial, instructions="保留当前金手指，开局节奏稍慢一些", requirements=history)
+        render(current=initial, instructions="保留当前核心循环，开局节奏稍慢一些", requirements=history)
     )
-    assert revised.protagonist_hook == initial.protagonist_hook
+    assert revised.core_loop == initial.core_loop
     assert revised.selling_points == initial.selling_points
     assert revised.decisions[0].chosen == initial.decisions[0].chosen

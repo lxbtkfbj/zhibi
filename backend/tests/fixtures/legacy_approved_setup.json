@@ -1,0 +1,1193 @@
+{
+  "source": {
+    "baseline_commit": "84aa30989bf9d9adc3a05a4a8292d0fb7d73b75a",
+    "evidence": "docs/第二包验收/任务2-真实旧检查点.json, case 旧一口气待拍板",
+    "description": "真实旧图已产生的完整方案；在测试中批准为旧书续写，不恢复旧开书图。仅转换存储分组，节点ID移除但序号引用原样保留，所有segment为None。"
+  },
+  "setup": {
+    "concept": {
+      "tags": [
+        "凡人流",
+        "宗门",
+        "智斗",
+        "慢热成长"
+      ],
+      "tone": "冷静克制，带一点黑色幽默，节奏紧凑",
+      "genre": "玄幻·修仙",
+      "title": "青灯问道",
+      "logline": "隔离验收：旧一口气待拍板；少年寻找失踪妹妹。——杂役弟子陆远捡到一盏能照见他人寿元的青灯，从此在吃人的宗门里步步为营。",
+      "alt_titles": [
+        "一灯照九州",
+        "灯下问长生"
+      ],
+      "stage_ladder": "玄冥宗杂役院 → 外门 → 北境寒原 → 血河总坛 → 宗主峰",
+      "chapter_words": 3000,
+      "target_length": 100,
+      "target_reader": "男频，喜欢信息差智斗与代价明确的成长，不喜欢无代价开挂",
+      "selling_points": [
+        "青灯能看见他人剩余寿元，信息差带来的智斗爽感",
+        "杂役翻身，每次突破都用计谋而非奇遇",
+        "宗门内斗与正邪两道的灰色地带；感情线：并肩查案慢慢靠近"
+      ],
+      "target_volumes": 8,
+      "protagonist_hook": "陆远知道每个人还能活多久，却必须装作什么都不知道"
+    },
+    "protagonist": {},
+    "world": {
+      "world_entries": [
+        {
+          "category": "力量体系",
+          "name": "修行境界",
+          "content": "炼气、筑基、结丹、元婴、化神五境，每境分初、中、后期。每次突破需要消耗寿元换取灵力上限，寿元耗尽者坐化。"
+        },
+        {
+          "category": "物品",
+          "name": "青灯",
+          "content": "上古遗物，点燃后可看见视野内生灵头顶的寿元数字。每次点燃消耗持灯人一日寿元，灯芯燃尽前无法熄灭。"
+        },
+        {
+          "category": "势力",
+          "name": "玄冥宗",
+          "content": "北境第一大宗，外门弟子三千，杂役上万。宗规森严，弟子间允许「生死擂」，胜者可夺败者资源。"
+        },
+        {
+          "category": "势力",
+          "name": "血河教",
+          "content": "正道口中的魔教，以吸取他人寿元修行。与玄冥宗高层暗中有交易。"
+        },
+        {
+          "category": "地理",
+          "name": "北境寒原",
+          "content": "终年积雪，灵脉稀薄，玄冥宗建在寒原唯一的地火灵脉之上。"
+        },
+        {
+          "category": "规则",
+          "name": "寿元交易",
+          "content": "修士之间可以通过契约转让寿元，但违约者会被契约反噬。此事在正道属于禁忌。"
+        }
+      ],
+      "characters": [
+        {
+          "name": "陆远",
+          "role_type": "主角",
+          "gender": "男",
+          "age": "十六岁",
+          "appearance": "瘦高，左手缺一根小指",
+          "personality": "谨慎多疑，说话留三分，心软但不让别人看出来",
+          "background": "寒原猎户之子，父母死于兽潮，被卖进玄冥宗当杂役",
+          "abilities": "炼气一层，擅长辨认药草",
+          "goal": "活下去，然后查清父母之死的真相",
+          "want": "",
+          "location": "玄冥宗杂役院",
+          "condition": "刚挨过一顿打，肋骨有伤"
+        },
+        {
+          "name": "苏晚晴",
+          "role_type": "女主",
+          "gender": "女",
+          "age": "十七岁",
+          "appearance": "总穿一身旧青衣，笑起来眼角有颗痣",
+          "personality": "外冷内热，嘴硬，极讲规矩",
+          "background": "外门执法堂弟子，出身没落世家",
+          "abilities": "筑基初期，剑修",
+          "goal": "重振家族",
+          "want": "",
+          "location": "玄冥宗执法堂",
+          "condition": "正常"
+        },
+        {
+          "name": "赵乾",
+          "role_type": "反派",
+          "gender": "男",
+          "age": "二十岁",
+          "appearance": "锦衣玉带，手上总戴扳指",
+          "personality": "笑面虎，睚眦必报",
+          "background": "长老之孙，外门首席",
+          "abilities": "筑基中期",
+          "goal": "拜入内门，成为宗主亲传",
+          "want": "",
+          "location": "玄冥宗外门",
+          "condition": "正常"
+        },
+        {
+          "name": "老瞎子",
+          "role_type": "配角",
+          "gender": "男",
+          "age": "不详",
+          "appearance": "双目失明，常年抱着一把破扫帚",
+          "personality": "疯疯癫癫，偶尔说出惊人之语",
+          "background": "杂役院扫地人，没人知道他来了多久",
+          "abilities": "深不可测",
+          "goal": "不详",
+          "want": "",
+          "location": "玄冥宗杂役院",
+          "condition": "寿元只剩七日（陆远所见）"
+        },
+        {
+          "name": "宗主厉沧海",
+          "role_type": "反派",
+          "gender": "男",
+          "age": "三百余岁",
+          "appearance": "白发童颜",
+          "personality": "威严，喜怒不形于色",
+          "background": "玄冥宗宗主，元婴后期",
+          "abilities": "元婴后期",
+          "goal": "突破化神，延长寿元",
+          "want": "",
+          "location": "玄冥宗主峰",
+          "condition": "寿元仅剩三年（外人不知）"
+        },
+        {
+          "name": "周长老",
+          "role_type": "配角",
+          "gender": "",
+          "age": "",
+          "appearance": "",
+          "personality": "谨慎护短，习惯先留退路",
+          "background": "赵乾的祖父，掌管外门资源",
+          "abilities": "",
+          "goal": "保住家族在宗门的地位",
+          "want": "",
+          "location": "",
+          "condition": ""
+        }
+      ],
+      "relationships": [
+        {
+          "source": "陆远",
+          "target": "老瞎子",
+          "kind": "亦师亦友",
+          "description": "老瞎子常给陆远留半个馒头，青灯也是从他那里流到陆远手上"
+        },
+        {
+          "source": "陆远",
+          "target": "赵乾",
+          "kind": "仇敌",
+          "description": "赵乾的跟班打伤了陆远，陆远记下了这笔账"
+        },
+        {
+          "source": "苏晚晴",
+          "target": "赵乾",
+          "kind": "对立",
+          "description": "苏晚晴在执法堂多次查赵乾，都被长老压下"
+        }
+      ]
+    },
+    "segment": {
+      "theme": "命数不该被买卖",
+      "core_conflict": "陆远想查清父母之死，而宗门高层靠收割寿元续命",
+      "protagonist_arc": "从只求自保到愿意保护别人",
+      "nodes": [
+        {
+          "segment": null,
+          "kind": "opening",
+          "title": "寒夜捡灯",
+          "event": "老瞎子把青灯交给受伤的陆远，灯火第一次照见别人的死期",
+          "prerequisite": "陆远陷入杂役院的欺压",
+          "consequence": "陆远得到危险的信息优势",
+          "volume": 1,
+          "status": "pencil",
+          "origin": "ai",
+          "editor_note": "先把主角必须付出的代价摆出来，再让这一节点改变局面。",
+          "techniques": [
+            "欲扬先抑",
+            "打脸三拍"
+          ]
+        },
+        {
+          "segment": null,
+          "kind": "milestone",
+          "title": "外门考核",
+          "event": "陆远借寿元信息拆穿考核陷阱，和苏晚晴合力查明跟班死亡原因",
+          "prerequisite": "青灯能力已验证，药碗证据已找齐",
+          "consequence": "陆远进入外门，赵乾把他当作真正的对手",
+          "volume": 1,
+          "status": "pencil",
+          "origin": "ai",
+          "editor_note": "先把主角必须付出的代价摆出来，再让这一节点改变局面。",
+          "techniques": [
+            "欲扬先抑",
+            "打脸三拍"
+          ]
+        },
+        {
+          "segment": null,
+          "kind": "milestone",
+          "title": "生死擂台",
+          "event": "陆远在生死擂正面击败赵乾，当众留下寿元交易的证据",
+          "prerequisite": "主角具备迎战实力，赵乾已立下赌约",
+          "consequence": "败者交易暴露，调查走出宗门",
+          "volume": 2,
+          "status": "pencil",
+          "origin": "ai",
+          "editor_note": "先把主角必须付出的代价摆出来，再让这一节点改变局面。",
+          "techniques": [
+            "欲扬先抑",
+            "打脸三拍"
+          ]
+        },
+        {
+          "segment": null,
+          "kind": "milestone",
+          "title": "寒原追查",
+          "event": "陆远追到寒原旧村，发现兽潮和寿元契约的联系",
+          "prerequisite": "盟友建立信任，旧村路线与证人得到保护",
+          "consequence": "父母死亡不再是天灾，主角决定追究责任",
+          "volume": 3,
+          "status": "pencil",
+          "origin": "ai",
+          "editor_note": "先把主角必须付出的代价摆出来，再让这一节点改变局面。",
+          "techniques": [
+            "欲扬先抑",
+            "打脸三拍"
+          ]
+        },
+        {
+          "segment": null,
+          "kind": "milestone",
+          "title": "血河潜入",
+          "event": "陆远与苏晚晴潜入血河总坛，抢出灭门交易账册",
+          "prerequisite": "已掌握换岗规律，能识别伪造的账册",
+          "consequence": "双方结成牢固同盟，幕后交易有了实证",
+          "volume": 4,
+          "status": "pencil",
+          "origin": "ai",
+          "editor_note": "先把主角必须付出的代价摆出来，再让这一节点改变局面。",
+          "techniques": [
+            "欲扬先抑",
+            "打脸三拍"
+          ]
+        },
+        {
+          "segment": null,
+          "kind": "milestone",
+          "title": "契约印记",
+          "event": "陆远对照账册发现缺失的小指是幼时被取走寿元的印记",
+          "prerequisite": "老瞎子的遗言、账册与童年证据已经对上",
+          "consequence": "主角不再只求自保，要阻止更多人被收割",
+          "volume": 5,
+          "status": "pencil",
+          "origin": "ai",
+          "editor_note": "先把主角必须付出的代价摆出来，再让这一节点改变局面。",
+          "techniques": [
+            "欲扬先抑",
+            "打脸三拍"
+          ]
+        },
+        {
+          "segment": null,
+          "kind": "milestone",
+          "title": "宗主真相",
+          "event": "陆远揭开宗主的续命计划，联合弟子准备反制寿元大阵",
+          "prerequisite": "主角有足够盟友与证据，也找到大阵的阵眼",
+          "consequence": "宗门内斗公开化，大典成为最后倒计时",
+          "volume": 6,
+          "status": "pencil",
+          "origin": "ai",
+          "editor_note": "先把主角必须付出的代价摆出来，再让这一节点改变局面。",
+          "techniques": [
+            "欲扬先抑",
+            "打脸三拍"
+          ]
+        },
+        {
+          "segment": null,
+          "kind": "milestone",
+          "title": "青灯燃尽",
+          "event": "化神大典上陆远燃尽青灯逆转寿元大阵，厉沧海遭到反噬",
+          "prerequisite": "苏晚晴能守住阵眼，陆远明白青灯真正代价",
+          "consequence": "宗主坐化，寿元交易终结，陆远失去青灯",
+          "volume": 7,
+          "status": "pencil",
+          "origin": "ai",
+          "editor_note": "先把主角必须付出的代价摆出来，再让这一节点改变局面。",
+          "techniques": [
+            "欲扬先抑",
+            "打脸三拍"
+          ]
+        },
+        {
+          "segment": null,
+          "kind": "ending",
+          "title": "重建家园",
+          "event": "陆远与苏晚晴归还受害者的寿元，在寒原重建杂役院",
+          "prerequisite": "大阵已被摧毁，受害者与剩余资源妥善安置",
+          "consequence": "主角失去外挂却拥有可以共同生活的家园",
+          "volume": 8,
+          "status": "pencil",
+          "origin": "ai",
+          "editor_note": "先把主角必须付出的代价摆出来，再让这一节点改变局面。",
+          "techniques": [
+            "欲扬先抑",
+            "打脸三拍"
+          ]
+        }
+      ],
+      "secrets": [
+        {
+          "seq": 1,
+          "title": "青灯的持有人",
+          "truth": "青灯已经到了陆远手中，点灯能看见他人的寿元",
+          "knowers": [
+            {
+              "how": "开书设定",
+              "name": "陆远",
+              "since_chapter": null
+            }
+          ],
+          "reader_knows": "知道",
+          "reveal_plan": "在对应节点通过对质和证据揭开，迫使知情者重新站队",
+          "status": "hidden",
+          "node": 3
+        },
+        {
+          "seq": 2,
+          "title": "宗主剩余寿元",
+          "truth": "厉沧海只剩三年寿元，正在以宗门弟子的寿元准备续命",
+          "knowers": [
+            {
+              "how": "开书设定",
+              "name": "陆远",
+              "since_chapter": null
+            },
+            {
+              "how": "开书设定",
+              "name": "宗主厉沧海",
+              "since_chapter": null
+            }
+          ],
+          "reader_knows": "知道",
+          "reveal_plan": "在对应节点通过对质和证据揭开，迫使知情者重新站队",
+          "status": "hidden",
+          "node": 7
+        },
+        {
+          "seq": 3,
+          "title": "苏家灭门真相",
+          "truth": "苏晚晴的家族被血河教灭门，留下的账册可以查出幕后交易",
+          "knowers": [
+            {
+              "how": "开书设定",
+              "name": "苏晚晴",
+              "since_chapter": null
+            }
+          ],
+          "reader_knows": "部分",
+          "reveal_plan": "在对应节点通过对质和证据揭开，迫使知情者重新站队",
+          "status": "hidden",
+          "node": 5
+        },
+        {
+          "seq": 4,
+          "title": "赵乾寿元交易",
+          "truth": "赵乾私下用败者的寿元与血河教交换修炼资源",
+          "knowers": [
+            {
+              "how": "开书设定",
+              "name": "赵乾",
+              "since_chapter": null
+            }
+          ],
+          "reader_knows": "不知道",
+          "reveal_plan": "在对应节点通过对质和证据揭开，迫使知情者重新站队",
+          "status": "hidden",
+          "node": 3
+        },
+        {
+          "seq": 5,
+          "title": "老人的青灯来历",
+          "truth": "老瞎子曾是青灯上一任主人，知道逆转寿元契约的方法",
+          "knowers": [
+            {
+              "how": "开书设定",
+              "name": "老瞎子",
+              "since_chapter": null
+            }
+          ],
+          "reader_knows": "不知道",
+          "reveal_plan": "在对应节点通过对质和证据揭开，迫使知情者重新站队",
+          "status": "hidden",
+          "node": 6
+        }
+      ],
+      "foreshadowings": [
+        {
+          "seq": 1,
+          "description": "陆远左手缺的小指，是幼时被血河教取走寿元的契约印记",
+          "span": "长",
+          "plant_plan": "用一个看似普通的细节带过",
+          "payoff_plan": "关键证据出现后重新解释这个细节",
+          "plant_volume": 1,
+          "payoff_volume": 5,
+          "kind": "伏笔",
+          "node": 6,
+          "status": "planned",
+          "planted_chapter": null,
+          "resolved_chapter": null,
+          "hint_chapters": []
+        },
+        {
+          "seq": 2,
+          "description": "宗主只剩三年寿元",
+          "span": "长",
+          "plant_plan": "用一个看似普通的细节带过",
+          "payoff_plan": "关键证据出现后重新解释这个细节",
+          "plant_volume": 1,
+          "payoff_volume": 6,
+          "kind": "伏笔",
+          "node": 7,
+          "status": "planned",
+          "planted_chapter": null,
+          "resolved_chapter": null,
+          "hint_chapters": []
+        },
+        {
+          "seq": 3,
+          "description": "老瞎子的半句遗言",
+          "span": "长",
+          "plant_plan": "用一个看似普通的细节带过",
+          "payoff_plan": "关键证据出现后重新解释这个细节",
+          "plant_volume": 1,
+          "payoff_volume": 5,
+          "kind": "伏笔",
+          "node": 6,
+          "status": "planned",
+          "planted_chapter": null,
+          "resolved_chapter": null,
+          "hint_chapters": []
+        },
+        {
+          "seq": 4,
+          "description": "药碗上的火漆属于外门库房",
+          "span": "长",
+          "plant_plan": "用一个看似普通的细节带过",
+          "payoff_plan": "关键证据出现后重新解释这个细节",
+          "plant_volume": 2,
+          "payoff_volume": 4,
+          "kind": "伏笔",
+          "node": 5,
+          "status": "planned",
+          "planted_chapter": null,
+          "resolved_chapter": null,
+          "hint_chapters": []
+        },
+        {
+          "seq": 5,
+          "description": "苏家的旧账册还有另一半",
+          "span": "长",
+          "plant_plan": "用一个看似普通的细节带过",
+          "payoff_plan": "关键证据出现后重新解释这个细节",
+          "plant_volume": 2,
+          "payoff_volume": 4,
+          "kind": "伏笔",
+          "node": 5,
+          "status": "planned",
+          "planted_chapter": null,
+          "resolved_chapter": null,
+          "hint_chapters": []
+        }
+      ],
+      "expectations": [
+        {
+          "seq": 6,
+          "description": "陆远要在生死擂当众击败赵乾",
+          "span": "长",
+          "plant_plan": "赵乾立下生死擂赌约",
+          "payoff_plan": "不只赢擂台，还拿到寿元交易证据",
+          "plant_volume": 1,
+          "payoff_volume": 2,
+          "kind": "期待",
+          "node": 3,
+          "status": "planned",
+          "planted_chapter": null,
+          "resolved_chapter": null,
+          "hint_chapters": []
+        },
+        {
+          "seq": 7,
+          "description": "陆远要查清父母之死，给被害者一个交代",
+          "span": "长",
+          "plant_plan": "主角对着旧信承诺查清真相",
+          "payoff_plan": "不只找到凶手，还终结收割寿元的规则",
+          "plant_volume": 1,
+          "payoff_volume": 7,
+          "kind": "期待",
+          "node": 8,
+          "status": "planned",
+          "planted_chapter": null,
+          "resolved_chapter": null,
+          "hint_chapters": []
+        }
+      ]
+    },
+    "volumes": {
+      "volumes": [
+        {
+          "index": 1,
+          "title": "杂役",
+          "stage": "玄冥宗 → 北境寒原 → 血河总坛 → 宗主峰",
+          "summary": "陆远借寿元信息拆穿考核陷阱，和苏晚晴合力查明跟班死亡原因",
+          "goal": "陆远进入外门，赵乾把他当作真正的对手",
+          "want": "",
+          "pressure": "",
+          "climax": "陆远借寿元信息拆穿考核陷阱，和苏晚晴合力查明跟班死亡原因",
+          "antagonist": "赵乾及其背后的宗门长老",
+          "power_range": "修为随着证据与盟友积累逐步提高",
+          "thread_beats": [
+            {
+              "beat": "捡到青灯，确认能看见寿元，借信息差活下来并进入外门",
+              "thread": "主线：青灯与寿元"
+            },
+            {
+              "beat": "执法堂初见，互相怀疑；陆远替她洗清一桩冤案，她欠下人情",
+              "thread": "感情线：苏晚晴"
+            },
+            {
+              "beat": "赵乾的跟班欺压陆远，赵乾在考核中设局",
+              "thread": "反派线：玄冥宗高层"
+            },
+            {
+              "beat": "老瞎子坐化前留下半句遗言",
+              "thread": "谜团线：父母之死"
+            }
+          ],
+          "new_characters": [],
+          "chapter_count": 31,
+          "reaches_node": true,
+          "editor_note": "这卷铺齐下个大事件的条件，再用卷末高潮兑现。",
+          "techniques": [
+            "欲扬先抑",
+            "打脸三拍"
+          ],
+          "target_node": 2,
+          "target_node_title": "外门考核"
+        },
+        {
+          "index": 2,
+          "title": "生死擂",
+          "stage": "玄冥宗 → 北境寒原 → 血河总坛 → 宗主峰",
+          "summary": "陆远在生死擂正面击败赵乾，当众留下寿元交易的证据",
+          "goal": "败者交易暴露，调查走出宗门",
+          "want": "",
+          "pressure": "",
+          "climax": "陆远在生死擂正面击败赵乾，当众留下寿元交易的证据",
+          "antagonist": "赵乾及其背后的宗门长老",
+          "power_range": "修为随着证据与盟友积累逐步提高",
+          "thread_beats": [
+            {
+              "beat": "外门大比中发现有人在比试里偷取败者寿元",
+              "thread": "主线：青灯与寿元"
+            },
+            {
+              "beat": "生死擂前她暗中提醒陆远，两人第一次并肩",
+              "thread": "感情线：苏晚晴"
+            },
+            {
+              "beat": "赵乾在生死擂上被击败，背后长老开始盯上陆远",
+              "thread": "反派线：玄冥宗高层"
+            }
+          ],
+          "new_characters": [],
+          "chapter_count": 90,
+          "reaches_node": true,
+          "editor_note": "这卷铺齐下个大事件的条件，再用卷末高潮兑现。",
+          "techniques": [
+            "欲扬先抑",
+            "打脸三拍"
+          ],
+          "target_node": 3,
+          "target_node_title": "生死擂台"
+        },
+        {
+          "index": 3,
+          "title": "寒原追查",
+          "stage": "玄冥宗 → 北境寒原 → 血河总坛 → 宗主峰",
+          "summary": "陆远追到寒原旧村，发现兽潮和寿元契约的联系",
+          "goal": "父母死亡不再是天灾，主角决定追究责任",
+          "want": "",
+          "pressure": "",
+          "climax": "陆远追到寒原旧村，发现兽潮和寿元契约的联系",
+          "antagonist": "赵乾及其背后的宗门长老",
+          "power_range": "修为随着证据与盟友积累逐步提高",
+          "thread_beats": [
+            {
+              "beat": "查到宗主与血河教交易寿元，自己也只剩三年可活",
+              "thread": "主线：青灯与寿元"
+            },
+            {
+              "beat": "得知灭门真相后她一度迁怒陆远，又在血河教总坛救下他",
+              "thread": "感情线：苏晚晴"
+            },
+            {
+              "beat": "宗主借血河教之手清理知情人，陆远成为目标",
+              "thread": "反派线：玄冥宗高层"
+            },
+            {
+              "beat": "小指的契约印记揭开父母之死与宗门交易的关系",
+              "thread": "谜团线：父母之死"
+            }
+          ],
+          "new_characters": [],
+          "chapter_count": 36,
+          "reaches_node": true,
+          "editor_note": "这卷铺齐下个大事件的条件，再用卷末高潮兑现。",
+          "techniques": [
+            "欲扬先抑",
+            "打脸三拍"
+          ],
+          "target_node": 4,
+          "target_node_title": "寒原追查"
+        },
+        {
+          "index": 4,
+          "title": "血河潜入",
+          "stage": "玄冥宗 → 北境寒原 → 血河总坛 → 宗主峰",
+          "summary": "陆远与苏晚晴潜入血河总坛，抢出灭门交易账册",
+          "goal": "双方结成牢固同盟，幕后交易有了实证",
+          "want": "",
+          "pressure": "",
+          "climax": "陆远与苏晚晴潜入血河总坛，抢出灭门交易账册",
+          "antagonist": "宗主厉沧海与血河教",
+          "power_range": "修为随着证据与盟友积累逐步提高",
+          "thread_beats": [
+            {
+              "beat": "化神大典上燃尽青灯，以自身寿元反噬大阵",
+              "thread": "主线：青灯与寿元"
+            },
+            {
+              "beat": "大典上她守住阵眼，结局与陆远一起离开宗门",
+              "thread": "感情线：苏晚晴"
+            },
+            {
+              "beat": "宗主发动寿元大阵，最终坐化",
+              "thread": "反派线：玄冥宗高层"
+            }
+          ],
+          "new_characters": [],
+          "chapter_count": 36,
+          "reaches_node": true,
+          "editor_note": "这卷铺齐下个大事件的条件，再用卷末高潮兑现。",
+          "techniques": [
+            "欲扬先抑",
+            "打脸三拍"
+          ],
+          "target_node": 5,
+          "target_node_title": "血河潜入"
+        },
+        {
+          "index": 5,
+          "title": "契约印记",
+          "stage": "玄冥宗 → 北境寒原 → 血河总坛 → 宗主峰",
+          "summary": "陆远对照账册发现缺失的小指是幼时被取走寿元的印记",
+          "goal": "主角不再只求自保，要阻止更多人被收割",
+          "want": "",
+          "pressure": "",
+          "climax": "陆远对照账册发现缺失的小指是幼时被取走寿元的印记",
+          "antagonist": "宗主厉沧海与血河教",
+          "power_range": "修为随着证据与盟友积累逐步提高",
+          "thread_beats": [],
+          "new_characters": [],
+          "chapter_count": 35,
+          "reaches_node": true,
+          "editor_note": "这卷铺齐下个大事件的条件，再用卷末高潮兑现。",
+          "techniques": [
+            "欲扬先抑",
+            "打脸三拍"
+          ],
+          "target_node": 6,
+          "target_node_title": "契约印记"
+        },
+        {
+          "index": 6,
+          "title": "宗主真相",
+          "stage": "玄冥宗 → 北境寒原 → 血河总坛 → 宗主峰",
+          "summary": "陆远揭开宗主的续命计划，联合弟子准备反制寿元大阵",
+          "goal": "宗门内斗公开化，大典成为最后倒计时",
+          "want": "",
+          "pressure": "",
+          "climax": "陆远揭开宗主的续命计划，联合弟子准备反制寿元大阵",
+          "antagonist": "宗主厉沧海与血河教",
+          "power_range": "修为随着证据与盟友积累逐步提高",
+          "thread_beats": [],
+          "new_characters": [],
+          "chapter_count": 35,
+          "reaches_node": true,
+          "editor_note": "这卷铺齐下个大事件的条件，再用卷末高潮兑现。",
+          "techniques": [
+            "欲扬先抑",
+            "打脸三拍"
+          ],
+          "target_node": 7,
+          "target_node_title": "宗主真相"
+        },
+        {
+          "index": 7,
+          "title": "青灯燃尽",
+          "stage": "玄冥宗 → 北境寒原 → 血河总坛 → 宗主峰",
+          "summary": "化神大典上陆远燃尽青灯逆转寿元大阵，厉沧海遭到反噬",
+          "goal": "宗主坐化，寿元交易终结，陆远失去青灯",
+          "want": "",
+          "pressure": "",
+          "climax": "化神大典上陆远燃尽青灯逆转寿元大阵，厉沧海遭到反噬",
+          "antagonist": "宗主厉沧海与血河教",
+          "power_range": "修为随着证据与盟友积累逐步提高",
+          "thread_beats": [],
+          "new_characters": [],
+          "chapter_count": 35,
+          "reaches_node": true,
+          "editor_note": "这卷铺齐下个大事件的条件，再用卷末高潮兑现。",
+          "techniques": [
+            "欲扬先抑",
+            "打脸三拍"
+          ],
+          "target_node": 8,
+          "target_node_title": "青灯燃尽"
+        },
+        {
+          "index": 8,
+          "title": "重建家园",
+          "stage": "玄冥宗 → 北境寒原 → 血河总坛 → 宗主峰",
+          "summary": "陆远与苏晚晴归还受害者的寿元，在寒原重建杂役院",
+          "goal": "主角失去外挂却拥有可以共同生活的家园",
+          "want": "",
+          "pressure": "",
+          "climax": "陆远与苏晚晴归还受害者的寿元，在寒原重建杂役院",
+          "antagonist": "宗主厉沧海与血河教",
+          "power_range": "修为随着证据与盟友积累逐步提高",
+          "thread_beats": [],
+          "new_characters": [],
+          "chapter_count": 35,
+          "reaches_node": true,
+          "editor_note": "这卷铺齐下个大事件的条件，再用卷末高潮兑现。",
+          "techniques": [
+            "欲扬先抑",
+            "打脸三拍"
+          ],
+          "target_node": 9,
+          "target_node_title": "重建家园"
+        }
+      ],
+      "threads": [
+        {
+          "name": "主线：青灯与寿元",
+          "kind": "主线",
+          "summary": "陆远靠青灯看见寿元，从自保到揭开玄冥宗收割寿元的真相，最终燃尽青灯破掉寿元大阵。",
+          "characters": [
+            "陆远",
+            "宗主厉沧海"
+          ],
+          "beats": [
+            {
+              "beat": "捡到青灯，确认能看见寿元，借信息差活下来并进入外门",
+              "volume": 1
+            },
+            {
+              "beat": "外门大比中发现有人在比试里偷取败者寿元",
+              "volume": 2
+            },
+            {
+              "beat": "查到宗主与血河教交易寿元，自己也只剩三年可活",
+              "volume": 3
+            },
+            {
+              "beat": "化神大典上燃尽青灯，以自身寿元反噬大阵",
+              "volume": 4
+            }
+          ]
+        },
+        {
+          "name": "感情线：苏晚晴",
+          "kind": "感情线",
+          "summary": "从执法堂里的互相怀疑，到并肩查案，再到寒原上一起重建杂役院。",
+          "characters": [
+            "陆远",
+            "苏晚晴"
+          ],
+          "beats": [
+            {
+              "beat": "执法堂初见，互相怀疑；陆远替她洗清一桩冤案，她欠下人情",
+              "volume": 1
+            },
+            {
+              "beat": "生死擂前她暗中提醒陆远，两人第一次并肩",
+              "volume": 2
+            },
+            {
+              "beat": "得知灭门真相后她一度迁怒陆远，又在血河教总坛救下他",
+              "volume": 3
+            },
+            {
+              "beat": "大典上她守住阵眼，结局与陆远一起离开宗门",
+              "volume": 4
+            }
+          ]
+        },
+        {
+          "name": "反派线：玄冥宗高层",
+          "kind": "反派线",
+          "summary": "从赵乾的跟班，到赵乾本人，再到幕后的宗主，对手一层比一层深。",
+          "characters": [
+            "赵乾",
+            "宗主厉沧海"
+          ],
+          "beats": [
+            {
+              "beat": "赵乾的跟班欺压陆远，赵乾在考核中设局",
+              "volume": 1
+            },
+            {
+              "beat": "赵乾在生死擂上被击败，背后长老开始盯上陆远",
+              "volume": 2
+            },
+            {
+              "beat": "宗主借血河教之手清理知情人，陆远成为目标",
+              "volume": 3
+            },
+            {
+              "beat": "宗主发动寿元大阵，最终坐化",
+              "volume": 4
+            }
+          ]
+        },
+        {
+          "name": "谜团线：父母之死",
+          "kind": "谜团线",
+          "summary": "兽潮、缺失的小指与老瞎子的遗言，一步步指向幼时的寿元契约。",
+          "characters": [
+            "陆远",
+            "老瞎子"
+          ],
+          "beats": [
+            {
+              "beat": "老瞎子坐化前留下半句遗言",
+              "volume": 1
+            },
+            {
+              "beat": "小指的契约印记揭开父母之死与宗门交易的关系",
+              "volume": 3
+            }
+          ]
+        }
+      ],
+      "anchors": [
+        {
+          "character": "陆远",
+          "node": 1,
+          "node_title": "寒夜捡灯",
+          "kind": "登场",
+          "note": "进入故事并和主角的目标发生关联"
+        },
+        {
+          "character": "苏晚晴",
+          "node": 2,
+          "node_title": "外门考核",
+          "kind": "登场",
+          "note": "进入故事并和主角的目标发生关联"
+        },
+        {
+          "character": "赵乾",
+          "node": 2,
+          "node_title": "外门考核",
+          "kind": "登场",
+          "note": "进入故事并和主角的目标发生关联"
+        },
+        {
+          "character": "老瞎子",
+          "node": 1,
+          "node_title": "寒夜捡灯",
+          "kind": "登场",
+          "note": "进入故事并和主角的目标发生关联"
+        },
+        {
+          "character": "宗主厉沧海",
+          "node": 3,
+          "node_title": "生死擂台",
+          "kind": "登场",
+          "note": "进入故事并和主角的目标发生关联"
+        },
+        {
+          "character": "周长老",
+          "node": 3,
+          "node_title": "生死擂台",
+          "kind": "登场",
+          "note": "进入故事并和主角的目标发生关联"
+        }
+      ]
+    },
+    "first_volume": {
+      "units": [
+        {
+          "index": 1,
+          "title": "捡灯",
+          "chapter_count": 6,
+          "goal": "活过被欺压的杂役日常",
+          "conflict": "赵乾的跟班克扣口粮并毒打陆远",
+          "climax": "陆远第一次点燃青灯，看见打他的人只剩两天寿元",
+          "outcome": "跟班果然暴毙，陆远意识到青灯的真实性，也被执法堂盯上",
+          "loop": "",
+          "key_events": [
+            "陆远挨打",
+            "老瞎子塞给他一盏旧灯",
+            "灯火照见寿元",
+            "跟班暴毙"
+          ],
+          "thread_beats": [
+            {
+              "beat": "捡到青灯，确认能看见寿元",
+              "thread": "主线：青灯与寿元"
+            }
+          ],
+          "foreshadow_actions": [
+            {
+              "ref": "F1",
+              "action": "埋下",
+              "detail": "挨打时随笔带过缺的小指"
+            },
+            {
+              "ref": "E6",
+              "action": "埋下",
+              "detail": "把当众立下的约定和眼前的冲突连起来"
+            },
+            {
+              "ref": "E7",
+              "action": "埋下",
+              "detail": "把当众立下的约定和眼前的冲突连起来"
+            },
+            {
+              "ref": "F8",
+              "action": "埋下",
+              "detail": "跟班暴毙时陆远注意到药碗"
+            },
+            {
+              "ref": "E10",
+              "action": "埋下",
+              "detail": "主角当众约定在本卷末拿出证据"
+            }
+          ],
+          "tropes": [
+            "以弱胜强"
+          ],
+          "resolution": "底牌显露",
+          "reveals": [],
+          "editor_note": "先让读者看到主角的目标，再把对手的阻力变成一次有代价的翻盘。",
+          "techniques": [
+            "欲扬先抑",
+            "打脸三拍"
+          ]
+        },
+        {
+          "index": 2,
+          "title": "执法堂",
+          "chapter_count": 6,
+          "goal": "洗清嫌疑",
+          "conflict": "苏晚晴怀疑陆远与暴毙案有关",
+          "climax": "陆远利用寿元信息推断出真凶另有其人，当众对质",
+          "outcome": "苏晚晴欠他一个人情，赵乾开始注意这个杂役",
+          "loop": "",
+          "key_events": [
+            "被带去执法堂",
+            "暗中观察寿元",
+            "赵乾派人试探陆远",
+            "找到中毒证据",
+            "当众对质"
+          ],
+          "thread_beats": [
+            {
+              "beat": "执法堂初见，互相怀疑",
+              "thread": "感情线：苏晚晴"
+            }
+          ],
+          "foreshadow_actions": [
+            {
+              "ref": "F2",
+              "action": "埋下",
+              "detail": "远远看见宗主头顶只剩三年"
+            },
+            {
+              "ref": "E6",
+              "action": "提醒",
+              "detail": "把当众立下的约定和眼前的冲突连起来"
+            },
+            {
+              "ref": "E7",
+              "action": "提醒",
+              "detail": "把当众立下的约定和眼前的冲突连起来"
+            },
+            {
+              "ref": "F8",
+              "action": "回收",
+              "detail": "执法堂对质时成为关键证据"
+            }
+          ],
+          "tropes": [
+            "对质揭穿"
+          ],
+          "resolution": "算计设局",
+          "reveals": [
+            {
+              "to": "苏晚晴",
+              "how": "陆远以证据解释先前异常，双方因此开始互相信任",
+              "ref": "S1"
+            }
+          ],
+          "editor_note": "先让读者看到主角的目标，再把对手的阻力变成一次有代价的翻盘。",
+          "techniques": [
+            "欲扬先抑",
+            "打脸三拍"
+          ]
+        },
+        {
+          "index": 3,
+          "title": "老瞎子的七日",
+          "chapter_count": 8,
+          "goal": "弄清青灯来历",
+          "conflict": "老瞎子只剩七日寿元，且不肯多说",
+          "climax": "老瞎子坐化前留下半句遗言",
+          "outcome": "陆远得知青灯与宗主有关，决定进入外门",
+          "loop": "",
+          "key_events": [
+            "追问老瞎子",
+            "老瞎子病重",
+            "坐化与遗言"
+          ],
+          "thread_beats": [
+            {
+              "beat": "老瞎子留下半句遗言",
+              "thread": "谜团线：父母之死"
+            }
+          ],
+          "foreshadow_actions": [
+            {
+              "ref": "F3",
+              "action": "埋下",
+              "detail": "遗言只说了半句"
+            },
+            {
+              "ref": "E6",
+              "action": "提醒",
+              "detail": "把当众立下的约定和眼前的冲突连起来"
+            },
+            {
+              "ref": "E7",
+              "action": "提醒",
+              "detail": "把当众立下的约定和眼前的冲突连起来"
+            }
+          ],
+          "tropes": [
+            "身份揭晓"
+          ],
+          "resolution": "借势借力",
+          "reveals": [],
+          "editor_note": "先让读者看到主角的目标，再把对手的阻力变成一次有代价的翻盘。",
+          "techniques": [
+            "欲扬先抑",
+            "打脸三拍"
+          ]
+        },
+        {
+          "index": 4,
+          "title": "外门考核",
+          "chapter_count": 11,
+          "goal": "通过外门考核",
+          "conflict": "赵乾在考核中设局",
+          "climax": "陆远将计就计，借寿元信息让设局者自食其果",
+          "outcome": "陆远成为外门弟子，发现考核中有人在偷偷收取寿元",
+          "loop": "",
+          "key_events": [
+            "报名考核",
+            "识破陷阱",
+            "反制",
+            "进入外门"
+          ],
+          "thread_beats": [
+            {
+              "beat": "赵乾在考核中设局",
+              "thread": "反派线：玄冥宗高层"
+            }
+          ],
+          "foreshadow_actions": [
+            {
+              "ref": "E6",
+              "action": "提醒",
+              "detail": "把当众立下的约定和眼前的冲突连起来"
+            },
+            {
+              "ref": "E7",
+              "action": "提醒",
+              "detail": "把当众立下的约定和眼前的冲突连起来"
+            },
+            {
+              "ref": "F9",
+              "action": "埋下",
+              "detail": "报名时陆远看见阵纹"
+            },
+            {
+              "ref": "E10",
+              "action": "回收",
+              "detail": "不只证实清白，还揭开对手背后的利益链"
+            }
+          ],
+          "tropes": [
+            "比试竞赛"
+          ],
+          "resolution": "算计设局",
+          "reveals": [],
+          "editor_note": "先让读者看到主角的目标，再把对手的阻力变成一次有代价的翻盘。",
+          "techniques": [
+            "欲扬先抑",
+            "打脸三拍"
+          ]
+        }
+      ],
+      "new_foreshadowings": [
+        {
+          "seq": 8,
+          "description": "跟班暴毙前喝过的那碗药被人动过手脚",
+          "span": "短",
+          "plant_plan": "跟班暴毙时陆远注意到药碗",
+          "payoff_plan": "执法堂对质时成为关键证据",
+          "plant_volume": 1,
+          "payoff_volume": 1,
+          "kind": "伏笔",
+          "node": 0,
+          "status": "planned",
+          "planted_chapter": null,
+          "resolved_chapter": null,
+          "hint_chapters": []
+        },
+        {
+          "seq": 9,
+          "description": "考核场地里有一座不该存在的聚灵阵",
+          "span": "中",
+          "plant_plan": "报名时陆远看见阵纹",
+          "payoff_plan": "第二卷发现那是收取寿元的阵法",
+          "plant_volume": 1,
+          "payoff_volume": 2,
+          "kind": "伏笔",
+          "node": 0,
+          "status": "planned",
+          "planted_chapter": null,
+          "resolved_chapter": null,
+          "hint_chapters": []
+        }
+      ],
+      "new_expectations": [
+        {
+          "seq": 10,
+          "description": "第1卷要让对手为轻视陆远付出代价",
+          "span": "中",
+          "plant_plan": "主角当众约定在本卷末拿出证据",
+          "payoff_plan": "不只证实清白，还揭开对手背后的利益链",
+          "plant_volume": 1,
+          "payoff_volume": 1,
+          "kind": "期待",
+          "node": 0,
+          "status": "planned",
+          "planted_chapter": null,
+          "resolved_chapter": null,
+          "hint_chapters": []
+        }
+      ]
+    }
+  }
+}

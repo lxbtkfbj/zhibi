@@ -153,7 +153,7 @@ function NewBookDialog({ open, onClose }: { open: boolean; onClose: () => void }
   return (
     <Modal open={open} onClose={onClose} title="开一本新书" wide>
       <p className="mb-4 text-sm leading-relaxed text-ink-2">
-        写下你的点子，一句话就够。先选方向，再一起完成定调、关键节点、人物上轴、填中间和第一卷。
+        写下你的点子，一句话就够。先选方向，再一起完成定调、主角、世界与人、第一段和第一卷。
       </p>
       <Composer autoFocus flat />
       <p className="mt-3 text-xs leading-relaxed text-ink-3">
@@ -253,7 +253,7 @@ export function Home() {
           </Reveal>
           <Reveal delay={0.24}>
             <p className="mt-4 text-center text-[13px] text-ink-3">
-              定调 · 钉关键节点 · 人物上轴 · 填中间 · 第一卷 —— 随时插话，每块由你确认
+              定调 · 主角 · 世界与人 · 第一段 · 第一卷 —— 随时插话，每块由你确认
             </p>
           </Reveal>
         </div>

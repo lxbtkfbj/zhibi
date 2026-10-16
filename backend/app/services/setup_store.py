@@ -1,11 +1,10 @@
 """开书方案与数据库之间的读写；按稳定编号对齐，保留作者维护的字段。"""
 
-import string
 import uuid
 from copy import deepcopy
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.glossary import clean_techniques
@@ -113,7 +112,7 @@ async def _rows(session: AsyncSession, model: Any, *where: Any, order: Any = Non
 
 
 def spine_from_legacy(spine: dict) -> dict:
-    """旧检查点仍可使用；有 nodes 时以新结构为准，不重复生成节点。"""
+    """仅供旧会议消息和旧书骨架读取；不再恢复旧开书检查点。"""
     result = {key: value for key, value in spine.items() if key not in {"opening", "ending", "milestones"}}
     if "nodes" in spine:
         return result
@@ -277,11 +276,9 @@ def merge_legacy_spine(spine: dict, previous_nodes: list[dict]) -> dict:
     return deepcopy({**converted, "nodes": items})
 
 
-async def _save_spine(session: AsyncSession, book: Book, spine: dict) -> list[StoryNode]:
-    previous = await load_nodes(session, book.id) if "nodes" not in spine else []
-    converted = merge_legacy_spine(spine, previous)
-    book.spine = {key: value for key, value in converted.items() if key != "nodes"}
-    return await save_nodes(session, book.id, converted["nodes"])
+async def _save_segment(session: AsyncSession, book: Book, segment: dict) -> list[StoryNode]:
+    book.spine = {key: segment.get(key, "") for key in ("core_conflict", "theme", "protagonist_arc")}
+    return await save_nodes(session, book.id, segment.get("nodes") or [])
 
 
 def assign_seqs(items: list[dict[str, Any]], existing: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -304,11 +301,11 @@ def assign_seqs(items: list[dict[str, Any]], existing: list[dict[str, Any]]) -> 
 
 
 def ledger_of(setup: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-    outline, first = setup.get("outline") or {}, setup.get("first_volume") or {}
+    segment, first = setup.get("segment") or {}, setup.get("first_volume") or {}
     items = []
     for source, key, kind, span in (
-        (outline, "foreshadowings", "伏笔", "长"),
-        (outline, "expectations", "期待", "长"),
+        (segment, "foreshadowings", "伏笔", "长"),
+        (segment, "expectations", "期待", "长"),
         (first, "new_foreshadowings", "伏笔", "中"),
         (first, "new_expectations", "期待", "中"),
     ):
@@ -324,11 +321,15 @@ async def _save_concept(session: AsyncSession, book: Book, concept: dict) -> Non
     book.genre = concept.get("genre", "")
 
 
-async def _save_lore(session: AsyncSession, book_id: uuid.UUID, lore: dict, nodes: list) -> dict[str, int]:
+async def _save_world(session: AsyncSession, book: Book, world: dict) -> None:
+    book_id = book.id
+    keys = ("surface", "power", "maps", "trouble", "opponent", "far_maps", "shadow", "mystery", "mystery_answer")
+    book.world = {
+        key: world.get(key, (book.world or {}).get(key, [] if key in {"maps", "far_maps"} else "")) for key in keys
+    }
     old = {c.name: c for c in await _rows(session, Character, Character.book_id == book_id)}
     by_name = {}
-    legacy_secrets = []
-    for ch in lore.get("characters", []):
+    for ch in world.get("characters", []):
         name = (ch.get("name") or "").strip()
         if not name or name in by_name:
             continue
@@ -336,26 +337,17 @@ async def _save_lore(session: AsyncSession, book_id: uuid.UUID, lore: dict, node
         _assign(row, {**ch, "name": name}, CHARACTER_FIELDS)
         session.add(row)
         by_name[name] = row
-        for text in ch.get("secrets") or []:
-            if isinstance(text, str) and text.strip():
-                legacy_secrets.append(
-                    {
-                        "title": text[:12].rstrip(string.punctuation + "，。！？；：、…—“”‘’（）【】《》"),
-                        "truth": text,
-                        "knowers": [{"name": name, "since_chapter": None, "how": "开书设定"}],
-                    }
-                )
     for row in old.values():
         await session.delete(row)
     old_world = {w.name: w for w in await _rows(session, WorldEntry, WorldEntry.book_id == book_id)}
     seen = set()
-    for world in lore.get("world_entries", []):
-        name = (world.get("name") or "").strip()
+    for entry in world.get("world_entries", []):
+        name = (entry.get("name") or "").strip()
         if not name or name in seen:
             continue
         seen.add(name)
         row = old_world.pop(name, None) or WorldEntry(book_id=book_id, name=name)
-        _assign(row, world, ("category", "content"))
+        _assign(row, entry, ("category", "content"))
         session.add(row)
     for row in old_world.values():
         await session.delete(row)
@@ -365,7 +357,7 @@ async def _save_lore(session: AsyncSession, book_id: uuid.UUID, lore: dict, node
         for r in await _rows(session, Relationship, Relationship.book_id == book_id)
     }
     seen = set()
-    for relation in lore.get("relationships", []):
+    for relation in world.get("relationships", []):
         a, b = by_name.get(relation.get("source", "")), by_name.get(relation.get("target", ""))
         if a is None or b is None or a is b:
             continue
@@ -378,27 +370,7 @@ async def _save_lore(session: AsyncSession, book_id: uuid.UUID, lore: dict, node
         session.add(row)
     for row in old_relations.values():
         await session.delete(row)
-    # 旧 LoreDraft 不认识锚点和结构化信息差；字段缺失不是作者要求清空。
-    dropped_anchors = 0
-    if "anchors" in lore:
-        dropped_anchors = await _save_anchors(session, book_id, lore.get("anchors") or [], nodes, by_name)
-    if "secrets" in lore:
-        secret_items = list(lore.get("secrets") or [])
-    else:
-        secret_items = await load_secrets(session, book_id, nodes)
-    known = {
-        (item.get("truth", "").strip(), knower.get("name"))
-        for item in secret_items
-        for knower in item.get("knowers") or []
-    }
-    for item in legacy_secrets:
-        key = (item["truth"].strip(), item["knowers"][0]["name"])
-        if key not in known:
-            secret_items.append(item)
-            known.add(key)
-    dropped_knowers = await _save_secrets(session, book_id, secret_items, nodes, by_name)
     await session.flush()
-    return {"dropped_anchors": dropped_anchors, "dropped_knowers": dropped_knowers}
 
 
 async def _save_anchors(session: AsyncSession, book_id: uuid.UUID, items: list, nodes: list, characters: dict) -> int:
@@ -519,6 +491,7 @@ async def _save_units(session: AsyncSession, book_id: uuid.UUID, first: dict) ->
     volume = await session.scalar(select(Volume).where(Volume.book_id == book_id, Volume.index == 1))
     if volume is None:
         return
+    _assign(volume, first, ("want", "pressure"))
     old = {u.index: u for u in await _rows(session, PlotUnit, PlotUnit.volume_id == volume.id)}
     seen = set()
     for item in first.get("units") or []:
@@ -543,7 +516,7 @@ async def _save_ledger(
     existing = await _rows(session, Foreshadowing, Foreshadowing.book_id == book_id)
     # ledger_of assigns missing numbers within one snapshot; use the full DB as numbering history instead.
     items = []
-    outline, first = setup.get("outline") or {}, setup.get("first_volume") or {}
+    segment, first = setup.get("segment") or {}, setup.get("first_volume") or {}
     old = {
         f.seq: f
         for f in existing
@@ -551,14 +524,14 @@ async def _save_ledger(
         and not (
             f.kind == "期待"
             and (
-                (f.span == "长" and "expectations" not in outline)
+                (f.span == "长" and "expectations" not in segment)
                 or (f.span != "长" and "new_expectations" not in first)
             )
         )
     }
     for source, key, kind, span in (
-        (outline, "foreshadowings", "伏笔", "长"),
-        (outline, "expectations", "期待", "长"),
+        (segment, "foreshadowings", "伏笔", "长"),
+        (segment, "expectations", "期待", "长"),
         (first, "new_foreshadowings", "伏笔", "中"),
         (first, "new_expectations", "期待", "中"),
     ):
@@ -581,7 +554,7 @@ async def _save_ledger(
 
 
 def remap_node_refs(setup: dict, previous_nodes: list[dict], new_nodes: list) -> dict:
-    """旧 schema 不会产生节点引用；这些序号来自旧 load_setup，按旧 ID 对齐而不是重新解释。"""
+    """节点调整顺序后，引用按旧 ID 对齐而不是重新解释。"""
     result = deepcopy(setup)
     before = {index: str(node["id"]) for index, node in enumerate(previous_nodes, 1) if node.get("id")}
     after = {}
@@ -595,11 +568,11 @@ def remap_node_refs(setup: dict, previous_nodes: list[dict], new_nodes: list) ->
         if isinstance(node, dict) and node.get("_snapshot_ref"):
             snapshot_refs[node["_snapshot_ref"]] = index
     for block, collection, field in (
-        ("lore", "anchors", "node"),
-        ("lore", "secrets", "node"),
-        ("outline", "volumes", "target_node"),
-        ("outline", "foreshadowings", "node"),
-        ("outline", "expectations", "node"),
+        ("segment", "secrets", "node"),
+        ("segment", "foreshadowings", "node"),
+        ("segment", "expectations", "node"),
+        ("volumes", "volumes", "target_node"),
+        ("volumes", "anchors", "node"),
         ("first_volume", "new_foreshadowings", "node"),
         ("first_volume", "new_expectations", "node"),
     ):
@@ -614,48 +587,86 @@ def remap_node_refs(setup: dict, previous_nodes: list[dict], new_nodes: list) ->
     return result
 
 
+def _require_new_shape(setup: dict) -> None:
+    if {"spine", "lore", "outline", "threads"} & setup.keys():
+        raise ValueError("旧开书方案不再支持，请按新流程重开")
+
+
+async def _save_segment_parts(
+    session: AsyncSession, book: Book, setup: dict, *, has_units: bool = False
+) -> dict[str, int]:
+    segment, volumes = setup.get("segment") or {}, setup.get("volumes") or {}
+    nodes = await _save_segment(session, book, segment)
+    characters = {row.name: row for row in await _rows(session, Character, Character.book_id == book.id)}
+    dropped_knowers = await _save_secrets(session, book.id, segment.get("secrets") or [], nodes, characters)
+    await _save_ledger(session, book.id, setup, nodes, long=True)
+    await _save_volumes(session, book.id, volumes, nodes, has_units)
+    await _save_threads(session, book.id, volumes)
+    dropped_anchors = await _save_anchors(session, book.id, volumes.get("anchors") or [], nodes, characters)
+    return {"dropped_anchors": dropped_anchors, "dropped_knowers": dropped_knowers}
+
+
 async def save_setup(session: AsyncSession, book_id: uuid.UUID, setup: dict[str, dict[str, Any]]) -> dict[str, int]:
+    _require_new_shape(setup)
     book = await session.get(Book, book_id)
     if book is None:
         raise ValueError("书不存在")
-    previous_nodes = await load_nodes(session, book_id) if "nodes" not in (setup.get("spine") or {}) else []
     await _save_concept(session, book, setup.get("concept") or {})
-    nodes = await _save_spine(session, book, setup.get("spine") or {})
-    if previous_nodes:
-        setup = remap_node_refs(setup, previous_nodes, nodes)
-    result = await _save_lore(session, book_id, setup.get("lore") or {}, nodes)
+    book.protagonist = deepcopy(setup.get("protagonist") or {})
+    await _save_world(session, book, setup.get("world") or {})
     first = setup.get("first_volume") or {}
-    await _save_volumes(session, book_id, setup.get("outline") or {}, nodes, bool(first.get("units")))
-    await _save_threads(session, book_id, setup.get("threads") or {})
+    result = await _save_segment_parts(session, book, setup, has_units=bool(first.get("units")))
     await _save_units(session, book_id, first)
-    await _save_ledger(session, book_id, setup, nodes)
+    await _save_ledger(session, book_id, setup, await load_nodes(session, book_id), long=False)
     await session.flush()
     return result
 
 
 async def save_piece(session: AsyncSession, book_id: uuid.UUID, piece: str, setup: dict) -> dict[str, int]:
-    if piece not in {"concept", "nodes", "cast", "fill", "first_volume"}:
+    _require_new_shape(setup)
+    if piece not in {"concept", "protagonist", "world", "segment", "first_volume"}:
         raise ValueError("未知的开书拼图块")
     book = await session.get(Book, book_id)
     if book is None:
         raise ValueError("书不存在")
     result = {"dropped_anchors": 0, "dropped_knowers": 0}
-    nodes = await load_nodes(session, book_id)
     if piece == "concept":
         await _save_concept(session, book, setup.get("concept") or {})
-    elif piece == "nodes":
-        await _save_spine(session, book, setup.get("spine") or {})
-    elif piece == "cast":
-        result = await _save_lore(session, book_id, setup.get("lore") or {}, nodes)
-    elif piece == "fill":
-        await _save_volumes(session, book_id, setup.get("outline") or {}, nodes, False)
-        await _save_threads(session, book_id, setup.get("threads") or {})
-        await _save_ledger(session, book_id, setup, nodes, long=True)
+    elif piece == "protagonist":
+        book.protagonist = deepcopy(setup.get("protagonist") or {})
+    elif piece == "world":
+        await _save_world(session, book, setup.get("world") or {})
+    elif piece == "segment":
+        result = await _save_segment_parts(session, book, setup)
     else:
         await _save_units(session, book_id, setup.get("first_volume") or {})
-        await _save_ledger(session, book_id, setup, nodes, long=False)
+        await _save_ledger(session, book_id, setup, await load_nodes(session, book_id), long=False)
     await session.flush()
     return result
+
+
+async def reset_for_restart(session: AsyncSession, book_id: uuid.UUID, keep_concept: bool) -> None:
+    """仅清空旧开书产物；作者要求、会议、历史草稿和调用记录原样保留。"""
+    book = await session.get(Book, book_id)
+    if book is None:
+        raise ValueError("书不存在")
+    for model in (
+        NodeAnchor,
+        Secret,
+        Relationship,
+        Character,
+        WorldEntry,
+        PlotUnit,
+        Volume,
+        StoryThread,
+        Foreshadowing,
+        StoryNode,
+    ):
+        await session.execute(delete(model).where(model.book_id == book_id))
+    book.spine, book.protagonist, book.world, book.setup_progress = {}, {}, {}, {}
+    if not keep_concept:
+        book.concept = {}
+    await session.flush()
 
 
 def thread_dict(t: StoryThread) -> dict[str, Any]:
@@ -748,32 +759,59 @@ async def load_setup(session: AsyncSession, book_id: uuid.UUID) -> dict[str, dic
         rows = await _rows(session, PlotUnit, PlotUnit.volume_id == volumes[0].id, order=PlotUnit.index)
         first_units = [unit_dict(unit) for unit in rows]
     ledger = await load_ledger(session, book_id)
-    lore = {
+    world_data = {
+        **{
+            key: (book.world or {}).get(key, [] if key in {"maps", "far_maps"} else "")
+            for key in (
+                "surface",
+                "power",
+                "maps",
+                "trouble",
+                "opponent",
+                "far_maps",
+                "shadow",
+                "mystery",
+                "mystery_answer",
+            )
+        },
         "world_entries": [{"category": row.category, "name": row.name, "content": row.content} for row in world],
-        "characters": [{key: getattr(row, key) for key in CHARACTER_FIELDS} for row in characters],
+        "characters": [
+            {
+                key: getattr(row, key)
+                for key in (*CHARACTER_FIELDS, "aliases", "notes", "is_alive", "first_appearance_chapter")
+            }
+            for row in characters
+        ],
         "relationships": [
             {
                 "source": names.get(row.source_id, ""),
                 "target": names.get(row.target_id, ""),
                 "kind": row.kind,
                 "description": row.description,
+                "since_chapter": row.since_chapter,
             }
             for row in relations
         ],
-        "anchors": await load_anchors(session, book_id, nodes),
-        "secrets": await load_secrets(session, book_id, nodes),
     }
     return {
-        "concept": dict(book.concept or {}),
-        "lore": lore,
-        "spine": {**(book.spine or {}), "nodes": nodes},
-        "threads": {"threads": await load_threads(session, book_id)},
-        "outline": {
-            "volumes": [volume_dict(volume, nodes) for volume in volumes],
+        "concept": deepcopy(book.concept or {}),
+        "protagonist": deepcopy(book.protagonist or {}),
+        "world": world_data,
+        "segment": {
+            **{key: (book.spine or {}).get(key, "") for key in ("core_conflict", "theme", "protagonist_arc")},
+            "nodes": nodes,
+            "secrets": await load_secrets(session, book_id, nodes),
             "foreshadowings": [f for f in ledger if f["kind"] == "伏笔" and f["span"] == "长"],
             "expectations": [f for f in ledger if f["kind"] == "期待" and f["span"] == "长"],
         },
+        "volumes": {
+            "volumes": [volume_dict(volume, nodes) for volume in volumes],
+            "threads": await load_threads(session, book_id),
+            "anchors": await load_anchors(session, book_id, nodes),
+        },
         "first_volume": {
+            "want": volumes[0].want if volumes and volumes[0].index == 1 else "",
+            "pressure": volumes[0].pressure if volumes and volumes[0].index == 1 else "",
             "units": first_units,
             "new_foreshadowings": [f for f in ledger if f["kind"] == "伏笔" and f["span"] != "长"],
             "new_expectations": [f for f in ledger if f["kind"] == "期待" and f["span"] != "长"],

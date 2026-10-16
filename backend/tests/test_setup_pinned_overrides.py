@@ -10,6 +10,7 @@ import pytest
 from app.agents import schemas
 from app.agents.setup_puzzle import merge_nodes
 from app.graphs import book_setup
+from app.llm import demo
 
 
 def node(node_id, kind="milestone", status="pinned", origin="author"):
@@ -50,17 +51,16 @@ def drafts(current):
 
 
 def without_snapshot(item):
-    return {key: value for key, value in item.items() if key != "_snapshot_ref"}
+    return {key: value for key, value in item.items() if key not in {"_snapshot_ref", "segment"}}
 
 
 @pytest.fixture
 def env(monkeypatch):
     setup = {
         "concept": {"title": "铁钉测试"},
-        "spine": {"core_conflict": "冲突", "theme": "主题", "protagonist_arc": "成长", "nodes": nodes()},
-        "lore": {"characters": []},
-        "outline": {"volumes": []},
-        "threads": {"threads": [{"name": "主线"}]},
+        "segment": {"core_conflict": "冲突", "theme": "主题", "protagonist_arc": "成长", "nodes": nodes()},
+        "world": {"characters": []},
+        "volumes": {"volumes": [], "threads": [{"name": "主线"}]},
         "first_volume": {"units": [{"index": 1}]},
     }
     session = SimpleNamespace(commit=AsyncMock(), get=AsyncMock(return_value=None))
@@ -77,13 +77,12 @@ def env(monkeypatch):
     async def live_state(state, deps):
         return deepcopy(state)
 
-    async def draft_spine(llm, concept, requirements, current, instruction, **kwargs):
-        return schemas.StorySpine(
-            core_conflict="冲突",
-            theme="主题",
-            protagonist_arc="成长",
-            nodes=drafts(current["nodes"]),
-            remark="主编完成本轮节点修改。",
+    async def draft_segment(llm, concept, protagonist, world, requirements, current, instruction, **kwargs):
+        return demo._segment("").model_copy(
+            update={
+                "nodes": [schemas.StoryNodeDraft.model_validate(item) for item in drafts(current["nodes"])],
+                "remark": "主编完成本轮节点修改。",
+            }
         )
 
     monkeypatch.setattr(book_setup, "live_state", live_state)
@@ -94,7 +93,7 @@ def env(monkeypatch):
     monkeypatch.setattr(book_setup, "playbook_text", lambda *args, **kwargs: "")
     monkeypatch.setattr(book_setup, "glossary_block", lambda: "")
     monkeypatch.setattr(book_setup.setup_store, "load_setup", load_setup)
-    monkeypatch.setattr(book_setup.editorial, "draft_spine", draft_spine)
+    monkeypatch.setattr(book_setup.editorial, "draft_segment", draft_segment)
     monkeypatch.setattr("app.agents.glossary.terms", lambda: [])
     deps = SimpleNamespace(
         book_id="本书",
@@ -108,8 +107,8 @@ def env(monkeypatch):
         **deepcopy(setup),
         "idea": "作者点子",
         "mode": "puzzle",
-        "piece": "nodes",
-        "pieces": {"concept": "confirmed", "nodes": "waiting"},
+        "piece": "segment",
+        "pieces": {"concept": "confirmed", "protagonist": "confirmed", "world": "confirmed", "segment": "waiting"},
         "queue": [],
         "instructions": {},
         "phase": "author_revise",
@@ -176,7 +175,7 @@ def test_authorized_position_survives_conflicting_ai_topology(env, change):
 
 @pytest.mark.parametrize("status", ["pinned", "pencil"])
 async def test_card_node_id_is_authority_even_when_triage_omits_override(env, monkeypatch, status):
-    env.setup["spine"]["nodes"][1]["status"] = status
+    env.setup["segment"]["nodes"][1]["status"] = status
     monkeypatch.setattr(
         book_setup,
         "interrupt",
@@ -186,13 +185,13 @@ async def test_card_node_id_is_authority_even_when_triage_omits_override(env, mo
     monkeypatch.setattr(book_setup.editorial, "triage_feedback", triage)
     command = await book_setup.piece_gate_node(env.state, env.runtime)
     assert command.goto == "intake"
-    assert command.update["queue"] == ["spine"]
+    assert command.update["queue"] == ["segment", "volumes"]
     assert command.update["pinned_overrides"] == ["点名节点"]
-    assert "只改节点 2" in command.update["instructions"]["spine"]
-    update = await book_setup.spine_node({**env.state, **command.update}, env.runtime)
-    changed, untouched = update["spine"]["nodes"][1:3]
+    assert "只改节点 2" in command.update["instructions"]["segment"]
+    update = await book_setup.segment_node({**env.state, **command.update}, env.runtime)
+    changed, untouched = update["segment"]["nodes"][1:3]
     assert changed["event"] == "按意见修改后的事件" and changed["status"] == status
-    assert without_snapshot(untouched) == env.setup["spine"]["nodes"][2]
+    assert without_snapshot(untouched) == env.setup["segment"]["nodes"][2]
     assert update["pinned_overrides"] == [] and update["pinned_override_sources"] == {}
     replies = [call.args[1] for call in env.runtime.context.emit.say.await_args_list]
     if status == "pinned":
@@ -206,25 +205,25 @@ async def test_general_feedback_maps_only_valid_refs_from_its_prompt_snapshot(en
     captured = []
 
     async def triage(llm, snapshot, requirements, feedback, **kwargs):
-        captured.extend(item["id"] for item in snapshot["spine"]["nodes"])
+        captured.extend(item["id"] for item in snapshot["segment"]["nodes"])
         return schemas.RevisionTriage(
-            spine_instructions="把节点 2 改为救师父",
+            segment_instructions="把节点 2 改为救师父",
             pinned_overrides=[2, 2, 0, -1, 99],
             remark="只改点名的节点。",
         )
 
     monkeypatch.setattr(book_setup.editorial, "triage_feedback", triage)
     update = await book_setup.triage_node(env.state, env.runtime)
-    assert captured == [item["id"] for item in env.state["spine"]["nodes"]]
+    assert captured == [item["id"] for item in env.state["segment"]["nodes"]]
     assert update["pinned_overrides"] == ["点名节点"]
     # 分派后节点顺序变化，也按稳定 ID 授权，不能把「节点 2」的权限给另一个铁钉。
-    current = deepcopy(env.state["spine"]["nodes"])
+    current = deepcopy(env.state["segment"]["nodes"])
     current[1], current[2] = current[2], current[1]
-    revised = await book_setup.spine_node(
-        {**env.state, **update, "spine": {**env.state["spine"], "nodes": current}}, env.runtime
+    revised = await book_setup.segment_node(
+        {**env.state, **update, "segment": {**env.state["segment"], "nodes": current}}, env.runtime
     )
-    assert without_snapshot(revised["spine"]["nodes"][1]) == current[1]
-    assert revised["spine"]["nodes"][2]["event"] == "按意见修改后的事件"
+    assert without_snapshot(revised["segment"]["nodes"][1]) == current[1]
+    assert revised["segment"]["nodes"][2]["event"] == "按意见修改后的事件"
 
 
 async def test_author_gate_to_triage_supports_oneshot_named_pin(env, monkeypatch):
@@ -237,7 +236,7 @@ async def test_author_gate_to_triage_supports_oneshot_named_pin(env, monkeypatch
         "triage_feedback",
         AsyncMock(
             return_value=schemas.RevisionTriage(
-                spine_instructions="把节点 2 改为救师父", pinned_overrides=[2], remark="只改这一处。"
+                segment_instructions="把节点 2 改为救师父", pinned_overrides=[2], remark="只改这一处。"
             )
         ),
     )
@@ -245,10 +244,10 @@ async def test_author_gate_to_triage_supports_oneshot_named_pin(env, monkeypatch
     assert gate.goto == "triage"
     state = {**env.state, **gate.update}
     triage = await book_setup.triage_node(state, env.runtime)
-    update = await book_setup.spine_node({**state, **triage}, env.runtime)
-    assert update["spine"]["nodes"][1]["event"] == "按意见修改后的事件"
-    assert update["spine"]["nodes"][1]["status"] == "pinned"
-    assert without_snapshot(update["spine"]["nodes"][2]) == env.setup["spine"]["nodes"][2]
+    update = await book_setup.segment_node({**state, **triage}, env.runtime)
+    assert update["segment"]["nodes"][1]["event"] == "按意见修改后的事件"
+    assert update["segment"]["nodes"][1]["status"] == "pinned"
+    assert without_snapshot(update["segment"]["nodes"][2]) == env.setup["segment"]["nodes"][2]
     assert update["pinned_overrides"] == []
 
 
@@ -257,17 +256,17 @@ async def test_interjection_maps_absorb_snapshot_and_preserves_unnamed_pin(env, 
     monkeypatch.setattr(book_setup, "_new_notes", AsyncMock(return_value=[(8, "把节点 2 改为救师父", None)]))
 
     async def absorb(llm, done, todo, requirements, fresh, **kwargs):
-        assert [item["id"] for item in done["spine"]["nodes"]] == [item["id"] for item in nodes()]
+        assert [item["id"] for item in done["segment"]["nodes"]] == [item["id"] for item in nodes()]
         return schemas.RevisionTriage(
-            spine_instructions="把节点 2 改为救师父", pinned_overrides=[2, 99], remark="按这次插话修改。"
+            segment_instructions="把节点 2 改为救师父", pinned_overrides=[2, 99], remark="按这次插话修改。"
         )
 
     monkeypatch.setattr(book_setup.editorial, "absorb_notes", absorb)
     intake = await book_setup.intake_node(env.state, env.runtime)
     assert intake["notes_seen"] == 8 and intake["pinned_overrides"] == ["点名节点"]
-    revised = await book_setup.spine_node({**env.state, **intake}, env.runtime)
-    assert revised["spine"]["nodes"][1]["event"] == "按意见修改后的事件"
-    assert without_snapshot(revised["spine"]["nodes"][2]) == env.setup["spine"]["nodes"][2]
+    revised = await book_setup.segment_node({**env.state, **intake}, env.runtime)
+    assert revised["segment"]["nodes"][1]["event"] == "按意见修改后的事件"
+    assert without_snapshot(revised["segment"]["nodes"][2]) == env.setup["segment"]["nodes"][2]
 
 
 @pytest.mark.parametrize("origin", ["triage", "notes"])
@@ -281,35 +280,44 @@ async def test_sync_only_plan_never_grants_model_reported_override(env, monkeypa
         monkeypatch.setattr(book_setup, "_new_notes", AsyncMock(return_value=[(9, "只改书名", None)]))
         monkeypatch.setattr(book_setup.editorial, "absorb_notes", AsyncMock(return_value=result))
         update = await book_setup.intake_node(env.state, env.runtime)
-    assert update["instructions"]["spine"] == book_setup.SYNC_INSTRUCTIONS["spine"]
+    assert update["instructions"]["segment"] == book_setup.SYNC_INSTRUCTIONS["segment"]
     assert not update.get("pinned_overrides")
-    revised = await book_setup.spine_node({**env.state, **update}, env.runtime)
-    assert without_snapshot(revised["spine"]["nodes"][1]) == env.setup["spine"]["nodes"][1]
+    revised = await book_setup.segment_node({**env.state, **update}, env.runtime)
+    assert without_snapshot(revised["segment"]["nodes"][1]) == env.setup["segment"]["nodes"][1]
 
 
 async def test_locked_nodes_do_not_receive_interjection_permission(env, monkeypatch):
-    env.state.update(piece="cast", pieces={"concept": "confirmed", "nodes": "confirmed", "cast": "waiting"})
+    env.state.update(
+        piece="first_volume",
+        pieces={
+            "concept": "confirmed",
+            "protagonist": "confirmed",
+            "world": "confirmed",
+            "segment": "confirmed",
+            "first_volume": "waiting",
+        },
+    )
     monkeypatch.setattr(book_setup, "_new_notes", AsyncMock(return_value=[(9, "把节点 2 改为救师父", None)]))
     monkeypatch.setattr(
         book_setup.editorial,
         "absorb_notes",
         AsyncMock(
             return_value=schemas.RevisionTriage(
-                spine_instructions="改节点 2", pinned_overrides=[2], remark="需要作者解锁。"
+                segment_instructions="改节点 2", pinned_overrides=[2], remark="需要作者解锁。"
             )
         ),
     )
     update = await book_setup.intake_node(env.state, env.runtime)
-    assert not update.get("pinned_overrides") and "spine" not in update.get("queue", [])
-    assert any(item["target"] == "spine" for item in update["unlock_requests"])
+    assert not update.get("pinned_overrides") and "segment" not in update.get("queue", [])
+    assert any(item["target"] == "segment" for item in update["unlock_requests"])
 
 
 async def test_consumed_permission_cannot_leak_to_next_revision(env):
-    env.state.update(queue=["spine"], instructions={"spine": "按作者意见修改"}, pinned_overrides=["点名节点"])
-    first = await book_setup.spine_node(env.state, env.runtime)
-    state = {**env.state, **first, "queue": ["spine"], "instructions": {"spine": "下一轮只修改暂定节点"}}
-    second = await book_setup.spine_node(state, env.runtime)
-    assert without_snapshot(second["spine"]["nodes"][1]) == without_snapshot(first["spine"]["nodes"][1])
+    env.state.update(queue=["segment"], instructions={"segment": "按作者意见修改"}, pinned_overrides=["点名节点"])
+    first = await book_setup.segment_node(env.state, env.runtime)
+    state = {**env.state, **first, "queue": ["segment"], "instructions": {"segment": "下一轮只修改暂定节点"}}
+    second = await book_setup.segment_node(state, env.runtime)
+    assert without_snapshot(second["segment"]["nodes"][1]) == without_snapshot(first["segment"]["nodes"][1])
     assert first["pinned_overrides"] == second["pinned_overrides"] == []
 
 
@@ -323,7 +331,7 @@ async def test_automatic_critique_discards_stale_author_permissions(env, monkeyp
             return_value=schemas.SetupCritique(
                 verdict="revise",
                 issues=[
-                    schemas.ReviewIssue(target="spine", severity="high", problem="铁钉不合理", suggestion="改铁钉")
+                    schemas.ReviewIssue(target="segment", severity="high", problem="铁钉不合理", suggestion="改铁钉")
                 ],
                 remark="建议调整。",
             )
@@ -335,13 +343,13 @@ async def test_automatic_critique_discards_stale_author_permissions(env, monkeyp
     else:
         update = (await book_setup.piece_check_node(env.state, env.runtime)).update
     assert update["pinned_overrides"] == [] and update["pinned_override_sources"] == {}
-    revised = await book_setup.spine_node({**env.state, **update}, env.runtime)
-    assert without_snapshot(revised["spine"]["nodes"][1]) == env.setup["spine"]["nodes"][1]
+    revised = await book_setup.segment_node({**env.state, **update}, env.runtime)
+    assert without_snapshot(revised["segment"]["nodes"][1]) == env.setup["segment"]["nodes"][1]
 
 
 async def test_deleting_author_source_revokes_pending_permission(env, monkeypatch):
     env.state.update(
-        instructions={"spine": "修改本轮授权的两个节点"},
+        instructions={"segment": "修改本轮授权的两个节点"},
         pinned_overrides=["点名节点", "其他铁钉"],
         pinned_override_sources={"点名节点": ["已删意见"], "其他铁钉": ["仍有效意见"]},
     )
@@ -355,9 +363,9 @@ async def test_deleting_author_source_revokes_pending_permission(env, monkeypatc
 
 async def test_deleted_merged_author_instruction_cannot_authorize_reviewer_fallback(env, monkeypatch):
     env.state.update(
-        instructions={"spine": "合并两条作者意见后的修改"},
-        instruction_sources={"spine": ["已删意见", "仍有效意见"]},
-        instruction_fallbacks={"spine": "审稿建议改掉所有铁钉"},
+        instructions={"segment": "合并两条作者意见后的修改"},
+        instruction_sources={"segment": ["已删意见", "仍有效意见"]},
+        instruction_fallbacks={"segment": "审稿建议改掉所有铁钉"},
         pinned_overrides=["点名节点", "其他铁钉"],
         pinned_override_sources={"点名节点": ["已删意见"], "其他铁钉": ["仍有效意见"]},
     )
@@ -365,7 +373,7 @@ async def test_deleted_merged_author_instruction_cannot_authorize_reviewer_fallb
     monkeypatch.setattr(book_setup, "list_requirements", AsyncMock(return_value=[]))
     monkeypatch.setattr(book_setup, "deleted_texts", AsyncMock(return_value={"已删意见"}))
     update = await env.real_live_state(env.state, env.runtime.context)
-    assert update["instructions"]["spine"] == "审稿建议改掉所有铁钉"
+    assert update["instructions"]["segment"] == "审稿建议改掉所有铁钉"
     assert update["pinned_overrides"] == [] and update["pinned_override_sources"] == {}
 
 
@@ -378,16 +386,16 @@ async def test_second_interjection_adds_authorization_while_spine_revision_is_pe
     seen = []
 
     async def absorb(llm, done, todo, requirements, fresh, **kwargs):
-        assert "spine" in done
+        assert "segment" in done
         seen.append(fresh)
         ref = 2 if len(seen) == 1 else 3
         return schemas.RevisionTriage(
-            spine_instructions=f"按这次插话修改节点 {ref}", pinned_overrides=[ref], remark="本轮一起修改。"
+            segment_instructions=f"按这次插话修改节点 {ref}", pinned_overrides=[ref], remark="本轮一起修改。"
         )
 
     monkeypatch.setattr(book_setup.editorial, "absorb_notes", absorb)
     first = await book_setup.intake_node(env.state, env.runtime)
-    assert first["queue"] == ["spine"] and first["pinned_overrides"] == ["点名节点"]
+    assert first["queue"] == ["segment", "volumes"] and first["pinned_overrides"] == ["点名节点"]
     state = {**env.state, **first}
     second = await book_setup.intake_node(state, env.runtime)
     assert second["pinned_overrides"] == ["点名节点", "其他铁钉"]
@@ -395,41 +403,47 @@ async def test_second_interjection_adds_authorization_while_spine_revision_is_pe
         "点名节点": ["把节点 2 改为救师父"],
         "其他铁钉": ["节点 3 也改成主动出击"],
     }
-    assert "节点 2" in second["instructions"]["spine"] and "节点 3" in second["instructions"]["spine"]
-    revised = await book_setup.spine_node({**state, **second}, env.runtime)
-    assert all(item["event"] == "按意见修改后的事件" for item in revised["spine"]["nodes"][1:3])
+    assert "节点 2" in second["instructions"]["segment"] and "节点 3" in second["instructions"]["segment"]
+    revised = await book_setup.segment_node({**state, **second}, env.runtime)
+    assert all(item["event"] == "按意见修改后的事件" for item in revised["segment"]["nodes"][1:3])
     assert revised["pinned_overrides"] == []
 
 
 @pytest.mark.parametrize("action", ["reopen", "unlock"])
 async def test_unlock_with_named_feedback_grants_only_the_named_pin(env, monkeypatch, action):
     env.state.update(
-        piece="cast",
-        pieces={"concept": "confirmed", "nodes": "confirmed", "cast": "waiting"},
+        piece="first_volume",
+        pieces={
+            "concept": "confirmed",
+            "protagonist": "confirmed",
+            "world": "confirmed",
+            "segment": "confirmed",
+            "first_volume": "waiting",
+        },
         pinned_overrides=["其他铁钉"],
         pinned_override_sources={"其他铁钉": ["上轮旧意见"]},
     )
     monkeypatch.setattr(
         book_setup,
         "interrupt",
-        lambda payload: {"action": action, "piece": "nodes", "feedback": "把节点 2 改为救师父"},
+        lambda payload: {"action": action, "piece": "segment", "feedback": "把节点 2 改为救师父"},
     )
 
     async def triage(llm, setup, requirements, feedback, **kwargs):
-        assert "关键节点" not in kwargs["locked"]
+        assert "第一段" not in kwargs["locked"]
         assert "节点 2" in feedback
         return schemas.RevisionTriage(
-            spine_instructions="把节点 2 改为救师父", pinned_overrides=[2], remark="解锁后按点名意见修改。"
+            segment_instructions="把节点 2 改为救师父", pinned_overrides=[2], remark="解锁后按点名意见修改。"
         )
 
     monkeypatch.setattr(book_setup.editorial, "triage_feedback", triage)
     command = await book_setup.piece_gate_node(env.state, env.runtime)
-    assert command.goto == "intake" and command.update["piece"] == "nodes"
-    assert command.update["pieces"]["nodes"] == "drafting" and command.update["pieces"]["cast"] == "todo"
+    assert command.goto == "intake" and command.update["piece"] == "segment"
+    assert command.update["pieces"]["segment"] == "drafting" and command.update["pieces"]["first_volume"] == "todo"
     assert command.update["pinned_overrides"] == ["点名节点"]
-    revised = await book_setup.spine_node({**env.state, **command.update}, env.runtime)
-    assert revised["spine"]["nodes"][1]["event"] == "按意见修改后的事件"
-    assert without_snapshot(revised["spine"]["nodes"][2]) == env.setup["spine"]["nodes"][2]
+    revised = await book_setup.segment_node({**env.state, **command.update}, env.runtime)
+    assert revised["segment"]["nodes"][1]["event"] == "按意见修改后的事件"
+    assert without_snapshot(revised["segment"]["nodes"][2]) == env.setup["segment"]["nodes"][2]
 
 
 @pytest.mark.parametrize("change", ["move_pin", "omit_pin", "omit_predecessors", "insert_before_pinned_ending"])

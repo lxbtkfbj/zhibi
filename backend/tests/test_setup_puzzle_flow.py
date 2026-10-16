@@ -125,9 +125,16 @@ async def test_puzzle_complete_api_path_and_author_nodes(flow, sessionmaker, mon
 
     monkeypatch.setattr(editorial, "critique_setup", critique)
     bid, jid = await new_puzzle(flow)
-    await confirm(flow, jid, "concept")
+    for piece in ("concept", "protagonist", "world"):
+        await confirm(flow, jid, piece)
     gate = (await flow("GET", f"/jobs/{jid}"))["pending"]
-    assert gate["piece"] == "nodes" and not gate["warnings"]
+    assert gate["piece"] == "segment" and not gate["warnings"]
+    nodes = await flow("GET", f"/books/{bid}/nodes")
+    await flow(
+        "POST",
+        f"/books/{bid}/nodes",
+        {"title": "作者远景", "event": "作者已想到的远景", "status": "pencil", "after_node_id": nodes[1]["id"]},
+    )
     nodes = await flow("GET", f"/books/{bid}/nodes")
     await flow("PATCH", f"/nodes/{nodes[1]['id']}", {"status": "pinned"})
     await flow("PATCH", f"/nodes/{nodes[2]['id']}", {"event": "作者亲手改的暂定事件"})
@@ -138,7 +145,7 @@ async def test_puzzle_complete_api_path_and_author_nodes(flow, sessionmaker, mon
     )
     assert author["status"] == "pinned" and author["origin"] == "author"
     await flow("PATCH", f"/nodes/{nodes[3]['id']}", {"status": "empty", "event": ""})
-    await flow("POST", f"/jobs/{jid}/piece", {"action": "candidates", "piece": "nodes", "node_id": nodes[2]["id"]})
+    await flow("POST", f"/jobs/{jid}/piece", {"action": "candidates", "piece": "segment", "node_id": nodes[2]["id"]})
     gate = (await flow("GET", f"/jobs/{jid}"))["pending"]
     assert len(gate["candidates"]["nodes"]) == 3
     candidate = gate["candidates"]["nodes"][0]
@@ -154,13 +161,12 @@ async def test_puzzle_complete_api_path_and_author_nodes(flow, sessionmaker, mon
     await flow(
         "POST",
         f"/jobs/{jid}/piece",
-        {"action": "fill", "piece": "nodes", "node_id": nodes[3]["id"], "feedback": "中间要有一场宗门大比"},
+        {"action": "fill", "piece": "segment", "node_id": nodes[3]["id"], "feedback": "中间要有一场宗门大比"},
     )
     after = await flow("GET", f"/books/{bid}/nodes")
     filled = next(n for n in after if n["id"] == nodes[3]["id"])
     assert filled["status"] == "pinned" and filled["origin"] == "author" and filled["event"]
-    for piece in ("nodes", "cast", "fill"):
-        await confirm(flow, jid, piece)
+    await confirm(flow, jid, "segment")
     gate = (await flow("GET", f"/jobs/{jid}"))["pending"]
     assert gate["piece"] == "first_volume" and gate["suggestions"][0]["target"] == "concept"
     await confirm(flow, jid, "first_volume")
@@ -168,7 +174,7 @@ async def test_puzzle_complete_api_path_and_author_nodes(flow, sessionmaker, mon
     assert book["status"] == "ready" and book["setup_progress"]["current"] is None
     assert book["setup_progress"]["pieces"] == dict.fromkeys(PIECE_ORDER, "confirmed")
     bible = await flow("GET", f"/books/{bid}/bible")
-    assert len(bible["secrets"]) >= 4
+    assert len(bible["secrets"]) >= 2
     assert any(f["code"].startswith("E") for f in bible["foreshadowings"])
     nodes_after = await flow("GET", f"/books/{bid}/nodes")
     assert any(n["anchors"] for n in nodes_after)
@@ -189,29 +195,28 @@ async def test_puzzle_complete_api_path_and_author_nodes(flow, sessionmaker, mon
 
 async def test_confirm_fills_empty_and_reopen_resync(flow):
     bid, jid = await new_puzzle(flow)
-    await confirm(flow, jid, "concept")
+    for piece in ("concept", "protagonist", "world"):
+        await confirm(flow, jid, piece)
     nodes = await flow("GET", f"/books/{bid}/nodes")
     await flow("PATCH", f"/nodes/{nodes[2]['id']}", {"status": "empty", "event": ""})
-    await confirm(flow, jid, "nodes")
+    await confirm(flow, jid, "segment")
     after = await flow("GET", f"/books/{bid}/nodes")
     assert next(n for n in after if n["id"] == nodes[2]["id"])["status"] == "pencil"
-    await confirm(flow, jid, "cast")
-    await flow("POST", f"/jobs/{jid}/piece", {"action": "reopen", "piece": "nodes"})
+    await flow("POST", f"/jobs/{jid}/piece", {"action": "reopen", "piece": "world"})
     progress = (await flow("GET", f"/books/{bid}"))["setup_progress"]
-    assert (
-        progress["pieces"]["nodes"] == "waiting" and progress["pieces"]["cast"] == progress["pieces"]["fill"] == "todo"
-    )
-    await confirm(flow, jid, "nodes")
-    assert (await flow("GET", f"/jobs/{jid}"))["pending"]["piece"] == "cast"
-    await confirm(flow, jid, "cast")
-    assert (await flow("GET", f"/jobs/{jid}"))["pending"]["piece"] == "fill"
+    assert progress["pieces"]["world"] == "waiting"
+    assert progress["pieces"]["segment"] == progress["pieces"]["first_volume"] == "todo"
+    await confirm(flow, jid, "world")
+    assert (await flow("GET", f"/jobs/{jid}"))["pending"]["piece"] == "segment"
+    await confirm(flow, jid, "segment")
+    assert (await flow("GET", f"/jobs/{jid}"))["pending"]["piece"] == "first_volume"
 
 
 async def test_locked_notes_request_unlock_then_resync(flow, sessionmaker, monkeypatch):
     bid, jid = await new_puzzle(flow)
     await confirm(flow, jid, "concept")
     before = (await flow("GET", f"/books/{bid}"))["concept"]
-    draft = editorial.draft_lore
+    draft = editorial.draft_world
 
     async def inject(*args, **kwargs):
         async with sessionmaker() as session:
@@ -235,21 +240,21 @@ async def test_locked_notes_request_unlock_then_resync(flow, sessionmaker, monke
             remark="需要作者解锁概念",
         )
 
-    monkeypatch.setattr(editorial, "draft_lore", inject)
+    monkeypatch.setattr(editorial, "draft_world", inject)
     monkeypatch.setattr(editorial, "absorb_notes", absorb)
-    await confirm(flow, jid, "nodes")
+    await confirm(flow, jid, "protagonist")
     pending = (await flow("GET", f"/jobs/{jid}"))["pending"]
-    assert pending["piece"] == "cast" and pending["unlock_requests"]
+    assert pending["piece"] == "world" and pending["unlock_requests"]
     assert (await flow("GET", f"/books/{bid}"))["concept"] == before
-    monkeypatch.setattr(editorial, "draft_lore", draft)
+    monkeypatch.setattr(editorial, "draft_world", draft)
     await flow("POST", f"/jobs/{jid}/piece", {"action": "unlock", "piece": "concept", "feedback": "核心卖点改成追凶"})
     assert (await flow("GET", f"/jobs/{jid}"))["pending"]["piece"] == "concept"
-    for piece in ("concept", "nodes", "cast", "fill", "first_volume"):
+    for piece in PIECE_ORDER:
         await confirm(flow, jid, piece)
     assert (await flow("GET", f"/books/{bid}"))["status"] == "ready"
 
 
-async def test_old_checkpoint_without_mode_and_with_legacy_spine(sessionmaker, monkeypatch):
+async def test_old_checkpoint_without_flow_is_not_resumed(sessionmaker, monkeypatch):
     monkeypatch.setattr(demo, "DELAY_S", 0)
     async with sessionmaker() as session:
         book = Book(idea="旧书检查点")
@@ -261,12 +266,12 @@ async def test_old_checkpoint_without_mode_and_with_legacy_spine(sessionmaker, m
     state = {
         "idea": "旧书检查点",
         "concept": {"title": "旧书", "target_volumes": 8, "target_length": 100, "chapter_words": 3000},
-        "spine": {
+        "segment": {
             "opening": "旧开篇",
             "ending": "旧结局",
             "milestones": [{"index": 1, "title": "旧转折", "event": "出城", "change": "成长", "volume": 2}],
         },
-        "queue": ["lore", "threads", "outline", "first_volume"],
+        "queue": ["world", "threads", "volumes", "first_volume"],
         "instructions": {},
         "phase": "draft",
         "round": 0,
@@ -278,6 +283,6 @@ async def test_old_checkpoint_without_mode_and_with_legacy_spine(sessionmaker, m
     await execute_job(job.id)
     async with sessionmaker() as session:
         stored = await session.get(Job, job.id)
-        assert stored.status == "waiting_author", stored.error
-        assert stored.pending["kind"] == "setup_review"
-        assert (await session.get(Book, book.id)).setup_progress["mode"] == "oneshot"
+        assert stored.status == "failed"
+        assert "按新流程重开" in stored.error
+        assert (await session.get(Book, book.id)).setup_progress == {}

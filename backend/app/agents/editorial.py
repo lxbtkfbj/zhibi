@@ -8,12 +8,15 @@ from app.agents.context import (
     format_lore,
     format_outline,
     format_pitches,
+    format_protagonist,
     format_revision,
+    format_segment_part,
     format_spine,
     format_style,
     format_threads,
     format_volume_plan,
-    planned_chapters,
+    format_volumes_part,
+    format_world,
 )
 from app.agents.glossary import glossary_block
 from app.agents.playbook import playbook_text
@@ -80,92 +83,102 @@ async def draft_node_slot(
     return await llm.structured("chief", s.NodeCandidates, persona("chief"), user, purpose="开书·节点候选与补空位")
 
 
-async def draft_lore(
-    llm: LLMRouter, concept: dict, spine: dict, requirements: str, current: dict, instructions: str
-) -> s.LoreDraft:
+async def draft_protagonist(
+    llm: LLMRouter,
+    idea: str,
+    concept: dict,
+    requirements: str,
+    current: dict,
+    instructions: str,
+    chosen_direction: str = "",
+) -> s.ProtagonistDraft:
     user = render(
-        "setup_lore",
+        "setup_protagonist",
+        idea=idea,
         concept=format_concept(concept),
-        spine=format_spine(spine),
+        chosen_direction=chosen_direction,
         requirements=requirements,
-        revision=format_revision("当前设定", format_lore(current), instructions) if current else "",
+        revision=format_revision("当前主角卡", format_protagonist(current), instructions) if current else "",
     )
-    return await llm.structured("lorekeeper", s.LoreDraft, persona("lorekeeper"), user, purpose="开书·设定")
+    return await llm.structured("chief", s.ProtagonistDraft, persona("chief"), user, purpose="开书·主角卡")
 
 
-async def draft_spine(
+async def draft_world(
     llm: LLMRouter,
     concept: dict,
+    protagonist: dict,
+    requirements: str,
+    current: dict,
+    instructions: str,
+) -> s.WorldDraft:
+    user = render(
+        "setup_world",
+        concept=format_concept(concept),
+        protagonist=format_protagonist(protagonist),
+        requirements=requirements,
+        revision=format_revision("当前的世界与人", format_world(current), instructions) if current else "",
+    )
+    return await llm.structured("lorekeeper", s.WorldDraft, persona("lorekeeper"), user, purpose="开书·世界与人")
+
+
+async def draft_segment(
+    llm: LLMRouter,
+    concept: dict,
+    protagonist: dict,
+    world: dict,
     requirements: str,
     current: dict,
     instructions: str,
     *,
     playbook: str,
     glossary: str,
-    legacy_lore: dict | None = None,
-) -> s.StorySpine:
+) -> s.SegmentDraft:
     user = render(
-        "setup_spine",
+        "setup_segment",
         concept=format_concept(concept),
+        protagonist=format_protagonist(protagonist),
+        world=format_world(world),
+        requirements=requirements,
         playbook=playbook,
         glossary=glossary,
-        lore=format_lore(legacy_lore) if legacy_lore else "（设定将在关键节点之后生成）",
-        requirements=requirements,
-        revision=format_revision("当前主线骨架", format_spine(current), instructions) if current else "",
+        revision=format_revision("当前第一段的走向", format_segment_part(current, world), instructions)
+        if current
+        else "",
     )
-    return await llm.structured("chief", s.StorySpine, persona("chief"), user, purpose="开书·主线骨架")
+    return await llm.structured("chief", s.SegmentDraft, persona("chief"), user, purpose="开书·第一段的走向")
 
 
-async def draft_threads(
+async def split_segment(
     llm: LLMRouter,
     concept: dict,
-    lore: dict,
-    spine: dict,
-    outline: dict,
+    protagonist: dict,
+    world: dict,
+    segment: dict,
     requirements: str,
     current: dict,
     instructions: str,
-    selection: str = "auto",
-) -> s.ThreadsDraft:
+    *,
+    playbook: str,
+    glossary: str,
+    volume_hint: str,
+    threads: str = "（还没有线索，这是第一段）",
+) -> s.SegmentVolumesDraft:
     user = render(
-        "setup_threads",
+        "split_segment",
         concept=format_concept(concept),
-        lore=format_lore(lore),
-        spine=format_spine(spine),
-        outline=format_outline(outline),
-        playbook=playbook_text(concept, "threads", selection=selection),
+        protagonist=format_protagonist(protagonist),
+        world=format_world(world),
+        segment=format_segment_part(segment, world),
+        threads=threads,
+        playbook=playbook,
         requirements=requirements,
-        revision=format_revision("当前线索", format_threads(current), instructions) if current else "",
+        glossary=glossary,
+        volume_hint=volume_hint,
+        revision=format_revision("当前的分卷与线索", format_volumes_part(current), instructions) if current else "",
     )
-    return await llm.structured("chief", s.ThreadsDraft, persona("chief"), user, purpose="开书·线索")
-
-
-async def draft_outline(
-    llm: LLMRouter,
-    concept: dict,
-    lore: dict,
-    spine: dict,
-    requirements: str,
-    current: dict,
-    instructions: str,
-    selection: str = "auto",
-    glossary: str | None = None,
-    legacy_threads: dict | None = None,
-) -> s.OutlineDraft:
-    chapters = planned_chapters(concept)
-    user = render(
-        "setup_outline",
-        concept=format_concept(concept),
-        lore=format_lore(lore),
-        spine=format_spine(spine),
-        threads=format_threads(legacy_threads) if legacy_threads else "（线索将在总纲之后生成）",
-        glossary=glossary if glossary is not None else glossary_block(),
-        playbook=playbook_text(concept, "outline", selection=selection),
-        requirements=requirements,
-        chapter_hint=f"（约 {chapters} 章）" if chapters else "",
-        revision=format_revision("当前总纲", format_outline(current), instructions) if current else "",
+    return await llm.structured(
+        "chief", s.SegmentVolumesDraft, persona("chief"), user, purpose="开书·第一段的分卷与线索"
     )
-    return await llm.structured("chief", s.OutlineDraft, persona("chief"), user, purpose="开书·全书总纲")
 
 
 async def plan_volume(
@@ -207,10 +220,18 @@ async def audit_volume(
 
 
 async def critique_setup(
-    llm: LLMRouter, idea: str, requirements: str, setup: dict[str, dict], selection: str = "auto", locked: str = ""
+    llm: LLMRouter,
+    idea: str,
+    requirements: str,
+    setup: dict[str, dict],
+    selection: str = "auto",
+    locked: str = "",
+    focus: str = "",
 ) -> s.SetupCritique:
     user = render(
         "setup_critique",
+        **_legacy_template_values(setup),
+        focus=focus,
         idea=idea,
         requirements=requirements,
         locked=locked,
@@ -225,6 +246,7 @@ async def triage_feedback(
 ) -> s.RevisionTriage:
     user = render(
         "setup_triage",
+        **_legacy_template_values(setup),
         requirements=requirements,
         feedback=feedback,
         locked=locked,
@@ -233,20 +255,48 @@ async def triage_feedback(
     return await llm.structured("chief", s.RevisionTriage, persona("chief"), user, purpose="开书·处理作者意见")
 
 
+def _legacy_template_values(setup: dict[str, dict]) -> dict[str, str]:
+    """保留作者旧审稿／分派模板的占位符；状态和持久化仍只采用新形状。"""
+    segment, volumes, world = (setup.get(key) or {} for key in ("segment", "volumes", "world"))
+    return {
+        "spine": format_spine(segment, world) if segment else "（还没做）",
+        "lore": format_lore(
+            {
+                **world,
+                "secrets": segment.get("secrets", []),
+                "anchors": volumes.get("anchors", []),
+                "nodes": segment.get("nodes", []),
+            }
+        )
+        if world
+        else "（还没做）",
+        "outline": format_outline(
+            {
+                **volumes,
+                "foreshadowings": segment.get("foreshadowings", []),
+                "expectations": segment.get("expectations", []),
+            }
+        )
+        if volumes
+        else "（还没做）",
+        "threads": format_threads(volumes) if volumes else "（还没做）",
+    }
+
+
 PART_LABELS = {
-    "concept": "概念",
-    "spine": "关键节点",
-    "lore": "世界观、人物与信息差",
-    "outline": "全书总纲",
-    "threads": "线索",
+    "concept": "定调",
+    "protagonist": "主角卡",
+    "world": "世界与人",
+    "segment": "第一段的走向",
+    "volumes": "第一段的分卷与线索",
     "first_volume": "第一卷卷纲",
 }
 PART_FORMATTERS = {
     "concept": format_concept,
-    "spine": format_spine,
-    "lore": format_lore,
-    "outline": format_outline,
-    "threads": format_threads,
+    "protagonist": format_protagonist,
+    "world": format_world,
+    "segment": format_segment_part,
+    "volumes": format_volumes_part,
     "first_volume": format_volume_plan,
 }
 

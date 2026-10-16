@@ -1,89 +1,82 @@
-"""填中间的跨块同步只允许更新本书已有非铁钉节点的卷号。"""
+"""第一段整块持久化：节点、信息差与分卷一起保存，不影响其他块或其他书。"""
 
-import uuid
 from copy import deepcopy
 from types import SimpleNamespace
 
+import pytest
 from sqlalchemy import select
 
 from app.graphs.book_setup import piece_persist_node
-from app.models import Book, StoryNode, Volume
-from app.services.setup_store import load_nodes, load_setup
+from app.models import Book, DraftVersion, StoryNode
+from app.services.setup_store import load_setup, save_setup
+from tests.test_story_map_store import sample_setup
 
 
-async def test_fill_persistence_only_updates_existing_unpinned_volume(sessionmaker, monkeypatch):
+async def deps_for(sessionmaker, monkeypatch, book_id):
     async def noop(*args, **kwargs):
         pass
 
     monkeypatch.setattr("app.graphs.book_setup.publish", noop)
+    return SimpleNamespace(
+        book_id=book_id, job_id=None, redis=None, sessionmaker=sessionmaker, emit=SimpleNamespace(say=noop, status=noop)
+    )
+
+
+async def test_segment_persists_nodes_and_volumes_together_preserving_other_blocks(sessionmaker, monkeypatch):
     async with sessionmaker() as session:
         book, other = Book(title="本书"), Book(title="别的书")
         session.add_all([book, other])
         await session.flush()
-        nodes = [
-            StoryNode(
-                book_id=book.id,
-                position=index,
-                kind=kind,
-                title=title,
-                event="作者事件",
-                prerequisite="作者前提",
-                consequence="作者后果",
-                volume=index,
-                status=status,
-                origin="author",
-                editor_note="作者批注",
-            )
-            for index, kind, title, status in (
-                (1, "opening", "开篇", "pencil"),
-                (2, "milestone", "可同步卷号", "pencil"),
-                (3, "milestone", "铁钉", "pinned"),
-                (4, "milestone", "检查点里漏掉的节点", "pencil"),
-                (5, "ending", "结局", "pencil"),
-            )
-        ]
-        foreign = StoryNode(book_id=other.id, position=1, kind="opening", title="另一书开篇", volume=1)
-        session.add_all([*nodes, foreign])
-        await session.flush()
-        session.add(Volume(book_id=book.id, index=1, title="第一卷", target_node_id=nodes[1].id))
+        for row in (book, other):
+            await save_setup(session, row.id, sample_setup())
         await session.commit()
-        before = await load_nodes(session, book.id)
-        setup = await load_setup(session, book.id)
+        before = await load_setup(session, book.id)
+        before_other = await load_setup(session, other.id)
         book_id, other_id = book.id, other.id
-        before_other = await load_nodes(session, other_id)
-        proposed = [
-            {
-                **deepcopy(before[1]),
-                "volume": 4,
-                "title": "不能覆盖名称",
-                "event": "不能覆盖事件",
-                "status": "pinned",
-                "origin": "ai",
-            },
-            {**deepcopy(before[2]), "volume": 99, "status": "pencil", "title": "不能改铁钉"},
-            {"id": str(foreign.id), "volume": 99},
-            {"id": str(uuid.uuid4()), "kind": "milestone", "title": "不能新建", "volume": 99},
-            {"id": None, "kind": "milestone", "title": "不能新建", "volume": 99},
-        ]
-    state = {
-        **setup,
-        "mode": "puzzle",
-        "piece": "fill",
-        "pieces": {"nodes": "confirmed", "fill": "drafting"},
-        "spine": {**setup["spine"], "nodes": proposed},
+    proposed = deepcopy(before)
+    proposed["segment"]["nodes"][1]["segment"] = {
+        "number": 1,
+        "goal": "查明城中旧案",
+        "opening": {"scene": "城门突遭封锁"},
     }
-    deps = SimpleNamespace(
-        book_id=book_id, job_id=None, redis=None, sessionmaker=sessionmaker, emit=SimpleNamespace(say=noop, status=noop)
-    )
+    proposed["volumes"]["volumes"][1]["want"] = "当众揭穿冒名的城主"
+    state = {
+        **proposed,
+        "mode": "puzzle",
+        "piece": "segment",
+        "pieces": {"concept": "confirmed", "protagonist": "confirmed", "world": "confirmed", "segment": "drafting"},
+    }
+    deps = await deps_for(sessionmaker, monkeypatch, book_id)
     update = await piece_persist_node(state, SimpleNamespace(context=deps))
-    expected = deepcopy(before)
-    expected[1]["volume"] = 4
-    assert update["spine"]["nodes"] == expected
-    assert update["pieces"]["fill"] == "waiting"
+    assert update["pieces"]["segment"] == "waiting"
+    assert set(update) >= {"segment", "volumes"}
     async with sessionmaker() as session:
-        assert await load_nodes(session, book_id) == expected
-        assert await load_nodes(session, other_id) == before_other
-        rows = list(
-            await session.scalars(select(StoryNode).where(StoryNode.book_id == book_id).order_by(StoryNode.position))
-        )
-        assert [row.position for row in rows] == [1, 2, 3, 4, 5]
+        after = await load_setup(session, book_id)
+        assert after["segment"] == proposed["segment"] and after["volumes"] == proposed["volumes"]
+        for key in ("concept", "protagonist", "world", "first_volume"):
+            assert after[key] == before[key]
+        assert await load_setup(session, other_id) == before_other
+        snapshot = await session.scalar(select(DraftVersion).where(DraftVersion.book_id == book_id))
+        assert snapshot.note == "piece:segment" and snapshot.payload == after
+
+
+async def test_segment_rejects_foreign_node_before_committing_any_changes(sessionmaker, monkeypatch):
+    async with sessionmaker() as session:
+        book, other = Book(), Book()
+        session.add_all([book, other])
+        await session.flush()
+        await save_setup(session, book.id, sample_setup())
+        foreign = StoryNode(book_id=other.id, kind="milestone", position=1, title="外书节点")
+        session.add(foreign)
+        await session.commit()
+        before = await load_setup(session, book.id)
+        state = deepcopy(before)
+        state["segment"]["nodes"][1]["id"] = str(foreign.id)
+        state.update(mode="puzzle", piece="segment", pieces={"segment": "drafting"})
+        book_id = book.id
+    deps = await deps_for(sessionmaker, monkeypatch, book_id)
+    with pytest.raises(ValueError, match="不属于本书"):
+        await piece_persist_node(state, SimpleNamespace(context=deps))
+    async with sessionmaker() as session:
+        assert await load_setup(session, book_id) == before
+        assert await session.scalar(select(DraftVersion).where(DraftVersion.book_id == book_id)) is None

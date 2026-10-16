@@ -7,6 +7,7 @@ import './index.css'
 import { BookLayout } from './pages/book/BookLayout'
 import { CharactersPage, ForeshadowingPage, RelationsPage, WorldPage } from './pages/book/sections/BiblePages'
 import { ChapterPage, ContentsPage } from './pages/book/sections/ChapterPages'
+import { ProtagonistPage } from './pages/book/sections/ProtagonistPage'
 import { ConceptPage } from './pages/book/sections/ConceptPage'
 import { Overview } from './pages/book/sections/Overview'
 import { SpinePage } from './pages/book/sections/SpinePage'
@@ -38,6 +39,7 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <Overview /> },
       { path: 'concept', element: <ConceptPage /> },
+      { path: 'protagonist', element: <ProtagonistPage /> },
       { path: 'spine', element: <SpinePage /> },
       { path: 'threads', element: <ThreadsPage /> },
       { path: 'chapters', element: <ContentsPage /> },

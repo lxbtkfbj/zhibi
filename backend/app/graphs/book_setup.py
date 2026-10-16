@@ -1,12 +1,4 @@
-"""开书流程图。
-
-（可选）主编先问作者几个关键问题 → 主编定概念 → 设定师建设定 → 主编定主线骨架（开篇、结局、关键转折）
-→ 主编做线索规划（主线、感情线、反派线、谜团线、成长线）→ 主编写全书总纲（分卷卡片 + 长线伏笔）
-→ 主编拆第一卷卷纲（剧情单元）→ 审稿挑刺 →（必要时自动修改一轮）→ 存库 → 作者拍板
-作者提意见：主编分派修改 → 对应角色修改 → 存库 → 再次拍板；作者批准：定稿。
-作者随时可以插话：每做完一步，主编先看有没有新的插话，已完成的部分需要改就先改，之后每一步都按插话来写。
-后面各卷的卷纲和每个单元的章纲，在写作流程里写到之前再做（见 write_book）。
-"""
+"""开书五步：定调、主角、世界与人、第一段、第一卷，支持逐块与一口气。"""
 
 import logging
 from copy import deepcopy
@@ -24,9 +16,12 @@ from app.agents.context import (
     format_direction_choice,
     format_ledger,
     format_locked,
+    format_opening,
     format_previous_directions,
+    format_protagonist,
     format_requirements,
     format_secrets,
+    format_segment_info,
     format_spine,
     format_target_node,
     format_threads,
@@ -35,22 +30,23 @@ from app.agents.context import (
 )
 from app.agents.glossary import clean_techniques, glossary_block
 from app.agents.planning import attach_new_foreshadowings, fit_chapter_counts, relevant_ledger, unit_hint
-from app.agents.playbook import pick, playbook_text
+from app.agents.playbook import playbook_text
 from app.agents.setup_puzzle import (
     NODE_CONTENT,
     ORDER,
     PIECE_NAMES,
     PIECE_ORDER,
     PIECES,
+    QUESTIONS,
     clean_reveals,
-    merge_nodes,
-    normalize_lore,
-    normalize_outline,
-    piece_warnings,
+    normalize_segment,
+    normalize_volumes,
+    normalize_world,
+    piece_checks,
 )
 from app.book_settings import settings_of
 from app.graphs.deps import GraphDeps
-from app.models import Book, MeetingMessage, StoryNode, Volume
+from app.models import Book, MeetingMessage, Volume
 from app.services import setup_store
 from app.services.meeting import publish
 from app.services.notes import note_prompt, note_thread
@@ -65,19 +61,26 @@ from app.services.requirements import (
 
 log = logging.getLogger(__name__)
 TARGET_NAMES = {
-    "concept": "概念",
-    "lore": "世界观、人物与信息差",
-    "spine": "关键节点",
-    "threads": "线索",
-    "outline": "全书总纲",
+    "concept": "定调",
+    "protagonist": "主角卡",
+    "world": "世界与人",
+    "segment": "第一段的走向",
+    "volumes": "第一段的分卷与线索",
     "first_volume": "第一卷卷纲",
 }
 SYNC_INSTRUCTIONS = {
-    "spine": "根据修改后的概念同步检查关键节点，铁钉保持原样；不受影响的部分保持原样。",
-    "lore": "根据修改后的概念和关键节点同步调整世界观、人物锚点与信息差；不受影响的部分保持原样。",
-    "threads": "根据修改后的上游内容同步检查线索，确保人物、节拍与之一致；不受影响的部分保持原样。",
-    "outline": "根据修改后的关键节点、人物锚点与信息差同步检查分卷、长线伏笔和期待；不受影响的部分保持原样。",
-    "first_volume": "根据修改后的上游内容同步检查第一卷卷纲，确保剧情单元、线索与伏笔与之一致；不受影响的部分保持原样。",
+    "protagonist": "根据修改后的定调同步检查主角卡；作者定下的和不受影响的部分保持原样。",
+    "world": "根据修改后的定调和主角卡同步检查世界、第一张地图和这里的人；主角卡里的姓名和在乎的人要对得上；不受影响的部分保持原样。",
+    "segment": "根据修改后的上游内容同步检查第一段的走向：开篇、目标、读者等什么、揭开什么、终点和全书方向，铁钉保持原样；不受影响的部分保持原样。",
+    "volumes": "根据修改后的第一段走向同步检查分卷、线索和人物出场；不受影响的部分保持原样。",
+    "first_volume": "根据修改后的上游内容同步检查第一卷卷纲：这一卷想做成什么、卷首处境、剧情单元和开篇落地；不受影响的部分保持原样。",
+}
+
+
+REVIEW_FOCUS = {
+    "protagonist": "【这次审什么】只审「主角卡」，其他部分只作参考，不要对它们提问题。\n重点查：驱动力（开局动机、长线追求、情感根源）够不够具体，长线追求是不是只写了「变强」；驱动力、金手指、核心循环是不是一套；金手指一句话说不说得清，限制能不能逼主角冒险或做选择；起点有没有提前写死境界名称；性格、底线、说话方式能不能让人物立起来。\n题目键（填进 question）：start 起点、drive 驱动力、person 性格底线与说话方式、finger 金手指、flaw_arc 软肋与成长终点、cared 在乎的人、interlock 咬合检查。",
+    "segment": "【这次审什么】只审「第一段的走向」和「第一段的分卷、线索与人物出场」，其他部分只作参考，不要对它们提问题。\n重点查：开篇是不是从冲突或异常切入，前 3 章有没有小爽点和钩子；这一段的目标具不具体、有没有期限或对手；终点是不是这一段的最高潮，能不能把主角推向下一张地图或下一个追求；第一段有没有兑现定调里的核心卖点，核心循环有没有完整转一圈；读者等的那件事明不明确；分卷和人物出场合不合理。远处只要有方向，不要因为远处没写细就提问题。\n题目键（填进 question）：opening 开篇、goal 这一段的目标、wait 读者等什么、reveal 揭开什么、end 这一段的终点、cast 人物出场、volumes 分卷、direction 全书方向。",
+    "first_volume": "【这次审什么】审整套开书方案，重点看第一卷卷纲，以及各部分之间对不对得上。\n重点查：第一卷想做成什么是不是第一段目标的一步；卷首处境和卷末高潮；每个剧情单元的核心循环有没有转起来；第一个单元有没有把开篇落地；作者的要求是否全部落实；主角卡、世界与人、第一段之间有没有矛盾。\n题目键（第一卷的问题填进 question）：want 这一卷想做成什么、pressure 卷首处境、climax 卷末高潮与结果、rival 这一卷的对手、units 剧情单元、growth 主角的成长、newcomers 新登场的人、landing 开篇落地。其他部分的问题，question 留空。",
 }
 
 
@@ -118,8 +121,11 @@ class SetupState(TypedDict, total=False):
     resync: list[str]
     piece_reviewed: dict[str, bool]
     piece_revised: dict[str, bool]
-    dropped: dict[str, int]
-    outline_warnings: list[str]
+    flow: int
+    check_notes: list[dict]
+    check_notes_by_step: dict[str, list[dict]]
+    review_notes: list[dict]
+    flags: dict[str, list[str]]
     op: dict
     requirements_ledger_ready: bool
     idea: str
@@ -133,10 +139,10 @@ class SetupState(TypedDict, total=False):
     # 已经读过的最后一条插话（会议消息 ID）
     notes_seen: int
     concept: dict
-    lore: dict
-    spine: dict
-    threads: dict
-    outline: dict
+    protagonist: dict
+    world: dict
+    segment: dict
+    volumes: dict
     first_volume: dict
     # 待执行的步骤（ORDER 中的部分），依次弹出
     queue: list[str]
@@ -157,6 +163,7 @@ class SetupState(TypedDict, total=False):
 
 def initial_state(idea: str, style_reference: str = "", ask: bool = False, mode: str = "oneshot") -> SetupState:
     return {
+        "flow": 2,
         "requirements_ledger_ready": True,
         "idea": idea,
         "style_reference": style_reference,
@@ -170,6 +177,10 @@ def initial_state(idea: str, style_reference: str = "", ask: bool = False, mode:
         "pieces": dict.fromkeys(PIECE_ORDER, "todo"),
         "decisions": {},
         "warnings": [],
+        "check_notes": [],
+        "check_notes_by_step": {},
+        "review_notes": [],
+        "flags": {},
         "suggestions": [],
         "unlock_requests": [],
         "candidates": None,
@@ -213,8 +224,10 @@ def merge_plan(
 
 def has_part(state: SetupState, target: str) -> bool:
     value = state.get(target) or {}
-    if target == "threads":
-        return bool(value.get("threads"))
+    if target == "segment":
+        return bool(value.get("nodes"))
+    if target == "volumes":
+        return bool(value.get("volumes"))
     if target == "first_volume":
         return bool(value.get("units"))
     return bool(value)
@@ -258,8 +271,6 @@ async def live_state(state: SetupState, d: GraphDeps) -> SetupState:
     previous = state.get("previous_directions") or {}
     if previous.get("feedback") in deleted:
         current["previous_directions"] = {**previous, "feedback": ""}
-    if state.get("spine"):
-        current["spine"] = setup_store.spine_from_legacy(state["spine"])
     current["feedback_sources"] = [text for text in state.get("feedback_sources") or [] if text not in deleted]
     # Author-derived directives are transient, but still must respect explicit deletion.
     # Source tracking lets us invalidate paraphrased instructions without erasing reviewer-only revisions.
@@ -273,10 +284,10 @@ async def live_state(state: SetupState, d: GraphDeps) -> SetupState:
         and not sources
         and any(text in "\n".join(state.get("notes") or []) for text in deleted)
     )
-    revoked_spine = False
+    revoked_segment = False
     for target in list(instructions):
         if legacy_author or any(text in deleted for text in sources.get(target, [])):
-            revoked_spine |= target == "spine"
+            revoked_segment |= target == "segment"
             fallback = (state.get("instruction_fallbacks") or {}).get(target)
             if fallback:
                 instructions[target] = fallback
@@ -289,7 +300,11 @@ async def live_state(state: SetupState, d: GraphDeps) -> SetupState:
         for node_id in state.get("pinned_overrides") or []
         if not any(text in deleted for text in override_sources.get(node_id, []))
     ]
-    if revoked_spine or not instructions.get("spine") or instructions.get("spine") == SYNC_INSTRUCTIONS["spine"]:
+    if (
+        revoked_segment
+        or not instructions.get("segment")
+        or instructions.get("segment") == SYNC_INSTRUCTIONS["segment"]
+    ):
         allowed = []
     current.update(
         pinned_overrides=allowed,
@@ -324,13 +339,36 @@ def _piece_of(target: str) -> str:
 
 
 async def mark_progress(d: GraphDeps, state: SetupState) -> None:
-    progress = {"mode": state.get("mode", "oneshot"), "current": state.get("piece"), "pieces": _pieces(state)}
+    progress = {
+        "flow": 2,
+        "mode": state.get("mode", "oneshot"),
+        "current": state.get("piece"),
+        "pieces": _pieces(state),
+    }
     async with d.sessionmaker() as session:
         book = await session.get(Book, d.book_id)
         if book is not None:
             book.setup_progress = progress
             await session.commit()
     await publish(d.redis, d.book_id, "book", {"id": str(d.book_id), "setup_progress": progress})
+
+
+def normalization_update(state: SetupState, target: str, notes: list[dict]) -> dict:
+    """本块用于 flags 的说明和一口气模式按步保留的说明，共用原文。"""
+    by_step = {**(state.get("check_notes_by_step") or {}), target: notes}
+    current = [item for step in PIECES[_piece_of(target)] for item in by_step.get(step, [])]
+    return {"check_notes": current, "check_notes_by_step": by_step}
+
+
+def all_program_warnings(state: SetupState) -> list[str]:
+    by_step = state.get("check_notes_by_step") or {}
+    setup = setup_of(state)
+    warnings = []
+    for piece in PIECE_ORDER:
+        notes = [item for target in PIECES[piece] for item in by_step.get(target, [])]
+        for item in [*notes, *piece_checks(piece, setup)]:
+            warnings.append(f"【{PIECE_NAMES[piece]}】{item['text']}")
+    return list(dict.fromkeys(warnings))
 
 
 async def _finished(d: GraphDeps, state: SetupState, target: str, value: dict, result=None) -> dict:
@@ -433,6 +471,7 @@ async def directions_gate_node(
     decision = interrupt(
         {
             "kind": "setup_directions",
+            "flow": 2,
             "reference": state.get("reference", ""),
             "directions": state.get("directions") or [],
             "recommended": state.get("recommended", 0),
@@ -482,7 +521,7 @@ async def directions_gate_node(
 
 def route_start(state: SetupState) -> str:
     if state.get("mode") == "puzzle":
-        return "directions"
+        return "intake" if state.get("direction") or state.get("concept") else "directions"
     return "interview" if state.get("ask") else "intake"
 
 
@@ -515,7 +554,7 @@ def _finish(state: SetupState, target: str, value: dict) -> dict:
         "instructions": rest,
         "instruction_sources": origins,
         "instruction_fallbacks": fallbacks,
-        **(_override_update([], []) if target == "spine" else {}),
+        **(_override_update([], []) if target == "segment" else {}),
     }
 
 
@@ -544,7 +583,7 @@ async def interview_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict
 
 async def interview_gate_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     # interrupt 之前不要放有副作用的代码：恢复执行时本节点会从头重跑
-    answer = interrupt({"kind": "setup_questions", "questions": state.get("questions") or []})
+    answer = interrupt({"kind": "setup_questions", "flow": 2, "questions": state.get("questions") or []})
     brief = [str(line).strip() for line in answer.get("brief") or [] if str(line).strip()]
     d = runtime.context
     await d.emit.status("chief", "收到，按你的意思开工。" if brief else "好，那就都交给编辑部来定。")
@@ -572,6 +611,8 @@ async def concept_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
         chosen_direction=format_direction_choice(state.get("direction") or {}) if state.get("mode") == "puzzle" else "",
     )
     concept = result.model_dump(exclude={"remark", "decisions"})
+    if (state.get("concept") or {}).get("protagonist_hook") and "protagonist_hook" not in concept:
+        concept["protagonist_hook"] = state["concept"]["protagonist_hook"]
     title = (state.get("direction") or {}).get("title")
     if title and concept["title"] != title:
         concept["alt_titles"] = list(
@@ -585,40 +626,124 @@ async def concept_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     return await _finished(d, state, "concept", concept, result)
 
 
-async def lore_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
+async def protagonist_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     d = runtime.context
     state = await live_state(state, d)
     await d.check_cancel()
-    current, instruction = _revising(state, "lore")
-    await d.emit.status("lorekeeper", "设定师正在修改世界观与人物…" if instruction else "设定师正在搭建世界观与人物…")
-    result = await editorial.draft_lore(
-        d.llm, state["concept"], state.get("spine") or {}, requirements(state), current, instruction
+    current, instruction = _revising(state, "protagonist")
+    await d.emit.status("chief", "主编正在修改主角卡…" if instruction else "主编正在写主角卡…")
+    result = await editorial.draft_protagonist(
+        d.llm,
+        state["idea"],
+        state["concept"],
+        requirements(state),
+        current,
+        instruction,
+        chosen_direction=format_direction_choice(state.get("direction") or {}) if state.get("mode") == "puzzle" else "",
     )
-    nodes = (state.get("spine") or {}).get("nodes") or []
-    lore, dropped = normalize_lore(
-        result.model_dump(exclude={"remark", "decisions"}), nodes, (state.get("lore") or {}).get("secrets") or []
+    protagonist = result.model_dump(exclude={"remark", "decisions"})
+    for key in ("escalation", "finger_later"):
+        protagonist[key] = (state.get("protagonist") or {}).get(key, "")
+    await d.emit.say("chief", result.remark)
+    await d.emit.artifact("chief", f"主角卡：{protagonist['name']}", {"type": "protagonist", "data": protagonist})
+    return await _finished(d, state, "protagonist", protagonist, result)
+
+
+async def world_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
+    d = runtime.context
+    state = await live_state(state, d)
+    await d.check_cancel()
+    current, instruction = _revising(state, "world")
+    await d.emit.status(
+        "lorekeeper", "设定师正在修改世界与人…" if instruction else "设定师正在搭建世界、第一张地图和这里的人…"
+    )
+    result = await editorial.draft_world(
+        d.llm, state["concept"], state.get("protagonist") or {}, requirements(state), current, instruction
+    )
+    world, notes = normalize_world(
+        {
+            **result.model_dump(exclude={"remark", "decisions"}),
+            "mystery_answer": (state.get("world") or {}).get("mystery_answer", ""),
+        },
+        state.get("protagonist") or {},
     )
     await d.emit.say("lorekeeper", result.remark)
+    maps = world.get("maps") or []
+    name = maps[0].get("name", "") if maps else ""
     await d.emit.artifact(
         "lorekeeper",
-        f"世界观 {len(lore['world_entries'])} 条，人物 {len(lore['characters'])} 位",
-        {"type": "lore", "data": lore},
+        f"世界与人：第一张地图「{name}」，人物 {len(world['characters'])} 位",
+        {"type": "world", "data": world},
+    )
+    return {**await _finished(d, state, "world", world, result), **normalization_update(state, "world", notes)}
+
+
+def volume_hint(concept: dict, segment: dict) -> str:
+    parts = []
+    if concept.get("target_length"):
+        parts.append(f"全书计划约 {concept['target_length']} 万字")
+    chapters = planned_chapters(concept)
+    if chapters:
+        parts.append(f"约 {chapters} 章（每章约 {concept.get('chapter_words') or 3000} 字）")
+    length = "、".join(parts)
+    if concept.get("target_volumes"):
+        length += ("，" if length else "") + f"粗估分 {concept['target_volumes']} 卷"
+    nodes = segment.get("nodes") or []
+    endpoint = nodes[1] if len(nodes) > 1 else {}
+    end_hint = f"这一段的终点约在第 {endpoint['volume']} 卷。" if endpoint.get("volume") else ""
+    return "卷号从第 1 卷开始。" + (length + "；" if length else "") + end_hint + "每卷通常 25-60 万字。"
+
+
+async def volumes_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
+    d = runtime.context
+    state = await live_state(state, d)
+    await d.check_cancel()
+    current, instruction = _revising(state, "volumes")
+    await d.emit.status(
+        "chief", "主编正在修改第一段的分卷与线索…" if instruction else "主编正在给第一段分卷、排线索和人物出场…"
+    )
+    result = await editorial.split_segment(
+        d.llm,
+        state["concept"],
+        state.get("protagonist") or {},
+        state.get("world") or {},
+        state.get("segment") or {},
+        requirements(state),
+        current,
+        instruction,
+        playbook=playbook_text(
+            state.get("concept"), "outline", selection=(state.get("settings") or {}).get("playbook", "auto")
+        ),
+        glossary=glossary_block(),
+        volume_hint=volume_hint(state["concept"], state.get("segment") or {}),
+        threads="（还没有线索，这是第一段）",
+    )
+    volumes, segment, notes = normalize_volumes(
+        result.model_dump(exclude={"remark", "decisions"}),
+        state.get("segment") or {},
+        (state.get("world") or {}).get("characters") or [],
+        start=1,
+    )
+    await d.emit.say("chief", result.remark)
+    total = sum(volume.get("chapter_count") or 0 for volume in volumes["volumes"])
+    await d.emit.artifact(
+        "chief", f"第一段分 {len(volumes['volumes'])} 卷，约 {total} 章", {"type": "segment_volumes", "data": volumes}
     )
     return {
-        **await _finished(d, state, "lore", lore, result),
-        "dropped": dropped,
-        "node_snapshot": [n.get("id") for n in nodes],
+        **await _finished(d, state, "volumes", volumes, result),
+        "segment": segment,
+        **normalization_update(state, "volumes", notes),
     }
 
 
-async def spine_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
+async def segment_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     d = runtime.context
     state = await live_state(state, d)
     await d.check_cancel()
-    current, instruction = _revising(state, "spine")
-    previous_nodes = deepcopy((state.get("spine") or {}).get("nodes") or [])
+    current, instruction = _revising(state, "segment")
+    previous_nodes = deepcopy((state.get("segment") or {}).get("nodes") or [])
     allowed = set(state.get("pinned_overrides") or [])
-    if state.get("phase") == "auto_revise" or instruction == SYNC_INSTRUCTIONS["spine"]:
+    if state.get("phase") == "auto_revise" or instruction == SYNC_INSTRUCTIONS["segment"]:
         allowed.clear()
     # 卡片按 ID 授权后也显式告诉模型；始终按本次节点提示词的序号，不沿用旧序号。
     if allowed and instruction:
@@ -627,10 +752,14 @@ async def spine_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
             for i, node in enumerate(previous_nodes, 1)
             if node.get("id") in allowed and node.get("status") == "pinned"
         )
-    await d.emit.status("chief", "主编正在修改主线骨架…" if instruction else "主编正在定主线：开篇、结局和关键转折…")
-    result = await editorial.draft_spine(
+    await d.emit.status(
+        "chief", "主编正在修改第一段的走向…" if instruction else "主编正在规划第一段：开篇、目标、终点和全书方向…"
+    )
+    result = await editorial.draft_segment(
         d.llm,
         state["concept"],
+        state.get("protagonist") or {},
+        state.get("world") or {},
         requirements(state),
         current,
         instruction,
@@ -638,15 +767,21 @@ async def spine_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
             state.get("concept"), "nodes", selection=(state.get("settings") or {}).get("playbook", "auto")
         ),
         glossary=glossary_block(),
-        legacy_lore=state.get("lore") or {},
     )
-    spine = result.model_dump(exclude={"remark", "decisions"})
-    # 模型只引用本次提示词中的序号，状态和铁钉内容始终由程序决定。
-    spine["nodes"] = merge_nodes(spine.get("nodes") or [], previous_nodes, pinned_overrides=allowed)
-    remapped = setup_store.remap_node_refs(setup_of(state), previous_nodes, spine["nodes"])
+    segment, notes = normalize_segment(
+        result.model_dump(exclude={"remark", "decisions"}),
+        previous_nodes,
+        (state.get("world") or {}).get("characters") or [],
+        state.get("segment") or {},
+        world=state.get("world") or {},
+        pinned_overrides=allowed,
+        existing_ledger=setup_store.ledger_of(setup_of(state)),
+    )
+    remapped = setup_store.remap_node_refs(setup_of(state), previous_nodes, segment["nodes"])
+    segment["foreshadowings"] = remapped["segment"].get("foreshadowings") or []
     await d.emit.say("chief", result.remark)
     previous_by_id = {node.get("id"): node for node in previous_nodes if node.get("id")}
-    for i, node in enumerate(spine["nodes"], 1):
+    for i, node in enumerate(segment["nodes"], 1):
         previous = previous_by_id.get(node.get("id"), {})
         if (
             node.get("id") in allowed
@@ -654,128 +789,49 @@ async def spine_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
             and any(node.get(key) != previous.get(key) for key in NODE_CONTENT)
         ):
             await d.emit.say("chief", f"按你的意思改了铁钉节点 {i}「{node.get('title', '')}」，它还是铁钉。")
-    milestones = sum(node["kind"] == "milestone" for node in spine["nodes"])
-    await d.emit.artifact("chief", f"主线骨架：{milestones} 个关键转折", {"type": "spine", "data": spine})
+    endpoint = segment["nodes"][1] if len(segment["nodes"]) > 1 else {}
+    await d.emit.artifact(
+        "chief", f"第一段：走到节点 2「{endpoint.get('title', '')}」", {"type": "segment", "data": segment}
+    )
     return {
-        **{key: remapped[key] for key in ("lore", "outline", "first_volume") if key in state},
-        **await _finished(d, state, "spine", spine, result),
+        **{key: remapped[key] for key in ("volumes", "first_volume") if key in state},
+        **await _finished(d, state, "segment", segment, result),
+        **normalization_update(state, "segment", notes),
         "node_snapshot": [node.get("id") for node in previous_nodes],
     }
 
 
-async def threads_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
-    d = runtime.context
-    state = await live_state(state, d)
-    await d.check_cancel()
-    current, instruction = _revising(state, "threads")
-    playbook = pick(state.get("concept"), (state.get("settings") or {}).get("playbook", "auto")).name
-    await d.emit.status(
-        "chief",
-        "主编正在修改线索…"
-        if instruction
-        else f"主编正在做线索规划（题材打法：{playbook}）：主线、感情线、反派线、谜团线…",
-    )
-    result = await editorial.draft_threads(
-        d.llm,
-        state["concept"],
-        state["lore"],
-        state.get("spine") or {},
-        state.get("outline") or {},
-        requirements(state),
-        current,
-        instruction,
-        selection=(state.get("settings") or {}).get("playbook", "auto"),
-    )
-    threads = result.model_dump(exclude={"remark"})
-    for t in threads["threads"]:
-        t["beats"] = sorted(t["beats"], key=lambda b: b["volume"])
-    outline = deepcopy(state.get("outline") or {})
-    for volume in outline.get("volumes") or []:
-        volume["thread_beats"] = [
-            {"thread": t["name"], "beat": b["beat"]}
-            for t in threads["threads"]
-            for b in t.get("beats") or []
-            if b.get("volume") == volume.get("index")
-        ]
-    await d.emit.say("chief", result.remark)
-    kinds = "、".join(dict.fromkeys(t["kind"] for t in threads["threads"]))
-    await d.emit.artifact("chief", f"线索 {len(threads['threads'])} 条：{kinds}", {"type": "threads", "data": threads})
-    return {**await _finished(d, state, "threads", threads), "outline": outline}
-
-
-async def outline_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
-    d = runtime.context
-    state = await live_state(state, d)
-    await d.check_cancel()
-    current, instruction = _revising(state, "outline")
-    await d.emit.status(
-        "chief", "主编正在修改全书总纲…" if instruction else "主编正在写全书总纲：每卷的舞台、对手与线索…"
-    )
-    result = await editorial.draft_outline(
-        d.llm,
-        state["concept"],
-        state["lore"],
-        state.get("spine") or {},
-        requirements(state),
-        current,
-        instruction,
-        selection=(state.get("settings") or {}).get("playbook", "auto"),
-        glossary=glossary_block(),
-        legacy_threads=state.get("threads") or {},
-    )
-    outline, nodes, warnings = normalize_outline(
-        result.model_dump(exclude={"remark", "decisions"}), (state.get("spine") or {}).get("nodes") or []
-    )
-    # 长线伏笔编号：与当前版本内容相同的沿用原编号，第一卷卷纲引用的编号才不会乱
-    previous = setup_store.ledger_of(setup_of(state))
-    ledger = setup_store.assign_seqs(
-        [{**f, "kind": "伏笔", "span": "长"} for f in outline["foreshadowings"]]
-        + [{**f, "kind": "期待"} for f in outline.get("expectations") or []],
-        previous,
-    )
-    outline["foreshadowings"] = [f for f in ledger if f["kind"] == "伏笔"]
-    outline["expectations"] = [f for f in ledger if f["kind"] == "期待"]
-    await d.emit.say("chief", result.remark)
-    total = sum(v.get("chapter_count") or 0 for v in outline["volumes"]) or planned_chapters(state["concept"])
-    await d.emit.artifact(
-        "chief",
-        f"全书 {len(outline['volumes'])} 卷"
-        + (f"约 {total} 章" if total else "")
-        + f"，长线伏笔 {len(outline['foreshadowings'])} 条",
-        {"type": "outline", "data": outline},
-    )
-    return {
-        **await _finished(d, state, "outline", outline, result),
-        "spine": {**(state.get("spine") or {}), "nodes": nodes},
-        "outline_warnings": warnings,
-        "node_snapshot": [n.get("id") for n in nodes],
-    }
-
-
 def first_volume_blocks(state: SetupState) -> dict[str, str]:
-    """开书时拆第一卷：上下文都来自方案本身。"""
-    volumes = (state.get("outline") or {}).get("volumes") or []
+    """开书第一卷只从已规划的第一段取材料。"""
+    volumes_part = state.get("volumes") or {}
+    volumes = volumes_part.get("volumes") or []
     card = next((v for v in volumes if v.get("index") == 1), volumes[0] if volumes else {})
     following = next((v for v in volumes if v.get("index") == 2), None)
     chapter_count = int(card.get("chapter_count") or 0)
-    lore = state.get("lore") or {}
-    spine = setup_store.spine_from_legacy(state.get("spine") or {})
-    opening = next((n.get("event", "") for n in spine.get("nodes", []) if n.get("kind") == "opening"), "（暂无）")
-    ledger = setup_store.ledger_of({"outline": state.get("outline") or {}})
+    world = state.get("world") or {}
+    segment = state.get("segment") or {}
+    nodes = segment.get("nodes") or []
+    info = (nodes[1].get("segment") or {}) if len(nodes) > 1 else {}
+    opening_event = next((n.get("event", "") for n in nodes if n.get("kind") == "opening"), "（暂无）")
+    hero = next((person for person in world.get("characters") or [] if person.get("role_type") == "主角"), None)
     return {
         "volume_index": "1",
         "concept": format_concept(state.get("concept") or {}),
-        "spine": format_spine(spine),
-        "target_node": format_target_node(card, spine.get("nodes") or []),
-        "secrets": format_secrets(lore.get("secrets") or []),
+        "spine": format_spine(segment, world),
+        "target_node": format_target_node(card, nodes),
+        "segment": format_segment_info(info, world) if info else "（暂无）",
+        "protagonist": format_protagonist(state.get("protagonist") or {}, hero),
+        "opening": format_opening(info.get("opening")),
+        "secrets": format_secrets(segment.get("secrets") or []),
         "glossary": glossary_block(),
-        "threads": format_threads(state.get("threads") or {}, volume=1),
+        "threads": format_threads(volumes_part, volume=1),
         "volume": format_volume_card(card),
-        "neighbors": "上一卷：无（这是第一卷）\n下一卷：" + (format_volume_card(following) if following else "无"),
-        "story_so_far": f"还没开写，这是第一卷。开篇设计：{opening}",
+        "neighbors": "上一卷：无（这是第一卷）\n下一卷："
+        + (format_volume_card(following) if following else "无（这一段只有一卷）"),
+        "story_so_far": f"还没开写，这是第一卷。开篇设计：{opening_event}",
         "used_climaxes": "（暂无）",
-        "characters": "\n".join(format_character_state(c) for c in lore.get("characters", [])) or "（暂无）",
-        "ledger": format_ledger(relevant_ledger(ledger, 1)),
+        "characters": "\n".join(format_character_state(c) for c in world.get("characters", [])) or "（暂无）",
+        "ledger": format_ledger(relevant_ledger(setup_store.ledger_of(setup_of(state)), 1)),
         "trope_usage": "（还没用过任何套路，这是第一卷）",
         "playbook": playbook_text(
             state.get("concept"), "volume", selection=(state.get("settings") or {}).get("playbook", "auto")
@@ -806,10 +862,12 @@ async def first_volume_node(state: SetupState, runtime: Runtime[GraphDeps]) -> d
         setup_store.ledger_of(setup_of(state)),
     )
     units, fresh = attach_new_foreshadowings(units, fresh, 1)
-    units = clean_reveals(units, (state.get("lore") or {}).get("secrets") or [])
+    units = clean_reveals(units, (state.get("segment") or {}).get("secrets") or [])
     for unit in units:
         unit["techniques"] = clean_techniques(unit.get("techniques"))
     first_volume = {
+        "want": plan.get("want", ""),
+        "pressure": plan.get("pressure", ""),
         "units": units,
         "new_foreshadowings": [f for f in fresh if f["kind"] == "伏笔"],
         "new_expectations": [f for f in fresh if f["kind"] == "期待"],
@@ -830,13 +888,16 @@ async def critique_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     state = await live_state(state, d)
     await d.check_cancel()
     await d.emit.status("reviewer", "审稿正在审阅开书方案…")
+    warnings = all_program_warnings(state)
+    checks = requirements(state) + ("\n\n【程序提醒】\n" + "\n".join(warnings) if warnings else "")
     result = await editorial.critique_setup(
         d.llm,
         state["idea"],
-        requirements(state),
+        checks,
         setup_of(state),
         selection=(state.get("settings") or {}).get("playbook", "auto"),
         locked=format_locked(state),
+        focus=REVIEW_FOCUS["first_volume"],
     )
     await d.emit.say("reviewer", result.remark)
     await d.emit.artifact("reviewer", "审稿意见", {"type": "critique", "data": result.model_dump(exclude={"remark"})})
@@ -850,6 +911,7 @@ async def critique_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
         names = "、".join(TARGET_NAMES[t] for t in queue)
         await d.emit.status("chief", f"主编采纳审稿意见，先修改一轮：{names}")
         return {
+            "warnings": warnings,
             "queue": queue,
             "instructions": instructions,
             "instruction_sources": {},
@@ -858,7 +920,7 @@ async def critique_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
             "phase": "auto_revise",
             "auto_revised": True,
         }
-    return {"queue": [], "instructions": {}, "phase": "reviewed", **_override_update([], [])}
+    return {"warnings": warnings, "queue": [], "instructions": {}, "phase": "reviewed", **_override_update([], [])}
 
 
 async def _new_notes(d: GraphDeps, seen: int) -> list[tuple[int, str, dict | None]]:
@@ -905,7 +967,7 @@ async def intake_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     notes = [*(state.get("notes") or []), *fresh]
     update.update(notes=notes, notes_seen=rows[-1][0])
     # 已有节点即使排队等待修改，也要给这次插话同一份快照，才能补充点名授权。
-    done = {t: state[t] for t in ORDER if has_part(state, t) and (t not in queue or t == "spine")}
+    done = {t: state[t] for t in ORDER if has_part(state, t) and (t not in queue or t == "segment")}
     if not done:
         if any(not note_thread(payload) for _, _, payload in rows):
             await d.emit.say("chief", "收到，接下来就按你说的写。")
@@ -915,7 +977,7 @@ async def intake_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     await d.check_cancel()
     await d.emit.status("chief", "主编正在看你的插话…")
     todo = [t for t in ORDER if t not in done]
-    snapshot = deepcopy((done.get("spine") or {}).get("nodes") or [])
+    snapshot = deepcopy((done.get("segment") or {}).get("nodes") or [])
     result = await editorial.absorb_notes(d.llm, done, todo, requirements(state), fresh, locked=format_locked(state))
     if any(not note_thread(payload) for _, _, payload in rows):
         await d.emit.say("chief", result.remark)
@@ -943,10 +1005,12 @@ async def intake_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
             )
         update["instruction_sources"] = origins
         update["instruction_fallbacks"] = fallbacks
-        if "spine" in raw and "spine" in extra_queue:
+        if "segment" in raw and "segment" in extra_queue:
             sources = [content for _, content, payload in rows if not (payload or {}).get("settings_change")]
             allowed = (
-                _pinned_overrides(result, snapshot) if sources and raw["spine"] != SYNC_INSTRUCTIONS["spine"] else []
+                _pinned_overrides(result, snapshot)
+                if sources and raw["segment"] != SYNC_INSTRUCTIONS["segment"]
+                else []
             )
             # 后续插话可以补充本轮授权；不能清掉尚未执行的、先前作者已点名的节点。
             combined = list(dict.fromkeys([*(state.get("pinned_overrides") or []), *allowed]))
@@ -973,13 +1037,25 @@ async def persist_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
         saved = await setup_store.load_setup(session, d.book_id)
     await d.emit.status("system", "开书方案已整理好，请作者过目并拍板。")
     await mark_progress(d, state)
-    return {**saved, "queue": [], "instructions": {}, **_override_update([], [])}
+    return {
+        **saved,
+        "warnings": all_program_warnings({**state, **saved}),
+        "queue": [],
+        "instructions": {},
+        **_override_update([], []),
+    }
 
 
 async def author_gate_node(state: SetupState, runtime: Runtime[GraphDeps]) -> Command[Literal["finalize", "triage"]]:
     # interrupt 之前不要放有副作用的代码：恢复执行时本节点会从头重跑
     decision = interrupt(
-        {"kind": "setup_review", "round": state.get("round", 0), "title": (state.get("concept") or {}).get("title", "")}
+        {
+            "kind": "setup_review",
+            "flow": 2,
+            "warnings": state.get("warnings") or [],
+            "round": state.get("round", 0),
+            "title": (state.get("concept") or {}).get("title", ""),
+        }
     )
     d = runtime.context
     if decision.get("action") == "approve":
@@ -1031,7 +1107,7 @@ async def triage_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     state = await live_state(state, d)
     await d.check_cancel()
     await d.emit.status("chief", "主编正在研究作者的意见…")
-    snapshot = deepcopy((state.get("spine") or {}).get("nodes") or [])
+    snapshot = deepcopy((state.get("segment") or {}).get("nodes") or [])
     result = await editorial.triage_feedback(
         d.llm, setup_of(state), requirements(state), state.get("feedback", ""), locked=format_locked(state)
     )
@@ -1048,7 +1124,7 @@ async def triage_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
         "instruction_fallbacks": {},
         **_override_update(
             _pinned_overrides(result, snapshot)
-            if raw.get("spine") and raw["spine"] != SYNC_INSTRUCTIONS["spine"]
+            if raw.get("segment") and raw["segment"] != SYNC_INSTRUCTIONS["segment"]
             else [],
             origins,
         ),
@@ -1073,6 +1149,9 @@ async def finalize_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
         "piece": None,
         "pieces": dict.fromkeys(PIECE_ORDER, "confirmed"),
         "warnings": [],
+        "check_notes": [],
+        "review_notes": [],
+        "flags": {},
         "suggestions": [],
         "unlock_requests": [],
         "candidates": None,
@@ -1082,23 +1161,39 @@ async def finalize_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     return update
 
 
+def check_payload(piece: str, setup: dict, notes: list[dict], review: list[dict] | None = None) -> dict:
+    checks = [*notes, *piece_checks(piece, setup)]
+    warnings = list(dict.fromkeys(item["text"] for item in checks))
+    flags: dict[str, list[str]] = {}
+    keys = {key for key, _ in QUESTIONS[piece]}
+    for item in checks:
+        if item.get("question") in keys:
+            flags.setdefault(item["question"], []).append(item["text"])
+    for item in review or []:
+        if item.get("question") in keys:
+            flags.setdefault(item["question"], []).append(f"审稿：{item['problem']}——{item['suggestion']}")
+    return {"warnings": warnings, "flags": {key: list(dict.fromkeys(values)) for key, values in flags.items()}}
+
+
 async def piece_check_node(
     state: SetupState, runtime: Runtime[GraphDeps]
 ) -> Command[Literal["intake", "piece_persist"]]:
     d = runtime.context
     state = await live_state(state, d)
     piece = state["piece"]
-    warnings = piece_warnings(piece, setup_of(state), state.get("dropped"))
-    if piece == "fill":
-        warnings = list(dict.fromkeys([*warnings, *(state.get("outline_warnings") or [])]))
-    update = {"warnings": warnings, **_override_update([], [])}
-    review = piece == "first_volume" or (piece == "nodes" and (state.get("settings") or {}).get("volume_audit", True))
+    notes = state.get("check_notes") or []
+    update = {**check_payload(piece, setup_of(state), notes, state.get("review_notes")), **_override_update([], [])}
+    review = piece == "first_volume" or (
+        piece in {"protagonist", "segment"} and (state.get("settings") or {}).get("volume_audit", True)
+    )
     if review and not (state.get("piece_reviewed") or {}).get(piece):
         await d.check_cancel()
         await d.emit.status("reviewer", f"审稿正在检查「{PIECE_NAMES[piece]}」…")
         completed = {target for p in PIECE_ORDER[: PIECE_ORDER.index(piece) + 1] for target in PIECES[p]}
         setup = {target: state.get(target) or {} for target in ORDER if target in completed}
-        checks = requirements(state) + ("\n\n【程序提醒】\n" + "\n".join(warnings) if warnings else "")
+        checks = requirements(state) + (
+            "\n\n【程序提醒】\n" + "\n".join(update["warnings"]) if update["warnings"] else ""
+        )
         result = await editorial.critique_setup(
             d.llm,
             state["idea"],
@@ -1106,11 +1201,12 @@ async def piece_check_node(
             setup,
             selection=(state.get("settings") or {}).get("playbook", "auto"),
             locked=format_locked(state),
+            focus=REVIEW_FOCUS[piece],
         )
         await d.emit.say("reviewer", result.remark)
         await d.emit.artifact(
             "reviewer",
-            "单块审稿" if piece == "nodes" else "跨块审稿",
+            "跨块审稿" if piece == "first_volume" else "单块审稿",
             {"type": "critique", "data": result.model_dump(exclude={"remark"})},
         )
         update["piece_reviewed"] = {**(state.get("piece_reviewed") or {}), piece: True}
@@ -1118,11 +1214,21 @@ async def piece_check_node(
         for issue in result.issues:
             if issue.target in locked_steps(state):
                 suggestions.append({"target": issue.target, "problem": issue.problem, "suggestion": issue.suggestion})
-        update["suggestions"] = list({(s["target"], s["problem"], s["suggestion"]): s for s in suggestions}.values())
-        local = [i for i in result.issues if i.target in PIECES[piece] and i.severity in ("high", "medium")]
-        if local and not (state.get("piece_revised") or {}).get(piece):
+        update["suggestions"] = list(
+            {(item["target"], item["problem"], item["suggestion"]): item for item in suggestions}.values()
+        )
+        local = [issue for issue in result.issues if issue.target in PIECES[piece]]
+        serious = [issue for issue in local if issue.severity in ("high", "medium")]
+        revise = serious and not (state.get("piece_revised") or {}).get(piece)
+        review_notes = [
+            {"question": issue.question, "problem": issue.problem, "suggestion": issue.suggestion}
+            for issue in local
+            if not revise or issue.severity == "low"
+        ]
+        update.update(review_notes=review_notes, **check_payload(piece, setup_of(state), notes, review_notes))
+        if revise:
             raw = {}
-            for issue in local:
+            for issue in serious:
                 raw[issue.target] = (
                     raw.get(issue.target, "") + f"- 审稿意见：{issue.problem}\n  建议：{issue.suggestion}\n"
                 )
@@ -1142,28 +1248,15 @@ async def piece_check_node(
 async def piece_persist_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     d, piece = runtime.context, state["piece"]
     async with d.sessionmaker() as session:
-        # 填中间只同步已有非铁钉节点的卷号，不能借旧检查点增删节点或覆盖作者的其他字段。
-        if piece == "fill":
-            existing_nodes = {
-                str(node.id): node
-                for node in await session.scalars(select(StoryNode).where(StoryNode.book_id == d.book_id))
-            }
-            for item in (state.get("spine") or {}).get("nodes") or []:
-                node = existing_nodes.get(str(item.get("id")))
-                if node is not None and node.status != "pinned" and "volume" in item:
-                    node.volume = item["volume"]
         await setup_store.save_piece(session, d.book_id, piece, setup_of(state))
-        await setup_store.snapshot(
-            session, d.book_id, d.job_id, state.get("round", 0), "ai", f"piece:{piece}", setup_of(state)
-        )
+        saved = await setup_store.load_setup(session, d.book_id)
+        await setup_store.snapshot(session, d.book_id, d.job_id, state.get("round", 0), "ai", f"piece:{piece}", saved)
         await session.commit()
         saved = await setup_store.load_setup(session, d.book_id)
     update = {**{target: saved[target] for target in PIECES[piece]}, **_override_update([], [])}
-    if piece == "fill":
-        update["spine"] = saved["spine"]
     update["pieces"] = {**_pieces(state), piece: "waiting"}
     await mark_progress(d, {**state, **update})
-    hint = f"提醒：{state['warnings'][0]}。" if state.get("warnings") else ""
+    hint = f"提醒：{state['warnings'][0]}" if state.get("warnings") else ""
     await d.emit.say(
         "chief",
         f"第 {PIECE_ORDER.index(piece) + 1} 块「{PIECE_NAMES[piece]}」好了。{hint}请你看看，没问题就点「确认这一块」。",
@@ -1181,6 +1274,9 @@ async def _confirm_piece(state: SetupState, d: GraphDeps) -> Command:
         **setup,
         "pieces": pieces,
         "warnings": [],
+        "check_notes": [],
+        "review_notes": [],
+        "flags": {},
         "suggestions": [],
         "unlock_requests": [],
         "candidates": None,
@@ -1214,9 +1310,12 @@ async def piece_gate_node(
     decision = interrupt(
         {
             "kind": "setup_piece",
+            "flow": 2,
             "piece": state["piece"],
             "round": state.get("round", 0),
             "warnings": state.get("warnings") or [],
+            "flags": state.get("flags") or {},
+            "review": state.get("review_notes") or [],
             "decisions": [
                 choice for target in PIECES[state["piece"]] for choice in (state.get("decisions") or {}).get(target, [])
             ],
@@ -1231,7 +1330,7 @@ async def piece_gate_node(
     state = await live_state({**state, **setup}, d)
     action, piece = decision.get("action"), state["piece"]
     if action in {"confirm", "delegate"}:
-        if piece == "nodes" and any(n["status"] == "empty" for n in setup["spine"]["nodes"]):
+        if piece == "segment" and any(n["status"] == "empty" for n in setup["segment"]["nodes"]):
             return Command(goto="node_op", update={**setup, "op": {"kind": "fill_all", "then": "confirm"}})
         return await _confirm_piece(state, d)
     if action in {"candidates", "fill"}:
@@ -1283,6 +1382,9 @@ async def piece_gate_node(
             "instruction_fallbacks": {},
             "resync": resync,
             "warnings": [],
+            "check_notes": [],
+            "review_notes": [],
+            "flags": {},
             "suggestions": [],
             "unlock_requests": [],
             "candidates": None,
@@ -1292,16 +1394,16 @@ async def piece_gate_node(
             "phase": "author_revise",
             **_override_update([], []),
         }
-        if reopened == "nodes" and feedback:
+        if reopened == "segment" and feedback:
             # 解锁只是打开块，不自动授权铁钉；仍须分析作者本轮意见是否点名。
-            snapshot = deepcopy((setup.get("spine") or {}).get("nodes") or [])
+            snapshot = deepcopy((setup.get("segment") or {}).get("nodes") or [])
             result = await editorial.triage_feedback(
                 d.llm, setup, requirements(state), feedback, locked=format_locked({**state, **update})
             )
             await d.emit.say("chief", result.remark)
             raw = result.instructions()
-            if raw.get("spine") and raw["spine"] != SYNC_INSTRUCTIONS["spine"]:
-                update["instructions"]["spine"] = "\n".join([feedback, raw["spine"]])
+            if raw.get("segment") and raw["segment"] != SYNC_INSTRUCTIONS["segment"]:
+                update["instructions"]["segment"] = "\n".join([feedback, raw["segment"]])
                 update.update(_override_update(_pinned_overrides(result, snapshot), [feedback]))
         await mark_progress(d, {**state, **update})
         return Command(goto="intake" if feedback else "piece_gate", update=update)
@@ -1311,7 +1413,7 @@ async def piece_gate_node(
     allowed = []
     if decision.get("node_id"):
         match = next(
-            ((i, n) for i, n in enumerate(setup["spine"]["nodes"], 1) if n.get("id") == decision["node_id"]), None
+            ((i, n) for i, n in enumerate(setup["segment"]["nodes"], 1) if n.get("id") == decision["node_id"]), None
         )
         if match is None:
             raise ValueError("节点已不存在")
@@ -1322,18 +1424,18 @@ async def piece_gate_node(
     if not feedback and (prefix or flips):
         raw = {PIECES[piece][0]: combined}
     else:
-        snapshot = deepcopy((setup.get("spine") or {}).get("nodes") or [])
+        snapshot = deepcopy((setup.get("segment") or {}).get("nodes") or [])
         result = await editorial.triage_feedback(
             d.llm, setup, requirements(state), combined, locked=format_locked(state)
         )
         await d.emit.say("chief", result.remark)
         requests = _unlock_requests(state, result)
         raw = {target: instruction for target, instruction in result.instructions().items() if target in PIECES[piece]}
-        if raw.get("spine") and raw["spine"] != SYNC_INSTRUCTIONS["spine"]:
+        if raw.get("segment") and raw["segment"] != SYNC_INSTRUCTIONS["segment"]:
             allowed.extend(_pinned_overrides(result, snapshot))
-    if prefix and piece == "nodes":
+    if prefix and piece == "segment":
         # node_id 是作者的直接授权，不依赖分派模型是否再次复述这个节点。
-        raw["spine"] = "\n".join(filter(None, [combined, raw.get("spine")]))
+        raw["segment"] = "\n".join(filter(None, [combined, raw.get("segment")]))
     queue, instructions = cascade(raw, state)
     await _explain_unlocks(d, requests)
     update = {
@@ -1348,7 +1450,7 @@ async def piece_gate_node(
         "round": state.get("round", 0) + 1,
         "phase": "author_revise",
         "candidates": None,
-        **_override_update(allowed if "spine" in queue else [], [feedback]),
+        **_override_update(allowed if "segment" in queue else [], [feedback]),
     }
     return Command(goto="intake" if queue else "piece_gate", update=update)
 
@@ -1372,7 +1474,7 @@ async def node_op_node(
     op = state.get("op") or {}
     async with d.sessionmaker() as session:
         setup = await setup_store.load_setup(session, d.book_id)
-    nodes = setup["spine"]["nodes"]
+    nodes = setup["segment"]["nodes"]
     selected = (
         [n["id"] for n in nodes if n["status"] == "empty"] if op.get("kind") == "fill_all" else [op.get("node_id")]
     )
@@ -1391,7 +1493,7 @@ async def node_op_node(
         result = await editorial.draft_node_slot(
             d.llm,
             setup["concept"],
-            {**setup["spine"], "nodes": nodes},
+            {**setup["segment"], "nodes": nodes},
             _slot(nodes, index, op.get("kind", "fill"), feedback),
             requirements(state),
         )
@@ -1417,7 +1519,7 @@ async def node_op_node(
         )
     async with d.sessionmaker() as session:
         setup = await setup_store.load_setup(session, d.book_id)
-    update = {**setup, "candidates": candidates, "op": {}, "warnings": piece_warnings("nodes", setup)}
+    update = {**setup, "candidates": candidates, "op": {}, **check_payload("segment", setup, [])}
     if op.get("then") == "confirm":
         return await _confirm_piece({**state, **update}, d)
     return Command(goto="piece_gate", update=update)
@@ -1431,10 +1533,10 @@ def build_setup_graph() -> StateGraph:
     graph.add_node("interview_gate", interview_gate_node)
     graph.add_node("intake", intake_node)
     graph.add_node("concept", concept_node)
-    graph.add_node("lore", lore_node)
-    graph.add_node("spine", spine_node)
-    graph.add_node("threads", threads_node)
-    graph.add_node("outline", outline_node)
+    graph.add_node("protagonist", protagonist_node)
+    graph.add_node("world", world_node)
+    graph.add_node("segment", segment_node)
+    graph.add_node("volumes", volumes_node)
     graph.add_node("first_volume", first_volume_node)
     graph.add_node("critique", critique_node)
     graph.add_node("persist", persist_node)
@@ -1457,3 +1559,25 @@ def build_setup_graph() -> StateGraph:
     graph.add_edge("persist", "author_gate")
     graph.add_edge("finalize", END)
     return graph
+
+
+LEGACY_CONCEPT = "这是按旧流程确认过的定调。按新的定调题补上缺的「核心循环」（作者提过对标作品的，再补上「对标」），其余内容保持原样；原来的「主角钩子」不用再写，下一步「主角」会参考它。"
+
+
+def restart_state(params: dict, old_values: dict, concept: dict) -> SetupState:
+    """只带回作者已选择/确认的材料，不把旧图的步骤和检查点恢复到新图。"""
+    mode = params.get("mode", "oneshot")
+    state = initial_state(params.get("idea", ""), params.get("style_reference", ""), ask=False, mode=mode)
+    if not old_values:
+        return state
+    if old_values.get("direction"):
+        state["direction"] = deepcopy(old_values["direction"])
+    if params.get("keep_concept") and concept.get("title"):
+        state["concept"] = deepcopy(concept)
+        if concept.get("core_loop"):
+            state["pieces"]["concept"] = "confirmed"
+            state["piece"] = "protagonist"
+            state["queue"] = ["protagonist"] if mode == "puzzle" else list(ORDER[1:])
+        else:
+            state["instructions"] = {"concept": LEGACY_CONCEPT}
+    return state

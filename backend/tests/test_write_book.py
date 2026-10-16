@@ -1,6 +1,9 @@
 """写书主循环（演示模型）：章纲 → 写 → 审稿与设定检查并行 → 退稿重写 → 定稿入库 → 试读 → 卷纲拍板。"""
 
+import json
 import uuid
+from copy import deepcopy
+from pathlib import Path
 
 import pytest
 from sqlalchemy import func, select
@@ -9,6 +12,7 @@ from app.graphs.write_book import clean_text
 from app.llm import demo
 from app.models import Book, Chapter, Character, Foreshadowing, Job, LlmCall, MeetingMessage, PlotUnit, Volume
 from app.services.job_runner import execute_job
+from app.services.setup_store import save_setup
 
 
 @pytest.fixture(autouse=True)
@@ -17,18 +21,17 @@ def fast_demo(monkeypatch):
 
 
 async def approved_book(sessionmaker) -> uuid.UUID:
-    """跑完开书流程并批准，返回书的 ID。"""
+    """真实任务 1 基线已开书方案：保留八卷与原台账，验证旧书照常续写。"""
+    fixture = json.loads((Path(__file__).parent / "fixtures/legacy_approved_setup.json").read_text(encoding="utf-8"))
     async with sessionmaker() as session:
-        book = Book(idea="一个能看见别人寿命的少年")
+        book = Book(idea="一个能看见别人寿命的少年", status="ready")
         session.add(book)
         await session.flush()
-        job = Job(book_id=book.id, kind="book_setup", thread_id=f"setup-{uuid.uuid4()}", params={"idea": book.idea})
-        session.add(job)
+        await save_setup(session, book.id, deepcopy(fixture["setup"]))
+        first = await session.scalar(select(Volume).where(Volume.book_id == book.id, Volume.index == 1))
+        first.status = "approved"
         await session.commit()
-        book_id, job_id = book.id, job.id
-    await execute_job(job_id)
-    await execute_job(job_id, {"action": "approve"})
-    return book_id
+        return book.id
 
 
 async def write_job(sessionmaker, book_id, until="count", count=3) -> uuid.UUID:

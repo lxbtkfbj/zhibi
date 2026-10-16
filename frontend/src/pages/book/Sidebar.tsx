@@ -73,10 +73,11 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     </section>
     <nav aria-label="书稿目录" className="scroll-thin min-h-0 flex-1 overflow-y-auto px-3 pt-5 pb-6">
       <h2 className="mb-3 px-2.5 text-xs tracking-[0.25em] text-ink-2">书稿</h2>
-      {puzzle.show && <div className="mb-5"><h3 className="mb-2 px-2.5 text-xs tracking-[0.2em] text-ink-2">开书拼图</h3><ol className="space-y-0.5">{puzzle.pieces.map(piece => <li key={piece.key}><Item to={`${base}${piece.path}`} active={puzzleSidebarActive(piece.key, puzzle.current)} icon={<PieceStatusIcon status={piece.status} />} label={<span title={`${piece.name} · ${PIECE_STATUS_LABELS[piece.status]}`}>{piece.number} {piece.name}<span className="ml-1 text-xs text-ink-2">{piece.status === 'waiting' ? '待确认' : ''}</span></span>} onNavigate={onNavigate} /></li>)}</ol></div>}
+      {puzzle.show && <div className="mb-5"><h3 className="mb-2 px-2.5 text-xs tracking-[0.2em] text-ink-2">开书拼图</h3><ol className="space-y-0.5">{puzzle.pieces.map(piece => <li key={piece.key}><Item to={`${base}${piece.path}`} active={puzzleSidebarActive()} icon={<PieceStatusIcon status={piece.status} />} label={<span title={`${piece.name} · ${PIECE_STATUS_LABELS[piece.status]}`}>{piece.number} {piece.name}<span className="ml-1 text-xs text-ink-2">{piece.status === 'waiting' ? '待确认' : ''}</span></span>} onNavigate={onNavigate} /></li>)}</ol></div>}
       <div className="space-y-0.5">
         <Item to={base} end icon={<LayoutDashboard className={icon} />} label="概览" onNavigate={onNavigate} />
         <Item to={`${base}/concept`} icon={<Lightbulb className={icon} />} label="书的概念" onNavigate={onNavigate} />
+        <Item to={`${base}/protagonist`} icon={<Users className={icon} />} label="主角" onNavigate={onNavigate} />
         <Item to={`${base}/spine`} icon={<Route className={icon} />} label="全书地图" onNavigate={onNavigate} />
         <Item to={`${base}/threads`} icon={<GitBranch className={icon} />} label="线索" count={threads?.length || undefined} onNavigate={onNavigate} />
       </div>

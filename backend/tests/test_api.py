@@ -138,7 +138,7 @@ async def test_new_book_flow(client, queued):
     assert book["title"] == "青灯问道"
 
     outline = (await client.get(f"/api/books/{book_id}/outline")).json()
-    assert len(outline["volumes"]) == 8
+    assert len(outline["volumes"]) == 2
     unit = outline["volumes"][0]["units"][0]
     res = await client.patch(f"/api/units/{unit['id']}", json={"title": "作者改的标题"})
     assert res.json()["title"] == "作者改的标题"
@@ -279,16 +279,16 @@ async def test_questions_then_note_then_review(client, queued):
     assert any(node["kind"] == "milestone" for node in nodes)
     assert "milestones" not in book["spine"]
     outline = (await client.get(f"/api/books/{book_id}/outline")).json()
-    # 选择 200 万字后，演示总纲按新八卷合同分摊篇幅，不再固定沿用旧四卷的 90 章。
-    assert outline["volumes"][1]["chapter_count"] == 83
-    assert sum(v["chapter_count"] for v in outline["volumes"]) == 667
+    # 全书计划 200 万字，但开书只规划第一段的两卷，不提前分配后面的篇幅。
+    assert outline["volumes"][1]["chapter_count"] == 30
+    assert sum(v["chapter_count"] for v in outline["volumes"]) == 61
 
     messages = (await client.get(f"/api/books/{book_id}/meeting")).json()
     note = next(m for m in messages if m["kind"] == "note")
     # 插话被主编读到并回应
     assert any(m["speaker"] == "chief" and m["kind"] == "speech" and m["id"] > note["id"] for m in messages)
     assert any(m["kind"] == "artifact" and m["payload"]["type"] == "questions" for m in messages)
-    assert any(m["kind"] == "artifact" and m["payload"]["type"] == "spine" for m in messages)
+    assert any(m["kind"] == "artifact" and m["payload"]["type"] == "segment" for m in messages)
 
     # 方案出来以后，插话要走「提修改意见」
     assert (await client.post(f"/api/books/{book_id}/notes", json={"content": "再改改"})).status_code == 409

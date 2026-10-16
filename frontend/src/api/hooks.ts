@@ -158,7 +158,7 @@ export function useUpdateChapter(bookId: string) {
   })
 }
 
-type VolumeFields = 'title' | 'stage' | 'summary' | 'goal' | 'climax' | 'antagonist' | 'power_range' | 'chapter_count' | 'new_characters'
+type VolumeFields = 'want' | 'pressure' | 'title' | 'stage' | 'summary' | 'goal' | 'climax' | 'antagonist' | 'power_range' | 'chapter_count' | 'new_characters'
 
 export function useUpdateVolume(bookId: string) {
   const qc = useQueryClient()
@@ -306,6 +306,13 @@ export function useJobActions(bookId: string) {
       mutationFn: ({ index, feedback, confirm }: { index: number; feedback: string; confirm: boolean }) =>
         post<Job>(`/books/${bookId}/chapters/${index}/rewrite`, { feedback, confirm }),
       onSuccess: setJob,
+    }),
+    restartSetup: useMutation({
+      mutationFn: (jobId: string) => post<Job>(`/jobs/${jobId}/restart-setup`),
+      onSuccess: (job) => {
+        setJob(job)
+        for (const key of [keys.book(bookId), keys.outline(bookId), keys.bible(bookId), keys.nodes(bookId), keys.threads(bookId), keys.secrets(bookId), keys.books]) void qc.invalidateQueries({ queryKey: key })
+      },
     }),
     resume: useMutation({ mutationFn: (jobId: string) => post<Job>(`/jobs/${jobId}/resume`), onSuccess: setJob }),
     cancel: useMutation({ mutationFn: (jobId: string) => post<Job>(`/jobs/${jobId}/cancel`), onSuccess: setJob }),

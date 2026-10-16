@@ -51,7 +51,7 @@ export function DirectionSelection({ job, pending }: { job: Job; pending: Extrac
       </fieldset>}
       <p className="my-3 font-serif text-base leading-relaxed">{direction.logline}</p>
       <dl className="space-y-2 text-sm leading-relaxed">{([
-        ['主角', direction.protagonist], ['金手指', direction.golden_finger], ['开局', direction.opening], ['卖点', direction.selling_points?.join('；')], ['舞台阶梯', direction.stage_ladder], ['基调', direction.tone], ['目标读者', direction.reader], ['不同之处', direction.difference],
+        ['主角', direction.protagonist], ['驱动力', direction.drive], ['金手指', direction.golden_finger], ['核心循环', direction.core_loop], ['开局', direction.opening], ['卖点', direction.selling_points?.join('；')], ['舞台阶梯', direction.stage_ladder], ['基调', direction.tone], ['目标读者', direction.reader], ['不同之处', direction.difference],
       ] as const).map(([label, value]) => value && <div key={label} className="flex gap-3"><dt className="w-16 shrink-0 text-ink-2">{label}</dt><dd className="min-w-0 break-words">{value}</dd></div>)}</dl>
       {(direction.editor_note || direction.techniques?.length > 0) && <footer className="mt-4 space-y-2 border-t border-line pt-3"><p className="text-xs leading-relaxed text-ink-2"><span className="mr-2 text-chief">批注</span>{direction.editor_note}</p><div className="flex flex-wrap gap-2">{direction.techniques?.map(name => <TechniqueChip key={name} name={name} />)}</div></footer>}
       <Button variant="soft" className="mt-4" onClick={() => void choose(index)} disabled={busy} loading={actions.directions.isPending && actions.directions.variables?.choice === index}>选这个</Button>

@@ -29,7 +29,7 @@ export function PieceDecisions({ piece }: { piece: PieceKey }) {
   const { bookId, book, job, working } = useBookContext()
   const { pieceAction } = useJobActions(bookId)
   const [open, setOpen] = useState(false)
-  const pending = job?.status === 'waiting_author' && job.pending?.kind === 'setup_piece' ? job.pending : null
+  const pending = job?.setup_flow !== 1 && job?.status === 'waiting_author' && job.pending?.kind === 'setup_piece' ? job.pending : null
   const canReopen = !working && pending && book.setup_progress?.pieces?.[piece] === 'confirmed' && book.setup_progress?.mode === 'puzzle'
   const index = PIECES.findIndex(item => item.key === piece)
   const downstream = PIECES.slice(index + 1).filter(item => book.setup_progress?.pieces?.[item.key] === 'confirmed').map(item => item.name)

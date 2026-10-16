@@ -25,7 +25,7 @@ export function StoryMapStrip({ nodes, volumes, chapters, onNodeSelect }: StoryM
   }, [])
 
   const position = writingPosition(nodes, volumes, chapters)
-  const summary = writingPositionText(position, volumes, chapters)
+  const summary = writingPositionText(position, volumes, chapters, nodes)
   const sorted = [...nodes].sort((a, b) => a.index - b.index)
   const hasTargets = volumes.some(volume => nodes.some(node => node.id === volume.target_node_id))
   const done = chapters.filter(chapter => chapter.status === 'final').length

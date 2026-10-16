@@ -231,6 +231,17 @@ async def _next_step(session: AsyncSession, book: Book, state: WriteState) -> di
         if not volume.recap.strip():
             return {**out, "step": "recap_volume"}
         volume.status = "done"
+    segmented = await session.scalar(
+        select(StoryNode.id).where(StoryNode.book_id == book.id, StoryNode.segment.is_not(None)).limit(1)
+    )
+    target = (
+        await session.get(StoryNode, volumes[-1].target_node_id) if volumes and volumes[-1].target_node_id else None
+    )
+    if segmented and (target is None or target.kind != "ending"):
+        return {
+            "step": "done",
+            "reason": "这一段写完了。下一段怎么走，等「定下一段」功能接入后由主编来定，先停在这里。",
+        }
     book.status = "completed"
     return {"step": "done", "reason": "全书写完了！"}
 
@@ -658,6 +669,8 @@ async def save_volume_node(state: WriteState, runtime: Runtime[GraphDeps]) -> di
             fresh,
             replace_new=bool(feedback),
             replace_expectations="new_expectations" in plan,
+            want=plan.get("want", ""),
+            pressure=plan.get("pressure", ""),
         )
         # 改完还剩的问题（程序能查的那部分）交给作者拍板时一并看到
         prior = await prior_units(session, d.book_id, index)

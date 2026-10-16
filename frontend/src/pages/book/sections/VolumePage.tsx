@@ -183,6 +183,9 @@ function UnitCard({
           <Beat icon={<Flag className="size-3.5" />} label="结果与钩子">
             <EditableText value={unit.outcome} onSave={(outcome) => save({ outcome })} locked={locked} multiline />
           </Beat>
+          <Beat icon={<TrendingUp className="size-3.5" />} label="核心循环">
+            <EditableText value={unit.loop ?? ''} onSave={(loop) => save({ loop })} locked={locked} multiline />
+          </Beat>
         </div>
         <div className="mt-4 grid gap-4 @lg/manuscript:grid-cols-2">
           <FieldBlock label="关键事件">
@@ -305,6 +308,8 @@ export function VolumePage() {
           {volume.reaches_node && <span className="text-xs text-seal">本卷发生</span>}
         </section>}
         <section className="mb-8 grid gap-6 border-b border-line pb-8 @lg/manuscript:grid-cols-2">
+          <CardField icon={<Target className="size-4" />} label="这一卷想做成" value={volume.want ?? ''} onSave={(want) => save({ id: volume.id, want })} locked={working} />
+          <CardField icon={<Swords className="size-4" />} label="卷首处境" value={volume.pressure ?? ''} onSave={(pressure) => save({ id: volume.id, pressure })} locked={working} />
           <CardField icon={<MapPin className="size-4" />} label="舞台" value={volume.stage} onSave={(stage) => save({ id: volume.id, stage })} locked={working} />
           <CardField icon={<Skull className="size-4" />} label="主要对手" value={volume.antagonist} onSave={(antagonist) => save({ id: volume.id, antagonist })} locked={working} />
           <CardField icon={<TrendingUp className="size-4" />} label="主角实力" value={volume.power_range} onSave={(power_range) => save({ id: volume.id, power_range })} locked={working} />

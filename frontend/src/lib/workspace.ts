@@ -1,4 +1,4 @@
-import type { BookDetail, ChapterBrief, Conversation, Job, LiveDraft, MeetingMessage, Outline, Pending, PieceKey, StoryNode, Volume } from '../api/types'
+import type { BookDetail, ChapterBrief, Conversation, Job, LiveDraft, MeetingMessage, Outline, Pending, StoryNode, Volume } from '../api/types'
 import { isWritingComplete, PIECES, plannedVolumeChapters, writingPosition } from './storyMap.ts'
 
 export interface WorkspaceTarget { path: string; label: string }
@@ -20,6 +20,10 @@ export function artifactTarget(message: MeetingMessage, bookId: string, outline?
   switch (type) {
     case 'concept': return page('/concept', '书的概念')
     case 'directions': return page('', '开书方向')
+    case 'protagonist': return page('/protagonist', '主角卡')
+    case 'world': return page('/world', '世界与人')
+    case 'segment': return page('/spine', '第一段')
+    case 'segment_volumes': return page('/spine', '第一段的分卷')
     case 'lore': return page('/characters', '人物设定')
     case 'spine': return page('/spine', '关键节点')
     case 'threads': return page('/threads', '线索')
@@ -63,7 +67,7 @@ export function pendingTarget(pending: Pending | null | undefined, bookId: strin
   }
 }
 
-const SETUP_OUTPUTS = new Set(['directions', 'concept', 'lore', 'spine', 'threads', 'outline', 'volume_plan'])
+const SETUP_OUTPUTS = new Set(['directions', 'concept', 'protagonist', 'world', 'segment', 'segment_volumes', 'lore', 'spine', 'threads', 'outline', 'volume_plan'])
 const WRITE_OUTPUTS = new Set(['volume_plan', 'volume_directions', 'volume_pitch', 'pitch_scores', 'volume_audit', 'chapter_plan', 'chapter_final'])
 
 export function currentTarget(bookId: string, job: Job | null, messages: MeetingMessage[], draft: LiveDraft | null, outline?: Outline): WorkspaceTarget | null {
@@ -103,7 +107,8 @@ export function progressText(book: BookDetail, messages: MeetingMessage[], draft
   if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_directions') return '等你选择：开书方向'
   if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_piece') return `等你确认：${PIECES.find(piece => piece.key === (job.pending as Extract<Pending, { kind: 'setup_piece' }>).piece)?.name ?? '当前拼图'}`
   const position = writing && writingPosition(writing.nodes, writing.volumes, writing.chapters)
-  const complete = !!writing && isWritingComplete(writing.volumes, writing.chapters)
+  const complete = !!writing && isWritingComplete(writing.volumes, writing.chapters, writing.nodes)
+  const segmentFinished = !!writing && !complete && isWritingComplete(writing.volumes, writing.chapters)
   const waiting = `${job?.pending?.kind === 'setup_questions' ? '等你回答' : '等你拍板'}：${target?.label ?? '编辑部的提问'}`
   if (job?.status === 'waiting_author' && position?.volume == null) return waiting
   const working = job?.status === 'queued' || job?.status === 'running'
@@ -115,7 +120,7 @@ export function progressText(book: BookDetail, messages: MeetingMessage[], draft
   }
   const volume = position?.volume ?? target?.path.match(/\/volume\/(\d+)$/)?.[1]
   let progress = `${volume ? `第 ${volume} 卷 · ` : ''}已定稿 ${book.chapters_final} 章`
-  if (position?.volume != null && writing && !complete) {
+  if (position?.volume != null && writing && !complete && !segmentFinished) {
     if (position.nextNode) progress += ` · 离「${position.nextNode.title}」还有 ${position.chaptersToNode} 章`
     else if (writing.volumes.some(item => item.target_node_id)) {
       const remaining = Math.max(0, writing.volumes.reduce((sum, item) => sum + plannedVolumeChapters(item), 0) - writing.chapters.filter(item => item.status === 'final').length)
@@ -125,12 +130,12 @@ export function progressText(book: BookDetail, messages: MeetingMessage[], draft
   if (job?.status === 'waiting_author') return `${progress} · ${waiting}`
   if (working) return `${progress} · ${draft && !draft.done && draft.job_id === job.id ? `写手在写第 ${draft.chapter} 章` : lastStatus?.content.replace(/[.…]+$/, '') ?? '编辑部工作中'}`
   if (job?.status === 'failed') return `${progress} · 任务出错，可继续`
-  return `${progress} · ${book.status === 'completed' || complete ? '全书完结' : '编辑部空闲'}`
+  return `${progress} · ${book.status === 'completed' || complete ? '全书完结' : segmentFinished ? '这一段已写完，下一段待规划' : '编辑部空闲'}`
 }
 
-/** 共用 /spine 的两块以当前拼图判定，其他入口仍交给路由匹配。 */
-export function puzzleSidebarActive(piece: PieceKey, current: PieceKey | null): boolean | undefined {
-  return piece === 'nodes' || piece === 'fill' ? piece === current : undefined
+/** 新五块各有独立路径，一律由 NavLink 按实际路由匹配。 */
+export function puzzleSidebarActive(): undefined {
+  return undefined
 }
 
 export interface NodeFeedback { nodeId: string; prefix: string }
@@ -146,7 +151,7 @@ export function retainedNodeFeedback(text: string, selected: NodeFeedback | null
 
 export function composerRoute(job: Job | null, text: string, selected: NodeFeedback | null) {
   // 其他块等待时，节点仍受块锁定保护；让主编根据原文提出解锁请求，不越过 API 的节点操作门禁。
-  if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_piece') return { kind: 'piece' as const, action: 'revise' as const, piece: job.pending.piece, ...(job.pending.piece === 'nodes' && retainedNodeFeedback(text, selected) ? { node_id: selected!.nodeId } : {}) }
+  if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_piece') return { kind: 'piece' as const, action: 'revise' as const, piece: job.pending.piece, ...(job.pending.piece === 'segment' && retainedNodeFeedback(text, selected) ? { node_id: selected!.nodeId } : {}) }
   if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_directions') return { kind: 'directions' as const, action: 'redo' as const }
   if (job?.status === 'waiting_author' && job.pending?.kind !== 'setup_questions') return { kind: 'decision' as const, action: 'revise' as const }
   return { kind: 'note' as const }

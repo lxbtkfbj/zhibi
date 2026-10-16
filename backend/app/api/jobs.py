@@ -3,6 +3,7 @@
 import json
 import uuid
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from redis.asyncio import Redis
@@ -15,7 +16,7 @@ from app.db import get_sessionmaker
 from app.graphs.deps import cancel_key
 from app.models import Book, Job, LlmCall, MeetingMessage, StoryNode
 from app.schemas import Answers, Decision, DirectionDecision, JobOut, MeetingMessageOut, NoteIn, PieceDecision, UsageOut
-from app.services import jobs
+from app.services import jobs, setup_store
 from app.services.meeting import job_dict, message_dict, post_message, publish, stream_key
 from app.services.requirements import add_requirement, note_source
 from app.services.usage import sum_known, token_sum
@@ -28,8 +29,14 @@ APPROVE_TEXT = {
     "trial_read": "前几章看过了，继续写。",
     "chapter_stuck": "这一章就按现在的版本定稿。",
 }
-PIECE_ORDER = ("concept", "nodes", "cast", "fill", "first_volume")
-PIECE_NAMES = {"concept": "定调", "nodes": "关键节点", "cast": "人物上轴", "fill": "填中间", "first_volume": "第一卷"}
+PIECE_ORDER = ("concept", "protagonist", "world", "segment", "first_volume")
+PIECE_NAMES = {
+    "concept": "定调",
+    "protagonist": "主角",
+    "world": "世界与人",
+    "segment": "第一段",
+    "first_volume": "第一卷",
+}
 
 
 async def _job(session: AsyncSession, job_id: uuid.UUID) -> Job:
@@ -37,6 +44,12 @@ async def _job(session: AsyncSession, job_id: uuid.UUID) -> Job:
     if job is None:
         raise HTTPException(404, "任务不存在")
     return job
+
+
+async def _reject_legacy_setup(job_id: uuid.UUID, session: AsyncSession = SessionDep) -> None:
+    # 在请求体校验之前拦住旧客户端的 nodes/cast/fill 等块名，统一给出可操作的重开提示。
+    if jobs.is_legacy_setup(await _job(session, job_id)):
+        raise HTTPException(409, jobs.LEGACY_SETUP_MESSAGE)
 
 
 async def _set_status(session: AsyncSession, redis: Redis, job: Job, status: str) -> JobOut:
@@ -58,6 +71,8 @@ async def decide(
 ) -> JobOut:
     job = await _job(session, job_id)
     kind = jobs.pending_kind(job)
+    if jobs.is_legacy_setup(job):
+        raise HTTPException(409, jobs.LEGACY_SETUP_MESSAGE)
     if kind not in APPROVE_TEXT:
         raise HTTPException(409, "当前没有等待你拍板的内容")
     feedback = body.feedback.strip()
@@ -86,6 +101,8 @@ async def _setup_gate(session: AsyncSession, job_id: uuid.UUID, kind: str) -> Jo
     job = await session.scalar(select(Job).where(Job.id == job_id).with_for_update())
     if job is None:
         raise HTTPException(404, "任务不存在")
+    if jobs.is_legacy_setup(job):
+        raise HTTPException(409, jobs.LEGACY_SETUP_MESSAGE)
     if job.kind != "book_setup" or jobs.pending_kind(job) != kind:
         raise HTTPException(
             409, "当前没有等待你选择方向" if kind == "setup_directions" else "当前没有等待你确认的开书拼图"
@@ -154,7 +171,7 @@ async def choose_direction(
     return await _queue_setup_response(session, redis, job, content, resume)
 
 
-@router.post("/jobs/{job_id}/piece", response_model=JobOut)
+@router.post("/jobs/{job_id}/piece", response_model=JobOut, dependencies=[Depends(_reject_legacy_setup)])
 async def decide_piece(
     job_id: uuid.UUID,
     body: PieceDecision,
@@ -179,9 +196,9 @@ async def decide_piece(
     if body.action in ("candidates", "fill") and body.node_id is None:
         raise HTTPException(422, "请选择要处理的节点")
     if (body.node_id or body.action in ("candidates", "fill")) and (
-        current != "nodes" or body.piece != "nodes" or body.action not in ("revise", "candidates", "fill")
+        current != "segment" or body.piece != "segment" or body.action not in ("revise", "candidates", "fill")
     ):
-        raise HTTPException(422, "节点操作只能在关键节点块等确认时使用")
+        raise HTTPException(422, "节点操作只能在「第一段」等确认时使用")
     node = None
     if body.node_id:
         node = await session.get(StoryNode, body.node_id)
@@ -219,6 +236,8 @@ async def answer(
 ) -> JobOut:
     """回答主编动笔前的提问。没回答的问题交给编辑部决定。"""
     job = await _job(session, job_id)
+    if jobs.is_legacy_setup(job):
+        raise HTTPException(409, jobs.LEGACY_SETUP_MESSAGE)
     if jobs.pending_kind(job) != "setup_questions":
         raise HTTPException(409, "当前没有需要你回答的问题")
     questions = (job.pending or {}).get("questions") or []
@@ -276,6 +295,60 @@ async def add_note(
             payload=payload,
         )
     return MeetingMessageOut(**data)
+
+
+@router.post("/jobs/{job_id}/restart-setup", response_model=JobOut)
+async def restart_setup(
+    job_id: uuid.UUID, session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)
+) -> JobOut:
+    job = await session.scalar(select(Job).where(Job.id == job_id).with_for_update())
+    if job is None:
+        raise HTTPException(404, "任务不存在")
+    if not jobs.is_legacy_setup(job):
+        raise HTTPException(409, "这个任务不需要重开")
+    if job.status in jobs.BUSY_STATUSES:
+        raise HTTPException(409, "编辑部正在工作，先停止再重开")
+    book = await session.scalar(select(Book).where(Book.id == job.book_id).with_for_update())
+    if book is None:
+        raise HTTPException(404, "书不存在")
+    if book.status not in {"setting_up", "awaiting_approval"}:
+        raise HTTPException(409, "这本书已经开完了，不需要重开")
+    restarted = await session.scalar(
+        select(Job.id).where(Job.book_id == book.id, Job.params["restart_from"].astext == str(job.id)).limit(1)
+    )
+    if restarted:
+        raise HTTPException(409, "这个任务已经按新流程重开")
+    keep_concept = (book.setup_progress or {}).get("pieces", {}).get("concept") == "confirmed" and bool(
+        (book.concept or {}).get("title")
+    )
+    job.status, job.finished_at = "cancelled", datetime.now(UTC)
+    await setup_store.reset_for_restart(session, book.id, keep_concept)
+    new_job = jobs.new_setup_job(book, ask=False, mode=(job.params or {}).get("mode", "oneshot"))
+    new_job.params = {**new_job.params, "restart_from": str(job.id), "keep_concept": keep_concept}
+    session.add(new_job)
+    await session.flush()
+    # 在首次提交释放锁之前，同时写入取消、清空与新任务，避免重复重开。
+    await post_message(
+        session,
+        redis,
+        book_id=book.id,
+        job_id=new_job.id,
+        speaker="author",
+        kind="decision",
+        content="按新流程重开开书。",
+    )
+    await session.refresh(job)
+    await publish(redis, book.id, "job", job_dict(job))
+    text = "开书流程更新了：保留你的点子、作者要求、已选的方向和已确认的定调，其余按新的五步重做。"
+    if not keep_concept:
+        text = text.replace("和已确认的定调", "")
+    await post_message(
+        session, redis, book_id=book.id, job_id=new_job.id, speaker="system", kind="decision", content=text
+    )
+    await session.refresh(new_job)
+    await publish(redis, book.id, "job", job_dict(new_job))
+    jobs.enqueue(new_job.id)
+    return JobOut.model_validate(new_job)
 
 
 @router.post("/jobs/{job_id}/resume", response_model=JobOut)
