@@ -260,5 +260,7 @@ def test_context_direction_target_and_locked():
     assert "没有标走向" in format_target_node({"target_node": 99}, nodes)
     state = {"mode": "puzzle", "pieces": {"concept": "confirmed", "nodes": "confirmed"}, "spine": {"nodes": nodes}}
     assert format_locked(state) == "【作者已确认（锁定）的部分】定调、关键节点\n其中铁钉节点：节点 2「飞升」"
-    assert format_locked({**state, "mode": "oneshot"}) == "【作者钉死的节点】节点 2「飞升」（铁钉，不能改）"
+    assert format_locked({**state, "mode": "oneshot"}) == (
+        "【作者钉死的节点】节点 2「飞升」（铁钉，不能擅自改；仅本轮作者明确点名时可按要求改，改完仍是铁钉）"
+    )
     assert format_locked({}) == ""

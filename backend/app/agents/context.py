@@ -374,7 +374,11 @@ def format_locked(state: dict[str, Any]) -> str:
         if pinned:
             result += "\n其中铁钉节点：" + "、".join(pinned)
         return result
-    return "【作者钉死的节点】" + "、".join(pinned) + "（铁钉，不能改）" if pinned else ""
+    return (
+        "【作者钉死的节点】" + "、".join(pinned) + "（铁钉，不能擅自改；仅本轮作者明确点名时可按要求改，改完仍是铁钉）"
+        if pinned
+        else ""
+    )
 
 
 def format_pitches(pitches: list[dict[str, Any]]) -> str:

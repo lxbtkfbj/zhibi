@@ -616,6 +616,10 @@ class RevisionTriage(Lenient):
     unlock_requests: list[UnlockRequest] = Field(
         default_factory=list, description="作者的话需要改动作者已确认（锁定）的部分时，在这里提出解锁请求；不需要就留空"
     )
+    pinned_overrides: list[int] = Field(
+        default_factory=list,
+        description="作者这次的话明确点名要改的铁钉节点序号（按提示词里的节点序号）；作者没有点名就留空",
+    )
     remark: str = remark_field("你打算怎么落实作者的话")
 
     def instructions(self) -> dict[str, str]:

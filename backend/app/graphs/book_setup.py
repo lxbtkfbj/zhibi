@@ -36,6 +36,7 @@ from app.agents.glossary import clean_techniques, glossary_block
 from app.agents.planning import attach_new_foreshadowings, fit_chapter_counts, relevant_ledger, unit_hint
 from app.agents.playbook import pick, playbook_text
 from app.agents.setup_puzzle import (
+    NODE_CONTENT,
     ORDER,
     PIECE_NAMES,
     PIECE_ORDER,
@@ -134,6 +135,9 @@ class SetupState(TypedDict, total=False):
     instruction_sources: dict[str, list[str]]
     instruction_fallbacks: dict[str, str]
     feedback_sources: list[str]
+    # 仅存检查点的本轮节点 ID 授权；生成节点后即清空，不写入作者要求或书籍设置。
+    pinned_overrides: list[str]
+    pinned_override_sources: dict[str, list[str]]
     # draft：首次起草；reviewed：审稿通过；auto_revise：按审稿意见修改；author_revise：按作者意见修改
     phase: str
     auto_revised: bool
@@ -164,6 +168,8 @@ def initial_state(idea: str, style_reference: str = "", ask: bool = False, mode:
         "piece_reviewed": {},
         "piece_revised": {},
         "instructions": {},
+        "pinned_overrides": [],
+        "pinned_override_sources": {},
         "phase": "draft",
         "auto_revised": False,
         "round": 0,
@@ -242,14 +248,28 @@ async def live_state(state: SetupState, d: GraphDeps) -> SetupState:
         and not sources
         and any(text in "\n".join(state.get("notes") or []) for text in deleted)
     )
+    revoked_spine = False
     for target in list(instructions):
         if legacy_author or any(text in deleted for text in sources.get(target, [])):
+            revoked_spine |= target == "spine"
             fallback = (state.get("instruction_fallbacks") or {}).get(target)
             if fallback:
                 instructions[target] = fallback
             else:
                 instructions.pop(target)
     current["instructions"] = instructions
+    override_sources = state.get("pinned_override_sources") or {}
+    allowed = [
+        node_id
+        for node_id in state.get("pinned_overrides") or []
+        if not any(text in deleted for text in override_sources.get(node_id, []))
+    ]
+    if revoked_spine or not instructions.get("spine") or instructions.get("spine") == SYNC_INSTRUCTIONS["spine"]:
+        allowed = []
+    current.update(
+        pinned_overrides=allowed,
+        pinned_override_sources={node_id: override_sources.get(node_id, []) for node_id in allowed},
+    )
     if settings.get("chapter_words") and state.get("concept"):
         current["concept"] = {**state["concept"], "chapter_words": settings["chapter_words"]}
     return current
@@ -319,6 +339,27 @@ async def _explain_unlocks(d: GraphDeps, requests: list[dict]) -> None:
     if requests:
         names = "、".join(dict.fromkeys(PIECE_NAMES[_piece_of(r["target"])] for r in requests))
         await d.emit.say("chief", f"这需要改已经确认的「{names}」，要解锁的话点「解锁并修改」。")
+
+
+def _pinned_overrides(result, snapshot: list[dict]) -> list[str]:
+    """模型序号只认本次渲染时的快照，不用最新顺序或历史 node_snapshot 猜测。"""
+    return list(
+        dict.fromkeys(
+            snapshot[ref - 1]["id"]
+            for ref in getattr(result, "pinned_overrides", [])
+            if type(ref) is int
+            and 1 <= ref <= len(snapshot)
+            and snapshot[ref - 1].get("id")
+            and snapshot[ref - 1].get("status") == "pinned"
+        )
+    )
+
+
+def _override_update(ids: list[str], sources: list[str]) -> dict:
+    return {
+        "pinned_overrides": list(dict.fromkeys(ids)),
+        "pinned_override_sources": {node_id: list(sources) for node_id in ids},
+    }
 
 
 async def directions_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
@@ -415,6 +456,7 @@ def _finish(state: SetupState, target: str, value: dict) -> dict:
         "instructions": rest,
         "instruction_sources": origins,
         "instruction_fallbacks": fallbacks,
+        **(_override_update([], []) if target == "spine" else {}),
     }
 
 
@@ -509,6 +551,17 @@ async def spine_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     state = await live_state(state, d)
     await d.check_cancel()
     current, instruction = _revising(state, "spine")
+    previous_nodes = deepcopy((state.get("spine") or {}).get("nodes") or [])
+    allowed = set(state.get("pinned_overrides") or [])
+    if state.get("phase") == "auto_revise" or instruction == SYNC_INSTRUCTIONS["spine"]:
+        allowed.clear()
+    # 卡片按 ID 授权后也显式告诉模型；始终按本次节点提示词的序号，不沿用旧序号。
+    if allowed and instruction:
+        instruction += "\n" + "\n".join(
+            f"作者要求改动铁钉节点 {i}，只按作者本轮意见修改，改完仍是铁钉。"
+            for i, node in enumerate(previous_nodes, 1)
+            if node.get("id") in allowed and node.get("status") == "pinned"
+        )
     await d.emit.status("chief", "主编正在修改主线骨架…" if instruction else "主编正在定主线：开篇、结局和关键转折…")
     result = await editorial.draft_spine(
         d.llm,
@@ -522,12 +575,20 @@ async def spine_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
         glossary=glossary_block(),
         legacy_lore=state.get("lore") or {},
     )
-    previous_nodes = (state.get("spine") or {}).get("nodes") or []
     spine = result.model_dump(exclude={"remark", "decisions"})
     # 模型只引用本次提示词中的序号，状态和铁钉内容始终由程序决定。
-    spine["nodes"] = merge_nodes(spine.get("nodes") or [], previous_nodes)
+    spine["nodes"] = merge_nodes(spine.get("nodes") or [], previous_nodes, pinned_overrides=allowed)
     remapped = setup_store.remap_node_refs(setup_of(state), previous_nodes, spine["nodes"])
     await d.emit.say("chief", result.remark)
+    previous_by_id = {node.get("id"): node for node in previous_nodes if node.get("id")}
+    for i, node in enumerate(spine["nodes"], 1):
+        previous = previous_by_id.get(node.get("id"), {})
+        if (
+            node.get("id") in allowed
+            and previous.get("status") == "pinned"
+            and any(node.get(key) != previous.get(key) for key in NODE_CONTENT)
+        ):
+            await d.emit.say("chief", f"按你的意思改了铁钉节点 {i}「{node.get('title', '')}」，它还是铁钉。")
     milestones = sum(node["kind"] == "milestone" for node in spine["nodes"])
     await d.emit.artifact("chief", f"主线骨架：{milestones} 个关键转折", {"type": "spine", "data": spine})
     return {
@@ -728,10 +789,11 @@ async def critique_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
             "instructions": instructions,
             "instruction_sources": {},
             "instruction_fallbacks": {},
+            **_override_update([], []),
             "phase": "auto_revise",
             "auto_revised": True,
         }
-    return {"queue": [], "instructions": {}, "phase": "reviewed"}
+    return {"queue": [], "instructions": {}, "phase": "reviewed", **_override_update([], [])}
 
 
 async def _new_notes(d: GraphDeps, seen: int) -> list[tuple[int, str, dict | None]]:
@@ -777,7 +839,8 @@ async def intake_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     fresh = [note_prompt(content, payload) for _, content, payload in rows]
     notes = [*(state.get("notes") or []), *fresh]
     update.update(notes=notes, notes_seen=rows[-1][0])
-    done = {t: state[t] for t in ORDER if has_part(state, t) and t not in queue}
+    # 已有节点即使排队等待修改，也要给这次插话同一份快照，才能补充点名授权。
+    done = {t: state[t] for t in ORDER if has_part(state, t) and (t not in queue or t == "spine")}
     if not done:
         if any(not note_thread(payload) for _, _, payload in rows):
             await d.emit.say("chief", "收到，接下来就按你说的写。")
@@ -787,6 +850,7 @@ async def intake_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     await d.check_cancel()
     await d.emit.status("chief", "主编正在看你的插话…")
     todo = [t for t in ORDER if t not in done]
+    snapshot = deepcopy((done.get("spine") or {}).get("nodes") or [])
     result = await editorial.absorb_notes(d.llm, done, todo, requirements(state), fresh, locked=format_locked(state))
     if any(not note_thread(payload) for _, _, payload in rows):
         await d.emit.say("chief", result.remark)
@@ -814,6 +878,20 @@ async def intake_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
             )
         update["instruction_sources"] = origins
         update["instruction_fallbacks"] = fallbacks
+        if "spine" in raw and "spine" in extra_queue:
+            sources = [content for _, content, payload in rows if not (payload or {}).get("settings_change")]
+            allowed = (
+                _pinned_overrides(result, snapshot) if sources and raw["spine"] != SYNC_INSTRUCTIONS["spine"] else []
+            )
+            # 后续插话可以补充本轮授权；不能清掉尚未执行的、先前作者已点名的节点。
+            combined = list(dict.fromkeys([*(state.get("pinned_overrides") or []), *allowed]))
+            update.update(_override_update(combined, []))
+            update["pinned_override_sources"] = {
+                **(state.get("pinned_override_sources") or {}),
+                **{node_id: sources for node_id in allowed},
+            }
+            if allowed and state.get("phase") == "auto_revise":
+                update["phase"] = "author_revise"
     await _reply_to_notes(d, rows)
     return update
 
@@ -830,7 +908,7 @@ async def persist_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
         saved = await setup_store.load_setup(session, d.book_id)
     await d.emit.status("system", "开书方案已整理好，请作者过目并拍板。")
     await mark_progress(d, state)
-    return {**saved, "queue": [], "instructions": {}}
+    return {**saved, "queue": [], "instructions": {}, **_override_update([], [])}
 
 
 async def author_gate_node(state: SetupState, runtime: Runtime[GraphDeps]) -> Command[Literal["finalize", "triage"]]:
@@ -868,7 +946,12 @@ async def author_gate_node(state: SetupState, runtime: Runtime[GraphDeps]) -> Co
         if decision.get("feedback", "").strip() and not decision.get("requirement_saved"):
             await add_requirement(session, d.book_id, decision["feedback"], "note")
         await session.commit()
-    update: dict = {**setup, "feedback": feedback, "round": state.get("round", 0) + 1}
+    update: dict = {
+        **setup,
+        "feedback": feedback,
+        "round": state.get("round", 0) + 1,
+        **_override_update([], []),
+    }
     update["feedback_sources"] = [*(content for _, content, _ in rows), str(decision.get("feedback", "")).strip()]
     # 作者的意见之后每一轮都要遵守，不能下一次修改又改回去
     update["notes"] = [*(state.get("notes") or []), *([feedback] if feedback else [])]
@@ -883,11 +966,13 @@ async def triage_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     state = await live_state(state, d)
     await d.check_cancel()
     await d.emit.status("chief", "主编正在研究作者的意见…")
+    snapshot = deepcopy((state.get("spine") or {}).get("nodes") or [])
     result = await editorial.triage_feedback(
         d.llm, setup_of(state), requirements(state), state.get("feedback", ""), locked=format_locked(state)
     )
     await d.emit.say("chief", result.remark)
-    queue, instructions = cascade(result.instructions())
+    raw = result.instructions()
+    queue, instructions = cascade(raw)
     if queue:
         await d.emit.artifact("chief", "修改分工", {"type": "triage", "data": instructions})
     origins = list(state.get("feedback_sources") or ([state["feedback"]] if state.get("feedback") else []))
@@ -896,6 +981,12 @@ async def triage_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
         "instructions": instructions,
         "instruction_sources": {target: origins for target in queue},
         "instruction_fallbacks": {},
+        **_override_update(
+            _pinned_overrides(result, snapshot)
+            if raw.get("spine") and raw["spine"] != SYNC_INSTRUCTIONS["spine"]
+            else [],
+            origins,
+        ),
         "phase": "author_revise",
     }
 
@@ -920,6 +1011,7 @@ async def finalize_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
         "suggestions": [],
         "unlock_requests": [],
         "candidates": None,
+        **_override_update([], []),
     }
     await mark_progress(d, {**state, **update})
     return update
@@ -934,7 +1026,7 @@ async def piece_check_node(
     warnings = piece_warnings(piece, setup_of(state), state.get("dropped"))
     if piece == "fill":
         warnings = list(dict.fromkeys([*warnings, *(state.get("outline_warnings") or [])]))
-    update = {"warnings": warnings}
+    update = {"warnings": warnings, **_override_update([], [])}
     review = piece == "first_volume" or (piece == "nodes" and (state.get("settings") or {}).get("volume_audit", True))
     if review and not (state.get("piece_reviewed") or {}).get(piece):
         await d.check_cancel()
@@ -1001,7 +1093,7 @@ async def piece_persist_node(state: SetupState, runtime: Runtime[GraphDeps]) -> 
         )
         await session.commit()
         saved = await setup_store.load_setup(session, d.book_id)
-    update = {target: saved[target] for target in PIECES[piece]}
+    update = {**{target: saved[target] for target in PIECES[piece]}, **_override_update([], [])}
     if piece == "fill":
         update["spine"] = saved["spine"]
     update["pieces"] = {**_pieces(state), piece: "waiting"}
@@ -1028,6 +1120,7 @@ async def _confirm_piece(state: SetupState, d: GraphDeps) -> Command:
         "unlock_requests": [],
         "candidates": None,
         "op": {},
+        **_override_update([], []),
     }
     if piece == "first_volume":
         await mark_progress(d, {**state, **update})
@@ -1132,12 +1225,25 @@ async def piece_gate_node(
             "piece_revised": {k: v for k, v in (state.get("piece_revised") or {}).items() if k not in span},
             "round": state.get("round", 0) + 1,
             "phase": "author_revise",
+            **_override_update([], []),
         }
+        if reopened == "nodes" and feedback:
+            # 解锁只是打开块，不自动授权铁钉；仍须分析作者本轮意见是否点名。
+            snapshot = deepcopy((setup.get("spine") or {}).get("nodes") or [])
+            result = await editorial.triage_feedback(
+                d.llm, setup, requirements(state), feedback, locked=format_locked({**state, **update})
+            )
+            await d.emit.say("chief", result.remark)
+            raw = result.instructions()
+            if raw.get("spine") and raw["spine"] != SYNC_INSTRUCTIONS["spine"]:
+                update["instructions"]["spine"] = "\n".join([feedback, raw["spine"]])
+                update.update(_override_update(_pinned_overrides(result, snapshot), [feedback]))
         await mark_progress(d, {**state, **update})
         return Command(goto="intake" if feedback else "piece_gate", update=update)
     if action != "revise":
         raise ValueError("未知的拼图操作")
     prefix = ""
+    allowed = []
     if decision.get("node_id"):
         match = next(
             ((i, n) for i, n in enumerate(setup["spine"]["nodes"], 1) if n.get("id") == decision["node_id"]), None
@@ -1145,17 +1251,24 @@ async def piece_gate_node(
         if match is None:
             raise ValueError("节点已不存在")
         prefix = f"只改节点 {match[0]}「{match[1]['title']}」："
+        allowed = [match[1]["id"]]
     combined = prefix + "\n".join([feedback, *flips]).strip()
     requests = list(state.get("unlock_requests") or [])
     if not feedback and (prefix or flips):
         raw = {PIECES[piece][0]: combined}
     else:
+        snapshot = deepcopy((setup.get("spine") or {}).get("nodes") or [])
         result = await editorial.triage_feedback(
             d.llm, setup, requirements(state), combined, locked=format_locked(state)
         )
         await d.emit.say("chief", result.remark)
         requests = _unlock_requests(state, result)
         raw = {target: instruction for target, instruction in result.instructions().items() if target in PIECES[piece]}
+        if raw.get("spine") and raw["spine"] != SYNC_INSTRUCTIONS["spine"]:
+            allowed.extend(_pinned_overrides(result, snapshot))
+    if prefix and piece == "nodes":
+        # node_id 是作者的直接授权，不依赖分派模型是否再次复述这个节点。
+        raw["spine"] = "\n".join(filter(None, [combined, raw.get("spine")]))
     queue, instructions = cascade(raw, state)
     await _explain_unlocks(d, requests)
     update = {
@@ -1170,6 +1283,7 @@ async def piece_gate_node(
         "round": state.get("round", 0) + 1,
         "phase": "author_revise",
         "candidates": None,
+        **_override_update(allowed if "spine" in queue else [], [feedback]),
     }
     return Command(goto="intake" if queue else "piece_gate", update=update)
 

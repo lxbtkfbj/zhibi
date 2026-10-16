@@ -314,6 +314,7 @@ def _spine(user: str = "") -> s.StorySpine:
         )
         for kind, title, volume, event, prerequisite, consequence in events
     ]
+    revised_pins = _revise_demo_pins(nodes, current, user)
     if "测试提醒" in user:
         nodes[3].prerequisite = ""
     return s.StorySpine(
@@ -329,8 +330,61 @@ def _spine(user: str = "") -> s.StorySpine:
                 why="让胜利有代价，成长才可信",
             )
         ],
-        remark="九个节点从捡灯走到重建家园，铁钉由程序原样保留，其余节点按序号衔接。",
+        remark=(
+            "演示模式已按本轮点名要求修改节点事件，其他铁钉仍由程序保护。"
+            if revised_pins
+            else "九个节点从捡灯走到重建家园，铁钉由程序原样保留，其余节点按序号衔接。"
+        ),
     )
+
+
+def _revise_demo_pins(nodes: list[s.StoryNodeDraft], current: str, user: str) -> bool:
+    """演示用确定性规则：只把本轮授权节点的「改为／改成」落实到事件，不模拟自然语言理解。"""
+    instruction = _match(r"【修改要求】\n(.*?)(?=\n\n请在当前版本|\n\n要求：|\Z)", user)
+    allowed = {int(index) for index in re.findall(r"作者要求改动铁钉节点\s*(\d+)", instruction)}
+    changed = False
+    for match in re.finditer(
+        r"^节点\s+(\d+)「([^」]*)」([^\n［]*)［铁钉(?:｜约第 (\d+) 卷)?］发生：[^\n]*((?:\n  [^\n]*)*)",
+        current,
+        re.M,
+    ):
+        index, title, label, volume, details = match.groups()
+        ref = int(index)
+        if ref not in allowed:
+            continue
+        event = ""
+        for clause in re.split(r"[。；\n]", instruction):
+            changes = list(re.finditer(r"改(?:为|成)[：:\s]*", clause))
+            # 一句里有多个改动或多个节点时不猜，防止把另一个节点的指令串进来。
+            if len(changes) != 1:
+                continue
+            change = changes[0]
+            mentioned = {int(value) for value in re.findall(r"节点\s*(\d+)", clause[: change.start()])}
+            if mentioned != {ref} and (mentioned or len(allowed) != 1):
+                continue
+            event = clause[change.end() :].strip()
+            if event:
+                break
+        if not event:
+            continue
+        existing = next((node for node in nodes if node.ref == ref), None)
+        replacement = s.StoryNodeDraft(
+            ref=ref,
+            kind="开篇" if "开篇" in label else "结局" if "结局" in label else "节点",
+            title=title,
+            volume=int(volume or 1),
+            event=event,
+            prerequisite=_match(r"之前得先有：([^\n]*)", details),
+            consequence=_match(r"之后变成：([^\n]*)", details),
+            editor_note=existing.editor_note if existing else "",
+            techniques=existing.techniques if existing else [],
+        )
+        if existing is None:
+            nodes.append(replacement)
+        else:
+            nodes[nodes.index(existing)] = replacement
+        changed = True
+    return changed
 
 
 def _threads() -> s.ThreadsDraft:
@@ -997,10 +1051,43 @@ def _interview() -> s.InterviewDraft:
     )
 
 
+def _author_feedback(user: str, heading: str) -> str:
+    """只读本轮意见，保留多段插话，不把模板要求混进作者授权。"""
+    match = re.search(rf"【{heading}】\n(.*?)(?=\n\n要求：|\n【|\Z)", user, re.S)
+    return match.group(1).strip().lstrip("- ") if match else ""
+
+
+def _pinned_revision(user: str, text: str) -> s.RevisionTriage | None:
+    """演示只识别本轮点名、且当前方案里确实标为铁钉的节点。"""
+    snapshot = _match(
+        r"【(?:当前方案|已经完成的部分)】\n(.*?)(?=\n【(?:还没做的部分|作者已确认|这本书的写作规矩|作者的要求|作者意见|作者刚才)|\Z)",
+        user,
+    )
+    pinned = {
+        int(index) for index in re.findall(r"^节点\s+(\d+)「[^」]*」[^\n［]*［铁钉(?:｜[^］]*)?］", snapshot, re.M)
+    }
+    overrides = list(dict.fromkeys(int(index) for index in re.findall(r"节点\s*(\d+)", text) if int(index) in pinned))
+    if not overrides:
+        return None
+    locked = _match(r"【作者已确认（锁定）的部分】([^\n]*)", user) or _section(user, "作者已确认（锁定）的部分")
+    if "关键节点" in locked:
+        return s.RevisionTriage(
+            unlock_requests=[s.UnlockRequest(target="spine", reason=f"作者要求调整：{text}")],
+            remark="你点名的铁钉节点在已经确认的部分，我先提出解锁请求，等你决定后再改。",
+        )
+    return s.RevisionTriage(
+        spine_instructions="；".join(f"作者要求改动铁钉节点 {index}" for index in overrides) + f"：{text}",
+        pinned_overrides=overrides,
+        remark="收到，你点名的铁钉节点按这次的意见修改，改完仍是铁钉，其他铁钉保持不变。",
+    )
+
+
 def _absorb(user: str) -> s.RevisionTriage:
-    """演示：插话里提到人物就改设定，否则留给后面的步骤。"""
-    match = re.search(r"【作者刚才的插话】\n(.+?)(\n\n|$)", user, re.S)
-    text = match.group(1).strip().lstrip("- ") if match else ""
+    """演示：先处理点名的铁钉，再按人物或后续步骤安排插话。"""
+    text = _author_feedback(user, "作者刚才的插话")
+    pinned_revision = _pinned_revision(user, text)
+    if pinned_revision is not None:
+        return pinned_revision
     # format_locked 的块名按产品格式紧接标题，不能用只识别换行正文的 _section。
     locked = _match(r"【作者已确认（锁定）的部分】([^\n]*)", user) or _section(user, "作者已确认（锁定）的部分")
     target = "concept" if any(word in text for word in ("概念", "基调", "方向")) else "lore"
@@ -1018,8 +1105,10 @@ def _absorb(user: str) -> s.RevisionTriage:
 
 
 def _triage(user: str) -> s.RevisionTriage:
-    feedback = re.search(r"【作者意见】\n(.+?)(\n\n|$)", user, re.S)
-    text = feedback.group(1).strip() if feedback else "按审稿意见调整"
+    text = _author_feedback(user, "作者意见") or "按审稿意见调整"
+    pinned_revision = _pinned_revision(user, text)
+    if pinned_revision is not None:
+        return pinned_revision
     return s.RevisionTriage(
         first_volume_instructions=text, remark=f"作者的意见我看了：{text[:40]}。主要影响第一卷卷纲，我来改。"
     )

@@ -29,9 +29,12 @@ def _number(value: Any) -> int:
         return 0
 
 
-def merge_nodes(ai_nodes: list[dict], current_nodes: list[dict]) -> list[dict]:
-    """ref 对应提示词的同一份快照；被引用铁钉取新位置，漏报铁钉按旧相对顺序插回。"""
+def merge_nodes(
+    ai_nodes: list[dict], current_nodes: list[dict], pinned_overrides: set[str] | None = None
+) -> list[dict]:
+    """ref 对应提示词快照；作者本轮点名的铁钉只改内容、保留原位，其他铁钉照旧恢复。"""
     current = deepcopy(current_nodes)
+    allowed = pinned_overrides or set()
     entries: list[tuple[dict, int | None]] = []
     used = set()
     for draft in ai_nodes:
@@ -44,6 +47,9 @@ def merge_nodes(ai_nodes: list[dict], current_nodes: list[dict]) -> list[dict]:
             used.add(source)
         if previous.get("status") == "pinned":
             node = deepcopy(previous)
+            if previous.get("id") in allowed:
+                node.update({key: deepcopy(draft[key]) for key in NODE_CONTENT if key in draft})
+                node["techniques"] = clean_techniques(node.get("techniques") or [])
         else:
             node = {
                 "id": previous.get("id"),
@@ -117,10 +123,32 @@ def merge_nodes(ai_nodes: list[dict], current_nodes: list[dict]) -> list[dict]:
     for node, _ in middle:
         if node.get("kind") in {"opening", "ending"} and node.get("status") != "pinned":
             node["kind"] = "milestone"
-    return [
-        {**node, "_snapshot_ref": source + 1 if source is not None else 0}
-        for node, source in ([opening] if opening else []) + middle + ([ending] if ending else [])
-    ]
+    ordered = ([opening] if opening else []) + middle + ([ending] if ending else [])
+    # 内容授权不是重排授权；只固定本轮点名的铁钉，未授权节点沿用原合并规则。
+    fixed = [entry for entry in ordered if entry[0].get("status") == "pinned" and entry[0].get("id") in allowed]
+    for entry in fixed:
+        ordered.remove(entry)
+    for entry in sorted(fixed, key=lambda entry: entry[1]):
+        if entry is opening:
+            index = 0
+        elif entry is ending:
+            index = len(ordered)
+        else:
+            index = max(1 if opening else 0, min(entry[1], len(ordered) - (ending in ordered)))
+        ordered.insert(index, entry)
+    if any(
+        index != source
+        for index, (node, source) in enumerate(ordered)
+        if node.get("status") == "pinned" and node.get("id") in allowed
+    ):
+        # 前置节点被漏删或结局前新增过多时，原位与两端规则可能无法同时成立。
+        # 退回原拓扑，只采纳按 ref 对齐的内容，不能为 AI 的顺带结构调整移动作者铁钉。
+        by_source = {source: node for node, source in ordered if source is not None}
+        ordered = [
+            ({**deepcopy(by_source.get(source, node)), "kind": node["kind"]}, source)
+            for source, node in enumerate(current)
+        ]
+    return [{**node, "_snapshot_ref": source + 1 if source is not None else 0} for node, source in ordered]
 
 
 def normalize_lore(
