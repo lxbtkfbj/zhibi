@@ -123,6 +123,12 @@ async def update_node(node_id: uuid.UUID, body: NodePatch, session: AsyncSession
     book = await _lock_book(session, node.book_id)
     _allow_empty(book, body.status)
     for field, value in body.model_dump(exclude_unset=True).items():
+        if field == "segment":
+            if node.segment is None:
+                raise HTTPException(422, "这一段还没规划，写到这里时主编会来定")
+            if isinstance(value.get("opening"), dict):
+                value["opening"] = {**(node.segment.get("opening") or {}), **value["opening"]}
+            value = {**node.segment, **value}
         setattr(node, field, value)
     await session.commit()
     await session.refresh(node)

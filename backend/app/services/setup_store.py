@@ -34,6 +34,7 @@ CHARACTER_FIELDS = (
     "background",
     "abilities",
     "goal",
+    "want",
     "location",
     "condition",
 )
@@ -43,6 +44,8 @@ VOLUME_FIELDS = (
     "stage",
     "summary",
     "goal",
+    "want",
+    "pressure",
     "climax",
     "antagonist",
     "power_range",
@@ -61,6 +64,7 @@ UNIT_FIELDS = (
     "conflict",
     "climax",
     "outcome",
+    "loop",
     "key_events",
     "thread_beats",
     "foreshadow_actions",
@@ -149,6 +153,7 @@ def node_dict(node: StoryNode) -> dict[str, Any]:
     return {
         "id": str(node.id),
         "updated_by_volume": node.updated_by_volume,
+        "segment": node.segment,
         **{key: getattr(node, key) for key in NODE_FIELDS},
     }
 
@@ -178,6 +183,8 @@ async def save_nodes(session: AsyncSession, book_id: uuid.UUID, items: list[dict
         _assign(row, item, NODE_FIELDS)
         if "volume" in item:
             row.volume = item["volume"]
+        if "segment" in item:
+            row.segment = item["segment"]
         row.position = index
         session.add(row)
         out.append(row)

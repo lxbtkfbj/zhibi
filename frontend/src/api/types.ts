@@ -74,6 +74,8 @@ export interface Job {
   id: string
   book_id: string
   kind: string
+  /** 开书流程版本；非开书任务为空。 */
+  setup_flow: number | null
   status: JobStatus
   pending: Pending | null
   error: string
@@ -100,6 +102,59 @@ export interface Concept {
   decisions?: AuthorChoice[]
 }
 
+/** 主角卡；旧书为空，逐步填写时允许只提供部分回答。 */
+export interface Protagonist {
+  name?: string
+  start?: string
+  trigger?: string
+  pursuit?: string
+  root?: string
+  escalation?: string
+  personality?: string
+  style?: string
+  bottom_line?: string
+  voice?: string
+  finger?: string
+  finger_later?: string
+  flaw?: string
+  arc_end?: string
+  cared?: { name?: string; relation?: string; why?: string }[]
+  interlock?: string
+}
+
+/** 世界与地图；小麻烦和大对手只属于第一段。 */
+export interface World {
+  surface?: string
+  power?: string
+  maps?: { name?: string; powers?: string; ceiling?: string; rules?: string; start?: string; gains?: string }[]
+  trouble?: string
+  opponent?: string
+  far_maps?: { name?: string; line?: string }[]
+  shadow?: string
+  mystery?: string
+  mystery_answer?: string
+}
+
+/** 一段的规划，保存在这一段的终点节点上。 */
+export interface SegmentPlan {
+  number: number
+  status: 'confirmed' | 'auto'
+  planned_at: number
+  map: string
+  trouble: string
+  opponent: string
+  goal: string
+  goal_link: string
+  wait: string
+  reveal: string
+  opening: { scene?: string; pressure?: string; first_win?: string; finger?: string; hook?: string } | null
+  carried: string
+  pursuit: string
+  finger_next: string
+  answers: string
+  finale: boolean
+}
+
 /** 主线元信息；关键节点以节点接口为唯一事实来源。 */
 export interface Spine {
   core_conflict?: string
@@ -124,6 +179,7 @@ export interface StoryNode {
   event: string
   prerequisite: string
   consequence: string
+  segment: SegmentPlan | null
   volume: number | null
   status: 'pinned' | 'pencil' | 'empty'
   origin: 'ai' | 'author'
@@ -169,6 +225,8 @@ export interface BookSummary {
 export interface BookDetail extends BookSummary {
   style_reference: string
   concept: Concept
+  protagonist: Protagonist
+  world: World
   spine: Spine
   setup_progress: SetupProgress
   /** 作者的要求：动笔前的回答、插话、拍板与试读意见 */
@@ -211,6 +269,7 @@ export interface PlotUnit {
   conflict: string
   climax: string
   outcome: string
+  loop: string
   key_events: string[]
   thread_beats: ThreadStep[]
   foreshadow_actions: ForeshadowStep[]
@@ -231,6 +290,8 @@ export interface Volume {
   id: string
   index: number
   title: string
+  want: string
+  pressure: string
   stage: string
   summary: string
   goal: string
@@ -324,6 +385,7 @@ export interface Character {
   background: string
   abilities: string
   goal: string
+  want: string
   location: string
   condition: string
   notes: string

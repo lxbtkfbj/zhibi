@@ -49,7 +49,13 @@ def format_character(ch: dict[str, Any]) -> str:
     basics = "，".join(x for x in (ch.get("gender"), ch.get("age"), ch.get("appearance")) if x)
     if basics:
         parts.append(basics)
-    for label, key in (("性格", "personality"), ("背景", "background"), ("能力", "abilities"), ("目标", "goal")):
+    for label, key in (
+        ("性格", "personality"),
+        ("背景", "background"),
+        ("能力", "abilities"),
+        ("目标", "goal"),
+        ("此刻想要", "want"),
+    ):
         if ch.get(key):
             parts.append(f"{label}：{ch[key]}")
     state = "，".join(x for x in (ch.get("location"), ch.get("condition")) if x)
@@ -63,10 +69,178 @@ def format_character_state(ch: dict[str, Any]) -> str:
     parts = [f"【{ch.get('name', '')}】{ch.get('role_type', '')}"]
     if ch.get("is_alive") is False:
         parts.append("已死亡")
-    for label, key in (("位置", "location"), ("状态", "condition"), ("实力", "abilities"), ("目标", "goal")):
+    for label, key in (
+        ("位置", "location"),
+        ("状态", "condition"),
+        ("实力", "abilities"),
+        ("目标", "goal"),
+        ("此刻想要", "want"),
+    ):
         if ch.get(key):
             parts.append(f"{label}：{ch[key]}")
     return "；".join(parts)
+
+
+def format_protagonist(card: dict, character: dict | None = None, hook: str = "") -> str:
+    """主角卡；旧书沿用设定库人物和概念里的主角钩子。"""
+    if not card:
+        lines = ["（这本书开书时还没有主角卡）"]
+        if character:
+            lines.append(format_character(character))
+        if hook:
+            lines.append(f"主角钩子：{hook}")
+        return "\n".join(lines)
+
+    lines = [f"{label}：{card[key]}" for label, key in (("姓名", "name"), ("起点", "start")) if card.get(key)]
+    lines.append("驱动力")
+    for label, key in (("开局动机", "trigger"), ("长线追求", "pursuit"), ("情感根源", "root")):
+        if card.get(key):
+            lines.append(f"- {label}：{card[key]}")
+    lines.append(f"- 怎么升级：{card.get('escalation') or '写到再定'}")
+    for label, key in (
+        ("性格", "personality"),
+        ("做事风格", "style"),
+        ("底线", "bottom_line"),
+        ("说话方式", "voice"),
+        ("金手指·现在", "finger"),
+    ):
+        if card.get(key):
+            lines.append(f"{label}：{card[key]}")
+    lines.append(f"金手指·以后：{card.get('finger_later') or '写到再定'}")
+    for label, key in (("软肋", "flaw"), ("成长的终点", "arc_end")):
+        if card.get(key):
+            lines.append(f"{label}：{card[key]}")
+    if card.get("cared"):
+        lines.append(
+            "在乎的人："
+            + "；".join(
+                f"{person.get('name', '')}（{person.get('relation', '')}：{person.get('why', '')}）"
+                for person in card["cared"]
+            )
+        )
+    if card.get("interlock"):
+        lines.append(f"三件套怎么咬合：{card['interlock']}")
+    if character and character.get("want"):
+        lines.append(f"此刻想要：{character['want']}")
+    return "\n".join(lines)
+
+
+def format_world(world: dict) -> str:
+    """世界与地图；开书阶段可附带尚未存入设定库的列表。"""
+    if not world:
+        return "（这本书开书时还没有「世界与地图」）"
+    lines = [
+        f"{label}：{world[key]}" for label, key in (("世界的表里", "surface"), ("力量规则", "power")) if world.get(key)
+    ]
+    for item in world.get("maps") or []:
+        details = "；".join(
+            f"{label}：{item[key]}"
+            for label, key in (
+                ("谁说了算", "powers"),
+                ("天花板", "ceiling"),
+                ("特有的规矩", "rules"),
+                ("主角从这里起步", "start"),
+                ("能拿到", "gains"),
+            )
+            if item.get(key)
+        )
+        if item.get("name") or details:
+            lines.append(f"地图「{item.get('name', '')}」：{details}")
+    for label, key in (("第一段·开篇的小麻烦", "trouble"), ("第一段·大对手", "opponent")):
+        if world.get(key):
+            lines.append(f"{label}：{world[key]}")
+    far_maps = " → ".join(
+        item.get("name", "") + (f"（{item['line']}）" if item.get("line") else "")
+        for item in world.get("far_maps") or []
+        if item.get("name") or item.get("line")
+    )
+    lines.append(f"后面的地图：{far_maps or '写到再定'}")
+    if world.get("shadow"):
+        lines.append(f"终极敌人的影子：{world['shadow']}")
+    mystery = [f"谜面：{world['mystery']}"] if world.get("mystery") else []
+    mystery.append(f"谜底：{world.get('mystery_answer') or '写到再定'}")
+    lines.append("核心谜团：" + "；".join(mystery))
+    blocks = ["\n".join(lines)]
+    if world.get("world_entries"):
+        blocks.append(
+            "设定条目：\n"
+            + "\n".join(
+                f"- [{item.get('category', '')}] {item.get('name', '')}：{item.get('content', '')}"
+                for item in world["world_entries"]
+            )
+        )
+    if world.get("characters"):
+        blocks.append("人物：\n" + "\n\n".join(format_character(ch) for ch in world["characters"]))
+    if world.get("relationships"):
+        blocks.append(
+            "人物关系：\n"
+            + "\n".join(
+                f"- {item.get('source', '')} 与 {item.get('target', '')}："
+                f"{item.get('kind', '')}。{item.get('description', '')}"
+                for item in world["relationships"]
+            )
+        )
+    return "\n\n".join(blocks)
+
+
+def _segment_value(segment: dict, key: str, world: dict | None) -> str:
+    """第一段的地图和对手优先用段内值，留空时回读世界卡。"""
+    value = segment.get(key)
+    if not value and segment.get("number") == 1 and world:
+        if key == "map":
+            maps = world.get("maps") or []
+            value = maps[0].get("name") if maps else None
+        elif key in {"trouble", "opponent"}:
+            value = world.get(key)
+    return value or ""
+
+
+def format_segment_info(segment: dict, world: dict | None = None) -> str:
+    """段的规划：保留作者确认方式及规划时的写作进度。"""
+    number, planned_at = segment.get("number"), segment.get("planned_at")
+    if number == 1 and planned_at == 0:
+        lines = ["第 1 段（开书时规划）"]
+    else:
+        approval = "按设置自动通过" if segment.get("status") == "auto" else "作者确认"
+        lines = [f"第 {number} 段（写到第 {planned_at} 章时规划，{approval}）"]
+    for label, key in (
+        ("地图", "map"),
+        ("开篇的小麻烦", "trouble"),
+        ("大对手", "opponent"),
+        ("这一段的目标", "goal"),
+        ("为什么离长线追求更近", "goal_link"),
+        ("读者在等", "wait"),
+        ("这一段揭开什么", "reveal"),
+        ("上一段留下的线头", "carried"),
+        ("主角的追求", "pursuit"),
+        ("金手指下一阶段", "finger_next"),
+        ("定下的谜底", "answers"),
+    ):
+        value = _segment_value(segment, key, world)
+        if value:
+            lines.append(f"{label}：{value}")
+    if segment.get("finale"):
+        lines.append("这是收尾段：开始收线，揭开核心谜团，往结局方向走。")
+    return "\n".join(lines)
+
+
+def format_opening(opening: dict | None) -> str:
+    if not opening:
+        return ""
+    lines = [
+        f"- {label}：{opening[key]}"
+        for label, key in (
+            ("第 1 章的切入场面", "scene"),
+            ("前 3 章主角被什么压着", "pressure"),
+            ("第一个小爽点", "first_win"),
+            ("金手指露头", "finger"),
+            ("第 3 章结尾的钩子", "hook"),
+        )
+        if opening.get(key)
+    ]
+    if not lines:
+        return ""
+    return "\n".join(["【开篇落地】第一个单元要把开篇写进去，第一个单元出章纲时照这个来：", *lines])
 
 
 def format_lore(lore: dict[str, Any]) -> str:
@@ -140,23 +314,34 @@ def format_secrets(secrets: list[dict[str, Any]]) -> str:
     return "\n".join(blocks) or "（暂无）"
 
 
-def format_spine(spine: dict[str, Any]) -> str:
+def format_spine(spine: dict[str, Any], world: dict | None = None) -> str:
     if not spine:
         return "（暂无）"
     from app.services.setup_store import spine_from_legacy
 
     spine = spine_from_legacy(spine)
+    story_nodes = spine.get("nodes") or []
+    last_planned = max((i for i, node in enumerate(story_nodes, 1) if node.get("segment") is not None), default=0)
     nodes = []
-    for i, n in enumerate(spine.get("nodes") or [], start=1):
+    for i, n in enumerate(story_nodes, start=1):
         status = {"pinned": "铁钉", "pencil": "暂定", "empty": "留空"}.get(n.get("status", "pencil"), "暂定")
         label = {"opening": "· 开篇", "ending": "· 结局"}.get(n.get("kind"), "")
         volume = f"｜约第 {n['volume']} 卷" if n.get("volume") else ""
+        pending = "｜这一段写到再定" if last_planned and i > last_planned and n.get("kind") != "opening" else ""
         title = n.get("title") or ("（留空）" if n.get("status") == "empty" else "")
         event = "这里还没定" if n.get("status") == "empty" else f"发生：{n.get('event', '')}"
-        nodes.append(f"节点 {i}「{title}」{label}［{status}{volume}］{event}")
+        nodes.append(f"节点 {i}「{title}」{label}［{status}{volume}{pending}］{event}")
         for key, name in (("prerequisite", "之前得先有"), ("consequence", "之后变成")):
             if n.get(key):
                 nodes.append(f"  {name}：{n[key]}")
+        if n.get("segment") is not None:
+            segment = n["segment"]
+            details = "；".join(
+                f"{label}：{value}"
+                for label, key in (("目标", "goal"), ("读者在等", "wait"), ("揭开", "reveal"), ("地图", "map"))
+                if (value := _segment_value(segment, key, world))
+            )
+            nodes.append(f"  这是第 {segment.get('number')} 段的终点" + (f"：{details}" if details else ""))
     return "\n".join(
         [
             f"核心矛盾：{spine.get('core_conflict', '')}",
@@ -195,6 +380,8 @@ def format_volume_card(v: dict[str, Any]) -> str:
         + (f"约 {v['chapter_count']} 章" if v.get("chapter_count") else "")
     ]
     for label, key in (
+        ("这一卷想做成", "want"),
+        ("卷首处境", "pressure"),
         ("舞台", "stage"),
         ("概要", "summary"),
         ("卷末目标", "goal"),
@@ -260,8 +447,10 @@ def format_unit(u: dict[str, Any]) -> str:
         f"冲突：{u.get('conflict', '')}",
         f"高潮：{u.get('climax', '')}",
         f"结果：{u.get('outcome', '')}",
-        f"关键事件：{' → '.join(u.get('key_events', []))}",
     ]
+    if u.get("loop"):
+        lines.append(f"核心循环：{u['loop']}")
+    lines.append(f"关键事件：{' → '.join(u.get('key_events', []))}")
     if u.get("thread_beats"):
         lines.append(f"推进线索：{format_steps(u['thread_beats'])}")
     if u.get("tropes") or u.get("resolution"):

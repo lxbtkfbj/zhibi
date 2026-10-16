@@ -38,6 +38,23 @@ if ($LASTEXITCODE -ne 0) { Fail '数据库启动失败，请查看上面的错�
 
 Step '安装后端依赖并升级数据库结构'
 uv sync --directory backend --quiet
+if ($LASTEXITCODE -ne 0) { Fail '后端依赖安装失败' }
+# 只解析 Alembic 的版本行；日志走标准错误，不把日志误认成版本号。
+$currentOutput = @(uv run --directory backend alembic current)
+if ($LASTEXITCODE -ne 0) { Fail '读取当前数据库版本失败，没有升级数据库' }
+$headsOutput = @(uv run --directory backend alembic heads)
+if ($LASTEXITCODE -ne 0) { Fail '读取最新数据库版本失败，没有升级数据库' }
+$current = @($currentOutput | Where-Object { $_ -match '^\S+(?:\s+\([^)]*\))*\s*$' } | ForEach-Object { ($_ -split '\s+')[0] })
+$heads = @($headsOutput | Where-Object { $_ -match '^\S+\s+\(head\)\s*$' } | ForEach-Object { ($_ -split '\s+')[0] })
+if ($heads.Count -ne 1 -or $current.Count -gt 1 -or ($currentOutput.Count -gt 0 -and $current.Count -eq 0)) {
+    Fail '数据库迁移版本无法唯一确认，没有升级数据库'
+}
+if ($current.Count -gt 0 -and $current[0] -ne $heads[0]) {
+    Step '升级前备份数据库'
+    $backupPath = & (Join-Path $PSScriptRoot 'backup-db.ps1') -Label "before-$($heads[0])"
+    if ($LASTEXITCODE -ne 0) { Fail '升级前备份失败，没有升级数据库' }
+    Write-Host "已备份到 $backupPath"
+}
 uv run --directory backend alembic upgrade head
 if ($LASTEXITCODE -ne 0) { Fail '数据库升级失败' }
 

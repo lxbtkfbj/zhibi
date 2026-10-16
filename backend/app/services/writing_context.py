@@ -193,6 +193,7 @@ def _char_dict(c: Character) -> dict[str, Any]:
             "background",
             "abilities",
             "goal",
+            "want",
             "location",
             "condition",
             "is_alive",

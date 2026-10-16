@@ -24,6 +24,10 @@ class Book(UUIDPk, Timestamps, Base):
     genre: Mapped[str] = mapped_column(String(100), default="")
     # 主编定下的概念：卖点、主角钩子、基调等
     concept: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # 主角卡：起点、驱动力、金手指、软肋与在乎的人
+    protagonist: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+    # 世界与地图：规则、详细地图、第一段的对手、远处的影子与核心谜团
+    world: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     # 主线骨架：核心矛盾、主题、主角成长弧；关键节点以 story_nodes 为准
     spine: Mapped[dict] = mapped_column(JSONB, default=dict)
     setup_progress: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
@@ -84,6 +88,9 @@ class Volume(UUIDPk, Timestamps, Base):
     stage: Mapped[str] = mapped_column(Text, default="")
     summary: Mapped[str] = mapped_column(Text, default="")
     goal: Mapped[str] = mapped_column(Text, default="")
+    # 这一卷想做成什么、卷首处境
+    want: Mapped[str] = mapped_column(Text, default="", server_default="")
+    pressure: Mapped[str] = mapped_column(Text, default="", server_default="")
     # 本卷高潮、主要对手、主角境界从哪到哪
     climax: Mapped[str] = mapped_column(Text, default="")
     antagonist: Mapped[str] = mapped_column(Text, default="")
@@ -124,6 +131,8 @@ class PlotUnit(UUIDPk, Timestamps, Base):
     conflict: Mapped[str] = mapped_column(Text, default="")
     climax: Mapped[str] = mapped_column(Text, default="")
     outcome: Mapped[str] = mapped_column(Text, default="")
+    # 核心循环在这个单元怎么转一圈
+    loop: Mapped[str] = mapped_column(Text, default="", server_default="")
     key_events: Mapped[list] = mapped_column(JSONB, default=list)
     # [{thread, beat}]：本单元推进哪些线索
     thread_beats: Mapped[list] = mapped_column(JSONB, default=list)

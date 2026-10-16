@@ -4,7 +4,9 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, computed_field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
+
+from app.api.segment_models import ProtagonistPatch, SegmentPatch, WorldPatch
 
 
 class ORM(BaseModel):
@@ -90,6 +92,15 @@ class BookPatch(BaseModel):
     style_reference: str | None = Field(None, max_length=20000)
     concept: dict | None = None
     spine: dict | None = None
+    protagonist: ProtagonistPatch | None = None
+    world: WorldPatch | None = None
+
+    @field_validator("protagonist", "world")
+    @classmethod
+    def cards_not_null(cls, value):
+        if value is None:
+            raise ValueError("主角卡和世界与地图不能为空值")
+        return value
 
 
 class JobOut(ORM):
@@ -102,6 +113,22 @@ class JobOut(ORM):
     created_at: datetime
     updated_at: datetime
     finished_at: datetime | None
+    setup_flow: int | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def read_setup_flow(cls, value):
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, dict):
+            values = dict(value)
+            params = values.get("params") or {}
+            flow = values.get("setup_flow", params.get("flow", 1))
+        else:
+            values = {name: getattr(value, name) for name in cls.model_fields if name != "setup_flow"}
+            flow = (getattr(value, "params", None) or {}).get("flow", 1)
+        values["setup_flow"] = flow if values.get("kind") == "book_setup" else None
+        return values
 
 
 class BookSummary(ORM):
@@ -122,6 +149,8 @@ class BookDetail(BookSummary):
     style_reference: str
     concept: dict
     spine: dict
+    protagonist: dict = {}
+    world: dict = {}
     setup_progress: dict = {}
     requirements: list[str] = []
     trial_read_done: bool = False
@@ -159,6 +188,7 @@ class UnitOut(ORM):
     conflict: str
     climax: str
     outcome: str
+    loop: str = ""
     key_events: list[str]
     thread_beats: list[ThreadStepOut] = []
     foreshadow_actions: list[ForeshadowStepOut] = []
@@ -179,10 +209,18 @@ class UnitPatch(BaseModel):
     conflict: str | None = None
     climax: str | None = None
     outcome: str | None = None
+    loop: str | None = None
     key_events: list[str] | None = None
     reveals: list[dict] | None = None
     editor_note: str | None = None
     techniques: list[str] | None = None
+
+    @field_validator("loop")
+    @classmethod
+    def loop_not_null(cls, value):
+        if value is None:
+            raise ValueError("核心循环不能为空值")
+        return value
 
     @field_validator("reveals", "editor_note", "techniques")
     @classmethod
@@ -196,6 +234,8 @@ class VolumeOut(ORM):
     id: uuid.UUID
     index: int
     title: str
+    want: str = ""
+    pressure: str = ""
     stage: str = ""
     summary: str
     goal: str
@@ -216,6 +256,8 @@ class VolumeOut(ORM):
 
 class VolumePatch(BaseModel):
     title: str | None = None
+    want: str | None = None
+    pressure: str | None = None
     stage: str | None = None
     summary: str | None = None
     goal: str | None = None
@@ -228,6 +270,13 @@ class VolumePatch(BaseModel):
     reaches_node: bool | None = None
     editor_note: str | None = None
     techniques: list[str] | None = None
+
+    @field_validator("want", "pressure")
+    @classmethod
+    def segment_fields_not_null(cls, value):
+        if value is None:
+            raise ValueError("这一卷想做成什么和卷首处境不能为空值")
+        return value
 
     @field_validator("reaches_node", "editor_note", "techniques")
     @classmethod
@@ -318,6 +367,7 @@ class CharacterBase(BaseModel):
     background: str = ""
     abilities: str = ""
     goal: str = ""
+    want: str = ""
     location: str = ""
     condition: str = ""
     notes: str = ""
@@ -340,10 +390,18 @@ class CharacterPatch(BaseModel):
     background: str | None = None
     abilities: str | None = None
     goal: str | None = None
+    want: str | None = None
     location: str | None = None
     condition: str | None = None
     notes: str | None = None
     is_alive: bool | None = None
+
+    @field_validator("want")
+    @classmethod
+    def want_not_null(cls, value):
+        if value is None:
+            raise ValueError("此刻想要什么不能为空值")
+        return value
 
 
 class WorldEntryBase(BaseModel):
@@ -452,6 +510,14 @@ class NodePatch(BaseModel):
     volume: int | None = Field(None, ge=1)
     status: NodeStatus | None = None
     editor_note: str | None = None
+    segment: SegmentPatch | None = None
+
+    @field_validator("segment")
+    @classmethod
+    def segment_not_null(cls, value):
+        if value is None:
+            raise ValueError("段规划不能为空值")
+        return value
 
     @field_validator("title", "event", "prerequisite", "consequence", "status", "editor_note")
     @classmethod
@@ -506,6 +572,7 @@ class NodeOut(ORM):
     editor_note: str
     techniques: list[str]
     anchors: list[AnchorOut] = []
+    segment: dict | None = None
 
 
 class Knower(BaseModel):

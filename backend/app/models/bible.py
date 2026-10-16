@@ -25,6 +25,8 @@ class Character(UUIDPk, Timestamps, Base):
     background: Mapped[str] = mapped_column(Text, default="")
     abilities: Mapped[str] = mapped_column(Text, default="")
     goal: Mapped[str] = mapped_column(Text, default="")
+    # 此刻想要什么
+    want: Mapped[str] = mapped_column(Text, default="", server_default="")
     # 随剧情变化的当前状态
     location: Mapped[str] = mapped_column(Text, default="")
     condition: Mapped[str] = mapped_column(Text, default="")

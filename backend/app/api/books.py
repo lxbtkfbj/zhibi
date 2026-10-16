@@ -125,6 +125,10 @@ async def update_book(
         if set(body.spine) - {"core_conflict", "theme", "protagonist_arc"}:
             raise HTTPException(422, "主线骨架只保存核心矛盾、主题和主角成长弧；请通过节点接口编辑关键节点")
         book.spine = {**(book.spine or {}), **body.spine}
+    for field in ("protagonist", "world"):
+        card = getattr(body, field)
+        if card is not None:
+            setattr(book, field, {**(getattr(book, field) or {}), **card.model_dump(exclude_unset=True)})
     await session.commit()
     await session.refresh(book)
     return await detail(session, book)

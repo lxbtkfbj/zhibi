@@ -44,6 +44,7 @@ def job_dict(job: Job) -> dict[str, Any]:
         "id": str(job.id),
         "book_id": str(job.book_id),
         "kind": job.kind,
+        "setup_flow": (job.params or {}).get("flow", 1) if job.kind == "book_setup" else None,
         "status": job.status,
         "pending": job.pending,
         "error": job.error,

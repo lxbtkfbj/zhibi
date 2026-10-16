@@ -19,6 +19,8 @@ class StoryNode(UUIDPk, Timestamps, Base):
     event: Mapped[str] = mapped_column(Text, default="", server_default="")
     prerequisite: Mapped[str] = mapped_column(Text, default="", server_default="")
     consequence: Mapped[str] = mapped_column(Text, default="", server_default="")
+    # 这一段的规划，记在终点节点上；空值表示写到再定
+    segment: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True))
     volume: Mapped[int | None] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(10), default="pencil", server_default="pencil")
     origin: Mapped[str] = mapped_column(String(10), default="ai", server_default="ai")

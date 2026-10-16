@@ -18,6 +18,7 @@ export interface WritingSettings {
   review_strictness: 'lenient' | 'standard' | 'strict'
   volume_audit: boolean
   volume_approval: boolean
+  segment_approval: boolean
   trial_read: boolean
 }
 export interface SettingsResponse { settings: WritingSettings; rules_text: string }
