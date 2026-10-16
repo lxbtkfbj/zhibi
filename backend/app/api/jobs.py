@@ -127,13 +127,24 @@ async def choose_direction(
             raise HTTPException(422, "请选择一个现有的开书方向")
         if not length:
             raise HTTPException(422, "请选择这本书打算写多长")
-        name = directions[body.choice].get("name", "")
+        chosen = directions[body.choice]
+        if body.title is not None and body.title not in (chosen.get("titles") or []):
+            raise HTTPException(422, "请选择这个方向里的书名候选")
+        name = chosen.get("name", "")
         await add_requirement(session, job.book_id, f"这本书打算写多长？——{length}", "answer")
         direction = f"开书方向：选用「{name}」" + (f"；混搭：{mix}" if mix else "")
         await add_requirement(session, job.book_id, direction, "answer")
+        if body.title is not None:
+            await add_requirement(session, job.book_id, f"书名用《{body.title}》", "answer")
         if feedback:
             await add_requirement(session, job.book_id, feedback, "note")
-        content = f"选方向「{name}」。" + (f"\n混搭：{mix}" if mix else "") + (f"\n{feedback}" if feedback else "")
+        content = (
+            f"选方向「{name}」"
+            + (f"，书名用《{body.title}》" if body.title is not None else "")
+            + "。"
+            + (f"\n混搭：{mix}" if mix else "")
+            + (f"\n{feedback}" if feedback else "")
+        )
     else:
         if not feedback:
             raise HTTPException(422, "请写下重新出方向的要求")

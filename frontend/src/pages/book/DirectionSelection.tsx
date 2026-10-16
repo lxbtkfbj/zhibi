@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useJobActions } from '../../api/hooks'
 import type { Job, Pending } from '../../api/types'
 import { TechniqueChip } from '../../components/TechniqueChip'
@@ -6,15 +6,19 @@ import { Badge, Button, ErrorText } from '../../components/ui'
 
 export function DirectionSelection({ job, pending }: { job: Job; pending: Extract<Pending, { kind: 'setup_directions' }> }) {
   const actions = useJobActions(job.book_id)
+  const id = useId()
   const [length, setLength] = useState(pending.length.options[pending.length.recommended] ?? pending.length.options[0] ?? '')
+  const [titles, setTitles] = useState<Record<number, string | undefined>>({})
   const [mix, setMix] = useState('')
   const [redoOpen, setRedoOpen] = useState(false)
   const [feedback, setFeedback] = useState('')
   const [validation, setValidation] = useState('')
+  const chapterWords = pending.length.chapter_words
+  const hasChapterWords = typeof chapterWords === 'number' && Number.isFinite(chapterWords) && chapterWords > 0
   const busy = actions.directions.isPending || actions.directions.isSuccess
   const choose = async (choice: number) => {
     if (busy) return
-    try { await actions.directions.mutateAsync({ jobId: job.id, action: 'choose', choice, length, mix: mix.trim() }) } catch { /* 保留选择与混搭 */ }
+    try { await actions.directions.mutateAsync({ jobId: job.id, action: 'choose', choice, title: titles[choice], length, mix: mix.trim() }) } catch { /* 保留篇幅、书名与混搭 */ }
   }
   const redo = async () => {
     if (busy) return
@@ -24,11 +28,27 @@ export function DirectionSelection({ job, pending }: { job: Job; pending: Extrac
   }
   return <section className="space-y-5 border-b border-line pb-8" aria-label="选择开书方向">
     <div><p className="mb-2 text-xs tracking-[0.25em] text-chief">下一步 · 定调</p><h3 className="font-serif text-xl font-bold">先选一个想写的方向</h3><p className="mt-2 text-sm leading-relaxed text-ink-2">选好篇幅和方向，也可以混搭。接下来的每一块，都由你确认。</p></div>
-    <fieldset disabled={busy} className="space-y-2"><legend className="mb-2 text-sm font-medium">{pending.length.question}</legend><div className="flex flex-wrap gap-2">
-      {pending.length.options.map((option, index) => <label key={option} className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm ${length === option ? 'border-chief bg-chief-soft text-chief' : 'border-line text-ink-2'}`}><input type="radio" name="direction-length" checked={length === option} onChange={() => setLength(option)} className="accent-chief" />{option}{index === pending.length.recommended && <span className="text-xs">推荐</span>}</label>)}
-    </div></fieldset>
+    {pending.reference?.trim() && <section aria-label="主编对对标作品的理解" className="space-y-2 rounded-xl border border-chief/20 bg-chief-soft/40 p-4">
+      <h4 className="text-sm font-medium text-chief">主编对对标作品的理解</h4>
+      <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{pending.reference}</p>
+      <p className="text-xs leading-relaxed text-ink-2">理解得不对？在下面「都不满意，重新出」里告诉主编，主编会按你的说法重出。</p>
+    </section>}
+    <fieldset disabled={busy} aria-describedby={hasChapterWords ? `${id}-length-hint` : undefined} className="min-w-0 space-y-2"><legend className="mb-2 text-sm font-medium">{pending.length.question}</legend><div className="flex flex-wrap gap-2">
+      {pending.length.options.map((option, index) => <label key={option} className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm ${length === option ? 'border-chief bg-chief-soft text-chief' : 'border-line text-ink-2'}`}><input type="radio" name="direction-length" checked={length === option} onChange={() => setLength(option)} className="accent-chief" />{option}{index === pending.length.recommended && <span className="shrink-0 text-xs whitespace-nowrap">推荐</span>}</label>)}
+    </div>{hasChapterWords && <p id={`${id}-length-hint`} className="text-xs leading-relaxed text-ink-2">按每章约 {chapterWords} 字估算章数。想要章数更多、每章更短，先到「本书设置」改每章字数，再点「都不满意，重新出」。</p>}</fieldset>
     <div className="space-y-4">{pending.directions.map((direction, index) => <article key={`${index}-${direction.name}`} className="rounded-xl border border-line bg-card p-5 shadow-sm" aria-label={`方向 ${index + 1}：${direction.name}`}>
-      <div className="flex flex-wrap items-center gap-2"><span className="font-serif text-xl text-ink-3">0{index + 1}</span><h4 className="font-serif text-xl font-bold">{direction.name}</h4>{index === pending.recommended && <Badge tone="busy">主编推荐</Badge>}</div>
+      <div className="flex flex-wrap items-center gap-2"><h4 className="text-sm font-medium text-ink-2">方向{['一', '二', '三'][index] ?? index + 1} · {direction.name}</h4>{index === pending.recommended && <Badge tone="busy">主编推荐</Badge>}</div>
+      {!!direction.titles?.length && <fieldset disabled={busy} aria-describedby={`${id}-title-hint-${index}`} className="mt-3 min-w-0 space-y-2">
+        <legend className="text-xs font-medium text-ink-2">书名候选</legend>
+        <div className="flex flex-wrap items-center gap-2">{direction.titles.map(title => <button
+          key={title}
+          type="button"
+          aria-pressed={titles[index] === title}
+          onClick={() => setTitles(current => ({ ...current, [index]: current[index] === title ? undefined : title }))}
+          className={`max-w-full rounded-lg border px-3 py-2 text-left text-sm break-words transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-chief disabled:cursor-not-allowed disabled:opacity-50 ${titles[index] === title ? 'border-chief bg-chief-soft text-chief' : 'border-line bg-paper-2 text-ink hover:border-chief/50'}`}
+        >《{title}》</button>)}</div>
+        <p id={`${id}-title-hint-${index}`} className="text-xs leading-relaxed text-ink-2">不选也行，定调时主编会再起</p>
+      </fieldset>}
       <p className="my-3 font-serif text-base leading-relaxed">{direction.logline}</p>
       <dl className="space-y-2 text-sm leading-relaxed">{([
         ['主角', direction.protagonist], ['金手指', direction.golden_finger], ['开局', direction.opening], ['卖点', direction.selling_points?.join('；')], ['舞台阶梯', direction.stage_ladder], ['基调', direction.tone], ['目标读者', direction.reader], ['不同之处', direction.difference],

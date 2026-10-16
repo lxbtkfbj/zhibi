@@ -43,11 +43,17 @@ def test_task_schema_descriptions_match_verbatim():
         "SetupTarget": s.SetupTarget,
     }
     exec(compile(block, str(task), "exec"), namespace)
+    # 任务 6 明确替换的描述由独立原文回归覆盖，任务 2 的其余描述仍逐字保持。
+    superseded = {
+        "BookDirection": {"name", "titles", "golden_finger", "stage_ladder"},
+        "BookDirections": {"reference", "directions", "remark"},
+    }
     for item in ast.parse(block).body:
         if isinstance(item, ast.ClassDef):
             actual, expected = getattr(s, item.name), namespace[item.name]
-            assert {name: field.description for name, field in actual.model_fields.items()} == {
-                name: field.description for name, field in expected.model_fields.items()
+            replaced = superseded.get(item.name, set())
+            assert {name: field.description for name, field in actual.model_fields.items() if name not in replaced} == {
+                name: field.description for name, field in expected.model_fields.items() if name not in replaced
             }, item.name
     assert namespace["TECHNIQUES_DESC"] == s.TECHNIQUES_DESC
     assert namespace["EDITOR_NOTE_DESC"] == s.EDITOR_NOTE_DESC
@@ -56,7 +62,7 @@ def test_task_schema_descriptions_match_verbatim():
     assert not hasattr(s, "Milestone")
     assert s.SETUP_PARTS == ("concept", "spine", "lore", "outline", "threads", "first_volume")
     expected = {
-        ("BookConcept", "stage_ladder"): "舞台阶梯：地图怎么一层层往上走，如「青石镇 → 天剑宗 → 中州 → 上界」",
+        ("BookConcept", "stage_ladder"): s.STAGE_LADDER_DESC,
         ("BookConcept", "target_reader"): "目标读者：男频还是女频、爱看什么、最讨厌什么，一句话",
         ("LoreDraft", "world_entries"): "世界观条目，6-12 条，必须包含力量体系（境界从低到高写清名称）和核心规则",
         ("LoreDraft", "characters"): "主要人物，6-12 人，至少包含主角和一个主要反派",
@@ -72,7 +78,7 @@ def test_task_schema_descriptions_match_verbatim():
 
 
 VARIABLES = {
-    "setup_directions": "idea style requirements glossary",
+    "setup_directions": "idea style requirements previous glossary",
     "setup_concept": "idea chosen_direction requirements style revision",
     "setup_spine": "concept playbook requirements glossary revision",
     "setup_node_slot": "concept spine slot requirements glossary",

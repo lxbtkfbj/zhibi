@@ -24,6 +24,7 @@ from app.agents.context import (
     format_direction_choice,
     format_ledger,
     format_locked,
+    format_previous_directions,
     format_requirements,
     format_secrets,
     format_spine,
@@ -79,22 +80,31 @@ SYNC_INSTRUCTIONS = {
     "first_volume": "根据修改后的上游内容同步检查第一卷卷纲，确保剧情单元、线索与伏笔与之一致；不受影响的部分保持原样。",
 }
 
-# 篇幅由系统固定提问：它决定全书章数，作者最需要拍板
-LENGTH_QUESTION = {
-    "question": "这本书打算写多长？",
-    "options": [
-        "约 30 万字（短篇，100 章左右）",
-        "约 100 万字（中长篇，300 章左右）",
-        "约 200 万字（标准网文长篇，600 章左右）",
-        "300 万字以上（超长篇）",
-    ],
-    "recommended": 2,
-}
+
+def length_question(chapter_words: int | None = None) -> dict:
+    """按本书每章字数估算五档篇幅，章数四舍五入到十位。"""
+    chapter_words = chapter_words or 3000
+    options = []
+    for total, label in ((50, "短篇"), (100, "中篇"), (200, "长篇"), (300, "长篇"), (500, "超长篇")):
+        chapters = (total * 10000 + 5 * chapter_words) // (10 * chapter_words) * 10
+        options.append(
+            f"500 万字以上（{label}，约 {chapters} 章起）"
+            if total == 500
+            else f"约 {total} 万字（{label}，约 {chapters} 章）"
+        )
+    return {
+        "question": "这本书打算写多长？",
+        "options": options,
+        "recommended": 2,
+        "chapter_words": chapter_words,
+    }
 
 
 class SetupState(TypedDict, total=False):
     mode: Literal["puzzle", "oneshot"]
+    reference: str
     directions: list[dict]
+    previous_directions: dict
     recommended: int
     direction: dict
     piece: str | None
@@ -233,6 +243,21 @@ async def live_state(state: SetupState, d: GraphDeps) -> SetupState:
         rows = await list_requirements(session, d.book_id)
         deleted = await deleted_texts(session, d.book_id)
     current = {**state, "settings": settings, "live_requirements": [row.text for row in rows]}
+    direction = state.get("direction") or {}
+    if selected_title := direction.get("title"):
+        direction = dict(direction)
+        if f"书名用《{selected_title}》" in deleted:
+            # 作者编辑或删除了原选名要求，检查点不能把已撤销的硬约束带回来。
+            direction.pop("title", None)
+        elif book and (book.concept or {}).get("title") and book.concept["title"] != selected_title:
+            # 初次生成前没有已存概念；此后手动保存的新书名优先，不能永久锁在开书时的候选。
+            direction["title"] = book.concept["title"]
+            if current.get("concept"):
+                current["concept"] = {**current["concept"], "title": book.concept["title"]}
+        current["direction"] = direction
+    previous = state.get("previous_directions") or {}
+    if previous.get("feedback") in deleted:
+        current["previous_directions"] = {**previous, "feedback": ""}
     if state.get("spine"):
         current["spine"] = setup_store.spine_from_legacy(state["spine"])
     current["feedback_sources"] = [text for text in state.get("feedback_sources") or [] if text not in deleted]
@@ -270,8 +295,8 @@ async def live_state(state: SetupState, d: GraphDeps) -> SetupState:
         pinned_overrides=allowed,
         pinned_override_sources={node_id: override_sources.get(node_id, []) for node_id in allowed},
     )
-    if settings.get("chapter_words") and state.get("concept"):
-        current["concept"] = {**state["concept"], "chapter_words": settings["chapter_words"]}
+    if settings.get("chapter_words") and current.get("concept"):
+        current["concept"] = {**current["concept"], "chapter_words": settings["chapter_words"]}
     return current
 
 
@@ -370,7 +395,11 @@ async def directions_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dic
     await mark_progress(d, {**state, "piece": "concept", "pieces": pieces})
     await d.emit.status("chief", "主编在想几个开书方向…")
     result = await editorial.draft_directions(
-        d.llm, state["idea"], state.get("style_reference", ""), requirements(state)
+        d.llm,
+        state["idea"],
+        state.get("style_reference", ""),
+        requirements(state),
+        previous=format_previous_directions(state.get("previous_directions")),
     )
     directions = [item.model_dump() for item in result.directions[:3]]
     for item in directions:
@@ -380,20 +409,34 @@ async def directions_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dic
     await d.emit.artifact(
         "chief",
         f"开书方向：{len(directions)} 个",
-        {"type": "directions", "data": {"directions": directions, "recommended": recommended}},
+        {
+            "type": "directions",
+            "data": {"reference": result.reference, "directions": directions, "recommended": recommended},
+        },
     )
-    return {"directions": directions, "recommended": recommended, "piece": "concept", "pieces": pieces}
+    return {
+        "reference": result.reference,
+        "directions": directions,
+        "recommended": recommended,
+        "piece": "concept",
+        "pieces": pieces,
+    }
 
 
 async def directions_gate_node(
     state: SetupState, runtime: Runtime[GraphDeps]
 ) -> Command[Literal["directions", "intake"]]:
+    # 此处只读设置；恢复时节点从头执行，数据库写入仍全部放在 interrupt 之后。
+    async with runtime.context.sessionmaker() as session:
+        book = await session.get(Book, runtime.context.book_id)
+        chapter_words = settings_of(book).get("chapter_words") if book else None
     decision = interrupt(
         {
             "kind": "setup_directions",
+            "reference": state.get("reference", ""),
             "directions": state.get("directions") or [],
             "recommended": state.get("recommended", 0),
-            "length": LENGTH_QUESTION,
+            "length": length_question(chapter_words),
         }
     )
     if decision.get("action") == "redo":
@@ -401,12 +444,26 @@ async def directions_gate_node(
             async with runtime.context.sessionmaker() as session:
                 await add_requirement(session, runtime.context.book_id, decision["feedback"].strip(), "note")
                 await session.commit()
-        return Command(goto="directions")
+        return Command(
+            goto="directions",
+            update={
+                "previous_directions": {
+                    "reference": state.get("reference", ""),
+                    "directions": deepcopy(state.get("directions") or []),
+                    "feedback": decision.get("feedback", "").strip(),
+                }
+            },
+        )
     directions = state.get("directions") or []
     choice = decision.get("choice")
     if not isinstance(choice, int) or not 0 <= choice < len(directions):
         raise ValueError("请选择有效的开书方向")
     direction = {**directions[choice], "mix": decision.get("mix", ""), "length": decision.get("length", "")}
+    title = decision.get("title")
+    if title is not None:
+        if title not in (direction.get("titles") or []):
+            raise ValueError("请选择这个方向里的书名候选")
+        direction["title"] = title
     if not decision.get("requirement_saved"):
         async with runtime.context.sessionmaker() as session:
             if direction["length"]:
@@ -417,6 +474,8 @@ async def directions_gate_node(
                 f"；混搭：{direction['mix']}" if direction["mix"] else ""
             )
             await add_requirement(session, runtime.context.book_id, note, "answer")
+            if title is not None:
+                await add_requirement(session, runtime.context.book_id, f"书名用《{title}》", "answer")
             await session.commit()
     return Command(goto="intake", update={"direction": direction, "queue": ["concept"]})
 
@@ -467,7 +526,7 @@ async def interview_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict
     await mark_progress(d, state)
     await d.emit.status("chief", "主编动笔前想先问你几个问题…")
     result = await editorial.interview(d.llm, state["idea"], state.get("style_reference", ""), requirements(state))
-    questions = [LENGTH_QUESTION]
+    questions = [length_question((state.get("settings") or {}).get("chapter_words"))]
     for q in result.questions[:5]:
         options = [o.strip() for o in q.options if o.strip()][:4]
         if q.question.strip() and options:
@@ -513,6 +572,12 @@ async def concept_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
         chosen_direction=format_direction_choice(state.get("direction") or {}) if state.get("mode") == "puzzle" else "",
     )
     concept = result.model_dump(exclude={"remark", "decisions"})
+    title = (state.get("direction") or {}).get("title")
+    if title and concept["title"] != title:
+        concept["alt_titles"] = list(
+            dict.fromkeys([concept["title"], *(alt for alt in concept.get("alt_titles") or [] if alt != title)])
+        )
+        concept["title"] = title
     if (state.get("settings") or {}).get("chapter_words"):
         concept["chapter_words"] = state["settings"]["chapter_words"]
     await d.emit.say("chief", result.remark)

@@ -260,7 +260,7 @@ export function useJobActions(bookId: string) {
   const setJob = (job: Job) =>
     qc.setQueryData<BookDetail>(keys.book(bookId), (old) => (old ? { ...old, active_job: job } : old))
   const directions = useMutation({
-      mutationFn: ({ jobId, ...body }: { jobId: string; action: 'choose' | 'redo'; choice?: number; mix?: string; length?: string; feedback?: string }) =>
+      mutationFn: ({ jobId, ...body }: { jobId: string; action: 'choose' | 'redo'; choice?: number; title?: string; mix?: string; length?: string; feedback?: string }) =>
         post<Job>(`/jobs/${jobId}/directions`, body),
       onSuccess: setJob,
     })
@@ -270,7 +270,7 @@ export function useJobActions(bookId: string) {
       onSuccess: setJob,
     })
   const chooseDirection = useMutation({
-    mutationFn: ({ jobId, ...body }: { jobId: string; choice: number; mix?: string; length?: string }) => post<Job>(`/jobs/${jobId}/directions`, { ...body, action: 'choose' }),
+    mutationFn: ({ jobId, ...body }: { jobId: string; choice: number; title?: string; mix?: string; length?: string }) => post<Job>(`/jobs/${jobId}/directions`, { ...body, action: 'choose' }),
     onSuccess: setJob,
   })
   const redoDirections = useMutation({

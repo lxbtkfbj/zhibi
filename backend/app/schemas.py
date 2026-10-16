@@ -574,6 +574,7 @@ SetupPiece = Literal["concept", "nodes", "cast", "fill", "first_volume"]
 class DirectionDecision(BaseModel):
     action: Literal["choose", "redo"]
     choice: int | None = Field(None, ge=0)
+    title: str | None = Field(None, description="作者选中的书名，必须属于所选方向的书名候选")
     mix: str = Field("", max_length=20000)
     length: str = Field("", max_length=1000)
     feedback: str = Field("", max_length=20000)

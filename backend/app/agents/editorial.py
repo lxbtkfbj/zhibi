@@ -52,9 +52,16 @@ async def draft_concept(
     return await llm.structured("chief", s.BookConcept, persona("chief"), user, purpose="开书·概念")
 
 
-async def draft_directions(llm: LLMRouter, idea: str, style: str, requirements: str = "") -> s.BookDirections:
+async def draft_directions(
+    llm: LLMRouter, idea: str, style: str, requirements: str = "", previous: str = ""
+) -> s.BookDirections:
     user = render(
-        "setup_directions", idea=idea, style=format_style(style), requirements=requirements, glossary=glossary_block()
+        "setup_directions",
+        idea=idea,
+        style=format_style(style),
+        requirements=requirements,
+        glossary=glossary_block(),
+        previous=previous,
     )
     return await llm.structured("chief", s.BookDirections, persona("chief"), user, purpose="开书·方向")
 

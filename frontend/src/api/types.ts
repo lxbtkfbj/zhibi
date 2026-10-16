@@ -24,6 +24,7 @@ export interface AuthorChoice {
 
 export interface BookDirection {
   name: string
+  titles?: string[]
   logline: string
   protagonist: string
   golden_finger: string
@@ -61,7 +62,7 @@ export interface NodeUpdateProposal {
 export type Pending =
   | { kind: 'setup_questions'; questions: InterviewQuestion[] }
   | { kind: 'setup_review'; round: number; title?: string }
-  | { kind: 'setup_directions'; directions: BookDirection[]; recommended: number; length: InterviewQuestion }
+  | { kind: 'setup_directions'; reference?: string; directions: BookDirection[]; recommended: number; length: InterviewQuestion & { chapter_words?: number } }
   | { kind: 'setup_piece'; piece: PieceKey; round: number; warnings?: string[]; decisions?: AuthorChoice[]; suggestions?: SetupSuggestion[]; unlock_requests?: { target: SetupTarget; reason: string }[]; candidates?: { node_id: string; nodes: NodeCandidate[] } | null }
   | { kind: 'volume_review'; volume: number; title: string; issues?: string[]; node_update?: NodeUpdateProposal | null; node_conflict?: string }
   | { kind: 'trial_read'; chapters: number }

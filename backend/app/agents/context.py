@@ -330,8 +330,31 @@ def format_direction_choice(direction: dict[str, Any] | None) -> str:
         f"基调：{direction.get('tone', '')}",
         f"目标读者：{direction.get('reader', '')}",
     ]
+    if direction.get("titles"):
+        lines.append("书名候选：" + "".join(f"《{title}》" for title in direction["titles"]))
+    if direction.get("title"):
+        lines.append(f"作者选定的书名：《{direction['title']}》")
     if direction.get("mix"):
         lines.extend(["", "【作者的混搭要求】", direction["mix"]])
+    return "\n".join(lines)
+
+
+def format_previous_directions(previous: dict[str, Any] | None) -> str:
+    """只渲染被作者否决的最近一轮，不把更早的方向嵌套带回模型。"""
+    if not previous:
+        return ""
+    lines = ["【上一轮的方向（作者不满意）】"]
+    if previous.get("reference"):
+        lines.append(f"你对对标作品的理解：{previous['reference']}")
+    for index, direction in enumerate(previous.get("directions") or [], 1):
+        line = (
+            f"{index}. 方向「{direction.get('name', '')}」：{direction.get('logline', '')}；"
+            f"金手指：{direction.get('golden_finger', '')}；舞台阶梯：{direction.get('stage_ladder', '')}"
+        )
+        if direction.get("titles"):
+            line += "；书名候选：" + "".join(f"《{title}》" for title in direction["titles"])
+        lines.append(line)
+    lines.append(f"作者的意见：{previous.get('feedback', '')}")
     return "\n".join(lines)
 
 

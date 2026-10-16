@@ -35,11 +35,18 @@ def _concept(user: str) -> s.BookConcept:
             alt_titles = [title + "记", title + "录"]
     length = int(_match(r"这本书打算写多长？[—－-]+[^\n]*?(\d+)\s*万", user) or 100)
     # 演示也落实作者换选项的决定，不只回显一份不变的示例。
-    feelings = re.findall(r"(?:把)?「感情线」改成[：:]?\s*[「]?([^」\n]+)", user)
-    feeling = feelings[-1].strip() if feelings else "并肩查案慢慢靠近"
+    current = _section(user, "当前概念")
+    instructions = _section(user, "修改要求")
+    if not instructions and not any(
+        marker in user for marker in ("【作者选定的方向】", "【当前概念】", "【作者的要求", "要求：")
+    ):
+        # 保留早期直接传入简短修改指令的演示调用；完整模板只认本轮修改要求。
+        instructions = user
+    feelings = re.findall(r"(?:把)?「感情线」改成[：:]?\s*[「]?([^」\n]+)", instructions)
+    feeling = feelings[-1].strip() if feelings else _match(r"感情线：([^\n]+)", current) or "并肩查案慢慢靠近"
     cost = "每次点灯消耗一天寿元，必须权衡救人与自保"
-    revised_cost = cost in user
-    return s.BookConcept(
+    revised_cost = cost in instructions
+    concept = s.BookConcept(
         title=title,
         alt_titles=alt_titles,
         genre="玄幻·东方玄幻" if harem else "玄幻·修仙",
@@ -67,6 +74,50 @@ def _concept(user: str) -> s.BookConcept:
         ],
         remark="这本书的钩子我定在「看得见寿元的青灯」上，信息差是最稳的爽点，主角靠脑子赢。篇幅先按 100 万字、八卷来规划。",
     )
+    chosen = _section(user, "作者选定的方向")
+    if chosen:
+        candidates = re.findall(r"《([^》]+)》", _match(r"书名候选：([^\n]+)", chosen))
+        selected = _match(r"作者选定的书名：《([^》]+)》", chosen)
+        if selected or candidates:
+            concept.title = selected or candidates[0]
+            concept.alt_titles = [candidate for candidate in candidates if candidate != concept.title]
+        for field, label in (
+            ("protagonist_hook", "金手指"),
+            ("stage_ladder", "舞台阶梯"),
+            ("tone", "基调"),
+            ("target_reader", "目标读者"),
+        ):
+            value = _match(rf"(?:^|\n){label}：([^\n]+)", chosen)
+            if value:
+                setattr(concept, field, value)
+        logline = _match(r"方向「[^」]*」：([^\n]+)", chosen)
+        if logline:
+            concept.logline = logline
+        points = _match(r"(?:^|\n)卖点：([^\n]+)", chosen)
+        if points:
+            concept.selling_points = points.split("；")
+        if any(word in chosen for word in ("恐怖屋", "鬼屋")):
+            concept.genre = "悬疑·灵异"
+            concept.tags = ["经营", "怪谈", "信息差", "悬疑"]
+        concept.remark = f"我沿用作者选中的方向和设定，书名定为《{concept.title}》，按 {length} 万字安排后续拼图。"
+    # 方向只是初始基底，不能在之后修改时盖回作者已经改好的概念。
+    current_hook = _match(r"(?:^|\n)主角钩子：([^\n]+)", current)
+    if current_hook:
+        concept.protagonist_hook = current_hook
+    current_points = re.findall(r"^- (.+)$", _match(r"核心卖点：\n(.*?)\n主角钩子：", current), re.M)
+    if current_points:
+        concept.selling_points = current_points
+    if revised_cost:
+        concept.protagonist_hook = cost
+    if feelings:
+        if any("感情线：" in point for point in concept.selling_points):
+            concept.selling_points = [
+                re.sub(r"感情线：.*", f"感情线：{feeling}", point) for point in concept.selling_points
+            ]
+        else:
+            prefix = "宗门内斗与正邪两道的灰色地带" if concept.genre.startswith("玄幻") else "在主线追查中逐渐建立信任"
+            concept.selling_points.append(f"{prefix}；感情线：{feeling}")
+    return concept
 
 
 def _lore(user: str = "") -> s.LoreDraft:
@@ -856,52 +907,140 @@ def _volume_plan(user: str) -> s.VolumePlanDraft:
 
 def _book_directions(user: str) -> s.BookDirections:
     techniques = [name for name, _ in terms()]
+    idea = _section(user, "作者的点子").split("\n\n", 1)[0].strip() or _idea(user)
+    referenced = any(word in idea for word in ("借用", "像", "对标", "《", "》"))
+    horror = any(word in idea for word in ("恐怖屋", "鬼屋"))
+    previous = _section(user, "上一轮的方向")
+    # 两组不同的主线、开局与对手轮换，连续重出也不重复最近一轮。
+    alternate = bool(previous) and "旧账追凶流" not in previous
+    reference = ""
+    if referenced:
+        reference = (
+            "演示理解：作者要保留恐怖屋经营、任务解锁场景与员工的核心设定；"
+            "爽点是主角掌握游客和对手不知道的秘密，把恐惧变成经营优势。"
+            "主角应敢于追查真相，舞台由城区逐步扩大到城市以外，整体兼有悬疑与反差幽默。"
+            "原作细节不确定，请作者纠正；人物和具体案件另写。"
+            if horror
+            else "演示理解：作者点名了借鉴对象，已经确定的题材、主角和核心设定都应保留，"
+            "三个方向只更换尚未确定的主线谜团、开局事件与主要对手。"
+            "演示模式无法核实这部作品：核心金手指、具体爽点、主角性格、舞台扩大方式与整体气质均不确定，"
+            "请作者补充或纠正，不把示例当成原作介绍。"
+        )
     variants = [
         (
-            "青灯藏锋",
+            "寿元智斗流",
+            ["灯下看余生", "杂役先知"],
             "杂役少年陆远",
-            "看见寿元，每次点灯消耗自己一天寿命",
+            "青灯能照见他人剩余寿元，查明一次寿元异变便解锁更远的照见范围；只能在近处取证，主角必须接近危险人物才能看穿布局。",
             "受伤的杂役捡到青灯，发现欺压他的人只剩两天寿元",
-            "宗门 → 寒原 → 血河总坛",
+            "青石镇 → 玄冥宗辖境 → 北境诸国 → 九州",
             "信息差智斗",
         ),
         (
-            "逆命医女",
+            "医者逆袭流",
+            ["病因可见", "弃女开方"],
             "被逐出家门的医女苏青",
-            "转移伤势，但必须自己承受一半代价",
+            "她能看见病症背后被掩盖的病因，每救一人便解锁一类疑难病；诊断必须亲手接触病人，救敌人还是保住身份要自己选。",
             "医馆被封的当天，她救活了本该死去的巡城使",
-            "边城医馆 → 王都 → 古战场",
+            "边城 → 王都 → 东域诸国 → 九州",
             "救人与身份反转",
         ),
         (
-            "寒原契约",
+            "契约博弈流",
+            ["契约背面", "逃债人作主"],
             "被追捕的少年账房程越",
-            "能看见契约漏洞，但利用漏洞会失去一段记忆",
+            "他能看见契约隐藏的漏洞，每破解一份便能读懂更高阶契约；必须拿到双方签押的原件，迫使他潜入债主控制的地盘。",
             "押送途中发现自己是寿元账册上的抵押品，设局逃走",
-            "流亡商队 → 地下市集 → 王庭",
+            "寒原边城 → 北境王国 → 大陆商盟 → 天外诸国",
             "冒险与契约博弈",
         ),
     ]
+    if alternate:
+        revisions = [
+            ("旧账追凶流", ["账上无人", "欠命人还账"], "查清被篡改的旧账", "旧账送上门，当年的受害者却成了如今的权贵"),
+            (
+                "卧底破局流",
+                ["门内有眼", "小人物入局"],
+                "潜入对手内部搜证",
+                "对手主动递来邀约，入局条件却是交出唯一的证人",
+            ),
+            (
+                "守城反击流",
+                ["城中最后一盏灯", "不退的守门人"],
+                "守住众人赖以生存的家园",
+                "整座城收到撤离令，主角发现命令背后藏着一桩交易",
+            ),
+        ]
+        variants = [
+            (name, titles, old[2], old[3], opening, old[5], advantage)
+            for old, (name, titles, advantage, opening) in zip(variants, revisions, strict=True)
+        ]
+    if referenced or horror:
+        # 点名借鉴时不能为了方向差异换题材或换掉既定核心能力。
+        hero = "继承旧恐怖屋的年轻经营者林舟" if horror else "作者设定中的主角"
+        power = (
+            "完成隐藏任务便能把真实怪谈场景收进恐怖屋，随着场景增加解锁更大园区；必须亲自进入事件查清来由，才能获得扩建资格。"
+            if horror
+            else "沿用作者已经指定的核心能力，不另换金手指；成长与限制沿原设定展开，遇到不确定的规则先请作者确认，不擅自增加折磨式代价。"
+        )
+        ladder = "老城区 → 整座城市 → 省城 → 全国" if horror else "沿作者指定的舞台，由当地势力圈扩展到更大区域"
+        if not alternate:
+            revisions = [
+                (
+                    "旧案追凶流",
+                    ["闭园后有客", "老板请留灯"],
+                    "追查来客背后的失踪旧案",
+                    "闭园后的来客留下失踪者照片，第二天照片中人却来应聘",
+                ),
+                (
+                    "经营反杀流",
+                    ["夜场满座", "小老板不关门"],
+                    "查清竞争者的收购阴谋",
+                    "同行买断客源逼主角关门，一条匿名订单却带来突破口",
+                ),
+                (
+                    "同伴解谜流",
+                    ["留下的名字", "与无名者同行"],
+                    "查明同伴被抹去的身份",
+                    "新同伴能认出每一位来客，却唯独不记得自己的名字",
+                ),
+            ]
+            variants = [
+                (name, titles, hero, power, opening, ladder, advantage)
+                for name, titles, advantage, opening in revisions
+            ]
+        else:
+            variants = [
+                (name, titles, hero, power, opening, ladder, advantage)
+                for name, titles, _, _, opening, _, advantage in variants
+            ]
+    title_rule = _match(r"(?:^|\n)- 书名：([^\n]+)", user)
     return s.BookDirections(
+        reference=reference,
         directions=[
             s.BookDirection(
                 name=name,
-                logline=f"{hero}为了找回自己的命运，与买卖寿元的人周旋",
+                titles=[f"{titles[0]}：{hero}{advantage}", f"{titles[1]}：从无人看好到掌握主动"]
+                if title_rule.startswith("番茄式长书名")
+                else titles,
+                logline=f"{idea}；{hero}以{advantage}破局，追出幕后操盘者",
                 protagonist=f"{hero}，处境艰难却不肯放弃判断，表面退让而心里有自己的底线",
                 golden_finger=power,
                 opening=opening,
-                selling_points=[advantage, "每次取胜都有明确代价"],
+                selling_points=[advantage, "把只有主角知道的线索变成反击筹码"],
                 stage_ladder=ladder,
-                tone="冷静智斗，关键时刻热血",
-                reader="男频，爱看靠判断赢下强敌，不喜欢无代价开挂",
+                tone="悬疑中带反差幽默" if horror else "沿作者点子的基调，关键时刻靠判断破局",
+                reader="爱看主角用信息差扳回劣势，不喜欢强行降智或无端折磨",
                 difference=f"这个方向主要靠{advantage}吸引读者",
-                editor_note="先给主角一个别人看不见的优势，再用必须付出的代价保住悬念。",
+                editor_note="让读者先看到主角掌握的秘密，再看他冒险把秘密变成筹码，赢得有悬念也有依据。",
                 techniques=techniques[3:5],
             )
-            for name, hero, power, opening, ladder, advantage in variants
+            for name, titles, hero, power, opening, ladder, advantage in variants
         ],
         recommended=0,
-        remark="我推荐青灯藏锋，信息差与代价能一起推动长篇；另外两个方向分别偏救人和冒险。",
+        remark=f"我推荐{variants[0][0]}，主线追问清楚，信息差能持续带出新事件。"
+        + ("这轮换了主线冲突和开局，保留作者原先确定的设定。" if previous else "")
+        + ("请看看我对对标作品的理解对不对。" if reference else ""),
     )
 
 

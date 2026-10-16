@@ -94,6 +94,7 @@ async def test_choose_direction_records_length_direction_mix_and_resume(client, 
     assert queued[-1][1] == {
         "action": "choose",
         "choice": 1,
+        "title": None,
         "mix": "保留青灯的代价",
         "length": "100 万字",
         "feedback": "",
@@ -117,6 +118,7 @@ async def test_choose_direction_records_length_direction_mix_and_resume(client, 
         {"action": "choose", "choice": 99, "length": "100 万字"},
         {"action": "choose", "length": "100 万字"},
         {"action": "choose", "choice": 0, "length": "  "},
+        {"action": "choose", "choice": 0, "length": "100 万字", "title": "旧方向没有这个候选"},
         {"action": "redo", "feedback": "  "},
     ],
 )
@@ -137,6 +139,33 @@ async def test_direction_redo_and_wrong_legacy_endpoint(client, sessionmaker, qu
     assert response.status_code == 200
     assert await requirements(sessionmaker, book_id) == {("换成女主视角", "note")}
     assert queued[-1][1]["feedback"] == "换成女主视角"
+
+
+async def test_choose_direction_validates_title_in_selected_card_and_saves_answer(client, sessionmaker, queued):
+    book_id, job_id, _ = await gate(sessionmaker, kind="setup_directions")
+    async with sessionmaker() as session:
+        job = await session.get(Job, job_id)
+        job.pending = {
+            **job.pending,
+            "directions": [
+                {"name": "青灯寿命", "titles": ["青灯渡命", "借命少年"]},
+                {"name": "古镜追凶", "titles": ["镜中追凶", "捕快照夜"]},
+            ],
+        }
+        await session.commit()
+    path = f"/api/jobs/{job_id}/directions"
+    body = {"action": "choose", "choice": 1, "length": "约 200 万字（长篇，约 670 章）"}
+    for invalid in ("青灯渡命", "不存在的书名", "", " 镜中追凶 "):
+        response = await client.post(path, json={**body, "title": invalid})
+        assert response.status_code == 422, response.text
+        assert not queued and not await requirements(sessionmaker, book_id)
+        assert (await client.get(f"/api/jobs/{job_id}")).json()["status"] == "waiting_author"
+    response = await client.post(path, json={**body, "title": "镜中追凶"})
+    assert response.status_code == 200, response.text
+    assert ("书名用《镜中追凶》", "answer") in await requirements(sessionmaker, book_id)
+    assert queued[-1][1]["title"] == "镜中追凶"
+    messages = (await client.get(f"/api/books/{book_id}/meeting")).json()
+    assert messages[-1]["content"] == "选方向「古镜追凶」，书名用《镜中追凶》。"
 
 
 async def test_piece_revise_flips_and_feedback_are_durable(client, sessionmaker, queued):

@@ -44,6 +44,7 @@ BY_NAME = {row[0]: row for row in CATALOG}
 
 VARIABLE_LABELS = {
     "chosen_direction": "作者选定的方向",
+    "previous": "上一轮的方向",
     "slot": "要补的位置",
     "locked": "已确认的部分",
     "target_node": "本卷走向的节点",

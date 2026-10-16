@@ -10,7 +10,7 @@ from sqlalchemy import select
 
 from app.agents import editorial, schemas
 from app.config import get_settings
-from app.graphs.book_setup import PIECE_ORDER, build_setup_graph
+from app.graphs.book_setup import PIECE_ORDER, build_setup_graph, length_question
 from app.llm import demo
 from app.main import create_app
 from app.models import AuthorRequirement, Book, Job, MeetingMessage, Volume
@@ -58,6 +58,51 @@ async def new_puzzle(flow, idea="一个少年捡到青灯"):
 
 async def confirm(flow, jid, piece):
     return await flow("POST", f"/jobs/{jid}/piece", {"action": "confirm", "piece": piece})
+
+
+async def test_direction_redos_checkpoint_recent_round_and_chosen_title(flow, monkeypatch):
+    captured = []
+    original = demo.respond
+
+    async def capture(schema, system, user):
+        result = await original(schema, system, user)
+        if schema is schemas.BookDirections:
+            captured.append(user)
+            # 唯一标签区分三轮，避免只检查了「有上一轮」却把全部历史方向累积带回。
+            result.directions[0].name = f"仅第{len(captured)}轮方向"
+        elif schema is schemas.BookConcept:
+            result.title = "模型擅改的书名"
+        return result
+
+    monkeypatch.setattr(demo, "respond", capture)
+    created = await flow("POST", "/books", {"idea": "借用《某某》的设定", "mode": "puzzle"})
+    bid, jid = created["book"]["id"], created["job"]["id"]
+    first = (await flow("GET", f"/jobs/{jid}"))["pending"]
+    assert first["reference"]
+    assert first["length"] == length_question(3000)
+    assert "【上一轮的方向（作者不满意）】" not in captured[0]
+    await flow("POST", f"/jobs/{jid}/directions", {"action": "redo", "feedback": "第一轮意见：保留经营"})
+    second = (await flow("GET", f"/jobs/{jid}"))["pending"]
+    assert "仅第1轮方向" in captured[1] and "第一轮意见：保留经营" in captured[1]
+    assert first["reference"] in captured[1]
+    await flow("PATCH", f"/books/{bid}/settings", {"chapter_words": 2000})
+    await flow("POST", f"/jobs/{jid}/directions", {"action": "redo", "feedback": "第二轮意见：突出追凶"})
+    third = (await flow("GET", f"/jobs/{jid}"))["pending"]
+    assert third["length"] == length_question(2000)
+    assert "仅第2轮方向" in captured[2] and "仅第1轮方向" not in captured[2]
+    assert second["reference"] in captured[2]
+    # 更早的意见仍留在作者要求中，而方向正文仅带最近一轮。
+    assert "第一轮意见：保留经营" in captured[2] and "第二轮意见：突出追凶" in captured[2]
+    title = third["directions"][0]["titles"][1]
+    await flow(
+        "POST",
+        f"/jobs/{jid}/directions",
+        {"action": "choose", "choice": 0, "title": title, "length": third["length"]["options"][2]},
+    )
+    concept = (await flow("GET", f"/books/{bid}"))["concept"]
+    assert concept["title"] == title and "模型擅改的书名" in concept["alt_titles"]
+    assert concept["chapter_words"] == 2000
+    assert (await flow("GET", f"/jobs/{jid}"))["pending"]["piece"] == "concept"
 
 
 async def test_puzzle_complete_api_path_and_author_nodes(flow, sessionmaker, monkeypatch):

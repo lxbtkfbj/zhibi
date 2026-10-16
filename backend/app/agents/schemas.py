@@ -40,6 +40,10 @@ def remark_field(focus: str = "") -> Any:
 
 TECHNIQUES_DESC = "用到的技巧名称，只能从【术语表】里选，最多 3 个；没有合适的就留空"
 EDITOR_NOTE_DESC = "编辑批注：这里用了什么技巧、想让读者有什么感受，写给不懂写作技巧的作者看，一两句白话，30-80 字"
+STAGE_LADDER_DESC = (
+    "舞台阶梯：主角活动的大地图一层层扩大，每一层能撑一两卷，有自己的势力格局和强者上限，"
+    "如「青石镇 → 天剑宗 → 中州 → 上界」或「老城区 → 整座城市 → 省城 → 全国」；不是一个个副本或案发地点"
+)
 
 
 class AuthorChoice(Lenient):
@@ -57,13 +61,21 @@ def decisions_field() -> Any:
 
 
 class BookDirection(Lenient):
-    name: str = Field(description="方向名，4-8 字，如「废柴逆袭」「冷面师尊」")
+    name: str = Field(
+        description="方向名：给这个方向贴的标签，4-8 字，说清主打什么，如「废柴逆袭流」「旧案追凶流」；不是书名"
+    )
+    titles: list[str] = Field(
+        default_factory=list,
+        description="2 个书名候选，按【这本书的写作规矩】的书名要求起，不带书名号；两个候选换不同角度，一个突出金手指或核心意象，一个突出主角或反差",
+    )
     logline: str = Field(description="一句话故事，50 字以内：主角是谁、想要什么、最大的阻碍是什么")
     protagonist: str = Field(description="主角：身份、性格、最抓人的一点，30-60 字")
-    golden_finger: str = Field(description="金手指或核心优势：是什么、怎么用、有什么限制和代价，30-60 字")
+    golden_finger: str = Field(
+        description="金手指：先用一句话说清核心规则，再写怎么成长（越用越强、解锁或扩张什么）和一个能逼主角冒险或做选择的限制，40-80 字"
+    )
     opening: str = Field(description="开局怎么切入：前 3 章发生什么、核心钩子是什么，40-80 字")
     selling_points: list[str] = Field(description="2-3 个卖点，具体到读者爽在哪里")
-    stage_ladder: str = Field(description="舞台阶梯：地图怎么一层层往上走，如「青石镇 → 天剑宗 → 中州 → 上界」")
+    stage_ladder: str = Field(description=STAGE_LADDER_DESC)
     tone: str = Field(description="基调，如「热血爽快，偶尔幽默」")
     reader: str = Field(description="目标读者：男频还是女频、爱看什么、最讨厌什么，一句话")
     difference: str = Field(description="和其他方向最大的不同，一句话")
@@ -74,11 +86,13 @@ class BookDirection(Lenient):
 class BookDirections(Lenient):
     """开书前主编先给出几个方向，作者挑一个（也可以混搭）。"""
 
-    directions: list[BookDirection] = Field(
-        description="3 个方向，彼此要有实质差别：主角、金手指、开局、舞台至少两项不同"
+    reference: str = Field(
+        default="",
+        description="对标作品：作者点名借鉴或对标某本书时，写出你对那本书的理解——核心设定和金手指、读者爽在哪里、主角是什么样的人、舞台怎么扩大、整体气质，拿不准的地方写「不确定」，80-200 字；作者没有提到任何作品就留空",
     )
+    directions: list[BookDirection] = Field(description="3 个方向：作者已经定下的东西都保留，差别只做在作者没定的地方")
     recommended: int = Field(default=0, ge=0, description="你推荐的方向序号（从 0 开始）")
-    remark: str = remark_field("推荐哪个方向、为什么")
+    remark: str = remark_field("推荐哪个方向、为什么；有对标作品时请作者看看你的理解对不对")
 
 
 class BookConcept(Lenient):
@@ -98,9 +112,7 @@ class BookConcept(Lenient):
     )
     target_volumes: int = Field(ge=1, le=20, description="计划分几卷：按篇幅定，每卷通常 25-60 万字")
     chapter_words: int = Field(ge=1000, le=8000, description="每章目标字数，通常 2000-4000")
-    stage_ladder: str = Field(
-        default="", description="舞台阶梯：地图怎么一层层往上走，如「青石镇 → 天剑宗 → 中州 → 上界」"
-    )
+    stage_ladder: str = Field(default="", description=STAGE_LADDER_DESC)
     target_reader: str = Field(default="", description="目标读者：男频还是女频、爱看什么、最讨厌什么，一句话")
     decisions: list[AuthorChoice] = decisions_field()
     remark: str = remark_field("书名、核心卖点和篇幅为什么这样定")
