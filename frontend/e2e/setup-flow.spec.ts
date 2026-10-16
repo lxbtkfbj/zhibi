@@ -51,7 +51,7 @@ test('任务 2：一口气开书、前三章、新结构入库与历史产出卡
   expect(profiles.length).toBeGreaterThan(0)
   expect(profiles.every(profile => profile.provider === 'demo')).toBeTruthy()
   const defaults = await json<{ settings: { setup_mode: string } }>(request, '/settings/new-book-defaults')
-  expect(defaults.settings.setup_mode).toBe('oneshot')
+  expect(defaults.settings.setup_mode).toBe('puzzle')
   const created = await json<{ book: BookDetail; job: Job }>(request, '/books', 'POST', {
     idea: '第一包任务 2 浏览器验收：少年借青灯窥见寿元，沿着身世线索从小城走向高天，逐步揭开被隐瞒的真相。', mode: 'oneshot', ask: false,
   })
@@ -71,7 +71,7 @@ test('任务 2：一口气开书、前三章、新结构入库与历史产出卡
   expect(expectations.every(item => /^E\d+$/.test(item.code))).toBeTruthy()
 
   await page.goto(`/books/${bookId}`)
-  await page.getByRole('link', { name: '完整主线 →', exact: true }).click()
+  await page.getByRole('link', { name: '完整地图 →', exact: true }).click()
   await manuscript(page)
   await expect(page.getByRole('main', { name: '稿件' })).toContainText('之前得先有')
   await expect(page.getByRole('main', { name: '稿件' })).toContainText('之后变成')

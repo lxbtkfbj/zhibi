@@ -4,6 +4,7 @@ import { EditableList, EditableText } from '../../../components/Editable'
 import { Badge, Reveal } from '../../../components/ui'
 import { totalChapters } from '../../../lib/status'
 import { useBookContext } from '../context'
+import { PieceDecisions } from '../PieceDecisions'
 import { FieldBlock, Locked, PageHeader } from './common'
 
 export function ConceptPage() {
@@ -20,6 +21,7 @@ export function ConceptPage() {
 
   return (
     <div>
+      <PieceDecisions piece="concept" />
       <PageHeader
         eyebrow="书的概念"
         title={
@@ -67,6 +69,8 @@ export function ConceptPage() {
               <FieldBlock label="基调与文风">
                 <EditableText value={concept.tone ?? ''} onSave={(tone) => save({ tone })} locked={working} multiline />
               </FieldBlock>
+              <FieldBlock label="舞台阶梯"><EditableText value={concept.stage_ladder ?? ''} onSave={(stage_ladder) => save({ stage_ladder })} locked={working} multiline /></FieldBlock>
+              <FieldBlock label="目标读者"><EditableText value={concept.target_reader ?? ''} onSave={(target_reader) => save({ target_reader })} locked={working} multiline /></FieldBlock>
               <FieldBlock label="篇幅">
                 <span className="text-ink-2">
                   {concept.target_length ? `全书约 ${concept.target_length} 万字，` : ''}计划 {concept.target_volumes ?? '-'} 卷，每章约 {concept.chapter_words ?? '-'} 字

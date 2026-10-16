@@ -139,6 +139,22 @@ def test_demo_spine_ignores_authorization_in_historical_requirements(monkeypatch
     assert node.event == current["nodes"][1]["event"]
 
 
+def test_demo_card_revision_preserves_custom_pencil_snapshot(monkeypatch):
+    current = _demo_current(monkeypatch)
+    current["nodes"][3]["title"] = "作者采用的候选"
+    del current["nodes"][5]
+    user = format_revision(
+        "当前主线骨架", format_spine(current), "只改节点 4「作者采用的候选」：\n发生什么改为先救下被困的同门。"
+    )
+    result = demo._spine(user)
+    assert len(result.nodes) == len(current["nodes"])
+    assert [node.ref for node in result.nodes] == list(range(1, len(current["nodes"]) + 1))
+    assert result.nodes[3].title == "作者采用的候选"
+    assert result.nodes[3].event == "先救下被困的同门"
+    assert result.nodes[1].event == current["nodes"][1]["event"]
+    assert result.nodes[2].event == current["nodes"][2]["event"]
+
+
 def test_demo_spine_does_not_apply_one_nodes_event_to_other_authorized_nodes(monkeypatch):
     current = _demo_current(monkeypatch)
     user = format_revision(

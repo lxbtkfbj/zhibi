@@ -32,7 +32,7 @@ def _number(value: Any) -> int:
 def merge_nodes(
     ai_nodes: list[dict], current_nodes: list[dict], pinned_overrides: set[str] | None = None
 ) -> list[dict]:
-    """ref 对应提示词快照；作者本轮点名的铁钉只改内容、保留原位，其他铁钉照旧恢复。"""
+    """ref 对应提示词快照；所有铁钉保留原位，本轮点名只授权改内容，其他铁钉原样恢复。"""
     current = deepcopy(current_nodes)
     allowed = pinned_overrides or set()
     entries: list[tuple[dict, int | None]] = []
@@ -124,8 +124,9 @@ def merge_nodes(
         if node.get("kind") in {"opening", "ending"} and node.get("status") != "pinned":
             node["kind"] = "milestone"
     ordered = ([opening] if opening else []) + middle + ([ending] if ending else [])
-    # 内容授权不是重排授权；只固定本轮点名的铁钉，未授权节点沿用原合并规则。
-    fixed = [entry for entry in ordered if entry[0].get("status") == "pinned" and entry[0].get("id") in allowed]
+    # 内容授权不是重排授权；所有铁钉都固定在本次提示词快照的位置。
+    # 快照已包含作者手工插入、删除和重排，不能让模型把未点名铁钉挪回旧位置。
+    fixed = [entry for entry in ordered if entry[0].get("status") == "pinned"]
     for entry in fixed:
         ordered.remove(entry)
     for entry in sorted(fixed, key=lambda entry: entry[1]):
@@ -136,11 +137,7 @@ def merge_nodes(
         else:
             index = max(1 if opening else 0, min(entry[1], len(ordered) - (ending in ordered)))
         ordered.insert(index, entry)
-    if any(
-        index != source
-        for index, (node, source) in enumerate(ordered)
-        if node.get("status") == "pinned" and node.get("id") in allowed
-    ):
+    if any(index != source for index, (node, source) in enumerate(ordered) if node.get("status") == "pinned"):
         # 前置节点被漏删或结局前新增过多时，原位与两端规则可能无法同时成立。
         # 退回原拓扑，只采纳按 ref 对齐的内容，不能为 AI 的顺带结构调整移动作者铁钉。
         by_source = {source: node for node, source in ordered if source is not None}

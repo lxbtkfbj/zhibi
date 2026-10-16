@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
 import type { Concept, InterviewQuestion, LiveDraft, MeetingMessage, PlotUnit, Speaker, StoryThread } from '../../api/types'
 import { TypingDots } from '../../components/ui'
+import { TechniqueChip } from '../../components/TechniqueChip'
 import { ROLE_META } from '../../lib/roles'
 import { isFresh, useTypewriter } from '../../lib/team'
 import { artifactTarget } from '../../lib/workspace'
@@ -122,7 +123,7 @@ interface CritiqueData {
 const TARGET_NAME: Record<string, string> = {
   concept: '概念',
   lore: '世界观与人物',
-  spine: '主线骨架',
+  spine: '关键节点',
   threads: '线索',
   outline: '全书总纲',
   first_volume: '第一卷卷纲',
@@ -263,6 +264,14 @@ function VolumeAudit({ data }: { data: AuditData }) {
   )
 }
 
+function ArtifactAnnotation({ data }: { data: { editor_note?: string; techniques?: string[] } }) {
+  if (!data.editor_note && !data.techniques?.length) return null
+  return <div className="mt-3 border-t border-line pt-2">
+    {data.editor_note && <p className="text-xs leading-relaxed text-ink-2"><span className="mr-2">批注</span>{data.editor_note}</p>}
+    {!!data.techniques?.length && <div className="mt-2 flex flex-wrap gap-1.5">{data.techniques.map(name => <TechniqueChip key={name} name={name} />)}</div>}
+  </div>
+}
+
 export function ArtifactBody({ message }: { message: MeetingMessage }) {
   const { type, data } = message.payload ?? { type: '', data: null }
   if (type === 'questions') {
@@ -283,14 +292,18 @@ export function ArtifactBody({ message }: { message: MeetingMessage }) {
   if (type === 'spine') {
     const nodes = spineArtifactNodes(data)
     return (
-      <div className="space-y-2 text-ink-2">
-        <ol className="space-y-1 border-l border-line-2 pl-3">
+      <div className="space-y-3 text-ink-2">
+        <ol className="space-y-3 border-l border-line-2 pl-3">
           {nodes.map((node, i) => (
-            <li key={i}>
-              <span className={node.kind === 'ending' ? 'font-medium text-seal' : node.kind === 'opening' ? 'font-medium text-ink' : 'font-medium text-chief'}>{node.title}：</span>
-              {node.volume != null && <span className="text-xs text-ink-2">（第{node.volume}卷）</span>} {node.event || '（未定）'}
-              {node.prerequisite && <p className="mt-1 text-xs text-ink-2">之前：{node.prerequisite}</p>}
-              {node.consequence && <p className="mt-1 text-xs text-ink-2">之后：{node.consequence}</p>}
+            <li key={i} className="rounded-lg border border-line bg-card p-3">
+              <div className="mb-1.5 flex flex-wrap items-center justify-between gap-1">
+                <span className={clsx('font-serif text-base font-bold', node.kind === 'ending' ? 'text-seal' : node.kind === 'opening' ? 'text-ink' : 'text-chief')}>{i + 1}. {node.title}</span>
+                {node.volume != null && <span className="text-xs text-ink-2">约第 {node.volume} 卷</span>}
+              </div>
+              <p className="whitespace-pre-wrap">{node.event || '（未定）'}</p>
+              {node.prerequisite && <p className="mt-2"><span className="mr-2 text-xs text-ink-2">之前得先有</span>{node.prerequisite}</p>}
+              {node.consequence && <p className="mt-1"><span className="mr-2 text-xs text-ink-2">之后变成</span>{node.consequence}</p>}
+              <ArtifactAnnotation data={node} />
             </li>
           ))}
         </ol>
@@ -342,37 +355,34 @@ export function ArtifactBody({ message }: { message: MeetingMessage }) {
   if (type === 'outline') {
     const o = outlineArtifact(data)
     return (
-      <div className="space-y-1.5 text-ink-2">
+      <div className="space-y-3 text-ink-2">
         {o.volumes.map((v) => (
-          <p key={v.index}>
-            <span className="font-medium text-ink">第{v.index}卷《{v.title}》</span>
-            {v.chapter_count ? <span className="text-xs text-ink-2">约 {v.chapter_count} 章</span> : null}
-            {v.stage ? <span className="text-xs text-ink-2"> · {v.stage}</span> : null} {v.summary}
-            {v.target_node ? <span className="block text-xs text-chief">走向：节点 {v.target_node}{v.reaches_node ? '（本卷发生）' : ''}</span> : null}
-          </p>
+          <section key={v.index} className="rounded-lg border border-line bg-card p-3">
+            <div className="mb-1 flex flex-wrap items-start justify-between gap-2"><h3 className="font-serif text-base font-bold text-ink">第 {v.index} 卷《{v.title}》</h3>{v.chapter_count ? <span className="text-xs text-ink-2">约 {v.chapter_count} 章</span> : null}</div>
+            {v.stage && <p className="mb-1 text-xs text-chief">{v.stage}</p>}
+            <p>{v.summary}</p>
+            {v.target_node ? <p className="mt-2 text-xs text-chief">走向：节点 {v.target_node}{v.reaches_node ? '（本卷发生）' : ''}</p> : null}
+            <ArtifactAnnotation data={v} />
+          </section>
         ))}
-        {o.foreshadowings && o.foreshadowings.length > 0 && (
-          <p className="text-ink-2">
-            长线伏笔：{o.foreshadowings.map((f) => `${f.code || '（待编号）'} ${f.description}${f.plant_volume && f.payoff_volume ? `（第${f.plant_volume}卷埋→第${f.payoff_volume}卷收）` : ''}`).join('、')}
-          </p>
-        )}
-        {o.expectations.length > 0 && <p className="text-ink-2">长线期待：{o.expectations.map(f => `${f.code || '（待编号）'} ${f.description}${f.plant_volume && f.payoff_volume ? `（第${f.plant_volume}卷立→第${f.payoff_volume}卷兑现）` : ''}`).join('、')}</p>}
+        {(o.expectations.length > 0 || o.foreshadowings.length > 0) && <section className="space-y-2 border-t border-line pt-3"><h3 className="font-medium text-ink">长线伏笔与期待</h3>{[
+          ...o.expectations.map(item => ({ ...item, expectation: true })),
+          ...o.foreshadowings.map(item => ({ ...item, expectation: false })),
+        ].map((item, i) => <div key={i} className="rounded-lg bg-paper px-3 py-2"><p><span className={clsx('mr-2 font-medium', item.expectation ? 'text-chief' : 'text-lore')}>{item.code || '（待编号）'}</span>{item.description}</p><p className="mt-1 text-xs text-ink-2">{item.expectation ? '立下' : '埋下'}：{item.plant_volume ? `第 ${item.plant_volume} 卷` : '待定'} → {item.expectation ? '兑现' : '回收'}：{item.payoff_volume ? `第 ${item.payoff_volume} 卷` : '待定'}</p></div>)}</section>}
       </div>
     )
   }
   if (type === 'directions') {
     const directions = directionsArtifact(data)
-    return <ol className="space-y-4 text-ink-2">{directions.map((direction, i) => <li key={i}>
-      <p className="font-medium text-ink">方向 {i + 1}「{direction.name}」</p>
-      <p>{direction.logline}</p>
-      {direction.protagonist && <p>主角：{direction.protagonist}</p>}
-      {direction.golden_finger && <p>核心优势：{direction.golden_finger}</p>}
-      {direction.opening && <p>开局：{direction.opening}</p>}
-      {direction.selling_points.length > 0 && <p>卖点：{direction.selling_points.join('；')}</p>}
-      {direction.stage_ladder && <p>舞台：{direction.stage_ladder}</p>}
-      {direction.tone && <p>基调：{direction.tone}</p>}
-      {direction.reader && <p>读者：{direction.reader}</p>}
-      {direction.difference && <p className="text-xs">区别：{direction.difference}</p>}
+    return <ol className="space-y-4 text-ink-2">{directions.map((direction, i) => <li key={i} className="rounded-lg border border-line bg-card p-3">
+      <h3 className="mb-2 font-serif text-base font-bold text-ink">方向 {i + 1}「{direction.name}」</h3>
+      <p className="mb-3">{direction.logline}</p>
+      <dl className="space-y-1.5">{[
+        ['主角', direction.protagonist], ['金手指', direction.golden_finger], ['开局', direction.opening],
+        ['卖点', direction.selling_points.join('；')], ['舞台阶梯', direction.stage_ladder], ['基调', direction.tone],
+        ['目标读者', direction.reader], ['区别', direction.difference],
+      ].filter(([, content]) => content).map(([label, content]) => <div key={label} className="flex gap-2"><dt className="min-w-14 shrink-0 pt-0.5 text-xs text-ink-2">{label}</dt><dd className="min-w-0">{content}</dd></div>)}</dl>
+      <ArtifactAnnotation data={direction} />
     </li>)}</ol>
   }
   if (type === 'threads') {
@@ -542,7 +552,7 @@ function ArtifactCard({ message }: { message: MeetingMessage }) {
           onClick={() => target ? manualNavigate(target.path) : setOpen((value) => !value)}
           className="min-w-0 flex-1 px-3 py-2 text-left hover:bg-paper"
         >
-          <span className="block text-[13px] font-medium text-ink">{message.content}</span>
+          <span className="block text-sm font-medium text-ink">{message.content}</span>
           <span className="mt-1 block text-xs text-seal">{target ? '在右边打开 →' : '查看产出内容'}</span>
         </button>
         <button

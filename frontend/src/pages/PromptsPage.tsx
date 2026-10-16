@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
 import { useRef, useState } from 'react'
-import { useBooks } from '../api/hooks'
+import { keys, useBooks } from '../api/hooks'
 import { promptApi, type PromptDetail, type PromptInfo } from '../api/prompts'
 import { PromptEditor, type PromptEditorHandle } from '../components/PromptEditor'
 import { ErrorText, Sheet } from '../components/ui'
@@ -45,6 +45,7 @@ function TemplateEditor({ prompt, viewCall }: { prompt: PromptDetail; viewCall: 
     if (readPromptDraft(prompt.name) === submitted) writePromptDraft(prompt.name, null)
     setDraft(null); setEditable(false); setNotice('已保存，从下一步调用起对所有书生效。')
     await cache.invalidateQueries({ queryKey: ['prompts'] })
+    if (prompt.name === 'glossary') await cache.invalidateQueries({ queryKey: keys.glossary })
   } })
   const reset = useMutation({ mutationFn: async (_submitted: string) => { await promptApi.reset(prompt.name); return promptApi.detail(prompt.name) }, onSuccess: async (updated, submitted) => {
     if (readPromptDraft(prompt.name) === submitted) writePromptDraft(prompt.name, null)
@@ -52,6 +53,7 @@ function TemplateEditor({ prompt, viewCall }: { prompt: PromptDetail; viewCall: 
     save.reset()
     cache.setQueryData(['prompt', prompt.name], updated)
     await cache.invalidateQueries({ queryKey: ['prompts'] })
+    if (prompt.name === 'glossary') await cache.invalidateQueries({ queryKey: keys.glossary })
   } })
   const busy = save.isPending || reset.isPending
   const changeContent = (next: string) => {
@@ -63,7 +65,7 @@ function TemplateEditor({ prompt, viewCall }: { prompt: PromptDetail; viewCall: 
   }
   return <div className="flex min-h-0 min-w-0 flex-1 flex-col">
     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-settings-divider px-5 py-3">
-      <h2 className="text-base font-medium">{prompt.title}</h2>
+      <h2 className="flex flex-wrap items-center gap-2 text-base font-medium">{prompt.title}{prompt.default_changed && <span className="rounded-full border border-seal/30 bg-seal-soft px-2 py-0.5 text-xs font-normal text-seal">默认版本已更新</span>}</h2>
       <div className="flex gap-2">
         <SettingsButton disabled={busy || (!prompt.customized && content === prompt.default_content)} onClick={() => {
           if (window.confirm('恢复默认会移除这个提示词的全局自定义内容，确定继续吗？')) reset.mutate(content)
@@ -76,6 +78,11 @@ function TemplateEditor({ prompt, viewCall }: { prompt: PromptDetail; viewCall: 
       {roleName(prompt.role)} · {prompt.when} · {prompt.customized ? '已自定义' : '默认版本'} · 最近一次发出：{timestamp(prompt.last_call?.created_at ?? null)}
       {prompt.last_call && <button className="ml-2 text-chief hover:underline" onClick={() => viewCall(prompt.last_call!.id)}>查看 →</button>}
     </div>
+    {prompt.default_changed && <div className="border-b border-settings-divider bg-seal-soft/50 px-5 py-3 text-sm leading-relaxed text-ink-2" role="note">
+      <p className="font-medium text-seal">默认版本已更新，当前仍保留你的自定义内容。</p>
+      {prompt.new_variables?.length ? <p className="mt-1">新增变量：{prompt.new_variables.map(variable => `${variable.label}（${variable.name}）`).join('、')}。</p> : <p className="mt-1">默认模板的变量与当前自定义版本不同。</p>}
+      <p className="mt-1">可以手动合并新增变量，或点击「恢复默认」采用新模板；恢复前请先保留你需要的自定义内容。</p>
+    </div>}
     <div className="flex flex-wrap items-center gap-2 border-b border-settings-divider px-5 py-3">
       <span className="text-xs text-ink-2">可用变量</span>
       {prompt.variables.map(variable => <button key={variable.name} disabled={!editable || busy} title={`插入 {{${variable.name}}}`} className="prompt-variable disabled:cursor-default" onClick={() => editor.current?.insert(variable.name)}>{variable.label}</button>)}
@@ -97,8 +104,8 @@ function Templates({ viewCall }: { viewCall: (id: number) => void }) {
   return <div className="prompts-workspace settings-panel">
     <nav className="prompt-nav scroll-thin" aria-label="提示词列表">
       <ErrorText error={list.error} />
-      {Array.from(groups, ([group, prompts]) => <section key={group}><h3>{group}</h3>{prompts.map(prompt => <button key={prompt.name} aria-current={selected === prompt.name ? 'page' : undefined} onClick={() => setSelected(prompt.name)} className={clsx('prompt-nav-item', selected === prompt.name && 'is-selected')}>
-        <span className="truncate">{prompt.title}</span>{prompt.customized && <span className="size-1.5 shrink-0 rounded-full bg-seal" aria-label="已自定义" />}
+      {Array.from(groups, ([group, prompts]) => <section key={group}><h3>{group}</h3>{prompts.map(prompt => <button key={prompt.name} aria-current={selected === prompt.name ? 'page' : undefined} onClick={() => setSelected(prompt.name)} className={clsx('prompt-nav-item', selected === prompt.name && 'is-selected', prompt.default_changed && 'has-default-update')}>
+        <span className="min-w-0 flex-1"><span className="block truncate">{prompt.title}</span>{prompt.default_changed && <span className="mt-1 block text-xs text-seal">默认版本已更新</span>}</span>{prompt.customized && <span className="size-1.5 shrink-0 rounded-full bg-seal" aria-label="已自定义" />}
       </button>)}</section>)}
     </nav>
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-card">

@@ -7,14 +7,15 @@ import { Link, Outlet, useLocation, useNavigate, useParams } from 'react-router-
 import { useBook, useOutline } from '../../api/hooks'
 import type { BookDetail, Conversation } from '../../api/types'
 import { Seal } from '../../components/decor'
-import { Button, EmptyState, Skeleton } from '../../components/ui'
+import { EmptyState, Skeleton } from '../../components/ui'
 import { cleanTitle } from '../../lib/status'
 import { useMeeting } from '../../lib/useMeeting'
 import { useConversationReads, useWorkspaceResize } from '../../lib/useWorkspacePanels'
-import { currentTarget, pendingTarget, progressText } from '../../lib/workspace'
+import { currentTarget, nodeFeedback, progressText, type NodeFeedback } from '../../lib/workspace'
 import { BookContext, type BookContextValue } from './context'
 import { ConversationPanel } from './ConversationPanel'
-import { ApproveButton } from './Decision'
+import { DecisionBar } from './Decision'
+import { PuzzleTracker } from './PuzzleTracker'
 import { ConversationList, Sidebar } from './Sidebar'
 import { SetupArtifactPreview } from './SetupArtifactPreview'
 import { useSettingsModal } from '../../lib/settingsModal'
@@ -34,6 +35,8 @@ function BookWorkspace({ bookId, book }: { bookId: string; book: BookDetail }) {
   const [conversation, setConversationState] = useState<Conversation>('group')
   const [following, setFollowing] = useState(() => !window.location.pathname.endsWith('/settings'))
   const [focusComposer, setFocusComposer] = useState(0)
+  const [composerNode, setComposerNode] = useState<NodeFeedback | null>(null)
+  const [composerDrafts, setComposerDrafts] = useState<Record<string, string>>({})
   const [tab, setTab] = useState<'discussion' | 'manuscript'>('discussion')
   const [wide, setWide] = useState(() => window.innerWidth >= 1024)
   const [navOpen, setNavOpen] = useState(false)
@@ -51,11 +54,17 @@ function BookWorkspace({ bookId, book }: { bookId: string; book: BookDetail }) {
   const asking = job?.status === 'waiting_author' && job.pending?.kind === 'setup_questions'
   const waiting = job?.status === 'waiting_author' && !asking
   const followTarget = useMemo(() => currentTarget(bookId, job, messages, draft, outline), [bookId, job, messages, draft, outline])
-  const todo = job?.status === 'waiting_author' ? pendingTarget(job.pending, bookId) : null
   const unread = useConversationReads(bookId, messages, conversation, wide || tab === 'discussion')
   const setConversation = useCallback((next: Conversation) => { setConversationState(next); setTab('discussion') }, [])
   const manualNavigate = useCallback((path: string) => { setFollowing(false); setTab('manuscript'); void navigate(path) }, [navigate])
   const requestFeedback = useCallback(() => { setConversation('group'); setFocusComposer(n => n + 1) }, [setConversation])
+  const requestNodeFeedback: BookContextValue['requestNodeFeedback'] = useCallback(node => {
+    const selection = nodeFeedback(node)
+    setComposerNode(selection)
+    setComposerDrafts(previous => ({ ...previous, group: `${selection.prefix}${(previous.group ?? '').replace(/^关于节点 \d+「[^」]*」：/, '')}` }))
+    setConversation('group')
+    setFocusComposer(n => n + 1)
+  }, [setConversation])
   const celebrate = useCallback(() => {
     if (stampTimer.current) clearTimeout(stampTimer.current)
     setStamp(true)
@@ -92,7 +101,7 @@ function BookWorkspace({ bookId, book }: { bookId: string; book: BookDetail }) {
     const href = (event.target as Element).closest('a[href]')?.getAttribute('href')
     if (href?.startsWith(`/books/${bookId}`) && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.button === 0) { setFollowing(false); setTab('manuscript') }
   }
-  const ctx: BookContextValue = { bookId, book, job, messages, connected, draft, working, waiting, asking, outline, conversation, setConversation, unread, following, followTarget, manualNavigate, focusComposer, requestFeedback, celebrate }
+  const ctx: BookContextValue = { bookId, book, job, messages, connected, draft, working, waiting, asking, outline, conversation, setConversation, unread, following, followTarget, manualNavigate, focusComposer, requestFeedback, requestNodeFeedback, composerNode, setComposerNode, composerDrafts, setComposerDrafts, celebrate }
   const progress = progressText(book, messages, draft, followTarget)
   return <BookContext.Provider value={ctx}>
     <div className="flex h-full min-h-0 flex-col" onClickCapture={captureManualLink}>
@@ -112,7 +121,8 @@ function BookWorkspace({ bookId, book }: { bookId: string; book: BookDetail }) {
             onKeyDown={event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); step(event.key === 'ArrowLeft' ? -24 : 24) } else if (event.key === 'Home') { event.preventDefault(); reset() } }} className={clsx('relative z-30 hidden w-px shrink-0 touch-none cursor-col-resize bg-divider outline-none before:absolute before:inset-y-0 before:-left-1 before:w-[9px] hover:bg-seal focus:bg-seal lg:block', dragging && 'bg-seal')} />
           <main id="manuscript-pane" aria-label="稿件" className={clsx('@container/manuscript relative min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-page lg:flex', tab === 'manuscript' ? 'flex' : 'hidden')}>
             {!following && followTarget && <button data-testid="resume-follow" onClick={() => { setFollowing(true); setTab('manuscript') }} className="shrink-0 border-b border-divider bg-paper-2 px-5 py-3 text-left text-sm text-chief hover:bg-line/40">回到正在进行的：{followTarget.label} →</button>}
-            <AnimatePresence initial={false}>{waiting && job && todo && <motion.div key="decision" data-testid="decision-bar" initial={reduce ? false : { opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: reduce ? 0 : 0.28, ease: 'easeOut' }} className="z-10 flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-seal/25 bg-paper-2 px-5 py-3"><p className="text-sm font-medium text-seal">待你拍板：{todo.label}</p><div className="flex items-center gap-2"><ApproveButton job={job} /><Button size="sm" variant="ghost" onClick={requestFeedback}>提意见</Button></div></motion.div>}</AnimatePresence>
+            <PuzzleTracker />
+            <DecisionBar />
             <div ref={manuscriptScroll} data-testid="manuscript-scroll" className="scroll-thin min-h-0 flex-1 overflow-y-auto"><div className="mx-auto w-full max-w-5xl px-5 py-8 @2xl/manuscript:px-9"><SetupArtifactPreview><Outlet /></SetupArtifactPreview></div></div>
           </main>
         </div>

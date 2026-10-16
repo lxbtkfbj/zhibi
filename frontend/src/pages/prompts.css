@@ -3,6 +3,7 @@
 .prompt-nav { width: 170px; flex-shrink: 0; overflow-y: auto; background: var(--color-pane-left); border-right: 1px solid var(--color-divider); padding: 10px 0; }
 .prompt-nav h3 { margin: 12px 14px 5px; font-size: 12px; color: var(--color-ink-2); }
 .prompt-nav-item { display: flex; align-items: center; justify-content: space-between; gap: 6px; width: 100%; height: 30px; padding: 0 14px; font-size: 13px; text-align: left; color: var(--color-ink-2); }
+.prompt-nav-item.has-default-update { height: auto; min-height: 50px; padding-block: 6px; }
 .prompt-nav-item:hover { background: var(--color-line); }
 .prompt-nav-item.is-selected { background: var(--color-card); color: var(--color-ink); box-shadow: inset 2px 0 var(--color-seal); }
 .prompt-variable { display: inline-block; border: 0; border-radius: 4px; padding: 1px 6px; font-family: var(--font-sans); font-size: 12px; line-height: 20px; color: var(--color-chief); background: var(--color-chief-soft); white-space: nowrap; user-select: none; }

@@ -120,7 +120,7 @@ async def test_profiles_and_roles(client):
 
 
 async def test_new_book_flow(client, queued):
-    res = await client.post("/api/books", json={"idea": "一个能看见别人寿命的少年"})
+    res = await client.post("/api/books", json={"idea": "一个能看见别人寿命的少年", "mode": "oneshot"})
     assert res.status_code == 201, res.text
     book_id, job_id = res.json()["book"]["id"], res.json()["job"]["id"]
     assert len(queued) == 1
@@ -209,7 +209,7 @@ async def test_cancel_and_resume(client, queued):
 
 async def test_sse_replays_history_then_streams(client, queued, live_server):
     """SSE：先补发历史消息，再实时推送 worker 产生的新消息。"""
-    res = await client.post("/api/books", json={"idea": "穿越成反派的狗"})
+    res = await client.post("/api/books", json={"idea": "穿越成反派的狗", "mode": "oneshot"})
     book_id = res.json()["book"]["id"]
 
     received: list[dict] = []
@@ -242,7 +242,7 @@ async def test_sse_replays_history_then_streams(client, queued, live_server):
 
 async def test_questions_then_note_then_review(client, queued):
     """动笔前提问 → 作者回答（含补充）→ 作者插话 → 方案出来后插话改走「提修改意见」。"""
-    res = await client.post("/api/books", json={"idea": "一个能看见别人寿命的少年", "ask": True})
+    res = await client.post("/api/books", json={"idea": "一个能看见别人寿命的少年", "mode": "oneshot", "ask": True})
     book_id, job_id = res.json()["book"]["id"], res.json()["job"]["id"]
     await run_queued(queued)
 
@@ -301,7 +301,7 @@ async def test_questions_then_note_then_review(client, queued):
 
 
 async def test_write_chapters_and_read_them(client, queued):
-    res = await client.post("/api/books", json={"idea": "一个能看见别人寿命的少年"})
+    res = await client.post("/api/books", json={"idea": "一个能看见别人寿命的少年", "mode": "oneshot"})
     book_id, job_id = res.json()["book"]["id"], res.json()["job"]["id"]
     # 方案还没定稿不能开写
     assert (await client.post(f"/api/books/{book_id}/write", json={"count": 1})).status_code == 409
@@ -366,7 +366,7 @@ async def test_write_chapters_and_read_them(client, queued):
 
 
 async def test_export_needs_final_chapters(client, queued):
-    res = await client.post("/api/books", json={"idea": "一个能看见别人寿命的少年"})
+    res = await client.post("/api/books", json={"idea": "一个能看见别人寿命的少年", "mode": "oneshot"})
     assert (await client.get(f"/api/books/{res.json()['book']['id']}/export.txt")).status_code == 409
 
 

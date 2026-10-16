@@ -1,6 +1,6 @@
-import { createContext, useContext } from 'react'
-import type { BookDetail, Conversation, Job, LiveDraft, MeetingMessage, Outline } from '../../api/types'
-import type { WorkspaceTarget } from '../../lib/workspace'
+import { createContext, useContext, type Dispatch, type SetStateAction } from 'react'
+import type { BookDetail, Conversation, Job, LiveDraft, MeetingMessage, Outline, StoryNode } from '../../api/types'
+import type { NodeFeedback, WorkspaceTarget } from '../../lib/workspace'
 
 export interface BookContextValue {
   bookId: string
@@ -24,6 +24,11 @@ export interface BookContextValue {
   manualNavigate: (path: string) => void
   focusComposer: number
   requestFeedback: () => void
+  requestNodeFeedback: (node: Pick<StoryNode, 'id' | 'index' | 'title'>) => void
+  composerNode: NodeFeedback | null
+  setComposerNode: (node: NodeFeedback | null) => void
+  composerDrafts: Record<string, string>
+  setComposerDrafts: Dispatch<SetStateAction<Record<string, string>>>
   celebrate: () => void
 }
 

@@ -13,6 +13,7 @@ import type {
   LlmProfile,
   LlmProfileInput,
   MeetingMessage,
+  NodeAnchor,
   Outline,
   PlotUnit,
   Relationship,
@@ -44,6 +45,7 @@ export const keys = {
   profiles: ['profiles'] as const,
   roles: ['roles'] as const,
   health: ['health'] as const,
+  glossary: ['glossary'] as const,
 }
 
 export const useBooks = () => useQuery({ queryKey: keys.books, queryFn: () => get<BookSummary[]>('/books') })
@@ -57,6 +59,7 @@ export const useNodes = (id: string) =>
   useQuery({ queryKey: keys.nodes(id), queryFn: () => get<StoryNode[]>(`/books/${id}/nodes`) })
 export const useSecrets = (id: string) =>
   useQuery({ queryKey: keys.secrets(id), queryFn: () => get<Secret[]>(`/books/${id}/secrets`) })
+export const useGlossary = () => useQuery({ queryKey: keys.glossary, queryFn: () => get<{ terms: { term: string; explanation: string }[] }>('/glossary'), staleTime: Infinity, gcTime: Infinity })
 /** 章节目录；指定 volume 时只列这一卷，并带上章纲。 */
 export const useChapters = (id: string, volume?: number) =>
   useQuery({
@@ -72,7 +75,7 @@ export const useHealth = () =>
 export function useCreateBook() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (body: { idea: string; style_reference: string; ask: boolean }) =>
+    mutationFn: (body: { idea: string; style_reference: string; ask: boolean; mode?: 'puzzle' | 'oneshot' }) =>
       post<{ book: BookDetail; job: Job }>('/books', body),
     onSuccess: (data) => {
       qc.setQueryData(keys.book(data.book.id), data.book)
@@ -226,21 +229,56 @@ export function useBibleMutations<K extends BibleList>(bookId: string, list: K) 
   return { create, update, remove }
 }
 
+export function useAnchorMutations(bookId: string) {
+  const qc = useQueryClient()
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: keys.nodes(bookId) })
+    void qc.invalidateQueries({ queryKey: keys.bible(bookId) })
+  }
+  type Fields = Pick<NodeAnchor, 'node_id' | 'character_id' | 'kind' | 'note'>
+  const create = useMutation({ mutationFn: (body: Fields) => post<NodeAnchor>(`/books/${bookId}/anchors`, body), onSuccess: refresh })
+  const update = useMutation({ mutationFn: ({ id, ...body }: { id: string } & Partial<Fields>) => patch<NodeAnchor>(`/anchors/${id}`, body), onSuccess: refresh })
+  const remove = useMutation({ mutationFn: (id: string) => del(`/anchors/${id}`), onSuccess: refresh })
+  return { create, update, remove }
+}
+
+export function useSecretMutations(bookId: string) {
+  const qc = useQueryClient()
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: keys.secrets(bookId) })
+    void qc.invalidateQueries({ queryKey: keys.bible(bookId) })
+  }
+  type Fields = Pick<Secret, 'title' | 'truth' | 'knowers' | 'reader_knows' | 'reveal_plan' | 'node_id' | 'status'>
+  const create = useMutation({ mutationFn: (body: Partial<Fields>) => post<Secret>(`/books/${bookId}/secrets`, body), onSuccess: refresh })
+  const update = useMutation({ mutationFn: ({ id, ...body }: { id: string } & Partial<Fields>) => patch<Secret>(`/secrets/${id}`, body), onSuccess: refresh })
+  const remove = useMutation({ mutationFn: (id: string) => del(`/secrets/${id}`), onSuccess: refresh })
+  return { create, update, remove }
+}
+
 export function useJobActions(bookId: string) {
   const qc = useQueryClient()
   const setJob = (job: Job) =>
     qc.setQueryData<BookDetail>(keys.book(bookId), (old) => (old ? { ...old, active_job: job } : old))
-  return {
-    directions: useMutation({
+  const directions = useMutation({
       mutationFn: ({ jobId, ...body }: { jobId: string; action: 'choose' | 'redo'; choice?: number; mix?: string; length?: string; feedback?: string }) =>
         post<Job>(`/jobs/${jobId}/directions`, body),
       onSuccess: setJob,
-    }),
-    piece: useMutation({
+    })
+  const piece = useMutation({
       mutationFn: ({ jobId, ...body }: { jobId: string; action: 'confirm' | 'delegate' | 'revise' | 'candidates' | 'fill' | 'reopen' | 'unlock'; piece: SetupPiece; feedback?: string; node_id?: string; flips?: { topic: string; choice: string }[] }) =>
         post<Job>(`/jobs/${jobId}/piece`, body),
       onSuccess: setJob,
-    }),
+    })
+  const chooseDirection = useMutation({
+    mutationFn: ({ jobId, ...body }: { jobId: string; choice: number; mix?: string; length?: string }) => post<Job>(`/jobs/${jobId}/directions`, { ...body, action: 'choose' }),
+    onSuccess: setJob,
+  })
+  const redoDirections = useMutation({
+    mutationFn: ({ jobId, feedback }: { jobId: string; feedback: string }) => post<Job>(`/jobs/${jobId}/directions`, { action: 'redo', feedback }),
+    onSuccess: setJob,
+  })
+  return {
+    directions, chooseDirection, redoDirections, piece, pieceAction: piece,
     decide: useMutation({
       mutationFn: ({ jobId, action, feedback }: { jobId: string; action: 'approve' | 'revise'; feedback?: string }) =>
         post<Job>(`/jobs/${jobId}/decision`, { action, feedback: feedback ?? '' }),

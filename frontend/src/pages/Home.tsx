@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useBooks, useCreateBook, useDeleteBook, useProfiles } from '../api/hooks'
 import type { BookSummary } from '../api/types'
+import { useNewBookDefaults } from '../api/settings'
+import { Segmented } from '../components/settings/SettingsList'
 import { BookCover } from '../components/BookCover'
 import { Cloud, Diamond, FretDivider, InkMountains } from '../components/decor'
 import { Badge, Button, ErrorText, Modal, Reveal, Skeleton, Spinner } from '../components/ui'
@@ -33,6 +35,9 @@ function Composer({ autoFocus, flat }: { autoFocus?: boolean; flat?: boolean }) 
   const [style, setStyle] = useState('')
   const [showStyle, setShowStyle] = useState(false)
   const [ask, setAskState] = useState(readAskPref)
+  const defaults = useNewBookDefaults()
+  const [selectedMode, setSelectedMode] = useState<'puzzle' | 'oneshot' | null>(null)
+  const mode = selectedMode ?? defaults.data?.settings.setup_mode ?? 'puzzle'
   const [placeholder, setPlaceholder] = useState(0)
   const create = useCreateBook()
   const navigate = useNavigate()
@@ -61,9 +66,11 @@ function Composer({ autoFocus, flat }: { autoFocus?: boolean; flat?: boolean }) 
 
   const submit = async () => {
     // 快捷键会绕过按钮的禁用状态，这里再拦一次，避免重复建书
-    if (!ready || create.isPending) return
-    const result = await create.mutateAsync({ idea: idea.trim(), style_reference: style.trim(), ask })
-    navigate(`/books/${result.book.id}`)
+    if (!ready || create.isPending || !defaults.data) return
+    try {
+      const result = await create.mutateAsync({ idea: idea.trim(), style_reference: style.trim(), ask: mode === 'oneshot' && ask, mode })
+      navigate(`/books/${result.book.id}`)
+    } catch { /* 错误在创建区显示，保留点子 */ }
   }
 
   return (
@@ -92,6 +99,10 @@ function Composer({ autoFocus, flat }: { autoFocus?: boolean; flat?: boolean }) 
           className="mx-2 mb-2 w-[calc(100%-1rem)] resize-none rounded-xl bg-paper-2 px-3 py-2 text-sm leading-relaxed ring-1 ring-line focus:ring-line-2 focus:outline-none"
         />
       )}
+      <div className="flex flex-wrap items-center gap-3 border-t border-line/70 px-3 py-3">
+        <span className="text-sm text-ink-2">开书方式</span>
+        <Segmented label="开书方式" value={mode} options={[{ value: 'puzzle', label: '逐块确认（推荐）' }, { value: 'oneshot', label: '一口气出方案' }]} onChange={setSelectedMode} />
+      </div>
       <div className="flex flex-wrap items-center gap-2 px-2 pb-1">
         <button
           onClick={() => setShowStyle(!showStyle)}
@@ -106,7 +117,7 @@ function Composer({ autoFocus, flat }: { autoFocus?: boolean; flat?: boolean }) 
           <Sparkles className="size-3.5" />
           给我一个灵感
         </button>
-        <button
+        {mode === 'oneshot' && <button
           onClick={() => setAsk(!ask)}
           aria-pressed={ask}
           title="篇幅、主角名字、金手指、结局……主编动笔前先跟你对一下，免得写完整套方案才发现方向不对"
@@ -116,10 +127,10 @@ function Composer({ autoFocus, flat }: { autoFocus?: boolean; flat?: boolean }) 
           )}
         >
           {ask ? <Check className="size-3.5" /> : <MessageCircleQuestion className="size-3.5" />}
-          动笔前先问我
-        </button>
+          先问我几个问题
+        </button>}
         <span className="ml-auto hidden text-xs text-ink-3 sm:inline">Ctrl + Enter</span>
-        <Button variant="seal" size="lg" onClick={submit} loading={create.isPending} disabled={!ready}>
+        <Button variant="seal" size="lg" onClick={submit} loading={create.isPending} disabled={!ready || !defaults.data}>
           交给编辑部
           <ArrowRight className="size-4" />
         </Button>
@@ -131,6 +142,8 @@ function Composer({ autoFocus, flat }: { autoFocus?: boolean; flat?: boolean }) 
       )}
       <div className="px-2">
         <ErrorText error={create.error} />
+        <ErrorText error={defaults.error} />
+        {defaults.isError && <button className="text-sm text-seal underline" onClick={() => void defaults.refetch()}>重试读取新书默认</button>}
       </div>
     </div>
   )
@@ -140,11 +153,11 @@ function NewBookDialog({ open, onClose }: { open: boolean; onClose: () => void }
   return (
     <Modal open={open} onClose={onClose} title="开一本新书" wide>
       <p className="mb-4 text-sm leading-relaxed text-ink-2">
-        写下你的点子，一句话就够。编辑部会把它变成一本书的完整方案：概念、世界观与人物、主线骨架和分卷大纲。
+        写下你的点子，一句话就够。先选方向，再一起完成定调、关键节点、人物上轴、填中间和第一卷。
       </p>
       <Composer autoFocus flat />
       <p className="mt-3 text-xs leading-relaxed text-ink-3">
-        打开「动笔前先问我」，主编会先问你篇幅、主角、金手指、结局等几件关键的事；编辑部工作时，你也可以随时在右侧插话。
+        逐块确认会在每一块做完后停下来；一口气模式可选择「先问我几个问题」。编辑部工作时，你也可以随时在讨论里插话。
       </p>
     </Modal>
   )
@@ -240,7 +253,7 @@ export function Home() {
           </Reveal>
           <Reveal delay={0.24}>
             <p className="mt-4 text-center text-[13px] text-ink-3">
-              主编定概念 · 设定师建世界 · 主编定主线 · 主编写大纲 · 审稿挑刺 —— 随时插话，最后由你拍板
+              定调 · 钉关键节点 · 人物上轴 · 填中间 · 第一卷 —— 随时插话，每块由你确认
             </p>
           </Reveal>
         </div>

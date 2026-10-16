@@ -10,7 +10,41 @@ export interface InterviewQuestion {
   recommended: number
 }
 
-export type SetupPiece = 'concept' | 'nodes' | 'cast' | 'fill' | 'first_volume'
+export type PieceKey = 'concept' | 'nodes' | 'cast' | 'fill' | 'first_volume'
+export type SetupPiece = PieceKey
+export type PieceStatus = 'todo' | 'drafting' | 'waiting' | 'confirmed' | 'done'
+export type SetupTarget = 'concept' | 'spine' | 'lore' | 'outline' | 'threads' | 'first_volume'
+
+export interface AuthorChoice {
+  topic: string
+  chosen: string
+  alternatives: string[]
+  why: string
+}
+
+export interface BookDirection {
+  name: string
+  logline: string
+  protagonist: string
+  golden_finger: string
+  opening: string
+  selling_points: string[]
+  stage_ladder: string
+  tone: string
+  reader: string
+  difference: string
+  editor_note: string
+  techniques: string[]
+}
+
+export interface SetupSuggestion {
+  target: SetupTarget
+  problem: string
+  suggestion: string
+  severity?: 'high' | 'medium' | 'low'
+}
+
+export type NodeCandidate = Pick<StoryNode, 'title' | 'event' | 'prerequisite' | 'consequence' | 'volume' | 'editor_note' | 'techniques'>
 
 /**
  * 等作者处理的内容：setup_questions 动笔前的提问；setup_review 开书方案拍板；
@@ -19,8 +53,8 @@ export type SetupPiece = 'concept' | 'nodes' | 'cast' | 'fill' | 'first_volume'
 export type Pending =
   | { kind: 'setup_questions'; questions: InterviewQuestion[] }
   | { kind: 'setup_review'; round: number; title?: string }
-  | { kind: 'setup_directions'; directions: { name: string; logline: string }[]; recommended: number; length: InterviewQuestion }
-  | { kind: 'setup_piece'; piece: SetupPiece; round: number; warnings?: string[]; decisions?: { topic: string; chosen: string; alternatives: string[]; why: string }[]; suggestions?: unknown[]; unlock_requests?: unknown[]; candidates?: unknown }
+  | { kind: 'setup_directions'; directions: BookDirection[]; recommended: number; length: InterviewQuestion }
+  | { kind: 'setup_piece'; piece: PieceKey; round: number; warnings?: string[]; decisions?: AuthorChoice[]; suggestions?: SetupSuggestion[]; unlock_requests?: { target: SetupTarget; reason: string }[]; candidates?: { node_id: string; nodes: NodeCandidate[] } | null }
   | { kind: 'volume_review'; volume: number; title: string; issues?: string[] }
   | { kind: 'trial_read'; chapters: number }
   | { kind: 'chapter_stuck'; chapter: number; title: string; issues: string[] }
@@ -52,6 +86,9 @@ export interface Concept {
   target_length?: number
   target_volumes?: number
   chapter_words?: number
+  stage_ladder?: string
+  target_reader?: string
+  decisions?: AuthorChoice[]
 }
 
 /** 主线元信息；关键节点以节点接口为唯一事实来源。 */
@@ -102,8 +139,8 @@ export interface Secret {
 
 export interface SetupProgress {
   mode?: 'puzzle' | 'oneshot'
-  current?: 'concept' | 'nodes' | 'cast' | 'fill' | 'first_volume' | null
-  pieces?: Partial<Record<'concept' | 'nodes' | 'cast' | 'fill' | 'first_volume', string>>
+  current?: PieceKey | null
+  pieces?: Partial<Record<PieceKey, PieceStatus>>
 }
 
 export interface BookSummary {
@@ -174,6 +211,8 @@ export interface PlotUnit {
   status: 'planned' | 'outlined' | 'done'
   /** 单元写完后设定师写的单元回顾 */
   recap: string
+  editor_note?: string
+  techniques?: string[]
 }
 
 export interface Volume {
@@ -195,6 +234,10 @@ export interface Volume {
   /** 一卷写完后设定师写的卷回顾 */
   recap: string
   units: PlotUnit[]
+  target_node_id: string | null
+  reaches_node: boolean
+  editor_note: string
+  techniques: string[]
 }
 
 export interface ChapterOutline {

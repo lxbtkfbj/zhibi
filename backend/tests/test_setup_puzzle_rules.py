@@ -32,7 +32,7 @@ def node(id_, kind="milestone", status="pencil", volume=1):
     }
 
 
-def test_merge_nodes_ref_preserves_pin_and_origin_but_accepts_referenced_position():
+def test_merge_nodes_ref_preserves_pin_position_and_origin():
     current = [node("a", "opening"), node("b", status="pinned"), node("c", status="empty"), node("d", "ending")]
     original = deepcopy(current)
     merged = merge_nodes(
@@ -46,14 +46,14 @@ def test_merge_nodes_ref_preserves_pin_and_origin_but_accepts_referenced_positio
         current,
     )
     assert current == original
-    assert [item["id"] for item in merged] == ["a", "c", "b", None, "d"]
-    assert {key: value for key, value in merged[2].items() if key != "_snapshot_ref"} == current[1]
-    assert merged[1]["status"] == "pencil" and merged[1]["origin"] == "author"
-    assert merged[1]["event"] == "填好空位" and merged[1]["techniques"] == ["信息差"]
+    assert [item["id"] for item in merged] == ["a", "b", "c", None, "d"]
+    assert {key: value for key, value in merged[1].items() if key != "_snapshot_ref"} == current[1]
+    assert merged[2]["status"] == "pencil" and merged[2]["origin"] == "author"
+    assert merged[2]["event"] == "填好空位" and merged[2]["techniques"] == ["信息差"]
     assert merged[3]["status"] == "pencil" and merged[3]["origin"] == "ai"
 
 
-def test_merge_nodes_restores_omitted_pin_after_surviving_predecessor():
+def test_merge_nodes_restores_omitted_pin_at_its_snapshot_position():
     current = [node("a", "opening"), node("b"), node("c", status="pinned"), node("d"), node("e", "ending")]
     merged = merge_nodes(
         [
@@ -64,8 +64,9 @@ def test_merge_nodes_restores_omitted_pin_after_surviving_predecessor():
         ],
         current,
     )
-    assert [item["id"] for item in merged] == ["a", None, "b", "c", "e"]
-    assert merged[3]["_snapshot_ref"] == 3
+    assert [item["id"] for item in merged] == ["a", None, "c", "b", "e"]
+    assert merged[2]["_snapshot_ref"] == 3
+    assert {key: value for key, value in merged[2].items() if key != "_snapshot_ref"} == current[2]
 
 
 def test_merge_deduplicates_refs_and_corrects_boundary_kinds():
@@ -98,11 +99,12 @@ def test_pinned_boundaries_win_over_extra_ai_boundaries(reference_pins):
     drafts.append({"ref": 0, "kind": "结局", "title": "多余的新结局"})
     merged = merge_nodes(drafts, current)
     assert current == original
-    assert [item["kind"] for item in merged] == ["opening", "milestone", "milestone", "milestone", "ending"]
+    assert [item["kind"] for item in merged] == ["opening", "milestone", "ending"]
+    assert [item["id"] for item in merged] == [item["id"] for item in current]
     assert {key: value for key, value in merged[0].items() if key != "_snapshot_ref"} == current[0]
     assert {key: value for key, value in merged[-1].items() if key != "_snapshot_ref"} == current[-1]
     assert merged[0]["_snapshot_ref"] == 1 and merged[-1]["_snapshot_ref"] == 3
-    assert [item["title"] for item in merged[1:-1]] == ["多余的新开篇", "保留中间节点", "多余的新结局"]
+    assert [item["title"] for item in merged[1:-1]] == ["保留中间节点"]
 
 
 def test_unpersisted_node_refs_follow_snapshot_not_none_ids():

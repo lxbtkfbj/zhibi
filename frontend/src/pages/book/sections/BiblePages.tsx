@@ -3,12 +3,14 @@ import clsx from 'clsx'
 import { BookOpen, Castle, Gem, Landmark, MapPin, Mountain, Plus, ScrollText, Sparkles, Trash2, Zap } from 'lucide-react'
 import { motion } from 'motion/react'
 import { type ReactNode, useMemo, useState } from 'react'
-import { useBible, useBibleMutations } from '../../../api/hooks'
-import type { Character, ForeshadowingStatus } from '../../../api/types'
+import { useBible, useBibleMutations, useNodes } from '../../../api/hooks'
+import type { Character, Foreshadowing, ForeshadowingStatus } from '../../../api/types'
 import { EditableText } from '../../../components/Editable'
 import { Badge, Button, Card, EmptyState, ErrorText, inputClass, Sheet, Skeleton } from '../../../components/ui'
 import type { Tone } from '../../../lib/status'
 import { useBookContext } from '../context'
+import { PieceDecisions } from '../PieceDecisions'
+import { CharacterAnchors } from './CharacterAnchors'
 import { FieldBlock, Locked, PageHeader } from './common'
 
 function Stagger({ i, children, className }: { i: number; children: ReactNode; className?: string }) {
@@ -63,8 +65,10 @@ function CharacterSheet({ character, onClose }: { character: Character; onClose:
             loading={remove.isPending}
             onClick={async () => {
               if (confirm(`删除人物「${character.name}」？与之相关的人物关系也会删除。`)) {
-                await remove.mutateAsync(character.id)
-                onClose()
+                try {
+                  await remove.mutateAsync(character.id)
+                  onClose()
+                } catch { /* 保留抽屉与错误，供作者重试。 */ }
               }
             }}
           >
@@ -93,6 +97,7 @@ function CharacterSheet({ character, onClose }: { character: Character; onClose:
           </div>
         </div>
         {field('备注', 'notes')}
+        <CharacterAnchors characterId={character.id} />
         <ErrorText error={update.error ?? remove.error} />
       </div>
     </Sheet>
@@ -100,7 +105,9 @@ function CharacterSheet({ character, onClose }: { character: Character; onClose:
 }
 
 export function CharactersPage() {
-  const { bookId, locked, data, isLoading } = useBibleData()
+  const { bookId, locked, data, isLoading, error } = useBibleData()
+  const { job, manualNavigate } = useBookContext()
+  const nodes = useNodes(bookId)
   const { create } = useBibleMutations(bookId, 'characters')
   const [openId, setOpenId] = useState<string | null>(null)
   const characters = data?.characters ?? []
@@ -109,12 +116,19 @@ export function CharactersPage() {
   const add = async () => {
     const name = prompt('新人物的名字')?.trim()
     if (!name) return
-    const created = await create.mutateAsync({ name })
-    setOpenId(created.id)
+    try {
+      const created = await create.mutateAsync({ name })
+      setOpenId(created.id)
+    } catch { /* 页面显示错误，不跳走或删除已有内容。 */ }
   }
 
   return (
     <div>
+      <PieceDecisions piece="cast" />
+      {job?.status === 'waiting_author' && job.pending?.kind === 'setup_piece' && job.pending.piece === 'cast' && <div className="mb-5 rounded-xl border border-chief/20 bg-chief-soft/50 px-4 py-3 text-sm text-chief">
+        <p>这一块还包括世界观、人物关系和信息差</p>
+        <div className="mt-2 flex flex-wrap gap-4">{[['世界观', 'world'], ['人物关系', 'relations'], ['信息差', 'secrets']].map(([name, path]) => <a key={path} href={`/books/${bookId}/${path}`} onClick={event => { event.preventDefault(); manualNavigate(`/books/${bookId}/${path}`) }} className="underline underline-offset-4">{name} →</a>)}</div>
+      </div>}
       <PageHeader
         eyebrow="设定库"
         title="人物"
@@ -152,6 +166,10 @@ export function CharactersPage() {
                   </div>
                   <p className="mt-3 line-clamp-2 text-[14px] leading-relaxed text-ink-2">{c.personality}</p>
                   {c.goal && <p className="mt-2 line-clamp-1 text-[14px] text-ink-2">想要：{c.goal}</p>}
+                  <div className="mt-3 space-y-1.5 border-t border-line pt-3 text-sm text-ink-2">
+                    {(nodes.data ?? []).flatMap(node => node.anchors.filter(anchor => anchor.character_id === c.id).map(anchor => <p key={anchor.id} title={anchor.note}>节点 {node.index}「{node.title || '留空'}」· {anchor.kind}{anchor.note && `——${anchor.note}`}</p>))}
+                    {!(nodes.data ?? []).some(node => node.anchors.some(anchor => anchor.character_id === c.id)) && <p className="text-xs text-ink-3">还没有人物锚点</p>}
+                  </div>
                   {(c.location || c.condition) && (
                     <p className="mt-auto flex items-start gap-1 pt-3 text-xs text-ink-2">
                       <MapPin className="mt-0.5 size-3 shrink-0" />
@@ -164,6 +182,7 @@ export function CharactersPage() {
           )
         })}
       </div>
+      <ErrorText error={error ?? nodes.error ?? create.error} />
       {opened && <CharacterSheet character={opened} onClose={() => setOpenId(null)} />}
     </div>
   )
@@ -338,7 +357,7 @@ export function RelationsPage() {
   )
 }
 
-// ---------- 伏笔 ----------
+// ---------- 伏笔与期待 ----------
 
 const F_STATUS: Record<ForeshadowingStatus, { label: string; tone: Tone }> = {
   planned: { label: '计划中', tone: 'idle' },
@@ -346,87 +365,85 @@ const F_STATUS: Record<ForeshadowingStatus, { label: string; tone: Tone }> = {
   resolved: { label: '已回收', tone: 'ok' },
   abandoned: { label: '已放弃', tone: 'wait' },
 }
+const E_STATUS: Record<ForeshadowingStatus, { label: string; tone: Tone }> = {
+  planned: { label: '未立', tone: 'idle' },
+  planted: { label: '已立', tone: 'busy' },
+  resolved: { label: '已兑现', tone: 'ok' },
+  abandoned: { label: '放弃', tone: 'wait' },
+}
 
 export function ForeshadowingPage() {
-  const { bookId, locked, data, isLoading } = useBibleData()
+  const { bookId, locked, data, isLoading, error } = useBibleData()
   const { create, update, remove } = useBibleMutations(bookId, 'foreshadowings')
-  const items = data?.foreshadowings ?? []
+  const [filter, setFilter] = useState<'全部' | Foreshadowing['kind']>('全部')
+  const [adding, setAdding] = useState(false)
+  const [newKind, setNewKind] = useState<Foreshadowing['kind']>('伏笔')
+  const [description, setDescription] = useState('')
+  const items = (data?.foreshadowings ?? []).filter(item => filter === '全部' || item.kind === filter)
+  const busy = locked || create.isPending || update.isPending || remove.isPending
   return (
     <div>
       <PageHeader
         eyebrow="设定库"
-        title="伏笔"
-        subtitle="伏笔台账：每条伏笔有编号和排期，规划每一卷、每个单元时主编按台账安排埋下、提醒和回收；每写完一章，设定师更新它的状态。"
-        action={
-          !locked && (
-            <Button
-              size="sm"
-              variant="soft"
-              loading={create.isPending}
-              onClick={() => {
-                const description = prompt('伏笔内容')?.trim()
-                if (description) create.mutate({ description })
-              }}
-            >
-              <Plus className="size-4" />
-              添加伏笔
-            </Button>
-          )
-        }
+        title="伏笔与期待"
+        subtitle="伏笔是暗中埋下的线，期待是读者明知并等着兑现的承诺。编辑部按台账安排立下、提醒与兑现。"
+        action={!locked && <Button size="sm" variant="soft" disabled={busy} onClick={() => { setNewKind(filter === '全部' ? '伏笔' : filter); setAdding(true) }}><Plus className="size-4" />添加条目</Button>}
       />
       <Locked locked={locked} />
+      <div role="group" aria-label="按台账类型筛选" className="mb-5 inline-flex gap-1 rounded-xl bg-paper p-1 ring-1 ring-line">
+        {(['全部', '伏笔', '期待'] as const).map(value => <button key={value} aria-pressed={filter === value} onClick={() => setFilter(value)} className={clsx('rounded-lg px-4 py-2 text-sm transition-colors', filter === value ? 'bg-card text-chief shadow-sm' : 'text-ink-2 hover:bg-card/60')}>{value}</button>)}
+      </div>
+      {adding && !locked && <form className="mb-5 space-y-3 rounded-xl border border-line bg-card p-4" onSubmit={event => {
+        event.preventDefault()
+        if (!description.trim() || busy) return
+        create.mutate({ kind: newKind, description: description.trim() }, { onSuccess: () => { setAdding(false); setDescription(''); setFilter(newKind) } })
+      }}>
+        <div role="group" aria-label="新增条目类型" className="flex gap-2">{(['伏笔', '期待'] as const).map(kind => <Button key={kind} type="button" size="sm" disabled={busy} variant={newKind === kind ? 'primary' : 'outline'} aria-pressed={newKind === kind} onClick={() => setNewKind(kind)}>{kind}</Button>)}</div>
+        <textarea aria-label="新增台账内容" value={description} disabled={busy} onChange={event => setDescription(event.target.value)} placeholder={newKind === '期待' ? '读者知道并等着兑现的承诺' : '准备暗中埋下的线索'} className={clsx(inputClass, 'w-full resize-y')} rows={2} />
+        <div className="flex gap-2"><Button type="submit" variant="primary" size="sm" disabled={!description.trim() || busy} loading={create.isPending}>添加{newKind}</Button><Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => setAdding(false)}>取消</Button></div>
+      </form>}
+      <ErrorText error={error ?? create.error ?? update.error ?? remove.error} />
       {isLoading && <Skeleton className="h-48" />}
+      {!isLoading && !items.length && <p className="rounded-xl border border-dashed border-line-2 p-6 text-sm text-ink-2">{filter === '全部' ? '还没有伏笔或期待，可以先添上一条。' : `还没有${filter}。`}</p>}
       <div className="space-y-4">
-        {items.map((f, i) => (
-          <Stagger key={f.id} i={i}>
+        {items.map((f, i) => {
+          const expectation = f.kind === '期待'
+          const statuses = expectation ? E_STATUS : F_STATUS
+          const plant = expectation ? '立下' : '埋下'
+          const payoff = expectation ? '兑现' : '回收'
+          return <Stagger key={f.id} i={i}>
             <Card hover className="group p-5 @lg/manuscript:p-6">
-              <div className="mb-4 flex items-start gap-3">
-                <span className="mt-1 w-10 shrink-0 font-serif text-xl leading-none font-bold text-ink-2">{f.code}</span>
-                <EditableText value={f.description} onSave={(v) => update.mutateAsync({ id: f.id, description: v })} locked={locked} multiline className="flex-1 font-serif text-[17px] font-bold" />
-                {locked ? (
-                  <Badge tone={F_STATUS[f.status].tone}>{F_STATUS[f.status].label}</Badge>
-                ) : (
-                  <select
-                    value={f.status}
-                    onChange={(e) => update.mutate({ id: f.id, status: e.target.value as ForeshadowingStatus })}
-                    className="rounded-lg border border-line-2 bg-card px-2 py-1 text-xs"
-                  >
-                    {Object.entries(F_STATUS).map(([value, { label }]) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                )}
-                {!locked && (
-                  <button onClick={() => confirm('删除这条伏笔？') && remove.mutate(f.id)} className="rounded p-1 text-ink-2 opacity-0 transition-opacity group-hover:opacity-100 hover:text-seal" aria-label="删除">
-                    <Trash2 className="size-4" />
-                  </button>
-                )}
+              <div className="mb-4 flex flex-wrap items-start gap-3">
+                <span className="mt-1 shrink-0 font-serif text-xl leading-none font-bold text-ink-2">{f.code}</span>
+                <EditableText value={f.description} onSave={v => update.mutateAsync({ id: f.id, description: v })} locked={busy} multiline className="min-w-24 flex-1 font-serif text-[17px] font-bold" />
+                {locked ? <Badge tone={statuses[f.status].tone}>{statuses[f.status].label}</Badge> : <select aria-label={`${f.code} 状态`} value={f.status} disabled={busy} onChange={event => update.mutate({ id: f.id, status: event.target.value as ForeshadowingStatus })} className="rounded-lg border border-line-2 bg-card px-2 py-1 text-xs">
+                  {Object.entries(statuses).map(([value, { label }]) => <option key={value} value={value}>{label}</option>)}
+                </select>}
+                {!locked && <button title={`删除${f.kind}`} onClick={() => { if (confirm(`删除这条${f.kind}？`)) remove.mutate(f.id) }} disabled={busy} className="rounded p-1 text-ink-2 hover:text-seal disabled:opacity-50" aria-label={`删除 ${f.code}`}><Trash2 className="size-4" /></button>}
               </div>
-              <div className="mb-3 flex flex-wrap gap-1.5 pl-[52px] text-xs">
+              <div className="mb-3 flex flex-wrap gap-1.5 text-xs">
+                <Badge tone={expectation ? 'busy' : 'idle'}>{f.kind}</Badge>
                 <span className="rounded-full bg-line/70 px-2.5 py-0.5 text-ink-2">{f.span}线</span>
-                {f.plant_volume && <span className="rounded-full bg-lore-soft px-2.5 py-0.5 text-lore">计划第 {f.plant_volume} 卷埋</span>}
-                {f.payoff_volume && <span className="rounded-full bg-seal-soft px-2.5 py-0.5 text-seal">计划第 {f.payoff_volume} 卷收</span>}
-                {f.planted_chapter && <span className="rounded-full bg-card px-2.5 py-0.5 text-ink-2 ring-1 ring-line">第 {f.planted_chapter} 章已埋</span>}
-                {f.hint_chapters.length > 0 && (
-                  <span className="rounded-full bg-card px-2.5 py-0.5 text-ink-2 ring-1 ring-line">提醒于第 {f.hint_chapters.join('、')} 章</span>
-                )}
-                {f.resolved_chapter && <span className="rounded-full bg-card px-2.5 py-0.5 text-ink-2 ring-1 ring-line">第 {f.resolved_chapter} 章已收</span>}
+                {f.plant_volume && <span className="rounded-full bg-lore-soft px-2.5 py-0.5 text-lore">计划第 {f.plant_volume} 卷{plant}</span>}
+                {f.payoff_volume && <span className="rounded-full bg-seal-soft px-2.5 py-0.5 text-seal">计划第 {f.payoff_volume} 卷{payoff}</span>}
+                {f.planted_chapter && <span className="rounded-full bg-card px-2.5 py-0.5 text-ink-2 ring-1 ring-line">第 {f.planted_chapter} 章已{plant}</span>}
+                {f.hint_chapters.length > 0 && <span className="rounded-full bg-card px-2.5 py-0.5 text-ink-2 ring-1 ring-line">提醒于第 {f.hint_chapters.join('、')} 章</span>}
+                {f.resolved_chapter && <span className="rounded-full bg-card px-2.5 py-0.5 text-ink-2 ring-1 ring-line">第 {f.resolved_chapter} 章已{payoff}</span>}
               </div>
+              <p className="mb-3 text-xs text-ink-2">台账动作：{plant} / 提醒 / {payoff}</p>
               <div className="grid gap-3 @lg/manuscript:grid-cols-2">
                 <div className="border-t border-line pt-3">
-                  <p className="mb-1 text-xs text-ink-2">怎么埋</p>
-                  <EditableText value={f.plant_plan} onSave={(v) => update.mutateAsync({ id: f.id, plant_plan: v })} locked={locked} multiline className="text-[14px]" />
+                  <p className="mb-1 text-xs text-ink-2">怎么{plant}</p>
+                  <EditableText value={f.plant_plan} onSave={v => update.mutateAsync({ id: f.id, plant_plan: v })} locked={busy} multiline className="text-[14px]" />
                 </div>
                 <div className="border-t border-line pt-3">
-                  <p className="mb-1 text-xs text-ink-2">怎么收</p>
-                  <EditableText value={f.payoff_plan} onSave={(v) => update.mutateAsync({ id: f.id, payoff_plan: v })} locked={locked} multiline className="text-[14px]" />
+                  <p className="mb-1 text-xs text-ink-2">怎么{payoff}</p>
+                  <EditableText value={f.payoff_plan} onSave={v => update.mutateAsync({ id: f.id, payoff_plan: v })} locked={busy} multiline className="text-[14px]" />
                 </div>
               </div>
             </Card>
           </Stagger>
-        ))}
+        })}
       </div>
     </div>
   )

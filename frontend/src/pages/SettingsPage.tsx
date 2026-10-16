@@ -109,7 +109,9 @@ function AppearancePanel() {
 
 function DefaultsEditor({ initial }: { initial: SettingsResponse }) {
   const editor = useSettingsEditor(initial, '/settings/new-book-defaults', 'PUT')
-  return <><p className="mb-5 text-xs leading-5 text-ink-3">自动保存。只影响之后新开的书；已有书保留自己的设置。</p>{!!editor.error && <div className="mb-4"><ErrorText error={editor.error} /><SettingsButton onClick={editor.retry}>重试保存</SettingsButton></div>}<WritingSettings value={editor.value} onChange={editor.update} statuses={editor.statuses} /><RulesPreview text={editor.rulesText} /></>
+  return <><p className="mb-5 text-xs leading-5 text-ink-3">自动保存。只影响之后新开的书；已有书保留自己的设置。</p>{!!editor.error && <div className="mb-4"><ErrorText error={editor.error} /><SettingsButton onClick={editor.retry}>重试保存</SettingsButton></div>}
+    <SettingsGroup title="开书"><SettingsRow label="开书方式" hint="逐块确认：每做完一块停下来等你确认；一口气：做完整套方案再一起拍板" status={editor.statuses.setup_mode}><Segmented label="默认开书方式" value={editor.value.setup_mode} options={[{ value: 'puzzle', label: '逐块确认' }, { value: 'oneshot', label: '一口气出方案' }]} onChange={setup_mode => editor.update({ setup_mode })} /></SettingsRow></SettingsGroup>
+    <WritingSettings value={editor.value} onChange={editor.update} statuses={editor.statuses} /><RulesPreview text={editor.rulesText} /></>
 }
 function DefaultsPanel() {
   const query = useNewBookDefaults()

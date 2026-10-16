@@ -34,6 +34,11 @@ def _concept(user: str) -> s.BookConcept:
             title = rule.strip("《》")
             alt_titles = [title + "记", title + "录"]
     length = int(_match(r"这本书打算写多长？[—－-]+[^\n]*?(\d+)\s*万", user) or 100)
+    # 演示也落实作者换选项的决定，不只回显一份不变的示例。
+    feelings = re.findall(r"(?:把)?「感情线」改成[：:]?\s*[「]?([^」\n]+)", user)
+    feeling = feelings[-1].strip() if feelings else "并肩查案慢慢靠近"
+    cost = "每次点灯消耗一天寿元，必须权衡救人与自保"
+    revised_cost = cost in user
     return s.BookConcept(
         title=title,
         alt_titles=alt_titles,
@@ -43,9 +48,9 @@ def _concept(user: str) -> s.BookConcept:
         selling_points=[
             "青灯能看见他人剩余寿元，信息差带来的智斗爽感",
             "杂役翻身，每次突破都用计谋而非奇遇",
-            "宗门内斗与正邪两道的灰色地带",
+            f"宗门内斗与正邪两道的灰色地带；感情线：{feeling}",
         ],
-        protagonist_hook="陆远知道每个人还能活多久，却必须装作什么都不知道",
+        protagonist_hook=cost if revised_cost else "陆远知道每个人还能活多久，却必须装作什么都不知道",
         tone="冷静克制，带一点黑色幽默，节奏紧凑",
         target_length=length,
         target_volumes=8,
@@ -55,8 +60,8 @@ def _concept(user: str) -> s.BookConcept:
         decisions=[
             s.AuthorChoice(
                 topic="感情线",
-                chosen="并肩查案慢慢靠近",
-                alternatives=["从欢喜冤家开始", "先有师徒之谊"],
+                chosen=feeling,
+                alternatives=[x for x in ["并肩查案慢慢靠近", "从欢喜冤家开始", "先有师徒之谊"] if x != feeling][:2],
                 why="互相试探能让智斗与感情一起推进",
             )
         ],
@@ -314,6 +319,32 @@ def _spine(user: str = "") -> s.StorySpine:
         )
         for kind, title, volume, event, prerequisite, consequence in events
     ]
+    instruction = _match(r"【修改要求】\n(.*?)(?=\n\n请在当前版本|\n\n要求：|\Z)", user)
+    if re.search(r"只改节点\s*\d+", instruction):
+        # 卡片定向修改按当前快照回填，不能凭初始九节点重新引入作者已经删掉的节点。
+        snapshot = []
+        for match in re.finditer(
+            r"^节点\s+(\d+)「([^」]*)」([^\n［]*)［(?:铁钉|暂定|留空)(?:｜约第 (\d+) 卷)?］(?:发生：)?([^\n]*)((?:\n  [^\n]*)*)",
+            current,
+            re.M,
+        ):
+            index, title, label, volume, event, details = match.groups()
+            existing = next((node for node in nodes if node.ref == int(index)), None)
+            snapshot.append(
+                s.StoryNodeDraft(
+                    ref=int(index),
+                    kind="开篇" if "开篇" in label else "结局" if "结局" in label else "节点",
+                    title=title,
+                    volume=int(volume or 1),
+                    event=event,
+                    prerequisite=_match(r"之前得先有：([^\n]*)", details),
+                    consequence=_match(r"之后变成：([^\n]*)", details),
+                    editor_note=existing.editor_note if existing else "",
+                    techniques=existing.techniques if existing else [],
+                )
+            )
+        if snapshot:
+            nodes = snapshot
     revised_pins = _revise_demo_pins(nodes, current, user)
     if "测试提醒" in user:
         nodes[3].prerequisite = ""
@@ -342,15 +373,17 @@ def _revise_demo_pins(nodes: list[s.StoryNodeDraft], current: str, user: str) ->
     """演示用确定性规则：只把本轮授权节点的「改为／改成」落实到事件，不模拟自然语言理解。"""
     instruction = _match(r"【修改要求】\n(.*?)(?=\n\n请在当前版本|\n\n要求：|\Z)", user)
     allowed = {int(index) for index in re.findall(r"作者要求改动铁钉节点\s*(\d+)", instruction)}
+    selected = {int(index) for index in re.findall(r"只改节点\s*(\d+)", instruction)}
+    targets = allowed | selected
     changed = False
     for match in re.finditer(
-        r"^节点\s+(\d+)「([^」]*)」([^\n［]*)［铁钉(?:｜约第 (\d+) 卷)?］发生：[^\n]*((?:\n  [^\n]*)*)",
+        r"^节点\s+(\d+)「([^」]*)」([^\n［]*)［(铁钉|暂定)(?:｜约第 (\d+) 卷)?］发生：[^\n]*((?:\n  [^\n]*)*)",
         current,
         re.M,
     ):
-        index, title, label, volume, details = match.groups()
+        index, title, label, status, volume, details = match.groups()
         ref = int(index)
-        if ref not in allowed:
+        if ref not in (allowed if status == "铁钉" else targets):
             continue
         event = ""
         for clause in re.split(r"[。；\n]", instruction):
@@ -360,7 +393,7 @@ def _revise_demo_pins(nodes: list[s.StoryNodeDraft], current: str, user: str) ->
                 continue
             change = changes[0]
             mentioned = {int(value) for value in re.findall(r"节点\s*(\d+)", clause[: change.start()])}
-            if mentioned != {ref} and (mentioned or len(allowed) != 1):
+            if mentioned != {ref} and (mentioned or len(targets) != 1):
                 continue
             event = clause[change.end() :].strip()
             if event:
@@ -1008,10 +1041,22 @@ def _critique(user: str = "") -> s.SetupCritique:
             issues=[],
             remark="已完成的节点可以交给作者确认，后面的部分等做完再审。",
         )
+    cross_piece = []
+    # 由验收点子显式开启，日常示例仍保持原审稿；解锁改好后不再重复建议。
+    if "跨块审稿演示" in user and "每次点灯消耗一天寿元，必须权衡救人与自保" not in user:
+        cross_piece.append(
+            s.ReviewIssue(
+                target="concept",
+                problem="概念的主角钩子还没有写清青灯的代价",
+                suggestion="主角钩子补充：每次点灯消耗一天寿元，必须权衡救人与自保",
+                severity="medium",
+            )
+        )
     return s.SetupCritique(
         verdict="revise",
         highlights=["寿元信息差的设定和主角性格很搭", "第一卷每个单元都有明确的翻盘点"],
         issues=[
+            *cross_piece,
             s.ReviewIssue(
                 target="first_volume",
                 problem="第二单元「执法堂」8 章只围绕一个案子，中段容易拖",

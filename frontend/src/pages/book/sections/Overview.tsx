@@ -4,12 +4,20 @@ import { useBible, useNodes, useOutline } from '../../../api/hooks'
 import { Cloud } from '../../../components/decor'
 import { Button, Card, CountUp, Reveal } from '../../../components/ui'
 import { cleanTitle, cleanVolumeTitle, totalChapters } from '../../../lib/status'
+import { directionProgressText } from '../../../lib/workspace'
 import { useBookContext } from '../context'
 import { InterviewForm, ResumeControls } from '../Decision'
+import { DirectionSelection } from '../DirectionSelection'
 import { PageHeader } from './common'
 
 function NextStep() {
-  const { book, job, bookId } = useBookContext()
+  const { book, job, bookId, messages } = useBookContext()
+  if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_directions') {
+    return <DirectionSelection key={`${job.id}-${job.updated_at}`} job={job} pending={job.pending} />
+  }
+  if (job?.kind === 'book_setup' && ['queued', 'running'].includes(job.status) && book.setup_progress.mode === 'puzzle' && !book.concept.title) {
+    return <p role="status" className="border-b border-line pb-6 text-sm text-chief">{directionProgressText(job.id, messages)}</p>
+  }
   if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_questions') {
     return (
       <section className="border-b border-line pb-8">
@@ -136,11 +144,11 @@ export function Overview() {
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <h3 className="flex flex-wrap items-center gap-2 font-serif text-lg font-bold">
                 <Route className="size-4 text-chief" />
-                主线骨架
+                全书地图
                 <span className="text-sm font-normal text-ink-2">{nodes.filter((node) => node.kind === 'milestone').length} 个关键转折</span>
               </h3>
               <Link to={`${base}/spine`} className="text-sm text-ink-2 hover:text-ink">
-                完整主线 →
+                完整地图 →
               </Link>
             </div>
             <div className="grid gap-4 @2xl/manuscript:grid-cols-2">

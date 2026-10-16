@@ -81,7 +81,7 @@ async def create_book(
 ) -> BookCreated:
     book = Book(idea=body.idea.strip(), style_reference=body.style_reference.strip(), source="new", status="setting_up")
     book.settings = await new_book_defaults(session)
-    mode = body.mode or book.settings.get("setup_mode", "oneshot")
+    mode = body.mode or book.settings.get("setup_mode", "puzzle")
     book.settings = {**book.settings, "setup_mode": mode}
     session.add(book)
     await session.flush()

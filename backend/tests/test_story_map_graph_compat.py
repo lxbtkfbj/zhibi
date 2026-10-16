@@ -93,8 +93,11 @@ async def generate(monkeypatch, state, ai_nodes):
     return update, deps
 
 
-async def test_spine_protects_pins_before_downstream_and_remaps_references(monkeypatch):
+@pytest.mark.parametrize("pinned_ending", [True, False])
+async def test_spine_protects_pins_before_downstream_and_remaps_references(monkeypatch, pinned_ending):
     state = graph_state()
+    if not pinned_ending:
+        state["spine"]["nodes"][-1].update(status="pencil", origin="ai")
     before = deepcopy(state)
     ai_nodes = [
         draft_node("开篇", "开篇", "进城", ref=1),
@@ -107,8 +110,14 @@ async def test_spine_protects_pins_before_downstream_and_remaps_references(monke
     nodes = update["spine"]["nodes"]
     by_id = {item["id"]: item for item in nodes if item.get("id")}
     assert content(by_id[before["spine"]["nodes"][1]["id"]]) == before["spine"]["nodes"][1]
-    assert content(by_id[before["spine"]["nodes"][3]["id"]]) == before["spine"]["nodes"][3]
-    assert any(item["title"] == "新增准备" for item in nodes)
+    assert nodes[1]["id"] == before["spine"]["nodes"][1]["id"]
+    if pinned_ending:
+        assert content(by_id[before["spine"]["nodes"][3]["id"]]) == before["spine"]["nodes"][3]
+        # 结局同样钉在原位时，AI 顺带新增会把结局后移，必须退回原拓扑。
+        assert [item["id"] for item in nodes] == [item["id"] for item in before["spine"]["nodes"]]
+    else:
+        # 没有铁钉结局约束时仍可新增，且所有下游序号须继续引用原来的节点。
+        assert any(item["title"] == "新增准备" for item in nodes)
     assert "milestones" not in update["spine"]
     # 旧序号即便移动，仍引用同一个节点，而不是插进来的新节点。
     index = {item["id"]: i for i, item in enumerate(nodes, 1) if item.get("id")}

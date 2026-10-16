@@ -10,6 +10,7 @@ import { ChapterPage, ContentsPage } from './pages/book/sections/ChapterPages'
 import { ConceptPage } from './pages/book/sections/ConceptPage'
 import { Overview } from './pages/book/sections/Overview'
 import { SpinePage } from './pages/book/sections/SpinePage'
+import { SecretsPage } from './pages/book/sections/SecretsPage'
 import { ThreadsPage } from './pages/book/sections/ThreadsPage'
 import { VolumePage } from './pages/book/sections/VolumePage'
 import { Home } from './pages/Home'
@@ -46,6 +47,7 @@ const router = createBrowserRouter([
       { path: 'world', element: <WorldPage /> },
       { path: 'relations', element: <RelationsPage /> },
       { path: 'foreshadowing', element: <ForeshadowingPage /> },
+      { path: 'secrets', element: <SecretsPage /> },
       { path: 'settings', element: <BookSettingsPage /> },
       { path: 'meeting', element: <Navigate to=".." relative="path" replace /> },
     ],

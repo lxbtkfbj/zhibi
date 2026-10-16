@@ -65,7 +65,7 @@ async def requirements(sessionmaker, book_id):
 
 
 async def test_create_book_mode_defaults_override_and_immutable(client, sessionmaker, queued):
-    assert (await client.get("/api/settings/new-book-defaults")).json()["settings"]["setup_mode"] == "oneshot"
+    assert (await client.get("/api/settings/new-book-defaults")).json()["settings"]["setup_mode"] == "puzzle"
     await client.put("/api/settings/new-book-defaults", json={"setup_mode": "puzzle"})
     inherited = (await client.post("/api/books", json={"idea": "少年携古镜寻找身世"})).json()
     explicit = (

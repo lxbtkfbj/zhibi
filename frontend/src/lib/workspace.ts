@@ -1,4 +1,5 @@
-import type { BookDetail, Conversation, Job, LiveDraft, MeetingMessage, Outline, Pending } from '../api/types'
+import type { BookDetail, Conversation, Job, LiveDraft, MeetingMessage, Outline, Pending, StoryNode } from '../api/types'
+import { PIECES } from './storyMap.ts'
 
 export interface WorkspaceTarget { path: string; label: string }
 
@@ -20,9 +21,9 @@ export function artifactTarget(message: MeetingMessage, bookId: string, outline?
     case 'concept': return page('/concept', '书的概念')
     case 'directions': return page('', '开书方向')
     case 'lore': return page('/characters', '人物设定')
-    case 'spine': return page('/spine', '主线骨架')
+    case 'spine': return page('/spine', '关键节点')
     case 'threads': return page('/threads', '线索')
-    case 'outline': return page('', '全书总纲')
+    case 'outline': return page('/spine', '填中间')
     case 'questions': return page('', '动笔前提问')
     case 'critique': return page('', '开书方案')
     case 'volume_plan': case 'volume_directions': case 'volume_pitch': case 'pitch_scores': case 'volume_audit': case 'volume_recap': {
@@ -49,6 +50,12 @@ export function pendingTarget(pending: Pending | null | undefined, bookId: strin
   switch (pending?.kind) {
     case 'setup_questions': return { path: base, label: '动笔前提问' }
     case 'setup_review': return { path: base, label: '开书方案' }
+    case 'setup_directions': return { path: base, label: '开书方向' }
+    case 'setup_piece': {
+      const index = PIECES.findIndex(piece => piece.key === pending.piece)
+      const piece = PIECES[index]
+      return piece ? { path: `${base}${piece.path}`, label: `第 ${index + 1} 块：${piece.name}` } : null
+    }
     case 'volume_review': return { path: `${base}/volume/${pending.volume}`, label: `第 ${pending.volume} 卷卷纲` }
     case 'trial_read': return { path: `${base}/chapter/1`, label: `前 ${pending.chapters} 章试读` }
     case 'chapter_stuck': return { path: `${base}/chapter/${pending.chapter}`, label: `第 ${pending.chapter} 章` }
@@ -93,13 +100,44 @@ export function unreadCount(messages: MeetingMessage[], conversation: Conversati
 
 export function progressText(book: BookDetail, messages: MeetingMessage[], draft: LiveDraft | null, target: WorkspaceTarget | null) {
   const job = book.active_job
+  if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_directions') return '等你选择：开书方向'
+  if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_piece') return `等你确认：${PIECES.find(piece => piece.key === (job.pending as Extract<Pending, { kind: 'setup_piece' }>).piece)?.name ?? '当前拼图'}`
   if (job?.status === 'waiting_author') return `${job.pending?.kind === 'setup_questions' ? '等你回答' : '等你拍板'}：${target?.label ?? '编辑部的提问'}`
   const working = job?.status === 'queued' || job?.status === 'running'
   const lastStatus = [...messages].reverse().find(m => m.job_id === job?.id && m.kind === 'status')
-  if (working && job.kind === 'book_setup') return `开书中 · ${lastStatus?.content.replace(/[.…]+$/, '') ?? '主编在准备方案'}`
+  if (working && job.kind === 'book_setup') {
+    const index = PIECES.findIndex(piece => piece.key === book.setup_progress?.current)
+    const status = lastStatus?.content.replace(/[.…]+$/, '') ?? '主编在准备方案'
+    return book.setup_progress?.mode === 'puzzle' && index >= 0 ? `开书 · 第 ${index + 1} 块「${PIECES[index].name}」· ${status}` : `开书中 · ${status}`
+  }
   const volume = target?.path.match(/\/volume\/(\d+)$/)?.[1]
   const progress = `${volume ? `第 ${volume} 卷 · ` : ''}已定稿 ${book.chapters_final} 章`
   if (working) return `${progress} · ${draft && !draft.done && draft.job_id === job.id ? `写手在写第 ${draft.chapter} 章` : lastStatus?.content.replace(/[.…]+$/, '') ?? '编辑部工作中'}`
   if (job?.status === 'failed') return `${progress} · 任务出错，可继续`
   return `${progress} · ${book.status === 'completed' ? '全书完结' : '编辑部空闲'}`
+}
+
+export interface NodeFeedback { nodeId: string; prefix: string }
+
+export function nodeFeedback(node: Pick<StoryNode, 'id' | 'index' | 'title'>): NodeFeedback {
+  return { nodeId: node.id, prefix: `关于节点 ${node.index}「${node.title}」：` }
+}
+
+/** 前缀被删除或改写即取消定向授权；之后再次输入相似文字也不恢复旧授权。 */
+export function retainedNodeFeedback(text: string, selected: NodeFeedback | null): NodeFeedback | null {
+  return selected && text.startsWith(selected.prefix) ? selected : null
+}
+
+export function composerRoute(job: Job | null, text: string, selected: NodeFeedback | null) {
+  // 其他块等待时，节点仍受块锁定保护；让主编根据原文提出解锁请求，不越过 API 的节点操作门禁。
+  if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_piece') return { kind: 'piece' as const, action: 'revise' as const, piece: job.pending.piece, ...(job.pending.piece === 'nodes' && retainedNodeFeedback(text, selected) ? { node_id: selected!.nodeId } : {}) }
+  if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_directions') return { kind: 'directions' as const, action: 'redo' as const }
+  if (job?.status === 'waiting_author' && job.pending?.kind !== 'setup_questions') return { kind: 'decision' as const, action: 'revise' as const }
+  return { kind: 'note' as const }
+}
+
+/** 初次出方向和选定方向后的定调是两种不同的等待，不假定作者已经做过选择。 */
+export function directionProgressText(jobId: string, messages: MeetingMessage[]) {
+  const chosen = messages.some(message => message.job_id === jobId && message.speaker === 'author' && message.kind === 'decision' && message.content.startsWith('选方向「'))
+  return chosen ? '主编正在按你的选择定调…' : '主编正在拟定开书方向…'
 }

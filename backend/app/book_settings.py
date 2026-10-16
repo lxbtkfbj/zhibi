@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class BookSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    setup_mode: Literal["puzzle", "oneshot"] = "oneshot"
+    setup_mode: Literal["puzzle", "oneshot"] = "puzzle"
     title_style: Literal["short", "tomato", "chief", "custom"] = "short"
     title_custom: str = Field("", max_length=5000)
     person: Literal["first", "second", "third"] = "third"
@@ -38,7 +38,8 @@ def default_settings() -> dict:
 
 
 def settings_of(book) -> dict:
-    return {**default_settings(), **(book.settings or {})}
+    # 缺少模式的历史书沿用旧流程；新默认只在创建新书时复制。
+    return {**default_settings(), "setup_mode": "oneshot", **(book.settings or {})}
 
 
 def merge_settings(current: dict | None, changes: dict) -> dict:

@@ -4,6 +4,7 @@ export interface PromptVariable { name: string; label: string }
 export interface PromptInfo {
   name: string; title: string; group: string; role: string; when: string
   customized: boolean; updated_at: string | null
+  default_changed: boolean; new_variables: PromptVariable[]
   last_call: { id: number; created_at: string } | null
   variables: PromptVariable[]
 }

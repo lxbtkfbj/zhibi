@@ -1,11 +1,51 @@
 import clsx from 'clsx'
 import { Check, CirclePause, PenLine, RotateCcw, Stamp } from 'lucide-react'
 import { useState } from 'react'
+import { AnimatePresence, motion } from 'motion/react'
 import { useJobActions } from '../../api/hooks'
 import type { InterviewQuestion, Job, WriteUntil } from '../../api/types'
 import { Button, ErrorText, inputClass, TypingDots } from '../../components/ui'
 import { decisionCopy } from '../../lib/decision'
+import { useReducedMotion } from '../../lib/appearance'
+import { PIECES, targetPiece } from '../../lib/storyMap'
+import { pendingTarget } from '../../lib/workspace'
 import { useBookContext } from './context'
+
+export function DecisionBar() {
+  const { bookId, job, waiting, requestFeedback, manualNavigate, celebrate } = useBookContext()
+  const { pieceAction } = useJobActions(bookId)
+  const reduce = useReducedMotion()
+  const pending = job?.pending
+  const target = pendingTarget(pending, bookId)
+  const piece = pending?.kind === 'setup_piece' ? pending : null
+  const name = PIECES.find(item => item.key === piece?.piece)?.name ?? ''
+  const reminders = (piece?.warnings?.length ?? 0) + (piece?.suggestions?.length ?? 0) + (piece?.unlock_requests?.length ?? 0)
+  const act = async (action: 'confirm' | 'delegate') => {
+    if (!job || !piece) return
+    try {
+      await pieceAction.mutateAsync({ jobId: job.id, action, piece: piece.piece })
+      if (piece.piece === 'first_volume') celebrate()
+    } catch { /* 失败保留待确认内容。 */ }
+  }
+  return <AnimatePresence initial={false}>{waiting && job && target && <motion.div key="decision" data-testid="decision-bar" initial={reduce ? false : { opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: reduce ? 0 : 0.28, ease: 'easeOut' }} className="z-10 max-h-[42vh] shrink-0 overflow-y-auto border-b border-seal/25 bg-paper-2 px-5 py-3">
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <p className="text-sm font-medium text-seal">{piece ? `待你确认：${name}${piece.warnings?.[0] ? `（${piece.warnings[0]}）` : ''}` : pending?.kind === 'setup_directions' ? '待你选择：开书方向' : `待你拍板：${target.label}`}</p>
+      <div className="flex flex-wrap items-center gap-2">{piece ? <>
+        <Button size="sm" variant="seal" loading={pieceAction.isPending && pieceAction.variables?.action === 'confirm'} disabled={pieceAction.isPending} onClick={() => void act('confirm')}>确认这一块</Button>
+        <Button size="sm" variant="ghost" loading={pieceAction.isPending && pieceAction.variables?.action === 'delegate'} disabled={pieceAction.isPending} onClick={() => void act('delegate')}>交给编辑部定</Button>
+      </> : pending?.kind === 'setup_directions' ? <button className="text-sm text-chief underline underline-offset-4" onClick={() => manualNavigate(`/books/${bookId}`)}>去选择 →</button> : <><ApproveButton job={job} /><Button size="sm" variant="ghost" onClick={requestFeedback}>提意见</Button></>}</div>
+    </div>
+    {!!reminders && piece && <details className="mt-3 border-t border-divider pt-2">
+      <summary className="cursor-pointer text-xs text-ink-2">提醒与审稿建议（{reminders}）</summary>
+      <ul className="mt-3 space-y-3 text-sm leading-relaxed text-ink-2">
+        {piece.warnings?.map((warning, index) => <li key={`warning-${index}`}><span className="mr-2 text-xs text-seal">提醒</span>{warning}</li>)}
+        {piece.suggestions?.map((suggestion, index) => <li key={`suggestion-${index}`}><span className="mr-2 text-xs text-chief">审稿建议</span>{suggestion.problem}<p className="mt-1">{suggestion.suggestion}</p><Button size="sm" variant="ghost" className="mt-1" disabled={pieceAction.isPending} loading={pieceAction.isPending && pieceAction.variables?.feedback === `${suggestion.problem}\n${suggestion.suggestion}`} onClick={() => pieceAction.mutate({ jobId: job.id, action: 'unlock', piece: targetPiece[suggestion.target], feedback: `${suggestion.problem}\n${suggestion.suggestion}` })}>解锁并修改</Button></li>)}
+        {piece.unlock_requests?.map((request, index) => <li key={`unlock-${index}`}><span className="mr-2 text-xs text-chief">解锁请求</span>{request.reason}<div><Button size="sm" variant="ghost" className="mt-1" disabled={pieceAction.isPending} loading={pieceAction.isPending && pieceAction.variables?.feedback === request.reason} onClick={() => pieceAction.mutate({ jobId: job.id, action: 'unlock', piece: targetPiece[request.target], feedback: request.reason })}>解锁并修改</Button></div></li>)}
+      </ul>
+    </details>}
+    <ErrorText error={pieceAction.error} />
+  </motion.div>}</AnimatePresence>
+}
 
 /** 只有盖章按钮：编辑部面板里修改意见直接在底部输入框里说。 */
 export function ApproveButton({ job }: { job: Job }) {

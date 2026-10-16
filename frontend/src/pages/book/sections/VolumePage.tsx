@@ -9,6 +9,7 @@ import { EditableList, EditableText } from '../../../components/Editable'
 import { Badge, Card, Reveal, Skeleton } from '../../../components/ui'
 import type { Tone } from '../../../lib/status'
 import { useBookContext } from '../context'
+import { PieceDecisions } from '../PieceDecisions'
 import { FieldBlock, Locked, PageHeader } from './common'
 
 const VOLUME_STATUS: Record<Volume['status'], [string, Tone]> = {
@@ -259,6 +260,7 @@ export function VolumePage() {
 
   return (
     <div>
+      {Number(index) === 1 && <PieceDecisions piece="first_volume" />}
       <PageHeader
         eyebrow={`第${volume.index}卷`}
         title={

@@ -195,3 +195,37 @@ async def test_running_author_note_http_is_absorbed_for_named_pin(
         and item["content"] == f"按你的意思改了铁钉节点 2「{before[1]['title']}」，它还是铁钉。"
         for item in messages
     )
+
+
+async def test_pencil_revision_keeps_author_inserted_pins_after_delete_and_reorder(flow, sessionmaker):
+    book_id, job_id, before = await setup_waiting(flow, "puzzle")
+    inserted = await flow(
+        "POST",
+        f"/books/{book_id}/nodes",
+        {"title": "作者新增铁钉", "event": "救回师父", "status": "pinned", "after_node_id": before[2]["id"]},
+    )
+    await flow("DELETE", f"/nodes/{before[4]['id']}")
+    nodes = await flow("GET", f"/books/{book_id}/nodes")
+    ids = [item["id"] for item in nodes]
+    index = ids.index(inserted["id"])
+    # 把后面的暂定节点移到旧铁钉前，快照顺序故意与演示初稿不同。
+    ids[index - 1], ids[index + 1] = ids[index + 1], ids[index - 1]
+    await flow("POST", f"/books/{book_id}/nodes/order", {"ids": ids})
+    snapshot = await flow("GET", f"/books/{book_id}/nodes")
+    selected = next(item for item in snapshot if item["kind"] == "milestone" and item["status"] == "pencil")
+    await flow(
+        "POST",
+        f"/jobs/{job_id}/piece",
+        {
+            "action": "revise",
+            "piece": "nodes",
+            "node_id": selected["id"],
+            "feedback": "发生什么改为先救下被困的同门",
+        },
+    )
+    after = await flow("GET", f"/books/{book_id}/nodes")
+    for item in snapshot:
+        if item["status"] == "pinned":
+            assert next(node for node in after if node["id"] == item["id"]) == item
+    assert next(item for item in after if item["id"] == selected["id"])["event"] == "先救下被困的同门"
+    await assert_checkpoint_consumed(sessionmaker, job_id)

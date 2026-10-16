@@ -430,3 +430,33 @@ async def test_unlock_with_named_feedback_grants_only_the_named_pin(env, monkeyp
     revised = await book_setup.spine_node({**env.state, **command.update}, env.runtime)
     assert revised["spine"]["nodes"][1]["event"] == "按意见修改后的事件"
     assert without_snapshot(revised["spine"]["nodes"][2]) == env.setup["spine"]["nodes"][2]
+
+
+@pytest.mark.parametrize("change", ["move_pin", "omit_pin", "omit_predecessors", "insert_before_pinned_ending"])
+def test_unnamed_pins_keep_latest_author_snapshot_positions(env, change):
+    # 作者已插入铁钉、删除旧节点并手动重排；current 是这些操作之后的最新顺序。
+    current = [
+        node("开篇", "opening", "pencil"),
+        node("已上移的暂定", status="pencil"),
+        node("待修改暂定", status="pencil"),
+        node("作者新增铁钉"),
+        node("已有铁钉"),
+        node("结局", "ending"),
+    ]
+    original = deepcopy(current)
+    proposed = drafts(current)
+    if change == "move_pin":
+        proposed[1], proposed[3] = proposed[3], proposed[1]
+    elif change == "omit_pin":
+        proposed = [item for item in proposed if item["ref"] != 4]
+    elif change == "omit_predecessors":
+        proposed = [item for item in proposed if item["ref"] not in {2, 3}]
+    else:
+        proposed.insert(2, {"ref": 0, "kind": "节点", "title": "AI顺带新增"})
+    merged = merge_nodes(proposed, current)
+    assert current == original
+    for index, item in enumerate(current):
+        if item["status"] == "pinned":
+            assert without_snapshot(merged[index]) == item
+            assert merged[index]["_snapshot_ref"] == index + 1
+    assert merged[0]["kind"] == "opening" and merged[-1]["kind"] == "ending"

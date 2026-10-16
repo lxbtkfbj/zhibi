@@ -75,13 +75,45 @@ async def test_glossary_api_and_prompt_override_are_live(client):
 
 
 async def test_setup_mode_defaults_and_rules(client):
-    assert BookSettings().setup_mode == "oneshot"
-    assert default_settings()["setup_mode"] == "oneshot"
+    assert BookSettings().setup_mode == "puzzle"
+    assert default_settings()["setup_mode"] == "puzzle"
     assert merge_settings({}, {"setup_mode": "puzzle"})["setup_mode"] == "puzzle"
     assert compile_rules({"setup_mode": "puzzle"}) == ""
     defaults = (await client.get("/api/settings/new-book-defaults")).json()
-    assert defaults["settings"]["setup_mode"] == "oneshot"
+    assert defaults["settings"]["setup_mode"] == "puzzle"
     response = await client.put("/api/settings/new-book-defaults", json={"setup_mode": "puzzle"})
     assert response.status_code == 200 and response.json()["settings"]["setup_mode"] == "puzzle"
     assert (await client.get("/api/settings/new-book-defaults")).json()["settings"]["setup_mode"] == "puzzle"
     assert (await client.put("/api/settings/new-book-defaults", json={"setup_mode": "wrong"})).status_code == 422
+
+
+async def test_new_default_does_not_reinterpret_legacy_books(client, sessionmaker):
+    from app.book_settings import settings_of
+    from app.models import Book
+
+    legacy = Book(title="旧书", settings={"title_style": "chief"})
+    explicit = Book(title="旧拼图书", settings={"setup_mode": "puzzle"})
+    assert settings_of(legacy)["setup_mode"] == "oneshot"
+    assert settings_of(explicit)["setup_mode"] == "puzzle"
+    async with sessionmaker() as session:
+        session.add(legacy)
+        await session.commit()
+        book_id = legacy.id
+    await client.put("/api/settings/new-book-defaults", json={"setup_mode": "oneshot"})
+    assert (await client.get("/api/settings/new-book-defaults")).json()["settings"]["setup_mode"] == "oneshot"
+    response = await client.get(f"/api/books/{book_id}/settings")
+    assert response.json()["settings"]["setup_mode"] == "oneshot"
+    assert response.json()["settings"]["title_style"] == "chief"
+
+
+def test_demo_concept_reflects_author_flip_and_cross_piece_fix():
+    from app.llm.demo import _concept, _critique
+
+    concept = _concept("【作者的点子】\n跨块审稿演示\n\n把「感情线」改成「从欢喜冤家开始」")
+    assert concept.decisions[0].chosen == "从欢喜冤家开始"
+    assert "从欢喜冤家开始" in concept.selling_points[-1]
+    critique = _critique("跨块审稿演示\n【第一卷卷纲】\n已经做好")
+    issue = next(i for i in critique.issues if i.target == "concept")
+    revised = _concept(f"【作者的点子】\n跨块审稿演示\n\n{issue.suggestion}")
+    assert "每次点灯消耗一天寿元" in revised.protagonist_hook
+    assert not any(i.target == "concept" for i in _critique(revised.model_dump_json()).issues)

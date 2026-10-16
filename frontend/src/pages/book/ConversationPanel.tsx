@@ -8,6 +8,7 @@ import { Button, ErrorText } from '../../components/ui'
 import { decisionCopy } from '../../lib/decision'
 import { ROLE_META } from '../../lib/roles'
 import { teamStatus } from '../../lib/team'
+import { composerRoute, pendingTarget, retainedNodeFeedback } from '../../lib/workspace'
 import { useBookContext } from './context'
 import { ResumeControls, RunningControls, WritingControls } from './Decision'
 import { MeetingFeed, RoleAvatar } from './MeetingFeed'
@@ -28,9 +29,8 @@ const QUICK_PHRASES = {
 
 /** 每个会话保留自己的草稿；切稿件路由不会重挂载这块区域。 */
 function NoteComposer() {
-  const { job, working, waiting, asking, bookId, book, conversation, focusComposer } = useBookContext()
+  const { job, working, waiting, asking, bookId, book, conversation, focusComposer, composerNode, setComposerNode, composerDrafts: drafts, setComposerDrafts: setDrafts } = useBookContext()
   const { note, decide, directions, piece } = useJobActions(bookId)
-  const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [sent, setSent] = useState<{ conversation: string; message: string } | null>(null)
   const ref = useRef<HTMLTextAreaElement>(null)
   const text = drafts[conversation] ?? ''
@@ -60,17 +60,21 @@ function NoteComposer() {
     return () => clearTimeout(timer)
   }, [sent])
 
-  const setText = (value: string) => setDrafts((previous) => ({ ...previous, [conversation]: value }))
+  const setText = (value: string) => {
+    setDrafts((previous) => ({ ...previous, [conversation]: value }))
+    if (conversation === 'group') setComposerNode(retainedNodeFeedback(value, composerNode))
+  }
   const send = async () => {
     const content = text.trim()
     if (!content || pending || tooLong) return
     const sentConversation = conversation
     try {
-      if (waiting && job?.pending?.kind === 'setup_directions') {
+      const route = composerRoute(job, text, conversation === 'group' ? composerNode : null)
+      if (route.kind === 'directions' && job) {
         await directions.mutateAsync({ jobId: job.id, action: 'redo', feedback: `${feedbackPrefix}${content}` })
-      } else if (waiting && job?.pending?.kind === 'setup_piece') {
-        await piece.mutateAsync({ jobId: job.id, action: 'revise', piece: job.pending.piece, feedback: `${feedbackPrefix}${content}` })
-      } else if (waiting && job) {
+      } else if (route.kind === 'piece' && job) {
+        await piece.mutateAsync({ jobId: job.id, action: 'revise', piece: route.piece, feedback: `${feedbackPrefix}${content}`, ...('node_id' in route ? { node_id: route.node_id } : {}) })
+      } else if (route.kind === 'decision' && job) {
         await decide.mutateAsync({
           jobId: job.id,
           action: 'revise',
@@ -80,6 +84,7 @@ function NoteComposer() {
         await note.mutateAsync({ content, ...(direct ? { to: conversation } : {}) })
       }
       setDrafts((previous) => previous[sentConversation] === text ? { ...previous, [sentConversation]: '' } : previous)
+      if (sentConversation === 'group') setComposerNode(null)
       setSent({
         conversation: sentConversation,
         message: waiting ? '意见已交给编辑部，按你的要求修改。' : asking || (working && (job?.kind === 'book_setup' || job?.kind === 'write_book'))
@@ -91,11 +96,11 @@ function NoteComposer() {
     }
   }
 
-  const placeholder = direct
+  const placeholder = waiting && job?.pending?.kind === 'setup_piece' ? '说说这一块想怎么改…' : direct
     ? `发消息给${ROLE_META[conversation].name}…`
     : waiting
       ? job?.pending?.kind === 'setup_directions'
-        ? '写下换方向的要求；选择方向与篇幅请通过接口完成'
+        ? '写下哪里不满意，主编会重新出开书方向…'
         : decisionCopy(job?.pending, bookId).placeholder
       : asking
         ? '还有别的要求也可以先说，例如：主角叫云澈'
@@ -161,12 +166,13 @@ export function ConversationPanel() {
   const status = teamStatus(messages, working)
   const copy = decisionCopy(job?.pending, bookId)
   const pending = job?.pending
-  const todoLabel = asking ? '动笔前提问'
+  const destination = pendingTarget(pending, bookId)
+  const todoLabel = destination?.label ?? (asking ? '动笔前提问'
     : pending?.kind === 'volume_review' ? `第 ${pending.volume} 卷卷纲`
       : pending?.kind === 'trial_read' ? `前 ${pending.chapters} 章试读`
         : pending?.kind === 'chapter_stuck' ? `第 ${pending.chapter} 章`
-          : '开书方案'
-  const todoPath = asking || pending?.kind === 'setup_review' ? `/books/${bookId}` : copy.links[0]?.[1] ?? `/books/${bookId}`
+          : '开书方案')
+  const todoPath = destination?.path ?? (asking || pending?.kind === 'setup_review' ? `/books/${bookId}` : copy.links[0]?.[1] ?? `/books/${bookId}`)
 
   return (
     <section className="flex h-full min-h-0 min-w-0 flex-col bg-pane-mid" aria-label="会话消息与输入">
