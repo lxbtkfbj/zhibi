@@ -159,7 +159,7 @@ async def test_materials_polish_recap_and_recall(sessionmaker, monkeypatch):
             )
         ).scalar_one()
     write7 = next(u for u in streamed if "请写第 7 章" in u)
-    assert "【本章要处理的伏笔】" in write7
+    assert "【本章要处理的伏笔和期待】" in write7
     assert f"- 回收F{poison.seq}［已埋］跟班暴毙前喝过的那碗药被人动过手脚" in write7
     assert "第1章《" in write7 and "（埋下）原文：「" in write7 and "跟班暴毙前喝过的那碗药被人动过手脚——" in write7
     assert "单元1「捡灯」：「捡灯」共 6 章" in write7

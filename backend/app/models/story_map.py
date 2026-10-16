@@ -22,6 +22,7 @@ class StoryNode(UUIDPk, Timestamps, Base):
     volume: Mapped[int | None] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(10), default="pencil", server_default="pencil")
     origin: Mapped[str] = mapped_column(String(10), default="ai", server_default="ai")
+    updated_by_volume: Mapped[int | None] = mapped_column(Integer)
     editor_note: Mapped[str] = mapped_column(Text, default="", server_default="")
     techniques: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
 

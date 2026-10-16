@@ -126,18 +126,22 @@ async def test_save_plan_persists_expectations_reveals_techniques_and_legacy_rep
         assert list(await session.scalars(select(Foreshadowing).where(Foreshadowing.book_id == book.id))) == []
 
 
-async def test_write_graph_new_expectation_saved_without_applying_node_update(sessionmaker):
+async def test_write_graph_new_expectation_saved_and_legacy_node_conflict_reported(sessionmaker):
     async with sessionmaker() as session:
         book, nodes, volume = await create_book(session)
         session.add(Secret(book_id=book.id, seq=1, title="身份"))
         await session.commit()
         book_id, node_id, volume_id = book.id, nodes[1].id, volume.id
     artifacts = []
+    speeches = []
 
     async def artifact(*args):
         artifacts.append(args)
 
-    deps = SimpleNamespace(book_id=book_id, sessionmaker=sessionmaker, emit=SimpleNamespace(artifact=artifact))
+    async def say(*args):
+        speeches.append(args)
+
+    deps = SimpleNamespace(book_id=book_id, sessionmaker=sessionmaker, emit=SimpleNamespace(artifact=artifact, say=say))
     plan = {
         "units": [
             {"index": 1, "title": "起", "chapter_count": 3, "reveals": [{"ref": "S1", "to": "读者", "how": "提示"}]},
@@ -146,7 +150,7 @@ async def test_write_graph_new_expectation_saved_without_applying_node_update(se
         "new_foreshadowings": [{"description": "旧玉佩", "plant_unit": 1, "payoff_unit": 2}],
         "new_expectations": [{"description": "等待飞升", "plant_unit": 1, "payoff_unit": 2, "node": 2}],
         "node_update": {"title": "不可提前应用", "event": "修改"},
-        "node_conflict": "应留到任务 4 处理",
+        "node_conflict": "铁钉前提尚未成立",
     }
     await save_volume_node({"volume_id": str(volume_id), "volume_draft": plan}, SimpleNamespace(context=deps))
     async with sessionmaker() as session:
@@ -160,3 +164,4 @@ async def test_write_graph_new_expectation_saved_without_applying_node_update(se
         unit = await session.scalar(select(PlotUnit).where(PlotUnit.book_id == book_id, PlotUnit.index == 1))
         assert unit.reveals[0]["ref"] == "S1" and any(action["ref"] == "E2" for action in unit.foreshadow_actions)
     assert artifacts[0][2]["data"]["new_expectations"][0]["kind"] == "期待"
+    assert any("节点冲突：铁钉前提尚未成立" in message for _, message in speeches)

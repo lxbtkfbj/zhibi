@@ -146,7 +146,11 @@ def spine_from_legacy(spine: dict) -> dict:
 
 
 def node_dict(node: StoryNode) -> dict[str, Any]:
-    return {"id": str(node.id), **{key: getattr(node, key) for key in NODE_FIELDS}}
+    return {
+        "id": str(node.id),
+        "updated_by_volume": node.updated_by_volume,
+        **{key: getattr(node, key) for key in NODE_FIELDS},
+    }
 
 
 async def load_nodes(session: AsyncSession, book_id: uuid.UUID) -> list[dict[str, Any]]:

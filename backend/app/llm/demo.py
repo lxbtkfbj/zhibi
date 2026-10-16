@@ -701,7 +701,7 @@ def _revise_units(user: str, units: list[s.PlotUnitDraft]) -> list[s.PlotUnitDra
         if resolution and resolution != "未标":
             unit.resolution = resolution
         unit.foreshadow_actions = [
-            s.ForeshadowStep(ref=ref, action=act) for act, ref in re.findall(r"(埋下|提醒|回收)(F\d+)", body)
+            s.ForeshadowStep(ref=ref, action=act) for act, ref in re.findall(r"(埋下|提醒|回收)([FE]\d+)", body)
         ]
     fix = _section(user, "修改要求")
     for ref, act in re.findall(r"(F\d+)「[^」]*」计划在本卷(埋下|回收)", fix):
@@ -807,19 +807,27 @@ def _volume_plan(user: str) -> s.VolumePlanDraft:
     plan = _base_volume_plan(user)
     volume = int(_match(r"请为第 (\d+) 卷写「卷纲」", user) or 1)
     known = [name for name, _ in terms()]
-    expectations = re.findall(r"^- (E\d+)［", user, re.M)
+    expectations = dict(re.findall(r"^- (E\d+)［([^］]*)］", _section(user, "伏笔与期待台账") or user, re.M))
     secrets = re.findall(r"^- (S\d+)「", user, re.M)
     for i, unit in enumerate(plan.units):
         unit.editor_note = "先让读者看到主角的目标，再把对手的阻力变成一次有代价的翻盘。"
         unit.techniques = known[3:5]
-        if expectations:
-            unit.foreshadow_actions.append(
-                s.ForeshadowStep(
-                    ref=expectations[0],
-                    action="埋下" if i == 0 else "提醒",
-                    detail="把当众立下的约定和眼前的冲突连起来",
+        for ref, metadata in expectations.items():
+            if "已兑现" in metadata or "放弃" in metadata:
+                continue
+            plant = _match(r"第(\d+)卷立", metadata) == str(volume)
+            payoff = _match(r"第(\d+)卷兑现", metadata) == str(volume)
+            action = ""
+            if i == 0 and plant and "未立" in metadata:
+                action = "埋下"
+            elif payoff and i == len(plan.units) - 1:
+                action = "回收"
+            elif "已立" in metadata or plant:
+                action = "提醒"
+            if action and not any(step.ref == ref and step.action == action for step in unit.foreshadow_actions):
+                unit.foreshadow_actions.append(
+                    s.ForeshadowStep(ref=ref, action=action, detail="把当众立下的约定和眼前的冲突连起来")
                 )
-            )
         if secrets and i == 1:
             unit.reveals = [
                 s.RevealStep(ref=secrets[0], to="苏晚晴", how="陆远以证据解释先前异常，双方因此开始互相信任")
@@ -835,6 +843,14 @@ def _volume_plan(user: str) -> s.VolumePlanDraft:
             payoff_unit=len(plan.units),
         )
     ]
+    if "测试节点调整" in user:
+        plan.node_update = s.NodeUpdate(
+            title="顺势破局",
+            event="陆远顺着前文已经查明的账册与证据，当众揭穿对手的布局，取得下一阶段的主动权。",
+            prerequisite="前文的关键证据已经被陆远掌握，盟友愿意在众人面前作证。",
+            consequence="旧对手退场，背后的势力开始正视陆远，主角获得继续追查的入口。",
+            reason="前文已经写成循证破局，暂定节点改成当众举证更自然。",
+        )
     return plan
 
 
@@ -962,6 +978,7 @@ def _audit() -> s.VolumeAudit:
             s.AuditCheck(aspect="rhythm", ok=True, comment="小高潮一个接一个，卷末最燃"),
             s.AuditCheck(aspect="foreshadow", ok=True, comment="新伏笔埋收都排进了单元"),
             s.AuditCheck(aspect="repetition", ok=True, comment="和第一卷的套路错开了"),
+            s.AuditCheck(aspect="expectation", ok=True, comment="约定在单元间持续提醒，卷末超出预期地兑现"),
         ],
         issues=[
             s.AuditIssue(
@@ -979,7 +996,13 @@ def _audit() -> s.VolumeAudit:
 def _chapter_plan(user: str) -> s.ChapterPlanDraft:
     count = int(_match(r"这个单元共 (\d+) 章", user) or 5)
     unit_title = _match(r"【本单元】\n单元\d+「(.+?)」", user) or "这一段"
-    actions = re.findall(r"(埋下|提醒|回收)(F\d+)", _section(user, "本单元"))
+    unit = _section(user, "本单元")
+    actions = re.findall(r"(埋下|提醒|回收)([FE]\d+)", unit)
+    reveals = [
+        s.RevealStep(ref=ref, to=to.strip(), how=how.strip())
+        for ref, to, how in re.findall(r"揭晓：(S\d+) 揭给 (.*?)——([^\n]+)", unit)
+    ]
+    bad_rhythm = "测试节奏" in unit_title
     chapters = []
     for i in range(count):
         step = ["起", "承", "转", "合"][min(3, i * 4 // max(1, count))]
@@ -994,6 +1017,11 @@ def _chapter_plan(user: str) -> s.ChapterPlanDraft:
                 hook="灯火里，一个本不该出现的人头顶只剩三天寿元",
                 characters=["陆远", "苏晚晴"] if i % 2 else ["陆远", "赵乾"],
                 foreshadow_actions=foreshadow,
+                emotion=-2
+                if bad_rhythm
+                else (2 if i == count - 2 else (1 if i == count - 1 else (-1 if i % 4 == 1 else 0))),
+                mood="虐" if bad_rhythm else ["悬", "虐", "爽", "惊", "暖", "燃"][i % 6],
+                reveals=reveals if i == count - 2 else [],
             )
         )
     return s.ChapterPlanDraft(chapters=chapters, remark=f"「{unit_title}」{count} 章：前面蓄势，倒数第二章最燃。")
@@ -1024,11 +1052,16 @@ def _review(user: str) -> s.ChapterReview:
 
 def _digest(user: str) -> s.ChapterDigest:
     title = _match(r"第 \d+ 章《(.+?)》已经定稿", user) or "本章"
-    marks = re.findall(r"（伏笔·(埋下|提醒|回收)(F\d+)）", _section(user, "正文"))
+    marks = re.findall(r"（(?:伏笔|期待)·(埋下|提醒|回收)([FE]\d+)）", _section(user, "正文"))
+    reveals = re.findall(r"（揭晓·(S\d+)·([^·）]+)·([^）]+)）", _section(user, "正文"))
     return s.ChapterDigest(
         summary=f"《{title}》：陆远借青灯看穿对手的底牌，当场反将一军；结尾灯火里出现了一个只剩三天寿元的人。",
         character_updates=[s.CharacterUpdate(name="陆远", condition="伤势好转，心事更重")],
         foreshadow_updates=[s.ForeshadowUpdate(ref=ref, action=act) for act, ref in marks],
+        secret_updates=[
+            s.SecretUpdate(ref=ref, learned_by=[] if to in ("读者", "众人") else [to], public=to == "众人", how=how)
+            for ref, to, how in reveals
+        ],
         remark=f"《{title}》的变化记好了：陆远的状态更新了一条。",
     )
 
@@ -1284,16 +1317,24 @@ def _chapter_text(user: str) -> str:
     hook = _hook(user)
     target = int(_match(r"字数约 (\d+) 字", user) or 3000)
     rewrite = "【上一稿】" in user
-    items = re.findall(r"^- (埋下|提醒|回收)(F\d+)［[^］]*］([^（\n]+)", _section(user, "本章要处理的伏笔"), re.M)
+    items = re.findall(
+        r"^- (埋下|立下|提醒|回收|兑现)([FE]\d+)［[^］]*］([^（\n]+)", _section(user, "本章要处理的伏笔"), re.M
+    )
     if not items:
-        items = [(act, ref, "") for act, ref in re.findall(r"(埋下|提醒|回收)(F\d+)", outline)]
+        items = [(act, ref, "") for act, ref in re.findall(r"(埋下|提醒|回收)([FE]\d+)", outline)]
+    items = [({"立下": "埋下", "兑现": "回收"}.get(act, act), ref, desc) for act, ref, desc in items]
     author = _match(r"- \[作者\] ([^\n]+)", _section(user, "修改要求"))
     head = [f"（演示模式{'·重写稿' if rewrite else ''}）{title}。" + ("（重写稿）" if rewrite else "")]
     if author:
         head.append(f"（按作者的意见改：{author}）")
     head += [f"{scene}。{FILLER[i % len(FILLER)]}" for i, scene in enumerate(scenes)]
     head.append(f"{cool}。那一刻，周围的人都没反应过来，只有他自己知道，这一步他已经算了很久。")
-    head += [f"{desc.strip() or '那件旧事'}——{FORESHADOW_LINES[act]}（伏笔·{act}{ref}）" for act, ref, desc in items]
+    head += [
+        f"{desc.strip() or '那件旧事'}——{FORESHADOW_LINES[act]}（{'期待' if ref.startswith('E') else '伏笔'}·{act}{ref}）"
+        for act, ref, desc in items
+    ]
+    for ref, to, how in re.findall(r"揭晓：(S\d+) 揭给 (.*?)——([^\n]+)", outline):
+        head.append(f"{to}终于得知了真相：{how}。（揭晓·{ref}·{to}·{how}）")
     short = index == 4 and not rewrite
     goal = int(target * (0.35 if short else 0.85)) - sum(len(p) for p in head)
     paragraphs = head + _filler(index, goal)

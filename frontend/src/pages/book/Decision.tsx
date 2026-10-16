@@ -16,6 +16,7 @@ export function DecisionBar() {
   const { pieceAction } = useJobActions(bookId)
   const reduce = useReducedMotion()
   const pending = job?.pending
+  const writingIssues = pending?.kind === 'volume_review' || pending?.kind === 'chapter_stuck' ? decisionCopy(pending, bookId).issues : []
   const target = pendingTarget(pending, bookId)
   const piece = pending?.kind === 'setup_piece' ? pending : null
   const name = PIECES.find(item => item.key === piece?.piece)?.name ?? ''
@@ -43,6 +44,7 @@ export function DecisionBar() {
         {piece.unlock_requests?.map((request, index) => <li key={`unlock-${index}`}><span className="mr-2 text-xs text-chief">解锁请求</span>{request.reason}<div><Button size="sm" variant="ghost" className="mt-1" disabled={pieceAction.isPending} loading={pieceAction.isPending && pieceAction.variables?.feedback === request.reason} onClick={() => pieceAction.mutate({ jobId: job.id, action: 'unlock', piece: targetPiece[request.target], feedback: request.reason })}>解锁并修改</Button></div></li>)}
       </ul>
     </details>}
+    {!!writingIssues?.length && <ul aria-label="卷纲与章节提醒" className="mt-3 space-y-1.5 border-t border-divider pt-2 text-sm leading-relaxed text-ink-2">{writingIssues.map((issue, index) => <li key={index}>{issue}</li>)}</ul>}
     <ErrorText error={pieceAction.error} />
   </motion.div>}</AnimatePresence>
 }

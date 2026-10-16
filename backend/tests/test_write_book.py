@@ -353,8 +353,27 @@ async def test_volume_pitches_then_special_review(sessionmaker, monkeypatch):
     assert artifacts[4].content == "比稿结果：方案2「借刀杀人」胜出，再融合其他方案的长处"
     report = artifacts[5].payload["data"]
     assert report["verdict"] == "revise"
-    assert {c["aspect"]: c["ok"] for c in report["checks"]}["repetition"] is False  # 程序查出重复，这一项不算过关
-    assert {i["aspect"] for i in report["issues"]} == {"villain", "repetition", "foreshadow"}
+    assert {c["aspect"]: c["ok"] for c in report["checks"]} == {
+        "villain": False,
+        "rhythm": True,
+        "foreshadow": False,
+        "repetition": False,
+        "expectation": True,
+    }
+    assert {i["aspect"] for i in report["issues"]} == {"villain", "repetition", "foreshadow", "expectation"}
+    # 跳过第一卷没有真正立下旧期待；新期待排首尾，中间各单元的空档只提示，不强制改稿。
+    assert [i for i in report["issues"] if i["aspect"] == "expectation"] == [
+        {
+            "aspect": "expectation",
+            "unit": index,
+            "problem": f"第 {index} 个单元没有任何期待动作",
+            "suggestion": "考虑安排立下、提醒或兑现一条期待",
+            "severity": "low",
+        }
+        for index in range(2, len(artifacts[1].payload["data"]["units"]))
+    ]
+    assert "提示：[期待感] 第2单元：第 2 个单元没有任何期待动作" in audit
+    assert "[期待感]" not in fix
     # 新演示总纲还在第二卷排了两条长线伏笔，程序应指出漏排，并在修改稿落实。
     async with sessionmaker() as session:
         scheduled = list(

@@ -1,21 +1,40 @@
 """写作阶段的入库：卷纲、章纲、定稿后的设定变化（以及重写时撤销）。都是校验后的增量修改，不整体重建。"""
 
 import uuid
+from copy import deepcopy
 from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents import schemas as s
+from app.agents.context import foreshadow_code
 from app.agents.glossary import clean_techniques
-from app.agents.planning import ref_seq
+from app.agents.planning import ref_seq, secret_seq
 from app.agents.setup_puzzle import clean_reveals
-from app.models import Chapter, Character, Foreshadowing, PlotUnit, Volume
+from app.models import Chapter, Character, Foreshadowing, PlotUnit, Secret, Volume
 from app.services.setup_store import FORESHADOW_FIELDS, UNIT_FIELDS, load_nodes, load_secrets
 
 # 定稿时设定师会改的人物状态、伏笔进展；记下改前改后的值，重写时据此撤销
 CHARACTER_STATE = ("location", "condition", "abilities", "is_alive")
 LEDGER_STATE = ("status", "planted_chapter", "hint_chapters", "resolved_chapter")
+
+
+def _secret_state(row: Secret) -> dict[str, Any]:
+    return {"knowers": deepcopy(row.knowers or []), "status": row.status}
+
+
+def _secret_snapshot(row: Secret) -> dict[str, Any]:
+    """删除本章新秘密前核对整条内容，避免连作者之后的修改一起删掉。"""
+    return {
+        **_secret_state(row),
+        "title": row.title,
+        "truth": row.truth,
+        "reader_knows": row.reader_knows,
+        "reveal_plan": row.reveal_plan,
+        "node_id": str(row.node_id) if row.node_id else None,
+        "created_chapter": row.created_chapter,
+    }
 
 
 def _state(row: Any, keys: tuple[str, ...]) -> dict[str, Any]:
@@ -122,13 +141,20 @@ async def create_chapters(
 async def apply_digest(
     session: AsyncSession, book_id: uuid.UUID, chapter: Chapter, digest: s.ChapterDigest
 ) -> dict[str, int]:
-    """把设定师提取的变化写进设定库：只认设定库里已有的人物和台账里已有的伏笔编号。
+    """把设定师提取的变化写进设定库：只认已有的人物、伏笔、期待与信息差编号。
 
     每处改动都记下改之前和改之后的值（chapter.bible_changes），重写这一章时据此撤销。
     这一章以前记过的改动（重写后重新提取时）先撤销再写。
     """
     await revert_chapter(session, book_id, chapter)
-    log: dict[str, list] = {"characters": [], "created": [], "foreshadowings": []}
+    log: dict[str, Any] = {
+        "characters": [],
+        "created": [],
+        "foreshadowings": [],
+        "secrets": [],
+        "created_secrets": [],
+        "created_secret_snapshots": {},
+    }
     characters = {
         c.name: c
         for c in (await session.execute(select(Character).where(Character.book_id == book_id))).scalars().all()
@@ -185,7 +211,11 @@ async def apply_digest(
     moved = 0
     for change in digest.foreshadow_updates:
         row = ledger.get(ref_seq(change.ref) or -1)
-        if row is None or row.status == "abandoned":
+        if (
+            row is None
+            or change.ref.strip().upper() != foreshadow_code({"seq": row.seq, "kind": row.kind})
+            or row.status == "abandoned"
+        ):
             continue
         before = _state(row, LEDGER_STATE)
         if row.status == "resolved":
@@ -207,6 +237,54 @@ async def apply_digest(
         log["foreshadowings"].append({"seq": row.seq, "before": before, "after": after})
         moved += 1
 
+    secrets = {row.seq: row for row in (await session.scalars(select(Secret).where(Secret.book_id == book_id))).all()}
+    secret_before = {}
+    for change in digest.secret_updates:
+        row = secrets.get(secret_seq(change.ref) or -1)
+        if row is None or change.ref.strip().upper() != f"S{row.seq}":
+            continue
+        secret_before.setdefault(row.seq, _secret_state(row))
+        knowers = deepcopy(row.knowers or [])
+        names = {item.get("name") for item in knowers}
+        for name in change.learned_by:
+            name = name.strip()
+            if name in characters and name not in names:
+                knowers.append({"name": name, "since_chapter": chapter.index, "how": change.how.strip()})
+                names.add(name)
+        row.knowers = knowers
+        if change.public:
+            row.status = "public"
+    for seq, before in secret_before.items():
+        after = _secret_state(secrets[seq])
+        if after != before:
+            log["secrets"].append({"seq": seq, "before": before, "after": after})
+
+    seq = max(secrets, default=0)
+    for new in digest.new_secrets:
+        title, truth = new.title.strip(), new.truth.strip()
+        if not title or not truth:
+            continue
+        # 重写前文时，本章创建的秘密可能因后文已使用而保留，不能再复制出同一条。
+        if any(row.title == title and row.truth == truth for row in secrets.values()):
+            continue
+        names = dict.fromkeys(name.strip() for name in new.knowers if name.strip() in characters)
+        seq += 1
+        row = Secret(
+            book_id=book_id,
+            seq=seq,
+            title=title[:100],
+            truth=truth,
+            knowers=[{"name": name, "since_chapter": chapter.index, "how": "本章"} for name in names],
+            reader_knows=new.reader_knows,
+            reveal_plan="",
+            status="hidden",
+            created_chapter=chapter.index,
+        )
+        session.add(row)
+        secrets[seq] = row
+        log["created_secrets"].append(seq)
+        log["created_secret_snapshots"][str(seq)] = _secret_snapshot(row)
+
     chapter.summary = digest.summary.strip()
     chapter.bible_changes = log
     chapter.status = "final"
@@ -221,7 +299,13 @@ async def apply_digest(
             unit = await session.get(PlotUnit, chapter.unit_id)
             if unit is not None:
                 unit.status = "done"
-    return {"characters_updated": updated, "characters_created": created, "foreshadowings": moved}
+    return {
+        "characters_updated": updated,
+        "characters_created": created,
+        "foreshadowings": moved,
+        "secrets_updated": len(log["secrets"]),
+        "secrets_created": len(log["created_secrets"]),
+    }
 
 
 async def later_finals(session: AsyncSession, book_id: uuid.UUID, index: int) -> int:
@@ -237,14 +321,14 @@ async def later_finals(session: AsyncSession, book_id: uuid.UUID, index: int) ->
 
 
 async def revert_chapter(session: AsyncSession, book_id: uuid.UUID, chapter: Chapter) -> dict[str, int]:
-    """撤销这一章定稿时记进设定库和伏笔台账的改动。
+    """撤销这一章定稿时记进设定库、伏笔台账和信息差表的改动。
 
     只改回「现在还是这一章改成的样子」的字段；后面的章节又改过的保持不动。这一章新建的人物，
     后面没有定稿的章节时才删掉（后面的章节可能已经写到这个人）。
     """
     log = chapter.bible_changes or {}
-    out = {"characters": 0, "removed": 0, "foreshadowings": 0}
-    if not any(log.get(k) for k in ("characters", "created", "foreshadowings")):
+    out = {"characters": 0, "removed": 0, "foreshadowings": 0, "secrets": 0, "removed_secrets": 0}
+    if not any(log.get(k) for k in ("characters", "created", "foreshadowings", "secrets", "created_secrets")):
         chapter.bible_changes = {}
         return out
     later = await later_finals(session, book_id, chapter.index)
@@ -289,6 +373,36 @@ async def revert_chapter(session: AsyncSession, book_id: uuid.UUID, chapter: Cha
                 setattr(row, key, before[key])
                 changed = True
         out["foreshadowings"] += changed
+
+    secrets = {row.seq: row for row in (await session.scalars(select(Secret).where(Secret.book_id == book_id))).all()}
+    for item in reversed(log.get("secrets") or []):
+        row = secrets.get(item.get("seq"))
+        if row is None:
+            continue
+        before, after = item.get("before") or {}, item.get("after") or {}
+        current = _secret_state(row)
+        previous_names = {knower.get("name") for knower in before.get("knowers") or []}
+        added = [
+            knower
+            for knower in after.get("knowers") or []
+            if knower.get("name") not in previous_names and knower.get("since_chapter") == chapter.index
+        ]
+        # 只移除本章追加且仍保持原样的记录；作者改过获知方式或后文改过获知章号的保留。
+        row.knowers = [knower for knower in row.knowers or [] if knower not in added]
+        if "status" in before and row.status == after.get("status"):
+            row.status = before["status"]
+        out["secrets"] += current != _secret_state(row)
+    for seq in log.get("created_secrets") or []:
+        row = secrets.get(seq)
+        snapshot = (log.get("created_secret_snapshots") or {}).get(str(seq))
+        if (
+            row is not None
+            and row.created_chapter == chapter.index
+            and not later
+            and (snapshot is None or _secret_snapshot(row) == snapshot)
+        ):
+            await session.delete(row)
+            out["removed_secrets"] += 1
     chapter.bible_changes = {}
     await session.flush()
     return out

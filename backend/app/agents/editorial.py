@@ -274,7 +274,7 @@ async def prepare_chapter(llm: LLMRouter, blocks: dict[str, str]) -> s.ChapterMa
 
 
 def write_chapter(llm: LLMRouter, blocks: dict[str, str]) -> AsyncIterator[str]:
-    user = render("write_chapter", **blocks)
+    user = render("write_chapter", **{**blocks, "secrets": blocks.get("secrets_for_writer", blocks.get("secrets", ""))})
     return llm.stream_text("writer", persona("writer"), user, purpose="写作·正文")
 
 

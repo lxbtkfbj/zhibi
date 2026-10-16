@@ -445,8 +445,10 @@ class PitchJudgement(Lenient):
     remark: str = remark_field("为什么选这一份、它赢在哪里")
 
 
-AuditAspect = Literal["villain", "rhythm", "foreshadow", "repetition"]
-AUDIT_ASPECT_DESC = "villain 反派是否降智 / rhythm 爽点节奏 / foreshadow 伏笔排期 / repetition 套路重复"
+AuditAspect = Literal["villain", "rhythm", "foreshadow", "repetition", "expectation"]
+AUDIT_ASPECT_DESC = (
+    "villain 反派是否降智 / rhythm 爽点节奏 / foreshadow 伏笔排期 / repetition 套路重复 / expectation 期待感"
+)
 
 
 class AuditCheck(Lenient):
@@ -464,12 +466,15 @@ class AuditIssue(Lenient):
 
 
 class VolumeAudit(Lenient):
-    """卷纲专项审稿：反派智商、爽点节奏、伏笔排期、套路重复。"""
+    """卷纲专项审稿：反派智商、爽点节奏、伏笔排期、套路重复、期待感。"""
 
     verdict: Literal["pass", "revise"] = Field(description="pass：可以交给作者；revise：有必须修改的问题")
-    checks: list[AuditCheck] = Field(description="四项各一条")
+    checks: list[AuditCheck] = Field(description="五项各一条")
     issues: list[AuditIssue] = Field(default_factory=list, description="问题清单，最多 6 条，按严重程度排序")
     remark: str = remark_field()
+
+
+EmotionMood = Literal["爽", "燃", "甜", "虐", "悬", "笑", "暖", "惊"]
 
 
 class ChapterOutlineDraft(Lenient):
@@ -480,7 +485,24 @@ class ChapterOutlineDraft(Lenient):
     cool_point: str = Field(description="本章的爽点或情绪高点：打脸、反转、突破、心动、揭秘……")
     hook: str = Field(description="结尾钩子：本章停在什么悬念上，让读者想看下一章")
     characters: list[str] = Field(default_factory=list, description="出场的主要人物姓名")
-    foreshadow_actions: list[ForeshadowStep] = Field(default_factory=list, description="本章对伏笔的动作")
+    foreshadow_actions: list[ForeshadowStep] = Field(
+        default_factory=list, description="本章对伏笔和期待的动作（伏笔如 F3，期待如 E2）"
+    )
+    emotion: int = Field(
+        default=0, description="本章读者的情绪落点：-2 憋屈压抑，-1 偏压，0 平稳或悬着，1 偏扬，2 爆发爽快"
+    )
+    mood: EmotionMood = Field(default="悬", description="本章的主情绪：爽 / 燃 / 甜 / 虐 / 悬 / 笑 / 暖 / 惊")
+    reveals: list[RevealStep] = Field(default_factory=list, description="本章揭开的秘密；没有就留空")
+
+    @field_validator("emotion", mode="before")
+    @classmethod
+    def _emotion(cls, value: Any) -> int:
+        if isinstance(value, str):
+            match = re.search(r"[+-]?\d+(?:\.\d+)?", value)
+            value = float(match.group()) if match else 0
+        if not isinstance(value, int | float) or value != value:
+            return 0
+        return int(max(-2, min(2, value)))
 
 
 class ChapterPlanDraft(Lenient):
@@ -531,6 +553,20 @@ class ForeshadowUpdate(Lenient):
     action: ForeshadowAction = Field(description="本章实际对这条伏笔做了什么")
 
 
+class SecretUpdate(Lenient):
+    ref: str = Field(description="秘密编号，如 S2（必须是信息差表里已有的编号）")
+    learned_by: list[str] = Field(default_factory=list, description="本章新知道这件事的人（设定库里已有的姓名）")
+    public: bool = Field(default=False, description="本章之后这件事是否已经人尽皆知")
+    how: str = Field(default="", description="怎么知道的，一句话")
+
+
+class NewSecret(Lenient):
+    title: str = Field(description="秘密的短名，4-12 字")
+    truth: str = Field(description="真相是什么，30-80 字")
+    knowers: list[str] = Field(default_factory=list, description="本章结束时知道这件事的人（设定库里已有的姓名）")
+    reader_knows: ReaderKnows = Field(description="读者知不知道：知道 / 不知道 / 部分")
+
+
 class ChapterDigest(Lenient):
     """定稿后设定师提取本章带来的变化，程序校验后写进设定库。"""
 
@@ -538,7 +574,13 @@ class ChapterDigest(Lenient):
     character_updates: list[CharacterUpdate] = Field(default_factory=list, description="状态有变化的已有人物")
     new_characters: list[NewCharacter] = Field(default_factory=list, description="本章新登场、之后还会出现的人物")
     foreshadow_updates: list[ForeshadowUpdate] = Field(
-        default_factory=list, description="本章实际埋下、提醒或回收的伏笔"
+        default_factory=list, description="本章实际埋下、提醒或回收的伏笔与期待（期待：埋下＝立下，回收＝兑现）"
+    )
+    secret_updates: list[SecretUpdate] = Field(
+        default_factory=list, description="本章正文里真的发生的信息差变化：谁新知道了哪个秘密、哪个秘密公开了"
+    )
+    new_secrets: list[NewSecret] = Field(
+        default_factory=list, description="本章出现的、之后会影响剧情的新秘密；没有就留空"
     )
     remark: str = remark_field()
 

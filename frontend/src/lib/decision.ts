@@ -1,5 +1,5 @@
 import type { Pending } from '../api/types'
-import { cleanVolumeTitle } from './status'
+import { cleanVolumeTitle } from './status.ts'
 
 export interface DecisionCopy {
   eyebrow: string
@@ -15,18 +15,24 @@ export interface DecisionCopy {
 export function decisionCopy(pending: Pending | null | undefined, bookId: string): DecisionCopy {
   const base = `/books/${bookId}`
   switch (pending?.kind) {
-    case 'volume_review':
+    case 'volume_review': {
+      const issues = [...(pending.issues ?? [])]
+      if (pending.node_update && !issues.some(issue => issue.startsWith('节点调整：'))) {
+        const proposal = pending.node_update
+        issues.push(`节点调整：暂定节点 ${proposal.index}「${proposal.current.title}」拟改为「${proposal.proposed.title}」；${proposal.reason}（批准卷纲后应用）`)
+      }
       return {
         eyebrow: '下一步 · 卷纲拍板',
         title: `第${pending.volume}卷《${cleanVolumeTitle(pending.title)}》的卷纲拆好了`,
-        hint: pending.issues?.length
-          ? '主编把这一卷拆成了剧情单元；审稿查出的下面几处还没改干净，你看看要不要管。哪里不对可以直接在卷纲里改，或者告诉主编怎么改；满意就盖章开写。'
-          : '主编把这一卷拆成了剧情单元，比稿选出这一版，审稿又专门查过反派、节奏、伏笔和套路重复。哪里不对可以直接在卷纲里改，或者告诉主编怎么改；满意就盖章开写。',
+        hint: issues.length
+          ? '主编把这一卷拆成了剧情单元；下面是待你确认的提醒与节点提议。哪里不对可以直接在卷纲里改，或者告诉主编怎么改；满意就盖章开写，暂定节点提议会随批准应用。'
+          : '主编把这一卷拆成了剧情单元，比稿选出这一版，审稿又专门查过反派、节奏、伏笔、套路重复和期待感。哪里不对可以直接在卷纲里改，或者告诉主编怎么改；满意就盖章开写。',
         approve: '批准开写',
         placeholder: '例如：第三单元太拖，压缩一下；女主在这一卷多一些戏份',
         links: [[`第${pending.volume}卷卷纲`, `${base}/volume/${pending.volume}`], ['线索', `${base}/threads`]],
-        issues: pending.issues,
+        issues,
       }
+    }
     case 'trial_read':
       return {
         eyebrow: '下一步 · 试读',

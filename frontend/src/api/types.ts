@@ -46,6 +46,14 @@ export interface SetupSuggestion {
 
 export type NodeCandidate = Pick<StoryNode, 'title' | 'event' | 'prerequisite' | 'consequence' | 'volume' | 'editor_note' | 'techniques'>
 
+export interface NodeUpdateProposal {
+  node_id: string
+  index: number
+  current: Pick<StoryNode, 'title' | 'event' | 'prerequisite' | 'consequence'>
+  proposed: Pick<StoryNode, 'title' | 'event' | 'prerequisite' | 'consequence'>
+  reason: string
+}
+
 /**
  * 等作者处理的内容：setup_questions 动笔前的提问；setup_review 开书方案拍板；
  * volume_review 某一卷的卷纲拍板；trial_read 前几章试读；chapter_stuck 某章重写两次仍未通过。
@@ -55,7 +63,7 @@ export type Pending =
   | { kind: 'setup_review'; round: number; title?: string }
   | { kind: 'setup_directions'; directions: BookDirection[]; recommended: number; length: InterviewQuestion }
   | { kind: 'setup_piece'; piece: PieceKey; round: number; warnings?: string[]; decisions?: AuthorChoice[]; suggestions?: SetupSuggestion[]; unlock_requests?: { target: SetupTarget; reason: string }[]; candidates?: { node_id: string; nodes: NodeCandidate[] } | null }
-  | { kind: 'volume_review'; volume: number; title: string; issues?: string[] }
+  | { kind: 'volume_review'; volume: number; title: string; issues?: string[]; node_update?: NodeUpdateProposal | null }
   | { kind: 'trial_read'; chapters: number }
   | { kind: 'chapter_stuck'; chapter: number; title: string; issues: string[] }
 
@@ -118,6 +126,7 @@ export interface StoryNode {
   volume: number | null
   status: 'pinned' | 'pencil' | 'empty'
   origin: 'ai' | 'author'
+  updated_by_volume?: number | null
   editor_note: string
   techniques: string[]
   anchors: NodeAnchor[]
@@ -213,6 +222,8 @@ export interface PlotUnit {
   recap: string
   editor_note?: string
   techniques?: string[]
+  reveals?: { ref: string; to: string; how: string }[]
+  plan_issues?: string[]
 }
 
 export interface Volume {
@@ -249,6 +260,9 @@ export interface ChapterOutline {
   hook?: string
   characters?: string[]
   foreshadow_actions?: ForeshadowStep[]
+  emotion?: number
+  mood?: '爽' | '燃' | '甜' | '虐' | '悬' | '笑' | '暖' | '惊'
+  reveals?: { ref: string; to: string; how: string }[]
 }
 
 export type ChapterStatus = 'planned' | 'drafting' | 'final'

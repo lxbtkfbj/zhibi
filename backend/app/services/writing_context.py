@@ -31,8 +31,9 @@ from app.agents.context import (
     format_volume_card,
 )
 from app.agents.glossary import glossary_block
-from app.agents.planning import ref_seq, relevant_ledger, unit_hint
+from app.agents.planning import ref_seq, relevant_ledger, secret_seq, unit_hint
 from app.agents.playbook import pick, usage_text
+from app.agents.rhythm import rhythm_text
 from app.book_settings import settings_of
 from app.models import Book, Chapter, Character, PlotUnit, Volume, WorldEntry
 from app.services.requirements import list_requirements
@@ -72,7 +73,8 @@ def format_chapter_outline(outline: dict[str, Any]) -> str:
     actions = outline.get("foreshadow_actions") or []
     if actions:
         lines.append(
-            "伏笔：" + "；".join(f"{a.get('action')}{a.get('ref')} {a.get('detail', '')}".strip() for a in actions)
+            "伏笔与期待："
+            + "；".join(f"{a.get('action')}{a.get('ref')} {a.get('detail', '')}".strip() for a in actions)
         )
     emotions = {-2: "憋屈压抑", -1: "偏压", 0: "平稳或悬着", 1: "偏扬", 2: "爆发爽快"}
     emotion, mood = outline.get("emotion"), outline.get("mood")
@@ -233,8 +235,8 @@ def world_text(rows: list[WorldEntry], mention: str, picked: list[str] | None = 
 
 
 def ledger_for_refs(ledger: list[dict[str, Any]], refs: list[str], volume: int) -> list[dict[str, Any]]:
-    seqs = {ref_seq(r) for r in refs}
-    picked = [f for f in ledger if f["seq"] in seqs]
+    codes = {ref.strip().upper() for ref in refs}
+    picked = [f for f in ledger if foreshadow_code(f) in codes]
     for f in relevant_ledger(ledger, volume):
         if f["status"] == "planted" and f not in picked:
             picked.append(f)
@@ -285,12 +287,12 @@ def best_excerpt(text: str, query: str, limit: int = EXCERPT_CHARS) -> str:
 async def foreshadow_tasks(
     session: AsyncSession, book_id: uuid.UUID, ledger: list[dict[str, Any]], actions: list[dict[str, Any]], before: int
 ) -> str:
-    """本章要处理的伏笔：台账里的描述和计划；提醒、回收时附上当初埋下（和最近一次提醒）那一章的原文片段。"""
+    """伏笔与期待任务：提醒、回收/兑现时附上埋下/立下及最近一次提醒的原文片段。"""
     by_seq = {f["seq"]: f for f in ledger}
     lines = []
     for a in actions:
         f = by_seq.get(ref_seq(a.get("ref", "")) or -1)
-        if f is None:
+        if f is None or a.get("ref", "").strip().upper() != foreshadow_code(f):
             continue
         action, detail = a.get("action", ""), (a.get("detail") or "").strip()
         expectation = f.get("kind") == "期待"
@@ -302,9 +304,11 @@ async def foreshadow_tasks(
         )
         if action == "埋下":
             if f.get("plant_plan"):
-                lines.append(f"  埋法：{f['plant_plan']}")
+                lines.append(f"  {'立法' if expectation else '埋法'}：{f['plant_plan']}")
+            if expectation:
+                lines.append("  写清楚让读者开始期待的那一幕（约定、狠话、倒计时），让读者明确知道接下来在等什么。")
             continue
-        sources = [("埋下", f.get("planted_chapter"))]
+        sources = [("立下" if expectation else "埋下", f.get("planted_chapter"))]
         if action == "回收" and f.get("hint_chapters"):
             sources.append(("提醒", f["hint_chapters"][-1]))
         found = False
@@ -323,19 +327,73 @@ async def foreshadow_tasks(
                 lines.append(f"  第{index}章《{row.title}》（{label}）原文：「{excerpt}」")
                 found = True
             else:
-                lines.append(f"  第{index}章《{row.title}》{label}了这条伏笔（没找到明显相关的段落，按描述自然带出）")
+                kind = "期待" if expectation else "伏笔"
+                lines.append(f"  第{index}章《{row.title}》{label}了这条{kind}（没找到明显相关的段落，按描述自然带出）")
                 found = True
         if not found:
-            lines.append("  台账里还没记下埋在哪一章，按描述自然带出。")
+            lines.append(f"  台账里还没记下{'立下' if expectation else '埋在'}哪一章，按描述自然带出。")
         if action == "回收" and f.get("payoff_plan"):
-            lines.append(f"  回收方式：{f['payoff_plan']}")
+            lines.append(f"  {'兑现' if expectation else '回收'}方式：{f['payoff_plan']}")
+        if expectation and action == "提醒":
+            lines.append("  让角色或旁人自然地提起，让读者想起还在等这件事。")
+        elif expectation and action == "回收":
+            lines.append("  兑现要超出读者的预期：比读者以为的更大、更快，或者换个角度。")
     if not lines:
         return ""
     return (
-        "【本章要处理的伏笔】\n"
+        "【本章要处理的伏笔和期待】\n"
         + "\n".join(lines)
-        + "\n提醒、回收伏笔时，要写出能让读者想起当初那一幕的细节（可以化用上面的原文，不要整段照抄）。"
+        + "\n提醒、回收伏笔或提醒、兑现期待时，要写出能让读者想起当初那一幕的细节（可以化用上面的原文，不要整段照抄）。"
     )
+
+
+def _canonical_names(names: list[str], characters: list[Character]) -> list[str]:
+    """章纲和备资料里可能使用别名；信息差知情人统一使用设定库的姓名。"""
+    aliases = {alias: c.name for c in characters for alias in c.aliases or []}
+    aliases.update({c.name: c.name for c in characters})
+    return list(dict.fromkeys(aliases.get(name.strip(), name.strip()) for name in names if name.strip()))
+
+
+def _secret_involves(secret: dict[str, Any], names: list[str]) -> bool:
+    knowers = {k.get("name") for k in secret.get("knowers") or []}
+    return bool(knowers.intersection(names)) or any(name in (secret.get("truth") or "") for name in names)
+
+
+def writer_secrets(secrets: list[dict[str, Any]], names: list[str], reveals: list[dict[str, Any]]) -> str:
+    """仅给写手本章相关的隐藏信息差，优先保留本章需要揭晓的秘密。"""
+    reveal_seqs = {secret_seq(reveal.get("ref", "")) for reveal in reveals}
+    picked = [
+        secret
+        for secret in secrets
+        if secret.get("status") == "hidden" and (secret.get("seq") in reveal_seqs or _secret_involves(secret, names))
+    ]
+    picked.sort(key=lambda secret: secret.get("seq") not in reveal_seqs)
+    picked = picked[:8]
+    if not picked:
+        return ""
+    lines = ["【本章的信息差】"]
+    for secret in picked:
+        knowers = []
+        known_names = set()
+        for knower in secret.get("knowers") or []:
+            name = knower.get("name", "")
+            if not name:
+                continue
+            known_names.add(name)
+            since = knower.get("since_chapter")
+            when = "开书时" if since is None else f"第 {since} 章"
+            knowers.append(f"{name}（{when}）")
+        unknown = "、".join(name for name in names if name not in known_names) or "（无）"
+        lines.append(
+            f"- S{secret['seq']}「{secret.get('title', '')}」（读者：{secret.get('reader_knows') or '未标注'}）："
+            f"知道的人：{'、'.join(knowers) or '（暂无）'}；本章出场但还不知道：{unknown}；真相：{secret.get('truth', '')}"
+        )
+    selected_seqs = {secret["seq"] for secret in picked}
+    for reveal in reveals:
+        if secret_seq(reveal.get("ref", "")) in selected_seqs:
+            lines.append(f"- 本章揭晓：{reveal['ref']} 揭给 {reveal.get('to', '')}——{reveal.get('how', '')}")
+    lines.append("写的时候，不知道的人不能说出、想到或按这些信息行动；要揭晓的，写清楚是怎么知道的。")
+    return "\n".join(lines)
 
 
 # ---------- 设定师备资料 ----------
@@ -347,6 +405,9 @@ async def material_blocks(session: AsyncSession, book: Book, chapter: Chapter) -
     volume = await session.get(Volume, chapter.volume_id) if chapter.volume_id else None
     outline = chapter.outline or {}
     characters = await _characters(session, book.id)
+    names = _canonical_names(list(outline.get("characters") or []), characters)
+    hidden_secrets = [secret for secret in await load_secrets(session, book.id) if secret.get("status") == "hidden"]
+    hidden_secrets.sort(key=lambda secret: not _secret_involves(secret, names))
     roster = sorted(characters, key=lambda c: c.role_type == "龙套")[:CATALOG_CHARACTERS]
     world = await _world(session, book.id)
     ledger = await load_ledger(session, book.id)
@@ -381,6 +442,7 @@ async def material_blocks(session: AsyncSession, book: Book, chapter: Chapter) -
         )
         or "（还没有前文）",
         "ledger": format_ledger(related),
+        "secrets": format_secrets(hidden_secrets[:20]),
     }
 
 
@@ -445,9 +507,11 @@ def used_climaxes(prior: list[dict[str, Any]]) -> str:
     return "\n".join(lines) or "（暂无）"
 
 
-async def volume_blocks(session: AsyncSession, book: Book, volume: Volume) -> dict[str, str]:
+async def volume_blocks(
+    session: AsyncSession, book: Book, volume: Volume, *, nodes: list[dict] | None = None
+) -> dict[str, str]:
     """拆某一卷的卷纲时需要的上下文。"""
-    nodes = await load_nodes(session, book.id)
+    nodes = await load_nodes(session, book.id) if nodes is None else nodes
     volumes = list(
         (await session.execute(select(Volume).where(Volume.book_id == book.id).order_by(Volume.index))).scalars().all()
     )
@@ -531,6 +595,35 @@ async def chapter_plan_blocks(
     ledger = await load_ledger(session, book.id)
     refs = [a.get("ref", "") for a in unit.foreshadow_actions or []]
     count = max(1, unit.chapter_count)
+    characters = await _characters(session, book.id)
+    mentioned = " ".join([*(unit.key_events or []), *(volume.new_characters or [])])
+    names = [
+        c.name
+        for c in characters
+        if c.role_type == "主角" or any(name in mentioned for name in [c.name, *(c.aliases or [])] if name)
+    ]
+    nodes = await load_nodes(session, book.id)
+    card = volume_dict(volume, nodes)
+    target = card.get("target_node")
+    reveal_seqs = {secret_seq(reveal.get("ref", "")) for reveal in unit.reveals or []}
+    secrets = [
+        secret
+        for secret in await load_secrets(session, book.id, nodes)
+        if secret.get("status") == "hidden"
+        and (
+            any(knower.get("name") in names for knower in secret.get("knowers") or [])
+            or secret.get("seq") in reveal_seqs
+            or (target and secret.get("node") == target)
+        )
+    ]
+    secrets.sort(key=lambda secret: secret.get("seq") not in reveal_seqs)
+    playbook = pick(book.concept, settings_of(book)["playbook"])
+    ledger_text = format_ledger(ledger_for_refs(ledger, refs, volume.index))
+    if not any(
+        item.get("kind") == "期待" and item.get("status") == "planted" and item.get("span") in ("中", "长")
+        for item in ledger
+    ):
+        ledger_text += "\n提示：本单元开始时没有开着的中长线期待，请安排新立一条，让读者知道接下来在等什么。"
     return {
         "volume_index": str(volume.index),
         "unit_index": str(unit.index),
@@ -538,16 +631,19 @@ async def chapter_plan_blocks(
         "first_chapter": str(first_chapter),
         "last_chapter": str(first_chapter + count - 1),
         "concept": format_concept({**(book.concept or {}), "chapter_words": chapter_words(book)}),
-        "volume": format_volume_card(volume_dict(volume, await load_nodes(session, book.id))),
+        "volume": format_volume_card(card),
         "unit": format_unit(unit_dict(unit)),
         "neighbors": "\n".join(neighbors),
         "story_so_far": await story_so_far(
             session, book, volume.index, before_chapter=first_chapter, unit_index=unit.index
         ),
-        "characters": character_states(await _characters(session, book.id)),
-        "ledger": format_ledger(ledger_for_refs(ledger, refs, volume.index)),
+        "characters": character_states(characters),
+        "ledger": ledger_text,
+        "secrets": format_secrets(secrets[:10]),
+        "rhythm": rhythm_text(playbook.key),
+        "revision": "",
         # 套路库只带本单元用到的套路，省篇幅
-        "playbook": pick(book.concept, settings_of(book)["playbook"]).text("chapters", tropes=list(unit.tropes or [])),
+        "playbook": playbook.text("chapters", tropes=list(unit.tropes or [])),
         "requirements": await requirements_of(book, session),
     }
 
@@ -568,7 +664,8 @@ async def chapter_blocks(session: AsyncSession, book: Book, chapter: Chapter) ->
         )
     ).scalar()
     characters = await _characters(session, book.id)
-    names = list(dict.fromkeys([*(outline.get("characters") or []), *materials.get("characters", [])]))
+    names = _canonical_names([*(outline.get("characters") or []), *materials.get("characters", [])], characters)
+    secrets = await load_secrets(session, book.id)
     mention = " ".join([str(outline), unit.title if unit else ""])
     ledger = await load_ledger(session, book.id)
     actions = outline.get("foreshadow_actions") or []
@@ -598,6 +695,8 @@ async def chapter_blocks(session: AsyncSession, book: Book, chapter: Chapter) ->
         "requirements": await requirements_of(book, session),
         "chapter_words": str(chapter_words(book)),
         "ledger": format_ledger(ledger_for_refs(ledger, refs, volume_index)),
+        "secrets": format_secrets(secrets),
+        "secrets_for_writer": writer_secrets(secrets, names, outline.get("reveals") or []),
         "content": chapter.content,
     }
 

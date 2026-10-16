@@ -3,7 +3,7 @@
 每一轮先看「下一步该做什么」（数据库为准，断点续跑、换任务都能接上）：
 - 当前这一卷还只有总纲卡片 → 拆卷纲：主编先想 2-3 个不同方向，每个方向并行各拆一份完整卷纲 →
   审稿按爽点、线索交织、反派智商、新意打分比稿，选出最好的一份（必要时主编把别的方案的长处融进来）→
-  审稿做专项审稿（反派是否降智、爽点节奏、伏笔排期、套路重复，套路超限和伏笔漏排由程序直接查）→
+  审稿做专项审稿（反派是否降智、爽点节奏、伏笔排期、套路重复、期待感，排期与节奏底线由程序检查）→
   有严重问题主编自动改一轮 → 存库 → 作者拍板（提意见则主编按意见改，再拍板）
 - 下一个剧情单元还没有章纲 → 主编出这个单元的章纲
 - 有章纲、还没定稿的章节 → 设定师读章纲备资料 → 写手写正文（流式，写到哪了实时推给网页）→
@@ -31,14 +31,15 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents import editorial
-from app.agents.context import format_direction, format_pitches, format_revision
-from app.agents.planning import attach_new_foreshadowings, fit_chapter_counts, schedule_issues
+from app.agents.context import foreshadow_code, format_direction, format_pitches, format_revision
+from app.agents.planning import attach_new_foreshadowings, expectation_issues, fit_chapter_counts, schedule_issues
 from app.agents.playbook import Playbook, pick, repetition_issues
+from app.agents.rhythm import check_chapter_plan, overdue_expectations
 from app.agents.setup_puzzle import clean_reveals
 from app.book_settings import settings_of, strictness_text
 from app.graphs.deps import GraphDeps
 from app.llm.router import LLMError
-from app.models import Book, Chapter, MeetingMessage, PlotUnit, Volume
+from app.models import Book, Chapter, MeetingMessage, PlotUnit, StoryNode, Volume
 from app.services import setup_store, writing_store
 from app.services.notes import note_thread
 from app.services.requirements import active_notes, add_requirement, deleted_texts, ingest_notes
@@ -47,6 +48,7 @@ from app.services.writing_context import (
     chapter_blocks,
     chapter_plan_blocks,
     chapter_words,
+    format_chapter_outline,
     material_blocks,
     pick_materials,
     prior_units,
@@ -55,7 +57,14 @@ from app.services.writing_context import (
     volume_recap_blocks,
 )
 
-ASPECT_NAMES = {"villain": "反派智商", "rhythm": "爽点节奏", "foreshadow": "伏笔排期", "repetition": "套路重复"}
+ASPECT_NAMES = {
+    "villain": "反派智商",
+    "rhythm": "爽点节奏",
+    "foreshadow": "伏笔排期",
+    "repetition": "套路重复",
+    "expectation": "期待感",
+}
+NODE_CONTENT = ("title", "event", "prerequisite", "consequence")
 # 新书写完前几章请作者试读
 TRIAL_READ_AFTER = 3
 UNTIL = ("count", "volume", "book")
@@ -111,6 +120,7 @@ class WriteState(TypedDict, total=False):
     volume_draft: dict
     volume_fix: str
     open_issues: list[str]
+    node_update: dict | None
 
 
 def initial_state(params: dict) -> WriteState:
@@ -265,12 +275,22 @@ def route_step(state: WriteState) -> str:
     return state.get("step") or "done"
 
 
-async def _volume_context(d: GraphDeps, volume_id: str) -> tuple[Volume, Playbook, dict[str, str]]:
+async def _volume_context(d: GraphDeps, volume_id: str) -> tuple[Volume, Playbook, dict[str, Any]]:
     """拆卷纲各步共用的上下文：这一卷、这本书的题材打法、拼好的各段提示词。"""
     async with d.sessionmaker() as session:
         book = await session.get(Book, d.book_id)
         volume = await session.get(Volume, uuid.UUID(volume_id))
-        blocks = await volume_blocks(session, book, volume)
+        # 将提示词这一次引用的目标绑定到稳定 ID，而非在模型返回后重新解释节点序号。
+        nodes = await setup_store.load_nodes(session, d.book_id)
+        blocks = await volume_blocks(session, book, volume, nodes=nodes)
+        blocks["_target_snapshot"] = next(
+            (
+                {"node_id": node["id"], "index": i, "current": {key: node[key] for key in NODE_CONTENT}}
+                for i, node in enumerate(nodes, 1)
+                if node["id"] == str(volume.target_node_id)
+            ),
+            None,
+        )
         return volume, pick(book.concept, settings_of(book)["playbook"]), blocks
 
 
@@ -359,6 +379,7 @@ async def draft_pitch_node(task: dict, runtime: Runtime[GraphDeps]) -> dict:
         d.llm, {**blocks, "direction": format_direction(direction)}, {}, "", purpose=f"写作·第{index}卷方案{pitch}"
     )
     plan = result.model_dump(exclude={"remark"})
+    plan["_target_snapshot"] = blocks.get("_target_snapshot")
     plan["units"] = fit_chapter_counts(plan["units"], volume.chapter_count)
     await d.emit.artifact(
         "chief",
@@ -443,13 +464,14 @@ async def merge_pitches_node(state: WriteState, runtime: Runtime[GraphDeps]) -> 
         d.llm, blocks, state.get("volume_draft") or {}, instructions, purpose=f"写作·第{index}卷融合方案"
     )
     plan = result.model_dump(exclude={"remark"})
+    plan["_target_snapshot"] = blocks.get("_target_snapshot")
     plan["units"] = fit_chapter_counts(plan["units"], volume.chapter_count)
     await d.emit.say("chief", result.remark)
     return {"volume_draft": plan, "merge_note": ""}
 
 
 async def audit_volume_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
-    """专项审稿：反派是否降智、爽点节奏、伏笔排期、套路重复。套路超限、伏笔漏排由程序直接查。"""
+    """五项专项审稿：程序问题必须修改，参考提示交给审稿判断。"""
     d = runtime.context
     await d.check_cancel()
     plan = state.get("volume_draft") or {}
@@ -458,17 +480,21 @@ async def audit_volume_node(state: WriteState, runtime: Runtime[GraphDeps]) -> d
     async with d.sessionmaker() as session:
         prior = await prior_units(session, d.book_id, index)
         ledger = await setup_store.load_ledger(session, d.book_id)
+        first = await writing_store.next_chapter_index(session, d.book_id)
     units = plan.get("units") or []
     found = [
         *repetition_issues(playbook, prior, units),
-        *schedule_issues(units, plan.get("new_foreshadowings") or [], ledger, index),
+        *schedule_issues(
+            units, plan.get("new_foreshadowings") or [], [f for f in ledger if f["kind"] == "伏笔"], index
+        ),
+        *expectation_issues(units, plan.get("new_expectations") or [], ledger, index, first),
     ]
-    await d.emit.status("reviewer", f"审稿正在给第{index}卷做专项审稿：反派智商、爽点节奏、伏笔排期、套路重复…")
+    await d.emit.status("reviewer", f"审稿正在给第{index}卷做专项审稿：反派智商、爽点节奏、伏笔排期、套路重复、期待感…")
     result = await editorial.audit_volume(
         d.llm,
         {**blocks, "playbook": playbook.text("review")},
         plan,
-        [_issue_line(i) for i in found],
+        [("问题：" if i.get("severity") in ("high", "medium") else "提示：") + _issue_line(i) for i in found],
         purpose=f"写作·第{index}卷专项审稿",
     )
     reviewed = [i.model_dump() for i in result.issues]
@@ -537,7 +563,7 @@ async def revise_volume_node(state: WriteState, runtime: Runtime[GraphDeps]) -> 
                 ],
             }
         if removed_feedback:
-            return {"volume_draft": current, "feedback": "", "volume_fix": ""}
+            return {"volume_draft": current, "feedback": "", "volume_fix": "", "node_update": None}
         await d.emit.status("chief", f"主编正在按你的意见修改第{index}卷卷纲…")
         instructions, purpose = feedback, f"写作·第{index}卷按作者意见修改"
     else:
@@ -546,7 +572,62 @@ async def revise_volume_node(state: WriteState, runtime: Runtime[GraphDeps]) -> 
         instructions, purpose = state.get("volume_fix", ""), f"写作·第{index}卷按专项审稿修改"
     result = await editorial.plan_volume(d.llm, blocks, current, instructions, purpose=purpose)
     await d.emit.say("chief", result.remark)
-    return {"volume_draft": result.model_dump(exclude={"remark"}), "volume_fix": ""}
+    return {
+        "volume_draft": {**result.model_dump(exclude={"remark"}), "_target_snapshot": blocks.get("_target_snapshot")},
+        "volume_fix": "",
+        "node_update": None,
+    }
+
+
+async def _node_proposal(
+    session: AsyncSession, book_id: uuid.UUID, volume: Volume, plan: dict
+) -> tuple[dict | None, str]:
+    conflict = str(plan.get("node_conflict") or "").strip()
+    proposed = plan.get("node_update")
+    if not proposed:
+        return None, conflict
+    node = await session.get(StoryNode, volume.target_node_id) if volume.target_node_id else None
+    if node is not None and node.status == "pinned":
+        return None, conflict + "（主编提议调整铁钉节点，已忽略）"
+    snapshot = plan.get("_target_snapshot") or {}
+    if (
+        node is None
+        or node.book_id != book_id
+        or node.status != "pencil"
+        or snapshot.get("node_id") != str(node.id)
+        or snapshot.get("current") != {key: getattr(node, key) for key in NODE_CONTENT}
+    ):
+        return None, conflict + "（目标节点已变化或缺少原始快照，节点调整已忽略，请重新拆卷纲）"
+    return {
+        **snapshot,
+        "proposed": {key: str(proposed.get(key) or "") for key in NODE_CONTENT},
+        "reason": str(proposed.get("reason") or ""),
+    }, conflict
+
+
+async def _apply_node_proposal(session: AsyncSession, book_id: uuid.UUID, volume: Volume, proposal: dict) -> str:
+    """批准时再次加锁核对作者当前版本，绝不将等待期间的手改、钉死或换目标覆盖掉。"""
+    try:
+        node_id = uuid.UUID(proposal.get("node_id", ""))
+    except (ValueError, TypeError, AttributeError):
+        return "节点调整未应用：原提议的节点已失效，请重新拆卷纲。"
+    node = await session.scalar(select(StoryNode).where(StoryNode.id == node_id).with_for_update())
+    if (
+        node is None
+        or node.book_id != book_id
+        or volume.target_node_id != node_id
+        or node.status != "pencil"
+        or proposal.get("current") != {key: getattr(node, key) for key in NODE_CONTENT}
+    ):
+        return "节点调整未应用：节点或本卷目标已由作者修改，已保留作者当前的版本。"
+    proposed = proposal.get("proposed") or {}
+    if not all(isinstance(proposed.get(key), str) and proposed[key].strip() for key in NODE_CONTENT):
+        return "节点调整未应用：提议内容不完整，已保留原节点。"
+    for key in NODE_CONTENT:
+        setattr(node, key, proposed[key])
+    node.origin = "ai"
+    node.updated_by_volume = volume.index
+    return f"暂定节点「{node.title}」按这一卷的写法调整了"
 
 
 async def save_volume_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
@@ -582,9 +663,21 @@ async def save_volume_node(state: WriteState, runtime: Runtime[GraphDeps]) -> di
         prior = await prior_units(session, d.book_id, index)
         remaining = [
             *repetition_issues(pick(book.concept, settings_of(book)["playbook"]), prior, units),
-            *schedule_issues(units, [], await setup_store.load_ledger(session, d.book_id), index),
+            *schedule_issues(
+                units, [], [f for f in await setup_store.load_ledger(session, d.book_id) if f["kind"] == "伏笔"], index
+            ),
+            *expectation_issues(
+                units,
+                [],
+                await setup_store.load_ledger(session, d.book_id),
+                index,
+                await writing_store.next_chapter_index(session, d.book_id),
+            ),
         ]
+        proposal, conflict = await _node_proposal(session, d.book_id, volume, plan)
         await session.commit()
+    if conflict:
+        await d.emit.say("chief", f"节点冲突：{conflict}")
     await d.emit.artifact(
         "chief",
         f"第{index}卷拆成 {len(units)} 个剧情单元，新埋伏笔 {sum(item['kind'] == '伏笔' for item in fresh)} 条、新立期待 {sum(item['kind'] == '期待' for item in fresh)} 条",
@@ -603,7 +696,16 @@ async def save_volume_node(state: WriteState, runtime: Runtime[GraphDeps]) -> di
         "directions": [],
         "pitches": Overwrite([]),
         "volume_draft": {},
-        "open_issues": [_issue_line(i) for i in _serious(remaining)],
+        "node_update": proposal,
+        "open_issues": [
+            *[_issue_line(i) for i in _serious(remaining)],
+            *(
+                [f"节点调整：{proposal['current']['title']} → {proposal['proposed']['title']}；{proposal['reason']}"]
+                if proposal
+                else []
+            ),
+            *([f"节点冲突：{conflict}"] if conflict else []),
+        ],
     }
 
 
@@ -615,27 +717,61 @@ async def volume_gate_node(
     pending: dict[str, Any] = {"kind": "volume_review", "volume": index, "title": state.get("volume_title", "")}
     if state.get("open_issues"):
         pending["issues"] = state["open_issues"]
+    if state.get("node_update"):
+        pending["node_update"] = state["node_update"]
     d = runtime.context
     automatic = not (await live_settings(d))["volume_approval"]
     decision = {"action": "approve"} if automatic else interrupt(pending)
     feedback = str(decision.get("feedback", "")).strip()
     async with d.sessionmaker() as session:
         if decision.get("action") == "approve":
-            volume = await session.get(Volume, uuid.UUID(state["volume_id"]))
+            volume = await session.scalar(
+                select(Volume).where(Volume.id == uuid.UUID(state["volume_id"])).with_for_update()
+            )
+            node_message = ""
             if volume is not None and volume.status == "detailed":
+                if state.get("node_update"):
+                    node_message = await _apply_node_proposal(session, d.book_id, volume, state["node_update"])
                 volume.status = "approved"
             await session.commit()
+            if node_message:
+                await d.emit.say("system" if automatic else "chief", node_message, kind="decision")
             await d.emit.say(
                 "system",
                 f"第{index}卷卷纲按设置自动批准，开写。" if automatic else f"作者批准了第{index}卷卷纲，开写。",
                 kind="decision",
             )
-            return Command(goto="dispatch", update={"open_issues": []})
+            return Command(goto="dispatch", update={"open_issues": [], "node_update": None})
         # 卷纲的修改意见也要记住，免得以后的规划又改回去
         if not decision.get("requirement_saved"):
             await _requirement(session, d.book_id, feedback, f"volume:{index}")
         await session.commit()
-    return Command(goto="revise_volume", update={"feedback": feedback or "请整体再打磨一遍。"})
+    return Command(
+        goto="revise_volume",
+        update={"feedback": feedback or "请整体再打磨一遍。", "node_update": None, "open_issues": []},
+    )
+
+
+def _chapter_plan_issues(
+    plans: list[dict], first: int, key: str, prior: list[dict], ledger: list[dict], secrets: list[dict]
+) -> list[str]:
+    indexed = [{**plan, "index": first + i} for i, plan in enumerate(plans)]
+    issues = check_chapter_plan(indexed, key, prior)
+    actions = [a for plan in plans for a in plan.get("foreshadow_actions") or []]
+    issues.extend(overdue_expectations(ledger, first, first + len(plans) - 1, actions))
+    known = {foreshadow_code(item) for item in ledger}
+    secret_refs = {f"S{item['seq']}" for item in secrets}
+    for i, plan in enumerate(plans, first):
+        for field, allowed, label in (("foreshadow_actions", known, "伏笔或期待"), ("reveals", secret_refs, "秘密")):
+            clean = []
+            for action in plan.get(field) or []:
+                ref = str(action.get("ref") or "").strip().upper()
+                if ref in allowed:
+                    clean.append({**action, "ref": ref})
+                else:
+                    issues.append(f"第 {i} 章引用了不存在的{label}编号「{ref}」，已丢弃，请使用表内编号重新安排")
+            plan[field] = clean
+    return issues
 
 
 async def plan_chapters_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
@@ -650,17 +786,56 @@ async def plan_chapters_node(state: WriteState, runtime: Runtime[GraphDeps]) -> 
         book = await session.get(Book, d.book_id)
         first = await writing_store.next_chapter_index(session, d.book_id)
         blocks = await chapter_plan_blocks(session, book, volume, unit, first)
+        blocks["revision"] = ""
+        key = pick(book.concept, settings_of(book)["playbook"]).key
+        history = list(
+            (
+                await session.scalars(
+                    select(Chapter)
+                    .where(Chapter.book_id == d.book_id, Chapter.index < first)
+                    .order_by(Chapter.index.desc())
+                    .limit(5)
+                )
+            ).all()
+        )
+        prior = [{**(chapter.outline or {}), "index": chapter.index} for chapter in reversed(history)]
+        ledger = await setup_store.load_ledger(session, d.book_id)
+        secrets = await setup_store.load_secrets(session, d.book_id)
         label = f"第{volume.index}卷第{unit.index}单元「{unit.title}」"
     await d.emit.status("chief", f"主编正在给{label}出章纲…")
-    result = await editorial.plan_chapters(d.llm, blocks)
-    plans = [c.model_dump() for c in result.chapters if c.title.strip() or c.goal.strip()]
-    if not plans:
-        raise LLMError("主编没有给出章纲")
+    for attempt in range(2):
+        result = await editorial.plan_chapters(d.llm, blocks)
+        plans = [c.model_dump() for c in result.chapters if c.title.strip() or c.goal.strip()]
+        if not plans:
+            raise LLMError("主编没有给出章纲")
+        issues = _chapter_plan_issues(plans, first, key, prior, ledger, secrets)
+        if not issues or attempt:
+            break
+        blocks["revision"] = format_revision(
+            "当前章纲",
+            "\n\n".join(f"第 {first + i} 章\n{format_chapter_outline(plan)}" for i, plan in enumerate(plans)),
+            "\n".join(f"- {issue}" for issue in issues),
+        )
+        await d.emit.status("chief", f"{label}章纲有 {len(issues)} 处问题，主编按检查结果重出一次…")
+        await d.check_cancel()
     async with d.sessionmaker() as session:
         unit = await session.get(PlotUnit, uuid.UUID(state["unit_id"]))
+        unit.plan_issues = issues
         rows = await writing_store.create_chapters(session, d.book_id, unit, plans)
         await session.commit()
-        listing = [{"index": r.index, "title": r.title, "hook": r.outline.get("hook", "")} for r in rows]
+        listing = [
+            {
+                "index": r.index,
+                "title": r.title,
+                "hook": r.outline.get("hook", ""),
+                "emotion": r.outline.get("emotion"),
+                "mood": r.outline.get("mood"),
+                "reveals": r.outline.get("reveals", []),
+            }
+            for r in rows
+        ]
+    if issues:
+        await d.emit.status("chief", f"第 {unit.index} 单元章纲还有 {len(issues)} 处节奏问题，已记在卷页")
     await d.emit.say("chief", result.remark)
     await d.emit.artifact(
         "chief",
@@ -1186,7 +1361,7 @@ def rewrite_initial_state(params: dict) -> WriteState:
 
 
 async def reopen_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
-    """撤销这一章原来记进设定库和伏笔台账的变化，章节回到写作中。续跑时已经重开过就跳过。"""
+    """撤销这一章原来记进设定库、伏笔期待与信息差表的变化；续跑时已经重开过就跳过。"""
     d = runtime.context
     await d.check_cancel()
     async with d.sessionmaker() as session:
@@ -1198,9 +1373,13 @@ async def reopen_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
         await session.commit()
         index = chapter.index
     if any(changes.values()):
-        undone = f"人物状态 {changes['characters']} 处、伏笔进展 {changes['foreshadowings']} 条" + (
+        undone = f"人物状态 {changes['characters']} 处、伏笔与期待进展 {changes['foreshadowings']} 条" + (
             f"、新人物 {changes['removed']} 位" if changes["removed"] else ""
         )
+        if changes.get("secrets"):
+            undone += f"、信息差 {changes['secrets']} 条"
+        if changes.get("removed_secrets"):
+            undone += f"、新秘密 {changes['removed_secrets']} 条"
         note = f"设定师先撤掉了第{index}章原来记进设定库的变化（{undone}），重写后重新提取。"
     else:
         note = f"第{index}章原来没有改动设定库里还作数的内容，直接重写，写完重新提取。"

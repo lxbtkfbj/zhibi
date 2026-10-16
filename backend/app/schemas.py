@@ -502,6 +502,7 @@ class NodeOut(ORM):
     volume: int | None
     status: NodeStatus
     origin: Literal["ai", "author"]
+    updated_by_volume: int | None = None
     editor_note: str
     techniques: list[str]
     anchors: list[AnchorOut] = []

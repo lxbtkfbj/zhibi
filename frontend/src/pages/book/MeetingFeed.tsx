@@ -85,7 +85,7 @@ interface AuditData {
 }
 interface ChapterPlanData {
   unit: string
-  chapters: { index: number; title: string; hook: string }[]
+  chapters: { index: number; title: string; hook: string; emotion?: number; mood?: string; reveals?: { ref: string; to: string; how: string }[] }[]
 }
 interface ChapterData {
   index: number
@@ -96,6 +96,8 @@ interface ChapterData {
   characters_updated?: number
   characters_created?: number
   foreshadowings?: number
+  secrets_updated?: number
+  secrets_created?: number
 }
 interface MaterialsData {
   index: number
@@ -129,7 +131,7 @@ const TARGET_NAME: Record<string, string> = {
   first_volume: '第一卷卷纲',
 }
 const SEVERITY: Record<string, string> = { high: '严重', medium: '中等', low: '轻微' }
-const ASPECT_NAME: Record<string, string> = { villain: '反派智商', rhythm: '爽点节奏', foreshadow: '伏笔排期', repetition: '套路重复' }
+const ASPECT_NAME: Record<string, string> = { villain: '反派智商', rhythm: '爽点节奏', foreshadow: '伏笔排期', repetition: '套路重复', expectation: '期待感' }
 const SCORE_COLUMNS: [keyof ScoreRow, string][] = [
   ['cool', '爽点'],
   ['weaving', '线索'],
@@ -434,11 +436,13 @@ export function ArtifactBody({ message }: { message: MeetingMessage }) {
   if (type === 'chapter_plan') {
     const c = data as ChapterPlanData
     return (
-      <ol className="space-y-1 text-ink-2">
+      <ol className="space-y-2 text-ink-2">
         {c.chapters.map((ch) => (
           <li key={ch.index}>
             <span className="font-medium text-ink">第{ch.index}章 {ch.title}</span>
+            {typeof ch.emotion === 'number' && <span className="ml-2 inline-block rounded bg-chief-soft px-1.5 py-px text-xs text-chief" aria-label={`情绪 ${ch.emotion}，主情绪 ${ch.mood ?? '未标注'}`}>{ch.emotion > 0 ? '+' : ''}{ch.emotion} {ch.mood}</span>}
             {ch.hook && <span className="text-ink-2"> —— {ch.hook}</span>}
+            {ch.reveals?.map((reveal, index) => <p key={index} className="mt-1 text-xs text-lore">揭晓：{reveal.ref} → {reveal.to || '未指定'}{reveal.how && ` · ${reveal.how}`}</p>)}
           </li>
         ))}
       </ol>
@@ -452,6 +456,7 @@ export function ArtifactBody({ message }: { message: MeetingMessage }) {
         {type === 'chapter_final' && (
           <p className="text-xs text-ink-2">
             设定库：人物状态更新 {c.characters_updated ?? 0} 处，新人物 {c.characters_created ?? 0} 位，伏笔进展 {c.foreshadowings ?? 0} 条
+            {(c.secrets_updated !== undefined || c.secrets_created !== undefined) && <>，信息差更新 {c.secrets_updated ?? 0} 条、新增 {c.secrets_created ?? 0} 条</>}
           </p>
         )}
       </div>
