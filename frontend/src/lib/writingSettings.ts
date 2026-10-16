@@ -17,3 +17,15 @@ export function requirementSource(source: string): string {
   }
   return names[source] ?? source
 }
+
+/** 篇幅以万字保存；与定调的整数篇幅约定一致，不悄悄截断或夹取作者输入。 */
+export function parseTargetLength(value: string): number | null {
+  const length = Number(value)
+  return value.trim() && Number.isSafeInteger(length) && length >= 5 && length <= 1000 ? length : null
+}
+
+/** 本书设置优先，其次概念，旧书缺值时按每章 3000 字估算。 */
+export function bookLengthEstimate(targetLength: number | null | undefined, settingsWords?: number | null, conceptWords?: number | null) {
+  const chapterWords = [settingsWords, conceptWords].find(words => typeof words === 'number' && Number.isFinite(words) && words > 0) ?? 3000
+  return { chapterWords, chapters: targetLength != null && targetLength > 0 ? Math.round(targetLength * 10000 / chapterWords) : null }
+}

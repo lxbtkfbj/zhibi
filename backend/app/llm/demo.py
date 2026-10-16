@@ -129,6 +129,8 @@ def _concept(user: str) -> s.BookConcept:
     if "测试短段" in user or "测试收尾" in user:
         marker = "测试收尾" if "测试收尾" in user else "测试短段"
         concept.benchmark = f"演示验收：{marker}，每段一卷六章。"
+        if "测试段提醒" in user:
+            concept.benchmark += "测试段提醒：下一段首轮留一条追求提醒。"
         if marker == "测试收尾":
             concept.target_length = 5
             concept.target_volumes = 3
@@ -540,6 +542,8 @@ def _next_segment(user: str = "") -> s.NextSegmentDraft:
     if choice:
         plan.decisions[0].chosen = choice
         plan.goal = "先公开契约逼对手放人，再护送证人穿过封锁。"
+    if "测试段提醒" in user and not current:
+        plan.pursuit = ""
     return plan
 
 

@@ -1,18 +1,19 @@
 import { Check } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import type { ChapterBrief, StoryNode, Volume } from '../api/types'
-import { NODE_STATUS, storyMapNodeChapters, storyMapWritingIndex, visibleStoryMapNodes, writingPosition, writingPositionText } from '../lib/storyMap'
+import type { ChapterBrief, Concept, StoryNode, Volume } from '../api/types'
+import { isWritingComplete, NODE_STATUS, storyMapNodeChapters, storyMapWritingIndex, visibleStoryMapNodes, writingPosition, writingPositionText } from '../lib/storyMap'
 import './StoryMapStrip.css'
 
 interface StoryMapStripProps {
   nodes: StoryNode[]
   volumes: Volume[]
   chapters: ChapterBrief[]
+  concept?: Concept
   onNodeSelect: (node: StoryNode) => void
 }
 
 /** 横向地图按稿件栏宽度折叠，不通过横向滚动挤压三栏工作台。 */
-export function StoryMapStrip({ nodes, volumes, chapters, onNodeSelect }: StoryMapStripProps) {
+export function StoryMapStrip({ nodes, volumes, chapters, concept, onNodeSelect }: StoryMapStripProps) {
   const ref = useRef<HTMLElement>(null)
   const [width, setWidth] = useState(0)
   useEffect(() => {
@@ -24,12 +25,15 @@ export function StoryMapStrip({ nodes, volumes, chapters, onNodeSelect }: StoryM
     return () => observer.disconnect()
   }, [])
 
-  const position = writingPosition(nodes, volumes, chapters)
+  const position = writingPosition(nodes, volumes, chapters, concept)
   const summary = writingPositionText(position, volumes, chapters, nodes)
   const sorted = [...nodes].sort((a, b) => a.index - b.index)
   const hasTargets = volumes.some(volume => nodes.some(node => node.id === volume.target_node_id))
   const done = chapters.filter(chapter => chapter.status === 'final').length
-  const writingIndex = storyMapWritingIndex(storyMapNodeChapters(sorted, volumes), done)
+  const plannedThrough = sorted.some(node => node.segment)
+    ? Math.max(0, sorted.findLastIndex(node => volumes.some(volume => volume.target_node_id === node.id)))
+    : sorted.length - 1
+  const writingIndex = storyMapWritingIndex(storyMapNodeChapters(sorted, volumes, concept), done, plannedThrough, isWritingComplete(volumes, chapters, nodes))
   const visible = visibleStoryMapNodes(sorted, writingIndex, width)
   const leftIndex = Math.floor(writingIndex)
   const leftSlot = visible.findIndex(node => node?.id === sorted[leftIndex]?.id)

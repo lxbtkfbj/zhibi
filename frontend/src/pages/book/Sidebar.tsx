@@ -79,6 +79,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         <Item to={`${base}/concept`} icon={<Lightbulb className={icon} />} label="书的概念" onNavigate={onNavigate} />
         <Item to={`${base}/protagonist`} icon={<Users className={icon} />} label="主角" onNavigate={onNavigate} />
         <Item to={`${base}/spine`} icon={<Route className={icon} />} label="全书地图" onNavigate={onNavigate} />
+        {job?.status === 'waiting_author' && job.pending?.kind === 'segment_review' && <Item to={`${base}/next-segment`} icon={<Route className={icon} />} label="定下一段 · 待确认" onNavigate={onNavigate} />}
         <Item to={`${base}/threads`} icon={<GitBranch className={icon} />} label="线索" count={threads?.length || undefined} onNavigate={onNavigate} />
       </div>
       {!!outline?.volumes.length && <Group title="大纲">{outline.volumes.map(v => <Item key={v.id} to={`${base}/volume/${v.index}`} icon={<BookMarked className={icon} />}

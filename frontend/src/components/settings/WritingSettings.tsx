@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { WritingSettings as Settings } from '../../api/settings'
 import { Segmented, SettingsButton, SettingsGroup, SettingsRow, Stepper, Toggle } from './SettingsList'
 
@@ -20,11 +20,12 @@ const EFFORT_PRESETS = {
 }
 const strictnessNames = { lenient: '宽松', standard: '标准', strict: '严格' }
 
-export function WritingSettings({ value, onChange, statuses = {}, currentPlaybook }: {
+export function WritingSettings({ value, onChange, statuses = {}, currentPlaybook, afterPreferences }: {
   value: Settings
   onChange: (changes: Partial<Settings>, debounce?: boolean) => void
   statuses?: Partial<Record<keyof Settings, string>>
   currentPlaybook?: string
+  afterPreferences?: ReactNode
 }) {
   const [editingRules, setEditingRules] = useState(false)
   const effortHint = `重写最多 ${value.max_rewrites} 次 · 卷纲出 ${value.pitches} 个方案${value.pitches > 1 ? '比稿' : ''} · ${value.volume_audit ? '做' : '不做'}专项审稿 · ${strictnessNames[value.review_strictness]}审稿`
@@ -44,6 +45,7 @@ export function WritingSettings({ value, onChange, statuses = {}, currentPlayboo
         extra={editingRules && <textarea className="settings-textarea" aria-label="其他规矩" rows={4} value={value.other_rules} placeholder="每行一条" onChange={event => onChange({ other_rules: event.target.value }, true)} />}><SettingsButton aria-expanded={editingRules} onClick={() => setEditingRules(!editingRules)}>{editingRules ? '收起' : '编辑'}</SettingsButton></SettingsRow>
       <SettingsRow label="题材打法" status={statuses.playbook}><select aria-label="题材打法" className="settings-select" value={value.playbook} onChange={event => onChange({ playbook: event.target.value as Settings['playbook'] })}><option value="auto">{currentPlaybook ? `自动匹配（当前：${currentPlaybook}）` : '自动匹配（开书后按题材匹配）'}</option><option value="harem_xuanhuan">后宫玄幻爽文</option><option value="general">通用</option></select></SettingsRow>
     </SettingsGroup>
+    {afterPreferences}
     <SettingsGroup title="编辑部力度">
       <SettingsRow label="力度" hint={effortHint} status={statuses.effort_preset} extra={value.effort_preset === 'custom' && <div className="settings-subrows">
         <SettingsRow label="不合格最多重写几次" status={statuses.max_rewrites}><Stepper label="不合格最多重写几次" value={value.max_rewrites} min={0} max={5} onChange={max_rewrites => onChange({ max_rewrites })} /></SettingsRow>
@@ -54,6 +56,7 @@ export function WritingSettings({ value, onChange, statuses = {}, currentPlayboo
         <Segmented label="力度" value={value.effort_preset} options={[{ value: 'quick', label: '省时' }, { value: 'balanced', label: '均衡' }, { value: 'premium', label: '精品' }, { value: 'custom', label: '自定义', custom: true }]} onChange={effort_preset => onChange({ effort_preset, ...(effort_preset === 'custom' ? {} : EFFORT_PRESETS[effort_preset]) })} />
       </SettingsRow>
       <SettingsRow label="每卷卷纲都要我拍板" status={statuses.volume_approval}><Toggle label="每卷卷纲都要我拍板" checked={value.volume_approval} onChange={volume_approval => onChange({ volume_approval })} /></SettingsRow>
+      <SettingsRow label="每一段开写前先给我确认" hint="关掉后，主编定好下一段就直接往下写，群聊里会告诉你；全书地图上会标出新规划的段，节点是暂定的，之后仍然可以改。" status={statuses.segment_approval}><Toggle label="每一段开写前先给我确认" checked={value.segment_approval ?? true} onChange={segment_approval => onChange({ segment_approval })} /></SettingsRow>
       <SettingsRow label="新书前 3 章先给我试读" status={statuses.trial_read}><Toggle label="新书前 3 章先给我试读" checked={value.trial_read} onChange={trial_read => onChange({ trial_read })} /></SettingsRow>
     </SettingsGroup>
   </>

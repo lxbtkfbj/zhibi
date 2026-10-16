@@ -7,6 +7,7 @@ import { Button, Card, CountUp, Reveal } from '../../../components/ui'
 import { cleanTitle, cleanVolumeTitle } from '../../../lib/status'
 import { needsSetupRestart, setupOverviewStats } from '../../../lib/setupPresentation'
 import { firstSegment } from '../../../lib/setupSegment'
+import { segmentBands, writingTotalChapters } from '../../../lib/storyMap'
 import { directionProgressText } from '../../../lib/workspace'
 import { useBookContext } from '../context'
 import { InterviewForm, ResumeControls } from '../Decision'
@@ -79,13 +80,14 @@ export function Overview() {
   const first = outline?.volumes[0]
   const chapters = first?.units.reduce((sum, u) => sum + u.chapter_count, 0) || first?.chapter_count || 0
   const overviewStats = setupOverviewStats(concept, outline?.volumes ?? [], nodes)
-  const total = overviewStats.chapters
+  const total = overviewStats.segmented ? writingTotalChapters(nodes, outline?.volumes ?? [], concept) : overviewStats.chapters
   const segmented = overviewStats.segmented
   const endpoint = firstSegment(nodes).endpoint
   const protagonist = book.protagonist
   const hasProtagonist = !!protagonist && Object.keys(protagonist).length > 0
   const volumes = outline?.volumes.length ?? 0
   const writing = book.chapters_final > 0
+  const currentSegment = segmentBands(nodes, outline?.volumes ?? [], chapterList).find(band => band.status === 'writing')
   const stats = [
     writing
       ? { value: book.chapters_final, label: '已定稿', suffix: '章' }
@@ -167,7 +169,7 @@ export function Overview() {
                 完整地图 →
               </Link>
             </div>
-            {writing ? <StoryMapStrip nodes={nodes} volumes={outline?.volumes ?? []} chapters={chapterList} onNodeSelect={node => manualNavigate(`${base}/spine#story-node-${node.id}`)} /> : <div data-testid="overview-map" className={`grid gap-4 ${segmented ? '@2xl/manuscript:grid-cols-3' : '@2xl/manuscript:grid-cols-2'}`}>
+            {writing ? <><StoryMapStrip nodes={nodes} volumes={outline?.volumes ?? []} chapters={chapterList} concept={concept} onNodeSelect={node => manualNavigate(`${base}/spine#story-node-${node.id}`)} />{currentSegment && <p data-testid="current-segment-goal" className="mt-4 border-l-2 border-chief/30 pl-3 text-sm leading-relaxed text-ink-2">第 {currentSegment.number} 段 · 想做成：{currentSegment.plan?.goal || '（未定）'}</p>}</> : <div data-testid="overview-map" className={`grid gap-4 ${segmented ? '@2xl/manuscript:grid-cols-3' : '@2xl/manuscript:grid-cols-2'}`}>
               <div className="border-l border-line pl-4">
                 <p className="mb-1 flex items-center gap-1.5 text-xs text-ink-2">
                   <Flag className="size-3.5" />

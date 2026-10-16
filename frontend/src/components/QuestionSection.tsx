@@ -4,6 +4,7 @@ import type { Pending, PieceKey } from '../api/types'
 import { useReducedMotion } from '../lib/appearance'
 import { SETUP_QUESTIONS, questionFlags, questionWhen, showLaterPlaceholder, type AnswerWhen } from '../lib/setupQuestions'
 import { LATER_ANSWER } from '../lib/setupPresentation'
+import { NEXT_SEGMENT_QUESTIONS, nextSegmentQuestionFlags } from '../lib/nextSegmentQuestions'
 import './setupQuestions.css'
 
 export function WhenBadge({ when, direction = false }: { when: AnswerWhen; direction?: boolean }) {
@@ -12,11 +13,15 @@ export function WhenBadge({ when, direction = false }: { when: AnswerWhen; direc
   </span>
 }
 
-export function QuestionSection({ piece, questionKey, pending, children, className }: { piece: PieceKey; questionKey: string; pending?: Pending | null; children: ReactNode; className?: string }) {
-  const question = SETUP_QUESTIONS[piece].find(item => item.key === questionKey)
+type QuestionPiece = PieceKey | 'next_segment'
+
+const questionsFor = (piece: QuestionPiece) => piece === 'next_segment' ? NEXT_SEGMENT_QUESTIONS : SETUP_QUESTIONS[piece]
+
+export function QuestionSection({ piece, questionKey, pending, children, className }: { piece: QuestionPiece; questionKey: string; pending?: Pending | null; children: ReactNode; className?: string }) {
+  const question = questionsFor(piece).find(item => item.key === questionKey)
   if (!question) return null
   const when = questionWhen(question)
-  const flags = questionFlags(piece, questionKey, pending)
+  const flags = piece === 'next_segment' ? nextSegmentQuestionFlags(questionKey, pending) : questionFlags(piece, questionKey, pending)
   return <section id={`q-${questionKey}`} tabIndex={-1} aria-labelledby={`q-title-${questionKey}`} className={clsx('setup-question scroll-mt-6 border-b border-line py-6 outline-none first:pt-0 last:border-b-0 focus-visible:ring-2 focus-visible:ring-chief/30', className)}>
     <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2">
       {question.focus && <span className="inline-flex items-center gap-1.5 text-xs text-seal"><span className="size-1.5 rounded-full bg-seal" aria-hidden />重点看</span>}
@@ -28,10 +33,10 @@ export function QuestionSection({ piece, questionKey, pending, children, classNa
   </section>
 }
 
-export function FocusQuestions({ piece }: { piece: PieceKey }) {
+export function FocusQuestions({ piece }: { piece: QuestionPiece }) {
   const reduced = useReducedMotion()
   return <nav aria-label="作者重点看" className="mb-7 border-l-2 border-seal/35 pl-3 text-sm leading-relaxed">
-    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1.5"><span className="font-medium text-ink-2">作者重点看：</span>{SETUP_QUESTIONS[piece].filter(question => question.focus).map(question => <a
+    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1.5"><span className="font-medium text-ink-2">作者重点看：</span>{questionsFor(piece).filter(question => question.focus).map(question => <a
       key={question.key} href={`#q-${question.key}`} className="text-chief underline decoration-chief/30 underline-offset-4 hover:decoration-chief focus-visible:outline-chief"
       onClick={event => { event.preventDefault(); const section = document.getElementById(`q-${question.key}`); section?.focus({ preventScroll: true }); section?.scrollIntoView({ behavior: reduced ? 'instant' : 'smooth', block: 'start' }) }}
     >{question.title}</a>)}</div>

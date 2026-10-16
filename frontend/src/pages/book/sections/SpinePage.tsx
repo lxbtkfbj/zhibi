@@ -3,12 +3,15 @@ import { ArrowDown, ArrowUp, Check, ChevronDown, MessageSquare, Pin, PinOff, Plu
 import { type ReactNode, useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useBible, useChapters, useJobActions, useNodeMutations, useNodes, useUpdateBook } from '../../../api/hooks'
+import { usePlanSegment } from '../../../api/segmentPlanning'
+import { useBookSettings } from '../../../api/settings'
 import type { Spine, StoryNode, Volume } from '../../../api/types'
 import { EditableText } from '../../../components/Editable'
 import { TechniqueChip } from '../../../components/TechniqueChip'
 import { StoryMapStrip } from '../../../components/StoryMapStrip'
+import { WritingSegmentBand } from '../../../components/WritingSegmentBand'
 import { Button, Card, ErrorText, inputClass, Modal, Reveal, Skeleton } from '../../../components/ui'
-import { isWritingComplete, nodeCounts, NODE_STATUS, plannedVolumeChapters, segments, writingPosition, type WritingPosition } from '../../../lib/storyMap'
+import { canPlanNextSegment, isWritingComplete, nodeCounts, NODE_STATUS, plannedVolumeChapters, segmentBands, segments, writingPosition, type WritingPosition } from '../../../lib/storyMap'
 import { firstSegment, isUnplannedSegment, showFirstSegment } from '../../../lib/setupSegment'
 import { useBookContext } from '../context'
 import { PieceDecisions } from '../PieceDecisions'
@@ -72,30 +75,36 @@ function EmptyNodeForm({ disabled, onFill, onCandidates }: { disabled: boolean; 
 
 /** 节点是全书地图的唯一事实来源；作者编辑永不写入会议快照。 */
 export function SpinePage() {
-  const { book, bookId, job, outline, working, requestNodeFeedback, manualNavigate } = useBookContext()
+  const { book, bookId, job, outline, working, requestNodeFeedback, manualNavigate, resumeFollow } = useBookContext()
   const location = useLocation()
   const update = useUpdateBook(bookId)
   const query = useNodes(bookId)
   const { data: chapters = [] } = useChapters(bookId)
   const bible = useBible(bookId)
   const mutations = useNodeMutations(bookId)
+  const planSegment = usePlanSegment(bookId)
+  const settings = useBookSettings(bookId)
   const { pieceAction } = useJobActions(bookId)
   const [error, setError] = useState<unknown>(null)
   const [deleting, setDeleting] = useState<StoryNode | null>(null)
   const [inserting, setInserting] = useState<StoryNode | null>(null)
   const [newTitle, setNewTitle] = useState('')
   const [dismissedCandidates, setDismissedCandidates] = useState('')
+  const [planning, setPlanning] = useState<string | null>(null)
   const spine: Spine = book.spine ?? {}
   const nodes = query.data ?? []
-  const position = writingPosition(nodes, outline?.volumes ?? [], chapters)
+  const position = writingPosition(nodes, outline?.volumes ?? [], chapters, book.concept)
   const complete = isWritingComplete(outline?.volumes ?? [], chapters, nodes)
   const writing = chapters.some(chapter => chapter.status === 'final')
   const setup = ['setting_up', 'awaiting_approval'].includes(book.status) || (job?.kind === 'book_setup' && ['queued', 'running', 'waiting_author'].includes(job.status))
   const pending = job?.status === 'waiting_author' && job.pending?.kind === 'setup_piece' ? job.pending : null
   const canRequestNodes = !writing && setup && pending?.piece === 'segment'
-  const busy = working || pieceAction.isPending || mutations.create.isPending || mutations.update.isPending || mutations.remove.isPending || mutations.reorder.isPending
+  const busy = working || planSegment.isPending || pieceAction.isPending || mutations.create.isPending || mutations.update.isPending || mutations.remove.isPending || mutations.reorder.isPending
   const counts = nodeCounts(nodes)
   const bands = segments(nodes, outline?.volumes ?? [])
+  const plannedBands = segmentBands(nodes, outline?.volumes ?? [], chapters)
+  const writingStage = !setup && nodes.some(node => node.segment)
+  const nextNumber = Math.max(0, ...plannedBands.map(band => band.number ?? 0)) + 1
   const firstEndpoint = firstSegment(nodes).endpoint
   const showPanel = showFirstSegment(nodes, book.setup_progress?.current, job)
   const candidateKey = JSON.stringify(pending?.candidates ?? null)
@@ -140,7 +149,7 @@ export function SpinePage() {
   return <div data-testid="story-puzzle-board">
     <PageHeader eyebrow="全书地图" title={setup ? '第一段怎么走与全书方向' : '从开篇到结局'} subtitle={<><span className="block" data-testid="node-counts">{counts.total} 个节点 · {counts.pinned} 铁钉 · {counts.pencil} 暂定 · {counts.empty} 留空</span><span className="mt-1 block text-sm">先钉住故事的重要转折，再把人物与每一卷放到合适的位置。</span></>} />
     <PieceDecisions piece="segment" />
-    {writing && <div className="mb-8 border-b border-line pb-6"><StoryMapStrip nodes={nodes} volumes={outline?.volumes ?? []} chapters={chapters} onNodeSelect={node => manualNavigate(`/books/${bookId}/spine#story-node-${node.id}`)} /></div>}
+    {writing && <div className="mb-8 border-b border-line pb-6"><StoryMapStrip nodes={nodes} volumes={outline?.volumes ?? []} chapters={chapters} concept={book.concept} onNodeSelect={node => manualNavigate(`/books/${bookId}/spine#story-node-${node.id}`)} /></div>}
     <Locked locked={working} />
     <ErrorText error={error} />
     {showPanel && <FirstSegmentPanel nodes={nodes} volumes={outline?.volumes ?? []} bible={bible.data} pending={pending} locked={busy || update.isPending} saveNode={(id, patch) => mutations.update.mutateAsync({ id, ...patch })} saveSpine={save} />}
@@ -151,7 +160,7 @@ export function SpinePage() {
         <FieldBlock label="主题"><EditableText value={spine.theme ?? ''} onSave={theme => save({ theme })} locked={busy} multiline className="font-serif" /></FieldBlock>
       </section></Reveal>}
       <h2 className="mb-5 font-serif text-lg font-bold">节点</h2>
-      {bands.filter(band => !band.from).map((band, i) => <div className="mb-4 pl-10" key={`before-${i}`}><SegmentBand {...band} position={position} complete={complete} /></div>)}
+      {!writingStage && bands.filter(band => !band.from).map((band, i) => <div className="mb-4 pl-10" key={`before-${i}`}><SegmentBand {...band} position={position} complete={complete} /></div>)}
       {nodes.map((node, i) => <Reveal key={node.id} delay={Math.min(i * 0.025, 0.2)} className={clsx('relative pl-10', i < nodes.length - 1 && 'pb-6')}>
         {i < nodes.length - 1 && <span aria-hidden className="absolute top-6 bottom-0 left-[15px] w-px bg-line-2" />}
         <span className="absolute top-4 left-0"><NodeMarker node={node} passed={position.passed.includes(node.id)} /></span>
@@ -186,12 +195,22 @@ export function SpinePage() {
             {candidates.nodes.map((candidate, candidateIndex) => <CandidateCard key={candidateIndex} candidate={candidate} busy={busy} onChoose={() => void run(async () => { await mutations.update.mutateAsync({ id: node.id, title: candidate.title, event: candidate.event, prerequisite: candidate.prerequisite, consequence: candidate.consequence, volume: candidate.volume, status: node.status === 'empty' ? 'pencil' : node.status }); setDismissedCandidates(candidateKey) })} />)}
           </section>}
         </div>
-        {bands.filter(band => band.from?.id === node.id).map((band, bandIndex) => isUnplannedSegment(node, band.to, nodes) && !band.volumes.length
+        {writingStage ? plannedBands.filter(band => band.from?.id === node.id).map(band => <WritingSegmentBand key={band.to.id} band={band} position={position} chapterList={chapters} locked={busy}
+          onSave={segment => mutations.update.mutateAsync({ id: band.to.id, segment })}
+          onVolumeSelect={volume => manualNavigate(`/books/${bookId}/volume/${volume.index}`)}
+          onPlan={canPlanNextSegment(book.status, job?.status, plannedBands, band.to.id) ? () => { setError(null); setPlanning(band.to.id) } : undefined} />)
+          : bands.filter(band => band.from?.id === node.id).map((band, bandIndex) => isUnplannedSegment(node, band.to, nodes) && !band.volumes.length
           ? <div key={bandIndex} data-testid="unplanned-segment" className="mt-4 rounded-lg border border-dashed border-line-2 bg-paper/40 px-3 py-3 text-xs leading-relaxed text-ink-2">写到再定 · 写到这里之前，主编会先来定下一段</div>
           : <SegmentBand key={bandIndex} {...band} number={band.to?.segment?.number} position={position} complete={complete} />)}
       </Reveal>)}
     </>}
     {!!outline?.volumes.length && <details className="group mt-8 border-t border-line pt-5" data-testid="long-story-threads"><summary className="flex cursor-pointer list-none items-center gap-2 font-serif text-lg font-bold"><ChevronDown className="size-4 transition-transform group-open:rotate-180 motion-reduce:transition-none" />长线伏笔与期待<span className="font-sans text-xs font-normal text-ink-2">{longThreads.length} 条</span></summary><div className="mt-4 space-y-3">{longThreads.map(item => <div key={item.id} className="rounded-lg border border-line bg-card p-3 text-sm leading-relaxed"><p><span className={clsx('mr-2 font-medium', item.kind === '期待' ? 'text-chief' : 'text-lore')}>{item.code}</span>{item.description}</p><p className="mt-1 text-xs text-ink-2">{item.kind === '期待' ? '立下' : '埋下'}：{item.plant_volume ? `第 ${item.plant_volume} 卷` : '待定'} → {item.kind === '期待' ? '兑现' : '回收'}：{item.payoff_volume ? `第 ${item.payoff_volume} 卷` : '待定'}</p></div>)}{!longThreads.length && <p className="text-sm text-ink-2">暂时没有长线伏笔与期待。</p>}<ErrorText error={bible.error} /></div></details>}
+    <Modal open={!!planning} onClose={() => !planSegment.isPending && setPlanning(null)} title="现在就规划下一段？" footer={<><Button onClick={() => setPlanning(null)} disabled={planSegment.isPending}>取消</Button><Button variant="seal" loading={planSegment.isPending} disabled={busy || !settings.data || !planning || !canPlanNextSegment(book.status, job?.status, plannedBands, planning)} onClick={() => void run(async () => { await planSegment.mutateAsync(); setPlanning(null); resumeFollow() })}>开始规划</Button></>}>
+      <p className="text-sm leading-relaxed">主编会根据已经写出来的内容，规划第 {nextNumber} 段：下一张地图、对手、目标和终点。</p>
+      {settings.data ? <p className="mt-3 text-sm leading-relaxed text-ink-2">{settings.data.settings.segment_approval ? '规划好之后会停下来等你确认。规划期间不会写新章节。' : '规划好之后按设置直接通过，群聊里会告诉你。'}</p> : <p className="mt-3 text-sm text-ink-2">正在读取本书的确认设置…</p>}
+      <ErrorText error={settings.error ?? error} />
+      {settings.isError && <Button variant="soft" className="mt-3" onClick={() => void settings.refetch()}>重新读取设置</Button>}
+    </Modal>
     <Modal open={!!deleting} onClose={() => !busy && setDeleting(null)} title="删除这个节点？" footer={<><Button onClick={() => setDeleting(null)} disabled={busy}>保留</Button><Button variant="danger" loading={mutations.remove.isPending} disabled={busy} onClick={() => deleting && void run(async () => { await mutations.remove.mutateAsync(deleting.id); setDeleting(null) })}>确认删除</Button></>}><p className="text-sm leading-relaxed text-ink-2">将删除「{deleting?.title}」及它的人物锚点，相关卷和信息差会解除对这个节点的关联。此操作无法撤销。</p><ErrorText error={error} /></Modal>
     <Modal open={!!inserting} onClose={() => !busy && setInserting(null)} title="插入一个铁钉节点" footer={<><Button onClick={() => setInserting(null)} disabled={busy}>取消</Button><Button variant="seal" disabled={busy || !newTitle.trim()} loading={mutations.create.isPending} onClick={() => inserting && void run(async () => { await mutations.create.mutateAsync({ title: newTitle.trim(), status: 'pinned', after_node_id: inserting.id, volume: inserting.volume }); setInserting(null) })}>添加节点</Button></>}><label className="mb-2 block text-sm text-ink-2" htmlFor="new-node-title">{book.status === 'awaiting_approval' ? '一口气方案已生成；此时亲手新增的节点是铁钉，不再留空。' : '你亲手加的节点默认是铁钉。'}</label><input id="new-node-title" autoFocus maxLength={100} value={newTitle} onChange={event => setNewTitle(event.target.value)} className={inputClass} placeholder="给节点起个名字" /><ErrorText error={error} /></Modal>
   </div>

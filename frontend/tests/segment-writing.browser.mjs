@@ -28,6 +28,7 @@ await page.route('**/api/**', async route => {
     if (path === '/api/books/fixture/events') return route.fulfill({ contentType: 'text/event-stream', body: messages.map(message => `id: ${message.id}\nevent: message\ndata: ${JSON.stringify(message)}\n\n`).join('') })
     if (path === '/api/books/fixture') return route.fulfill({ json: book })
     if (path === '/api/books/fixture/outline') return route.fulfill({ json: { concept: book.concept, volumes: [] } })
+    if (path === '/api/books/fixture/settings') return route.fulfill({ json: { settings: { segment_approval: true }, defaults: { segment_approval: true }, overrides: {} } })
     if (path === '/api/books/fixture/bible') return route.fulfill({ json: { characters: [], world_entries: [], relationships: [], foreshadowings: [], secrets: [] } })
     if (['nodes', 'chapters', 'threads', 'secrets'].some(suffix => path === `/api/books/fixture/${suffix}`)) return route.fulfill({ json: [] })
     if (path === '/api/books') return route.fulfill({ json: [] })
@@ -61,7 +62,7 @@ try {
   await expect(confirm).toBeDisabled()
   await expect(delegate).toBeDisabled()
   await expect(send).toBeDisabled()
-  await expect(page.getByText('模拟失败：保留本轮规划和意见', { exact: true })).toBeVisible()
+  await expect(bar.getByText('模拟失败：保留本轮规划和意见', { exact: true })).toBeVisible()
   await expect(composer).toHaveValue('保留原地图，不要换地图。')
   await expect(confirm).toBeEnabled()
   assert.deepEqual(mutations[0].body, { action: 'revise', feedback: '保留原地图，不要换地图。' })
@@ -80,7 +81,7 @@ try {
   await expect(send).toBeDisabled()
   await expect(bar).toHaveCount(0)
   assert.equal(mutations.length, 3)
-  assert.deepEqual(mutations[2].body, { action: 'confirm' })
+  assert.deepEqual(mutations[2].body, { action: 'confirm', pin_end: false })
 
   // 代定同样调用专用接口，不误调用旧的 /decision。
   book = { ...book, active_job: job }
@@ -88,7 +89,7 @@ try {
   await delegate.click()
   await expect(confirm).toBeDisabled()
   await expect(bar).toHaveCount(0)
-  assert.deepEqual(mutations[3].body, { action: 'delegate' })
+  assert.deepEqual(mutations[3].body, { action: 'delegate', pin_end: false })
   assert.deepEqual(errors, [])
   assert.deepEqual(unexpected, [])
   console.log('通过：下一段拍板、第一条提醒/折叠、四项会议卡、聊天修改失败保留与重试、确认/代定、跨组件防重复。全部 API 已拦截。')

@@ -20,6 +20,7 @@ export interface BookContextValue {
   setConversation: (conversation: Conversation) => void
   unread: Record<Conversation, number>
   following: boolean
+  resumeFollow: () => void
   followTarget: WorkspaceTarget | null
   manualNavigate: (path: string) => void
   focusComposer: number
@@ -30,6 +31,20 @@ export interface BookContextValue {
   composerDrafts: Record<string, string>
   setComposerDrafts: Dispatch<SetStateAction<Record<string, string>>>
   celebrate: () => void
+  segmentPinEnd: boolean
+  setSegmentPinEnd: (value: boolean) => void
+  segmentReview: {
+    submitting: boolean
+    action: SegmentDecisionInput['action'] | undefined
+    error: unknown
+    submit: (body: SegmentDecisionInput) => Promise<boolean>
+  }
+}
+
+export interface SegmentDecisionInput {
+  action: 'confirm' | 'delegate' | 'revise'
+  feedback?: string
+  flips?: { topic: string; choice: string }[]
 }
 
 export const BookContext = createContext<BookContextValue | null>(null)

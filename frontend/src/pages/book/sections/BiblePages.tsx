@@ -91,6 +91,7 @@ function CharacterSheet({ character, onClose }: { character: Character; onClose:
         {field('背景', 'background')}
         {field('能力', 'abilities')}
         {field('想要什么', 'goal')}
+        {field('此刻想要什么', 'want')}
         <div className="rounded-xl bg-paper px-4 py-3 ring-1 ring-line">
           <p className="mb-2 text-xs tracking-[0.15em] text-ink-2">当前状态（随剧情更新）</p>
           <div className="space-y-3">
@@ -180,6 +181,7 @@ export function CharactersPage() {
                   </div>
                   <p className="mt-3 line-clamp-2 text-[14px] leading-relaxed text-ink-2">{c.personality}</p>
                   {c.goal && <p className="mt-2 line-clamp-1 text-[14px] text-ink-2">想要：{c.goal}</p>}
+                  {c.want && <p className="mt-2 line-clamp-2 text-[14px] text-ink-2">此刻想要什么：{c.want}</p>}
                   <div className="mt-3 space-y-1.5 border-t border-line pt-3 text-sm text-ink-2">
                     {(nodes.data ?? []).flatMap(node => node.anchors.filter(anchor => anchor.character_id === c.id).map(anchor => <p key={anchor.id} title={anchor.note}>节点 {node.index}「{node.title || '留空'}」· {anchor.kind}{anchor.note && `——${anchor.note}`}</p>))}
                     {!(nodes.data ?? []).some(node => node.anchors.some(anchor => anchor.character_id === c.id)) && <p className="text-xs text-ink-3">还没有人物锚点</p>}

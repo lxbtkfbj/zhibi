@@ -1,4 +1,4 @@
-import type { ChapterBrief, PieceKey, PieceStatus, SetupProgress, SetupTarget, StoryNode, Volume } from '../api/types'
+import type { BookStatus, ChapterBrief, Concept, JobStatus, PieceKey, PieceStatus, SegmentPlan, SetupProgress, SetupTarget, StoryNode, Volume } from '../api/types'
 
 export const PIECES = [
   { key: 'concept', name: '定调', path: '/concept', number: '①' },
@@ -70,6 +70,53 @@ export function plannedVolumeChapters(volume: Pick<Volume, 'chapter_count' | 'un
     : Math.max(0, volume.chapter_count || 0)
 }
 
+export interface SegmentBand {
+  number: number | null
+  from: StoryNode | null
+  to: StoryNode
+  plan: SegmentPlan | null
+  volumes: Volume[]
+  chapters: number
+  status: 'done' | 'writing' | 'planned' | 'later'
+  auto: boolean
+}
+
+/** 只把已经保存的段规划当作计划；旧书仍由 segments() 显示原来的卷带。 */
+export function segmentBands(nodes: StoryNode[], volumes: Volume[], chapters: ChapterBrief[]): SegmentBand[] {
+  if (!nodes.some(node => node.segment)) return []
+  const ordered = [...nodes].sort((a, b) => a.index - b.index)
+  return ordered.filter(node => node.kind !== 'opening').map(to => {
+    const plan = to.segment ?? null
+    const own = [...volumes].filter(volume => volume.target_node_id === to.id).sort((a, b) => a.index - b.index)
+    const started = chapters.some(chapter => own.some(volume => volume.id === chapter.volume_id) && ['final', 'drafting'].includes(chapter.status))
+    const done = own.length > 0 && own.every(volume => volumeWritingComplete(volume, chapters))
+    return {
+      number: plan?.number ?? null, from: ordered[ordered.indexOf(to) - 1] ?? null, to, plan,
+      volumes: own, chapters: own.reduce((sum, volume) => sum + plannedVolumeChapters(volume), 0),
+      status: !plan ? 'later' : done ? 'done' : started ? 'writing' : 'planned', auto: plan?.status === 'auto',
+    }
+  })
+}
+
+export function nextUnplanned(bands: SegmentBand[]): SegmentBand | null {
+  return bands.find(band => band.status === 'later') ?? null
+}
+
+/** 等作者处理的任务同样占用编辑部，不能在拍板中另起一轮规划。 */
+export function canPlanNextSegment(status: BookStatus, jobStatus: JobStatus | null | undefined, bands: SegmentBand[], nodeId: string): boolean {
+  return ['ready', 'writing'].includes(status) && !['queued', 'running', 'waiting_author'].includes(jobStatus ?? '') &&
+    !bands.some(band => band.to.kind === 'ending' && band.plan) && nextUnplanned(bands)?.to.id === nodeId
+}
+
+/** 分段规划没有列出全书卷卡片，剩余篇幅以概念中的计划估算；旧书保持原算法。 */
+export function writingTotalChapters(nodes: StoryNode[], volumes: Volume[], concept?: Concept): number {
+  const planned = volumes.reduce((sum, volume) => sum + plannedVolumeChapters(volume), 0)
+  if (!nodes.some(node => node.segment)) return planned
+  const words = concept?.chapter_words || 3000
+  const intended = concept?.target_length ? Math.round(concept.target_length * 10000 / words) : 0
+  return Math.max(planned, intended)
+}
+
 export interface WritingPosition {
   volume: number | null
   doneInVolume: number
@@ -105,10 +152,10 @@ export function segmentFinishedText(nodes: StoryNode[], volumes: Volume[]): stri
 }
 
 /** 只使用真实定稿与卷目标计算位置，不把预先生成的章纲算成已写。 */
-export function writingPosition(nodes: StoryNode[], volumes: Volume[], chapters: ChapterBrief[]): WritingPosition {
+export function writingPosition(nodes: StoryNode[], volumes: Volume[], chapters: ChapterBrief[], concept?: Concept): WritingPosition {
   const ordered = [...volumes].sort((a, b) => a.index - b.index)
   const finals = chapters.filter(chapter => chapter.status === 'final')
-  const total = ordered.reduce((sum, volume) => sum + plannedVolumeChapters(volume), 0)
+  const total = writingTotalChapters(nodes, ordered, concept)
   const done = (volume: Volume) => finals.filter(chapter => chapter.volume_id === volume.id).length
   const complete = (volume: Volume) => volumeWritingComplete(volume, chapters)
   const result: WritingPosition = {
@@ -139,35 +186,44 @@ export function writingPosition(nodes: StoryNode[], volumes: Volume[], chapters:
   return result
 }
 
+export function writingSegmentNumber(nodes: StoryNode[], volumes: Volume[], position: WritingPosition): number | null {
+  const current = volumes.find(volume => volume.index === position.volume)
+  return nodes.find(node => node.id === current?.target_node_id)?.segment?.number ?? null
+}
+
 export function writingPositionText(position: WritingPosition, volumes: Volume[], chapters: ChapterBrief[], nodes: StoryNode[] = []): string {
   if (position.volume == null) return ''
   const total = volumes.reduce((sum, volume) => sum + plannedVolumeChapters(volume), 0)
   const done = chapters.filter(chapter => chapter.status === 'final').length
   if (isWritingComplete(volumes, chapters, nodes)) return '全书完结'
   if (isWritingComplete(volumes, chapters)) return segmentFinishedText(nodes, volumes)
-  const current = `第 ${position.volume} 卷 ${position.doneInVolume}/${position.volumeChapters} 章`
+  const segment = writingSegmentNumber(nodes, volumes, position)
+  const current = `${segment == null ? '' : `第 ${segment} 段 · `}第 ${position.volume} 卷 ${position.doneInVolume}/${position.volumeChapters} 章`
   if (position.nextNode) return `${current} · 离「${position.nextNode.title}」还有 ${position.chaptersToNode ?? 0} 章`
   // 历史卷没有目标节点时只呈现确实知道的章数，不臆测正在接近哪个节点。
   if (!volumes.some(volume => volume.target_node_id)) return `${current} · 全书已定稿 ${done}/${total} 章`
   return `${current} · 正在写最后一段，离结局还有 ${Math.max(0, total - done)} 章`
 }
 
-/** 节点落在章数轴上的位置；分段书尚未规划的远景没有章数，用 Infinity 表示，不冒充已写到的卷末。 */
-export function storyMapNodeChapters(nodes: StoryNode[], volumes: Volume[]): number[] {
+/** 未规划的远景在已规划章数与全书篇幅之间均分；这只是地图位置，不算已经走到。 */
+export function storyMapNodeChapters(nodes: StoryNode[], volumes: Volume[], concept?: Concept): number[] {
   const ordered = [...volumes].sort((a, b) => a.index - b.index)
   let accumulated = 0
   const ends = ordered.map(volume => (accumulated += plannedVolumeChapters(volume)))
   const sorted = [...nodes].sort((a, b) => a.index - b.index)
   const segmented = sorted.some(node => node.segment)
+  const total = writingTotalChapters(nodes, volumes, concept)
   const plannedThrough = sorted.findLastIndex(node => ordered.some(volume => volume.target_node_id === node.id))
   let previous = 0
   return sorted.map((node, index) => {
-    if (segmented && node.kind !== 'opening' && index > plannedThrough) return Infinity
+    if (segmented && node.kind !== 'opening' && index > plannedThrough) {
+      return accumulated + (total - accumulated) * (index - Math.max(0, plannedThrough)) / Math.max(1, sorted.length - 1 - Math.max(0, plannedThrough))
+    }
     let at = ordered.findLastIndex(volume => volume.target_node_id === node.id && volume.reaches_node)
     if (at < 0) at = ordered.findLastIndex(volume => volume.target_node_id === node.id)
     if (at < 0 && node.volume != null) at = ordered.findLastIndex(volume => volume.index <= node.volume!)
     const chapter = node.kind === 'opening' ? Math.min(1, accumulated)
-      : node.kind === 'ending' ? accumulated
+      : node.kind === 'ending' ? total
         : at >= 0 ? ends[at] : accumulated * index / Math.max(1, sorted.length - 1)
     previous = Math.max(previous, chapter)
     return previous
@@ -175,9 +231,13 @@ export function storyMapNodeChapters(nodes: StoryNode[], volumes: Volume[]): num
 }
 
 /** 返回节点序列里的连续坐标；例如 1.25 表示第二、三个节点之间的四分之一处。 */
-export function storyMapWritingIndex(nodeChapters: number[], done: number): number {
+export function storyMapWritingIndex(nodeChapters: number[], done: number, plannedThrough = nodeChapters.length - 1, complete = false): number {
+  // 概念篇幅只是估计；实际写到结局并完成所有卷后，地图必须抵达结局，而非卡在估计章数中途。
+  if (complete) return Math.max(0, nodeChapters.length - 1)
   if (nodeChapters.length < 2 || done < nodeChapters[0]) return 0
   for (let index = 1; index < nodeChapters.length; index += 1) {
+    // 篇幅被作者缩短到已规划章数时，远景可能同点；也不能因此宣称走到未来节点。
+    if (index > plannedThrough) return Math.max(0, plannedThrough)
     // 远景节点还没有卷卡片，当前位置最多停在最后一个已规划终点。
     if (!Number.isFinite(nodeChapters[index])) return index - 1
     if (done < nodeChapters[index]) {

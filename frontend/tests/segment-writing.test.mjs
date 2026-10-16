@@ -10,14 +10,16 @@ const pending = { kind: 'segment_review', flow: 2, number: 3, round: 1, warnings
 const job = { id: 'job', kind: 'write_book', status: 'waiting_author', pending }
 const message = type => ({ id: 1, job_id: 'job', kind: 'artifact', payload: { type, data: {} } })
 
-test('下一段确认和规划产出跟随全书地图，不落回开书或卷纲拍板', () => {
-  assert.deepEqual(pendingTarget(pending, 'book'), { path: '/books/book/spine', label: '第 3 段' })
-  assert.deepEqual(artifactTarget(message('segment_plan'), 'book'), { path: '/books/book/spine', label: '下一段' })
+test('下一段确认和写作产出跟随独立确认页，开书分卷仍在全书地图', () => {
+  assert.deepEqual(pendingTarget(pending, 'book'), { path: '/books/book/next-segment', label: '第 3 段' })
+  assert.deepEqual(artifactTarget(message('segment_plan'), 'book'), { path: '/books/book/next-segment', label: '下一段' })
   assert.deepEqual(currentTarget('book', job, [], null), pendingTarget(pending, 'book'))
   for (const type of ['segment_plan', 'segment_volumes']) {
-    assert.equal(currentTarget('book', { ...job, status: 'running', pending: null }, [message(type)], null).path, '/books/book/spine')
+    assert.equal(currentTarget('book', { ...job, status: 'running', pending: null }, [message(type)], null).path, '/books/book/next-segment')
   }
   assert.equal(currentTarget('book', { ...job, status: 'running', pending: null }, [{ ...message('segment_plan'), job_id: 'old' }], null), null)
+  assert.equal(artifactTarget(message('segment_volumes'), 'book').path, '/books/book/spine')
+  assert.equal(artifactTarget({ ...message('segment_volumes'), payload: { type: 'segment_volumes', data: { volumes: [{ index: 2 }] } } }, 'book').path, '/books/book/next-segment')
 })
 
 test('下一段提意见走专用接口路由，文案、提醒和来源准确', () => {
@@ -63,18 +65,19 @@ test('分段书的写作指针停在已规划终点，不越过等高的远景�
     { id: 'ending', index: 4, kind: 'ending', volume: 3 },
   ]
   const volumes = [{ id: 'v1', index: 1, chapter_count: 6, units: [], target_node_id: 'first', reaches_node: true }]
-  const positions = storyMapNodeChapters(nodes, volumes)
-  assert.deepEqual(positions, [1, 6, Infinity, Infinity])
-  assert.equal(storyMapWritingIndex(positions, 3), 0.4)
-  assert.equal(storyMapWritingIndex(positions, 6), 1)
-  assert.equal(storyMapWritingIndex(positions, 8), 1)
-  assert.equal(storyMapWritingIndex(storyMapNodeChapters(nodes, []), 0), 0)
+  const concept = { target_length: 6, chapter_words: 3000 }
+  const positions = storyMapNodeChapters(nodes, volumes, concept)
+  assert.deepEqual(positions, [1, 6, 13, 20])
+  assert.equal(storyMapWritingIndex(positions, 3, 1), 0.4)
+  assert.equal(storyMapWritingIndex(positions, 6, 1), 1)
+  assert.equal(storyMapWritingIndex(positions, 8, 1), 1)
+  assert.equal(storyMapWritingIndex(storyMapNodeChapters(nodes, [], concept), 0, 0), 0)
 
   // 新段真正保存了卷卡片才扩展章数轴；只确认但未写章时指针仍在第一段终点。
   const planned = nodes.map(node => node.id === 'future' ? { ...node, segment: { number: 2 } } : node)
   const nextVolumes = [...volumes, { ...volumes[0], id: 'v2', index: 2, target_node_id: 'future' }]
-  const nextPositions = storyMapNodeChapters(planned, nextVolumes)
-  assert.deepEqual(nextPositions, [1, 6, 12, Infinity])
+  const nextPositions = storyMapNodeChapters(planned, nextVolumes, concept)
+  assert.deepEqual(nextPositions, [1, 6, 12, 20])
   assert.equal(storyMapWritingIndex(nextPositions, 6), 1)
   assert.equal(storyMapWritingIndex(nextPositions, 7), 1 + 1 / 6)
   assert.equal(storyMapWritingIndex(nextPositions, 12), 2)

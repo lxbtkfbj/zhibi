@@ -34,6 +34,19 @@ test('写作顶栏兼容旧卷、未开写、最后一段及完结', () => {
   assert.equal(progressText(book,[],null,null,{...writing,volumes:[{...volume,target_node_id:'deleted-node'}]}), '第 1 卷 · 已定稿 1 章 · 正在写最后一段，离结局还有 1 章 · 编辑部空闲')
   assert.equal(progressText({...book,chapters_final:2},[],null,null,{...writing,chapters:[chapter,{...chapter,id:'c2',index:2}]}), '第 1 卷 · 已定稿 2 章 · 全书完结')
 })
+
+test('分段写作顶栏显示段号与卷内进度，等待、工作和出错仍保留', () => {
+  const nodes = [{ id: 'open', index: 1, kind: 'opening', title: '开篇' }, { id: 'end', index: 2, kind: 'milestone', title: '寒原追查', segment: { number: 2 } }]
+  const volumes = [{ id: 'v3', index: 3, chapter_count: 60, units: [], status: 'approved', target_node_id: 'end', reaches_node: true }]
+  const chapters = Array.from({ length: 42 }, (_, index) => ({ id: `c${index}`, index: index + 1, volume_id: 'v3', status: 'final' }))
+  const writing = { nodes, volumes, chapters }
+  const book = { chapters_final: 42, status: 'writing', concept: { target_length: 60, chapter_words: 3000 }, active_job: null }
+  const base = '第 2 段 · 第 3 卷 42/60 章 · 离「寒原追查」还有 18 章'
+  assert.equal(progressText(book, [], null, null, writing), `${base} · 编辑部空闲`)
+  assert.equal(progressText({ ...book, active_job: { id: 'job', kind: 'write_book', status: 'waiting_author', pending: { kind: 'segment_review', number: 3 } } }, [], null, { label: '第 3 段' }, writing), `${base} · 等你确认：第 3 段`)
+  assert.equal(progressText({ ...book, active_job: { id: 'job', kind: 'write_book', status: 'running' } }, [], { job_id: 'job', chapter: 43, done: false }, null, writing), `${base} · 写手在写第 43 章`)
+  assert.equal(progressText({ ...book, active_job: { id: 'job', kind: 'write_book', status: 'failed' } }, [], null, null, writing), `${base} · 任务出错，可继续`)
+})
 for (const [type, suffix] of [['protagonist', '/protagonist'], ['world', '/world'], ['segment', '/spine'], ['segment_volumes', '/spine'], ['concept', '/concept'], ['lore', '/characters'], ['spine', '/spine'], ['threads', '/threads'], ['outline', '/spine']]) {
   test(`setup follows ${type}`, () => assert.equal(currentTarget('book', job, [msg(type)], null).path, `/books/book${suffix}`))
 }

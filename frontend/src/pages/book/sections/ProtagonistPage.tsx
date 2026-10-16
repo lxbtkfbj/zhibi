@@ -57,6 +57,7 @@ export function ProtagonistPage() {
       <div data-testid="protagonist-card">
         <QuestionSection piece="protagonist" questionKey="start" pending={pending}>{text('start')}</QuestionSection>
         <QuestionSection piece="protagonist" questionKey="drive" pending={pending}>
+          {legacyHero?.want?.trim() && <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-lg border-l-2 border-chief bg-chief-soft/40 px-3 py-2 text-sm leading-relaxed" data-testid="protagonist-current-want"><p className="min-w-0 whitespace-pre-wrap"><span className="text-ink-2">此刻想要（写作中设定师每章更新）：</span>{legacyHero.want}</p><a href={`/books/${bookId}/characters#character-${legacyHero.id}`} onClick={event => { event.preventDefault(); manualNavigate(event.currentTarget.getAttribute('href')!) }} className="shrink-0 text-chief underline underline-offset-4">去人物页 →</a></div>}
           <QuestionField label="开局动机" when="before">{text('trigger')}</QuestionField><QuestionField label="长线追求" when="before">{text('pursuit')}</QuestionField><QuestionField label="情感根源" when="before">{text('root')}</QuestionField>
           <QuestionField label="怎么升级" when="later"><LaterValue value={card.escalation}>{text('escalation')}</LaterValue></QuestionField>
         </QuestionSection>

@@ -4,7 +4,7 @@ import { BookOpenText, ChevronLeft, Settings, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from 'react'
 import { Link, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { useBook, useChapters, useNodes, useOutline } from '../../api/hooks'
+import { useBook, useChapters, useJobActions, useNodes, useOutline } from '../../api/hooks'
 import type { BookDetail, Conversation } from '../../api/types'
 import { Seal } from '../../components/decor'
 import { EmptyState, Skeleton } from '../../components/ui'
@@ -19,6 +19,7 @@ import { PuzzleTracker } from './PuzzleTracker'
 import { ConversationList, Sidebar } from './Sidebar'
 import { SetupArtifactPreview } from './SetupArtifactPreview'
 import { useSettingsModal } from '../../lib/settingsModal'
+import { segmentReviewKey } from '../../lib/nextSegmentQuestions'
 
 function StampOverlay({ show }: { show: boolean }) {
   const reduce = useReducedMotion()
@@ -43,6 +44,9 @@ function BookWorkspace({ bookId, book }: { bookId: string; book: BookDetail }) {
   const [wide, setWide] = useState(() => window.innerWidth >= 1024)
   const [navOpen, setNavOpen] = useState(false)
   const [stamp, setStamp] = useState(false)
+  const [segmentPin, setSegmentPin] = useState({ key: '', selected: false })
+  const segmentLock = useRef(false)
+  const { segment, segmentPending } = useJobActions(bookId)
   const stampTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const { container, width, max, dragging, separatorProps, step, reset } = useWorkspaceResize()
   const navigate = useNavigate()
@@ -55,10 +59,28 @@ function BookWorkspace({ bookId, book }: { bookId: string; book: BookDetail }) {
   const working = job?.status === 'queued' || job?.status === 'running'
   const asking = job?.status === 'waiting_author' && job.pending?.kind === 'setup_questions'
   const waiting = job?.status === 'waiting_author' && !asking
+  const segmentKey = segmentReviewKey(job?.id, job?.status === 'waiting_author' ? job.pending : null)
+  const segmentPinEnd = !!segmentKey && segmentPin.key === segmentKey && segmentPin.selected
+  const setSegmentPinEnd = (selected: boolean) => setSegmentPin({ key: segmentKey, selected })
+  const segmentReview: BookContextValue['segmentReview'] = {
+    submitting: segmentPending,
+    action: segment.variables?.action,
+    error: segment.error,
+    submit: async body => {
+      if (!job || !segmentKey || segmentPending || segmentLock.current) return false
+      segmentLock.current = true
+      try {
+        await segment.mutateAsync({ jobId: job.id, ...body, ...(body.action !== 'revise' ? { pin_end: segmentPinEnd } : {}) })
+        setSegmentPin({ key: '', selected: false })
+        return true
+      } finally { segmentLock.current = false }
+    },
+  }
   const followTarget = useMemo(() => currentTarget(bookId, job, messages, draft, outline), [bookId, job, messages, draft, outline])
   const unread = useConversationReads(bookId, messages, conversation, wide || tab === 'discussion')
   const setConversation = useCallback((next: Conversation) => { setConversationState(next); setTab('discussion') }, [])
   const manualNavigate = useCallback((path: string) => { setFollowing(false); setTab('manuscript'); void navigate(path) }, [navigate])
+  const resumeFollow = useCallback(() => { setFollowing(true); setTab('manuscript') }, [])
   const requestFeedback = useCallback(() => { setConversation('group'); setFocusComposer(n => n + 1) }, [setConversation])
   const requestNodeFeedback: BookContextValue['requestNodeFeedback'] = useCallback(node => {
     const selection = nodeFeedback(node)
@@ -103,7 +125,7 @@ function BookWorkspace({ bookId, book }: { bookId: string; book: BookDetail }) {
     const href = (event.target as Element).closest('a[href]')?.getAttribute('href')
     if ((href?.startsWith(`/books/${bookId}`) || href?.startsWith('#')) && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.button === 0) { setFollowing(false); setTab('manuscript') }
   }
-  const ctx: BookContextValue = { bookId, book, job, messages, connected, draft, working, waiting, asking, outline, conversation, setConversation, unread, following, followTarget, manualNavigate, focusComposer, requestFeedback, requestNodeFeedback, composerNode, setComposerNode, composerDrafts, setComposerDrafts, celebrate }
+  const ctx: BookContextValue = { bookId, book, job, messages, connected, draft, working, waiting, asking, outline, conversation, setConversation, unread, following, followTarget, manualNavigate, resumeFollow, focusComposer, requestFeedback, requestNodeFeedback, composerNode, setComposerNode, composerDrafts, setComposerDrafts, celebrate, segmentPinEnd, setSegmentPinEnd, segmentReview }
   const progress = progressText(book, messages, draft, followTarget, { nodes, volumes: outline?.volumes ?? [], chapters })
   return <BookContext.Provider value={ctx}>
     <div className="flex h-full min-h-0 flex-col" onClickCapture={captureManualLink}>

@@ -68,17 +68,24 @@ export interface NextSegmentPlan {
   power: string
   trouble: string
   opponent: string
-  new_characters: { name: string; role_type: string; desire: string; want: string; [key: string]: unknown }[]
+  new_characters: { name: string; role_type: string; goal: string; want: string; [key: string]: unknown }[]
   relationships: Record<string, unknown>[]
   goal: string
   goal_link: string
-  wait: { description: string; plant_volume?: number; payoff_volume?: number; [key: string]: unknown }
+  wait: { description: string; plant_plan?: string; payoff_plan?: string; plant_volume?: number; payoff_volume?: number; [key: string]: unknown }
   reveal: string
   secrets: { title: string; truth: string; knowers: string[]; [key: string]: unknown }[]
   end: NodeCandidate & { adopted: boolean; status?: StoryNode['status']; ref?: number }
   ending: string
   finale: boolean
   decisions?: AuthorChoice[]
+  nodes_view?: { index: number; title: string }[]
+}
+
+export interface NextSegmentSplit {
+  volumes: { index: number; title: string; chapter_count: number; want: string; goal: string; antagonist: string }[]
+  anchors?: { node: number; character: string; kind: string; note?: string }[]
+  threads?: { name: string; beats: { volume: number; beat: string }[] }[]
 }
 
 /**
@@ -90,7 +97,7 @@ export type Pending =
   | { kind: 'setup_review'; flow?: number; round: number; title?: string }
   | { kind: 'setup_directions'; flow?: number; reference?: string; directions: BookDirection[]; recommended: number; length: InterviewQuestion & { chapter_words?: number } }
   | { kind: 'setup_piece'; flow?: number; flags?: Record<string, string[]>; review?: { question: string; problem: string; suggestion: string }[]; piece: PieceKey; round: number; warnings?: string[]; decisions?: AuthorChoice[]; suggestions?: SetupSuggestion[]; unlock_requests?: { target: SetupTarget; reason: string }[]; candidates?: { node_id: string; nodes: NodeCandidate[] } | null }
-  | { kind: 'segment_review'; flow: 2; number: number; round: number; plan: NextSegmentPlan; split: { volumes: Record<string, unknown>[]; [key: string]: unknown }; warnings: string[]; flags: Record<string, string[]>; decisions: AuthorChoice[] }
+  | { kind: 'segment_review'; flow: 2; number: number; round: number; plan: NextSegmentPlan; split: NextSegmentSplit; warnings: string[]; flags: Record<string, string[]>; decisions: AuthorChoice[] }
   | { kind: 'volume_review'; volume: number; title: string; issues?: string[]; node_update?: NodeUpdateProposal | null; node_conflict?: string }
   | { kind: 'trial_read'; chapters: number }
   | { kind: 'chapter_stuck'; chapter: number; title: string; issues: string[] }

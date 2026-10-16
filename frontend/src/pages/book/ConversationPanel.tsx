@@ -29,8 +29,8 @@ const QUICK_PHRASES = {
 
 /** 每个会话保留自己的草稿；切稿件路由不会重挂载这块区域。 */
 function NoteComposer() {
-  const { job, working, waiting, asking, bookId, book, conversation, focusComposer, composerNode, setComposerNode, composerDrafts: drafts, setComposerDrafts: setDrafts } = useBookContext()
-  const { note, decide, directions, piece, segment, segmentPending } = useJobActions(bookId)
+  const { job, working, waiting, asking, bookId, book, conversation, focusComposer, composerNode, setComposerNode, composerDrafts: drafts, setComposerDrafts: setDrafts, segmentReview } = useBookContext()
+  const { note, decide, directions, piece } = useJobActions(bookId)
   const [sent, setSent] = useState<{ conversation: string; message: string } | null>(null)
   const ref = useRef<HTMLTextAreaElement>(null)
   const sending = useRef(false)
@@ -42,8 +42,8 @@ function NoteComposer() {
   const feedbackPrefix = direct ? `（给${ROLE_META[conversation].name}）` : ''
   const inputLimit = waiting ? 5000 - feedbackPrefix.length : 5000
   const tooLong = text.trim().length > inputLimit
-  const pending = note.isPending || decide.isPending || directions.isPending || piece.isPending || segmentPending
-  const error = note.error ?? decide.error ?? directions.error ?? piece.error ?? segment.error
+  const pending = note.isPending || decide.isPending || directions.isPending || piece.isPending || segmentReview.submitting
+  const error = note.error ?? decide.error ?? directions.error ?? piece.error ?? segmentReview.error
   const idle = !working && !waiting && !asking
   const resumable = job?.status === 'failed' || job?.status === 'cancelled'
 
@@ -81,7 +81,7 @@ function NoteComposer() {
       } else if (route.kind === 'piece' && job) {
         await piece.mutateAsync({ jobId: job.id, action: 'revise', piece: route.piece, feedback: `${feedbackPrefix}${content}`, ...('node_id' in route ? { node_id: route.node_id } : {}) })
       } else if (route.kind === 'segment' && job) {
-        await segment.mutateAsync({ jobId: job.id, action: 'revise', feedback: `${feedbackPrefix}${content}` })
+        if (!await segmentReview.submit({ action: 'revise', feedback: `${feedbackPrefix}${content}` })) return
       } else if (route.kind === 'decision' && job) {
         await decide.mutateAsync({
           jobId: job.id,

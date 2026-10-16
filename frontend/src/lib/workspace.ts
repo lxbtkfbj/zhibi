@@ -1,5 +1,5 @@
 import type { BookDetail, ChapterBrief, Conversation, Job, LiveDraft, MeetingMessage, Outline, Pending, StoryNode, Volume } from '../api/types'
-import { isWritingComplete, PIECES, plannedVolumeChapters, segmentFinishedText, writingPosition } from './storyMap.ts'
+import { isWritingComplete, PIECES, plannedVolumeChapters, segmentFinishedText, writingPosition, writingSegmentNumber } from './storyMap.ts'
 
 export interface WorkspaceTarget { path: string; label: string }
 
@@ -23,8 +23,8 @@ export function artifactTarget(message: MeetingMessage, bookId: string, outline?
     case 'protagonist': return page('/protagonist', '主角卡')
     case 'world': return page('/world', '世界与人')
     case 'segment': return page('/spine', '第一段')
-    case 'segment_plan': return page('/spine', '下一段')
-    case 'segment_volumes': return page('/spine', '这一段的分卷')
+    case 'segment_plan': return page('/next-segment', '下一段')
+    case 'segment_volumes': return page(Array.isArray(data.volumes) && (positive(record(data.volumes[0]).index) ?? 1) > 1 ? '/next-segment' : '/spine', '这一段的分卷')
     case 'lore': return page('/characters', '人物设定')
     case 'spine': return page('/spine', '关键节点')
     case 'threads': return page('/threads', '线索')
@@ -61,7 +61,7 @@ export function pendingTarget(pending: Pending | null | undefined, bookId: strin
       const piece = PIECES[index]
       return piece ? { path: `${base}${piece.path}`, label: `第 ${index + 1} 块：${piece.name}` } : null
     }
-    case 'segment_review': return { path: `${base}/spine`, label: `第 ${pending.number} 段` }
+    case 'segment_review': return { path: `${base}/next-segment`, label: `第 ${pending.number} 段` }
     case 'volume_review': return { path: `${base}/volume/${pending.volume}`, label: `第 ${pending.volume} 卷卷纲` }
     case 'trial_read': return { path: `${base}/chapter/1`, label: `前 ${pending.chapters} 章试读` }
     case 'chapter_stuck': return { path: `${base}/chapter/${pending.chapter}`, label: `第 ${pending.chapter} 章` }
@@ -88,7 +88,9 @@ export function currentTarget(bookId: string, job: Job | null, messages: Meeting
   const allowed = job.kind === 'book_setup' ? SETUP_OUTPUTS : WRITE_OUTPUTS
   for (const message of [...current].reverse()) {
     if (message.kind !== 'artifact' || !allowed.has(message.payload?.type ?? '')) continue
-    const target = artifactTarget(message, bookId, outline)
+    const target = job.kind !== 'book_setup' && message.payload?.type === 'segment_volumes'
+      ? { path: `/books/${bookId}/next-segment`, label: '这一段的分卷' }
+      : artifactTarget(message, bookId, outline)
     if (target) return target
   }
   return job.kind === 'book_setup' ? { path: `/books/${bookId}`, label: '开书方案' } : null
@@ -108,7 +110,7 @@ export function progressText(book: BookDetail, messages: MeetingMessage[], draft
   const job = book.active_job
   if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_directions') return '等你选择：开书方向'
   if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_piece') return `等你确认：${PIECES.find(piece => piece.key === (job.pending as Extract<Pending, { kind: 'setup_piece' }>).piece)?.name ?? '当前拼图'}`
-  const position = writing && writingPosition(writing.nodes, writing.volumes, writing.chapters)
+  const position = writing && writingPosition(writing.nodes, writing.volumes, writing.chapters, book.concept)
   const complete = !!writing && isWritingComplete(writing.volumes, writing.chapters, writing.nodes)
   const segmentFinished = !!writing && !complete && isWritingComplete(writing.volumes, writing.chapters)
   const waiting = `${job?.pending?.kind === 'setup_questions' ? '等你回答' : job?.pending?.kind === 'segment_review' ? '等你确认' : '等你拍板'}：${target?.label ?? '编辑部的提问'}`
@@ -122,6 +124,9 @@ export function progressText(book: BookDetail, messages: MeetingMessage[], draft
   }
   const volume = position?.volume ?? target?.path.match(/\/volume\/(\d+)$/)?.[1]
   let progress = `${volume ? `第 ${volume} 卷 · ` : ''}已定稿 ${book.chapters_final} 章`
+  const segmentNumber = writing && position ? writingSegmentNumber(writing.nodes, writing.volumes, position) : null
+  if (segmentNumber != null && position?.volume != null && !complete && !segmentFinished) progress = `第 ${segmentNumber} 段 · 第 ${position.volume} 卷 ${position.doneInVolume}/${position.volumeChapters} 章`
+  if (segmentFinished && writing) progress = segmentFinishedText(writing.nodes, writing.volumes)
   if (position?.volume != null && writing && !complete && !segmentFinished) {
     if (position.nextNode) progress += ` · 离「${position.nextNode.title}」还有 ${position.chaptersToNode} 章`
     else if (writing.volumes.some(item => item.target_node_id)) {
@@ -132,6 +137,7 @@ export function progressText(book: BookDetail, messages: MeetingMessage[], draft
   if (job?.status === 'waiting_author') return `${progress} · ${waiting}`
   if (working) return `${progress} · ${draft && !draft.done && draft.job_id === job.id ? `写手在写第 ${draft.chapter} 章` : lastStatus?.content.replace(/[.…]+$/, '') ?? '编辑部工作中'}`
   if (job?.status === 'failed') return `${progress} · 任务出错，可继续`
+  if (segmentFinished) return progress
   return `${progress} · ${book.status === 'completed' || complete ? '全书完结' : segmentFinished && writing ? segmentFinishedText(writing.nodes, writing.volumes) : '编辑部空闲'}`
 }
 

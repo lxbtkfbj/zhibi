@@ -11,6 +11,7 @@ import { ProtagonistPage } from './pages/book/sections/ProtagonistPage'
 import { ConceptPage } from './pages/book/sections/ConceptPage'
 import { Overview } from './pages/book/sections/Overview'
 import { SpinePage } from './pages/book/sections/SpinePage'
+import { NextSegmentPage } from './pages/book/sections/NextSegmentPage'
 import { SecretsPage } from './pages/book/sections/SecretsPage'
 import { ThreadsPage } from './pages/book/sections/ThreadsPage'
 import { VolumePage } from './pages/book/sections/VolumePage'
@@ -41,6 +42,7 @@ const router = createBrowserRouter([
       { path: 'concept', element: <ConceptPage /> },
       { path: 'protagonist', element: <ProtagonistPage /> },
       { path: 'spine', element: <SpinePage /> },
+      { path: 'next-segment', element: <NextSegmentPage /> },
       { path: 'threads', element: <ThreadsPage /> },
       { path: 'chapters', element: <ContentsPage /> },
       { path: 'chapter/:index', element: <ChapterPage /> },

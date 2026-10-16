@@ -66,3 +66,12 @@ test('舞台阶梯认识四种箭头，空项不生成台阶，一层和空值�
   assert.deepEqual(splitStageLadder('一张地图'), ['一张地图'])
   for (const value of ['', ' ', null, undefined]) assert.deepEqual(splitStageLadder(value), [])
 })
+
+test('事实表各行共享本表最长名称列，上限 9em，窄稿件栏保持上下排列', () => {
+  const css = readFileSync(new URL('../src/components/setupQuestions.css', import.meta.url), 'utf8')
+  assert.match(css, /\.setup-facts \{[^}]*grid-template-columns: fit-content\(9em\) minmax\(0, 1fr\)/u)
+  assert.match(css, /\.setup-fact-row \{[^}]*grid-template-columns: subgrid/u)
+  assert.match(css, /\.setup-fact-row > dt \{[^}]*max-width: 9em/u)
+  assert.match(css, /@container manuscript \(width < 480px\) \{\s*\.setup-facts \{ grid-template-columns: minmax\(0, 1fr\); \}/u)
+  assert.match(css, /\.setup-fact-row \{ grid-template-columns: minmax\(0, 1fr\); gap: \.5rem; \}/u)
+})

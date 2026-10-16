@@ -78,3 +78,13 @@ def test_demo_want_changes_every_few_chapters():
     assert demo._digest("第 1 章《开篇》已经定稿").character_updates[0].want == ""
     assert demo._digest("第 3 章《资格》已经定稿").character_updates[0].want == "拿到外门考核资格并保护老人"
     assert demo._digest("第 6 章《取证》已经定稿").character_updates[0].want == "查清师兄的死因"
+
+
+def test_demo_segment_flag_fixture_only_affects_explicit_first_round():
+    concept = demo._concept("【作者的点子】\n测试短段，测试段提醒\n\n")
+    assert "测试段提醒" in concept.benchmark
+    first = demo._next_segment(concept.benchmark)
+    assert not first.pursuit
+    revised = demo._next_segment(concept.benchmark + "\n【当前的下一段】\n这一段的目标：取证\n【修改要求】\n补全追求")
+    assert revised.pursuit
+    assert demo._next_segment("普通演示").pursuit
