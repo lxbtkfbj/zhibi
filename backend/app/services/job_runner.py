@@ -51,6 +51,7 @@ BOOK_STATUS_WHILE_WAITING = {
     "setup_directions": "setting_up",
     "setup_piece": "setting_up",
     "volume_review": "writing",
+    "segment_review": "writing",
     "trial_read": "writing",
     "chapter_stuck": "writing",
 }

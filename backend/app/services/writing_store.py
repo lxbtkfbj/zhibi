@@ -12,12 +12,328 @@ from app.agents.context import foreshadow_code
 from app.agents.glossary import clean_techniques
 from app.agents.planning import ref_seq, secret_seq
 from app.agents.setup_puzzle import clean_reveals
-from app.models import Chapter, Character, Foreshadowing, PlotUnit, Secret, Volume
-from app.services.setup_store import FORESHADOW_FIELDS, UNIT_FIELDS, load_nodes, load_secrets
+from app.models import (
+    Book,
+    Chapter,
+    Character,
+    Foreshadowing,
+    NodeAnchor,
+    PlotUnit,
+    Relationship,
+    Secret,
+    StoryNode,
+    StoryThread,
+    Volume,
+)
+from app.services.segment_planning import END_CONTENT
+from app.services.setup_store import (
+    CHARACTER_FIELDS,
+    FORESHADOW_FIELDS,
+    UNIT_FIELDS,
+    VOLUME_FIELDS,
+    load_nodes,
+    load_secrets,
+)
 
 # 定稿时设定师会改的人物状态、伏笔进展；记下改前改后的值，重写时据此撤销
-CHARACTER_STATE = ("location", "condition", "abilities", "is_alive")
+CHARACTER_STATE = ("location", "condition", "want", "abilities", "is_alive")
 LEDGER_STATE = ("status", "planted_chapter", "hint_chapters", "resolved_chapter")
+
+
+async def save_segment(
+    session: AsyncSession,
+    book: Book,
+    plan: dict,
+    split: dict,
+    *,
+    number: int,
+    status: str = "confirmed",
+    pin_end: bool = False,
+) -> dict[str, Any]:
+    """确认整段后一次增量入库；事务由调用方提交，锁行复核作者等待期间的改动。"""
+    book = await session.scalar(
+        select(Book).where(Book.id == book.id).with_for_update().execution_options(populate_existing=True)
+    )
+    if book is None:
+        raise ValueError("书不存在")
+    nodes = list(
+        (
+            await session.scalars(
+                select(StoryNode)
+                .where(StoryNode.book_id == book.id)
+                .order_by(StoryNode.position)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).all()
+    )
+    # 保存已提交、图检查点尚未落下时恢复：同一段不能重复插卷、重记期待或追加主角卡。
+    saved = next((node for node in nodes if (node.segment or {}).get("number") == number), None)
+    if saved is not None:
+        volumes = list(
+            await session.scalars(select(Volume).where(Volume.book_id == book.id, Volume.target_node_id == saved.id))
+        )
+        return {
+            "volumes": len(volumes),
+            "chapters": sum(volume.chapter_count for volume in volumes),
+            "new_characters": 0,
+            "new_secrets": 0,
+            "preserved_end": False,
+            "first_volume": min((volume.index for volume in volumes), default=1),
+            "end_title": saved.title,
+            "end_id": str(saved.id),
+            "already_saved": True,
+        }
+    cards = deepcopy(split.get("volumes") or [])
+    if not cards:
+        raise ValueError("这一段还没有分卷。")
+    current_last = int(await session.scalar(select(func.max(Volume.index)).where(Volume.book_id == book.id)) or 0)
+    first, last = current_last + 1, current_last + len(cards)
+    if [card.get("index") for card in cards] != list(range(first, last + 1)):
+        raise ValueError("等待确认期间卷号发生了变化，请重新规划下一段。")
+    final_count = int(
+        await session.scalar(
+            select(func.count(Chapter.id)).where(Chapter.book_id == book.id, Chapter.status == "final")
+        )
+        or 0
+    )
+    adopt = plan.get("adopt") or {}
+    endpoint = next((node for node in nodes if str(node.id) == adopt.get("node_id")), None)
+    end = plan.get("end") or {}
+    preserved_end = False
+    if endpoint is None:
+        position = max((node.position for node in nodes if node.segment is not None), default=0) + 1
+        for node in nodes:
+            if node.position >= position:
+                node.position += 1
+        endpoint = StoryNode(book_id=book.id, position=position, kind="milestone", status="pencil", origin="ai")
+        for key in END_CONTENT:
+            setattr(endpoint, key, end.get(key, ""))
+        endpoint.volume = last
+        endpoint.editor_note = end.get("editor_note", "")
+        endpoint.techniques = clean_techniques(end.get("techniques"))
+        session.add(endpoint)
+    elif endpoint.status != "pinned":
+        snapshot = adopt.get("snapshot") or {}
+        if all(getattr(endpoint, key) == snapshot.get(key, "") for key in END_CONTENT):
+            for key in END_CONTENT:
+                setattr(endpoint, key, end.get(key, ""))
+            endpoint.volume = last
+        else:
+            preserved_end = True
+    if pin_end:
+        endpoint.status = "pinned"
+    endpoint.segment = {
+        "number": number,
+        "status": status,
+        "planned_at": final_count,
+        **{key: plan.get(key, "") for key in ("map", "trouble", "opponent", "goal", "goal_link")},
+        "wait": (plan.get("wait") or {}).get("description", ""),
+        "reveal": plan.get("reveal", ""),
+        "opening": None,
+        **{key: plan.get(key, "") for key in ("carried", "pursuit", "finger_next", "answers")},
+        "finale": bool(plan.get("finale")),
+    }
+    ending = next((node for node in nodes if node.kind == "ending"), None)
+    if (
+        plan.get("ending")
+        and ending is not None
+        and ending.status != "pinned"
+        and not (ending is endpoint and preserved_end)
+    ):
+        ending.event = plan["ending"]
+    world = deepcopy(book.world or {})
+    new_map = plan.get("new_map") or {}
+    if new_map:
+        maps = deepcopy(world.get("maps") or [])
+        match = next((i for i, item in enumerate(maps) if item.get("name") == new_map.get("name")), None)
+        if match is None:
+            maps.append(deepcopy(new_map))
+        else:
+            maps[match] = deepcopy(new_map)
+        world["maps"] = maps
+        world["far_maps"] = [item for item in world.get("far_maps") or [] if item.get("name") != new_map.get("name")]
+    if plan.get("power"):
+        world["power"] = "\n".join(
+            value for value in (world.get("power"), f"（第 {number} 段）{plan['power']}") if value
+        )
+    if plan.get("answers") and not world.get("mystery_answer"):
+        world["mystery_answer"] = plan["answers"]
+    book.world = world
+    protagonist = deepcopy(book.protagonist or {})
+    for target, source in (("escalation", "pursuit"), ("finger_later", "finger_next")):
+        if plan.get(source):
+            protagonist[target] = "\n".join(
+                value for value in (protagonist.get(target), f"第 {number} 段：{plan[source]}") if value
+            )
+    book.protagonist = protagonist
+    characters = {
+        person.name: person for person in await session.scalars(select(Character).where(Character.book_id == book.id))
+    }
+    new_characters = 0
+    for person in plan.get("new_characters") or []:
+        name = str(person.get("name", "")).strip()
+        if not name or name in characters:
+            continue
+        row = Character(book_id=book.id, name=name)
+        for key in CHARACTER_FIELDS:
+            if key != "name" and person.get(key) is not None:
+                setattr(row, key, person[key])
+        session.add(row)
+        characters[name] = row
+        new_characters += 1
+    await session.flush()
+    relations = {
+        (row.source_id, row.target_id, row.kind)
+        for row in await session.scalars(select(Relationship).where(Relationship.book_id == book.id))
+    }
+    for relation in plan.get("relationships") or []:
+        source, target = characters.get(relation.get("source")), characters.get(relation.get("target"))
+        if source is None or target is None or source is target:
+            continue
+        key = (source.id, target.id, relation.get("kind", ""))
+        if key in relations:
+            continue
+        session.add(
+            Relationship(
+                book_id=book.id,
+                source_id=source.id,
+                target_id=target.id,
+                kind=key[2],
+                description=relation.get("description", ""),
+            )
+        )
+        relations.add(key)
+    next_secret = int(await session.scalar(select(func.max(Secret.seq)).where(Secret.book_id == book.id)) or 0) + 1
+    new_secrets = 0
+    for secret in plan.get("secrets") or []:
+        knowers, known = [], set()
+        for item in secret.get("knowers") or []:
+            item = {"name": item} if isinstance(item, str) else item
+            name = str(item.get("name", "")).strip()
+            if name in characters and name not in known:
+                knowers.append({"name": name, "since_chapter": None, "how": "开书设定"})
+                known.add(name)
+        session.add(
+            Secret(
+                book_id=book.id,
+                seq=next_secret,
+                title=secret.get("title", ""),
+                truth=secret.get("truth", ""),
+                knowers=knowers,
+                reader_knows=secret.get("reader_knows"),
+                reveal_plan=secret.get("reveal_plan", ""),
+                status="hidden",
+                node_id=endpoint.id,
+            )
+        )
+        next_secret += 1
+        new_secrets += 1
+    wait = plan.get("wait") or {}
+    if wait:
+        seq = (
+            int(await session.scalar(select(func.max(Foreshadowing.seq)).where(Foreshadowing.book_id == book.id)) or 0)
+            + 1
+        )
+        plant = max(first, min(last, int(wait.get("plant_volume") or first)))
+        payoff = int(wait.get("payoff_volume") or last)
+        if not first <= payoff <= last:
+            payoff = last
+        session.add(
+            Foreshadowing(
+                book_id=book.id,
+                seq=seq,
+                kind="期待",
+                span="长",
+                node_id=endpoint.id,
+                description=wait.get("description", ""),
+                plant_plan=wait.get("plant_plan", ""),
+                payoff_plan=wait.get("payoff_plan", ""),
+                plant_volume=plant,
+                payoff_volume=payoff,
+                status="planned",
+            )
+        )
+    for card in cards:
+        row = Volume(book_id=book.id, index=card["index"], title=card.get("title", ""), status="planned")
+        for key in VOLUME_FIELDS:
+            if card.get(key) is not None:
+                setattr(row, key, clean_techniques(card[key]) if key == "techniques" else deepcopy(card[key]))
+        row.target_node_id = endpoint.id
+        row.reaches_node = row.index == last
+        row.thread_beats = [
+            {"thread": thread["name"], "beat": beat.get("beat", "")}
+            for thread in split.get("threads") or []
+            for beat in thread.get("beats") or []
+            if beat.get("volume") == row.index
+        ]
+        session.add(row)
+    threads = {
+        row.name: row for row in await session.scalars(select(StoryThread).where(StoryThread.book_id == book.id))
+    }
+    next_thread = max((row.index for row in threads.values()), default=0) + 1
+    for thread in split.get("threads") or []:
+        name = str(thread.get("name", "")).strip()
+        if not name:
+            continue
+        row = threads.get(name)
+        if row is None:
+            row = StoryThread(
+                book_id=book.id,
+                name=name,
+                index=next_thread,
+                kind=thread.get("kind", "其他"),
+                characters=deepcopy(thread.get("characters") or []),
+                beats=[],
+            )
+            next_thread += 1
+            threads[name] = row
+            session.add(row)
+        if not row.summary:
+            row.summary = thread.get("summary", "")
+        beats = {beat.get("volume"): deepcopy(beat) for beat in row.beats or []}
+        beats.update(
+            {
+                beat["volume"]: deepcopy(beat)
+                for beat in thread.get("beats") or []
+                if first <= int(beat.get("volume") or 0) <= last
+            }
+        )
+        row.beats = [beat for _, beat in sorted(beats.items())]
+    current_ids = {str(node.id): node.id for node in nodes}
+    node_ids = {
+        index: current_ids.get(str(node.get("id"))) for index, node in enumerate(plan.get("nodes_view") or [], 1)
+    }
+    node_ids[plan.get("end_index", 0)] = endpoint.id
+    anchors = {
+        (row.character_id, row.node_id, row.kind)
+        for row in await session.scalars(select(NodeAnchor).where(NodeAnchor.book_id == book.id))
+    }
+    for anchor in split.get("anchors") or []:
+        person, node_id = characters.get(anchor.get("character")), node_ids.get(anchor.get("node"))
+        if person is None or node_id is None:
+            continue
+        key = (person.id, node_id, anchor.get("kind", "登场"))
+        if key in anchors:
+            continue
+        session.add(
+            NodeAnchor(
+                book_id=book.id, character_id=person.id, node_id=node_id, kind=key[2], note=anchor.get("note", "")
+            )
+        )
+        anchors.add(key)
+    await session.flush()
+    return {
+        "volumes": len(cards),
+        "chapters": sum(int(card.get("chapter_count") or 0) for card in cards),
+        "new_characters": new_characters,
+        "new_secrets": new_secrets,
+        "preserved_end": preserved_end,
+        "first_volume": first,
+        "end_title": endpoint.title,
+        "end_id": str(endpoint.id),
+        "already_saved": False,
+    }
 
 
 def _secret_state(row: Secret) -> dict[str, Any]:
@@ -182,7 +498,7 @@ async def apply_digest(
         if row is None:
             continue
         before = _state(row, CHARACTER_STATE)
-        for key in ("location", "condition", "abilities"):
+        for key in ("location", "condition", "want", "abilities"):
             value = getattr(change, key).strip()
             if value and value != getattr(row, key) and (row.name, key) not in later:
                 setattr(row, key, value)

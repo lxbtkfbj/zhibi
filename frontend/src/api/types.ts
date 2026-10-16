@@ -57,20 +57,45 @@ export interface NodeUpdateProposal {
   reason: string
 }
 
+/** 下一段尚未落库的规划快照；确认页以后沿用这些字段，不拿已保存节点冒充待确认内容。 */
+export interface NextSegmentPlan {
+  carried: string
+  pursuit: string
+  finger_next: string
+  answers: string
+  map: string
+  new_map: NonNullable<World['maps']>[number] | null
+  power: string
+  trouble: string
+  opponent: string
+  new_characters: { name: string; role_type: string; desire: string; want: string; [key: string]: unknown }[]
+  relationships: Record<string, unknown>[]
+  goal: string
+  goal_link: string
+  wait: { description: string; plant_volume?: number; payoff_volume?: number; [key: string]: unknown }
+  reveal: string
+  secrets: { title: string; truth: string; knowers: string[]; [key: string]: unknown }[]
+  end: NodeCandidate & { adopted: boolean; status?: StoryNode['status']; ref?: number }
+  ending: string
+  finale: boolean
+  decisions?: AuthorChoice[]
+}
+
 /**
  * 等作者处理的内容：setup_questions 动笔前的提问；setup_review 开书方案拍板；
- * volume_review 某一卷的卷纲拍板；trial_read 前几章试读；chapter_stuck 某章重写两次仍未通过。
+ * segment_review 下一段确认；volume_review 某一卷的卷纲拍板；trial_read 前几章试读；chapter_stuck 某章重写两次仍未通过。
  */
 export type Pending =
   | { kind: 'setup_questions'; flow?: number; questions: InterviewQuestion[] }
   | { kind: 'setup_review'; flow?: number; round: number; title?: string }
   | { kind: 'setup_directions'; flow?: number; reference?: string; directions: BookDirection[]; recommended: number; length: InterviewQuestion & { chapter_words?: number } }
   | { kind: 'setup_piece'; flow?: number; flags?: Record<string, string[]>; review?: { question: string; problem: string; suggestion: string }[]; piece: PieceKey; round: number; warnings?: string[]; decisions?: AuthorChoice[]; suggestions?: SetupSuggestion[]; unlock_requests?: { target: SetupTarget; reason: string }[]; candidates?: { node_id: string; nodes: NodeCandidate[] } | null }
+  | { kind: 'segment_review'; flow: 2; number: number; round: number; plan: NextSegmentPlan; split: { volumes: Record<string, unknown>[]; [key: string]: unknown }; warnings: string[]; flags: Record<string, string[]>; decisions: AuthorChoice[] }
   | { kind: 'volume_review'; volume: number; title: string; issues?: string[]; node_update?: NodeUpdateProposal | null; node_conflict?: string }
   | { kind: 'trial_read'; chapters: number }
   | { kind: 'chapter_stuck'; chapter: number; title: string; issues: string[] }
 
-export type DecisionKind = 'setup_review' | 'volume_review' | 'trial_read' | 'chapter_stuck'
+export type DecisionKind = 'setup_review' | 'segment_review' | 'volume_review' | 'trial_read' | 'chapter_stuck'
 
 export interface Job {
   id: string

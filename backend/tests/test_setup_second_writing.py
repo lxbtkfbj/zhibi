@@ -1,4 +1,4 @@
-"""卷纲新问题与任务 4 接入前的段边界保护，兼容没有分段信息的旧书。"""
+"""卷纲新问题与段边界滚动规划，兼容没有分段信息的旧书。"""
 
 import pytest
 
@@ -97,20 +97,18 @@ async def test_finishing_planned_volumes_does_not_complete_unfinished_new_book(s
     async with sessionmaker() as session:
         book, _, _ = await fixture(session, segmented=segmented, end=end)
         result = await _next_step(session, book, {"until": "book"})
-        assert result["step"] == "done"
+        assert result["step"] == ("done" if completed else "plan_segment")
         assert (book.status == "completed") is completed
-        assert result["reason"] == (
-            "全书写完了！"
-            if completed
-            else "这一段写完了。下一段怎么走，等「定下一段」功能接入后由主编来定，先停在这里。"
-        )
+        if completed:
+            assert result["reason"] == "全书写完了！"
 
 
 @pytest.mark.parametrize("ending", [True, False])
-async def test_finale_volume_without_following_card_can_say_final_volume(sessionmaker, ending):
+async def test_only_ending_volume_without_following_card_can_say_final_volume(sessionmaker, ending):
     async with sessionmaker() as session:
         book, volume, target = await fixture(session, end=ending)
         if not ending:
             target.segment = {**target.segment, "finale": True}
         await session.flush()
-        assert "下一卷：无（这是最后一卷）" in (await volume_blocks(session, book, volume))["neighbors"]
+        expected = "下一卷：无（这是最后一卷）" if ending else "下一卷：无（后面的卷写到再定）"
+        assert expected in (await volume_blocks(session, book, volume))["neighbors"]

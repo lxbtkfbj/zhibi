@@ -109,7 +109,7 @@ def test_template_variables_and_labels(name, expected, default_prompts):
     assert "{{" not in prompts.render(name, **dict.fromkeys(expected.split(), "测试"))
 
 
-def test_moved_prompts_unchanged_retired_hidden_task4_untouched():
+def test_moved_prompts_unchanged_retired_hidden_and_task4_now_moved():
     evidence = json.loads((ROOT / "docs/第二包验收/任务2-提示词原文校验.json").read_text(encoding="utf-8"))
     assert len(evidence) == 14
     for record in evidence:
@@ -122,17 +122,8 @@ def test_moved_prompts_unchanged_retired_hidden_task4_untouched():
     for name in ("setup_spine", "setup_lore", "setup_outline", "setup_threads"):
         assert name not in BY_NAME
         assert not (ROOT / f"backend/app/prompts/{name}.md").exists()
-    assert {p.name for p in (ROOT / "docs/codex任务/第二包/提示词").glob("*.md")} == {
-        f"{name}.md"
-        for name in (
-            "plan_segment",
-            "volume_directions",
-            "audit_volume",
-            "plan_chapters",
-            "digest_chapter",
-            "write_chapter",
-        )
-    }
+    # 第二包任务4已原文迁入剩余六份；其逐字合同在test_next_segment_prompts_demo单独校验。
+    assert not list((ROOT / "docs/codex任务/第二包/提示词").glob("*.md"))
 
 
 async def test_all_editorial_calls_render_new_templates(default_prompts):

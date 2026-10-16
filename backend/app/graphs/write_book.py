@@ -1,6 +1,8 @@
 """写书主循环：分层滚动规划，从第一卷一直写到完本。
 
 每一轮先看「下一步该做什么」（数据库为准，断点续跑、换任务都能接上）：
+- 已规划的卷都写完但还没到结局 → 定下一段、分卷 → 作者确认（或按设置自动通过）后接拆卷纲；
+  作者也可以提前单独规划下一段，确认后停下，不开始写章。
 - 当前这一卷还只有总纲卡片 → 拆卷纲：主编先想 2-3 个不同方向，每个方向并行各拆一份完整卷纲 →
   审稿按爽点、线索交织、反派智商、新意打分比稿，选出最好的一份（必要时主编把别的方案的长处融进来）→
   审稿做专项审稿（反派是否降智、爽点节奏、伏笔排期、套路重复、期待感，排期与节奏底线由程序检查）→
@@ -22,6 +24,7 @@ import re
 import time
 import uuid
 from collections.abc import AsyncIterator
+from copy import deepcopy
 from typing import Annotated, Any, Literal, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -31,11 +34,23 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents import editorial
-from app.agents.context import foreshadow_code, format_direction, format_pitches, format_revision
+from app.agents.context import (
+    foreshadow_code,
+    format_character,
+    format_direction,
+    format_next_segment,
+    format_pitches,
+    format_revision,
+    format_segment_info,
+    format_spine,
+    format_threads,
+    format_volumes_part,
+    format_world,
+)
 from app.agents.planning import attach_new_foreshadowings, expectation_issues, fit_chapter_counts, schedule_issues
 from app.agents.playbook import Playbook, pick, repetition_issues
 from app.agents.rhythm import check_chapter_plan, overdue_expectations
-from app.agents.setup_puzzle import clean_reveals
+from app.agents.setup_puzzle import clean_reveals, normalize_volumes
 from app.book_settings import settings_of, strictness_text
 from app.graphs.deps import GraphDeps
 from app.llm.router import LLMError
@@ -43,6 +58,7 @@ from app.models import Book, Chapter, MeetingMessage, PlotUnit, StoryNode, Volum
 from app.services import setup_store, writing_store
 from app.services.notes import note_thread
 from app.services.requirements import active_notes, add_requirement, deleted_texts, ingest_notes
+from app.services.segment_planning import normalize_next_segment, segment_checks
 from app.services.writing_context import (
     SENTENCE,
     chapter_blocks,
@@ -52,6 +68,8 @@ from app.services.writing_context import (
     material_blocks,
     pick_materials,
     prior_units,
+    segment_blocks,
+    segment_lengths,
     unit_recap_blocks,
     volume_blocks,
     volume_recap_blocks,
@@ -67,7 +85,7 @@ ASPECT_NAMES = {
 NODE_CONTENT = ("title", "event", "prerequisite", "consequence")
 # 新书写完前几章请作者试读
 TRIAL_READ_AFTER = 3
-UNTIL = ("count", "volume", "book")
+UNTIL = ("count", "volume", "book", "segment")
 # 写完后检查：字数不到目标的七成就让写手接着写（最多两次）；结尾写成总结就改写结尾（一次）
 SHORT_RATIO = 0.7
 MAX_EXTENSIONS = 2
@@ -80,14 +98,14 @@ RECAP_STEPS = ("recap_unit", "recap_volume")
 
 
 class WriteState(TypedDict, total=False):
-    # count：写够 target 章；volume：写完当前这一卷；book：一直写到完本
+    # count：写够 target 章；volume：写完当前这一卷；book：一直写到完本；segment：只定下一段
     until: str
     target: int
     # 这一轮已经定稿的章数
     written: int
     start_volume: int
     notes_seen: int
-    # 下一步：plan_volume / volume_gate / plan_chapters / write / recap_unit / recap_volume / trial_gate /
+    # 下一步：plan_segment / plan_volume / volume_gate / plan_chapters / write / recap_unit / recap_volume / trial_gate /
     # finalize / chapter_gate / done
     step: str
     volume_id: str
@@ -121,6 +139,16 @@ class WriteState(TypedDict, total=False):
     volume_fix: str
     open_issues: list[str]
     node_update: dict | None
+    # 下一段只存检查点，拍板后才一次写入书库；旧检查点无需补造这些字段。
+    segment_plan: dict
+    segment_split: dict
+    segment_number: int
+    segment_round: int
+    segment_feedback: str
+    segment_notes: list[dict]
+    segment_done: bool
+    # 本段是否自动通过在进拍板点前落检查点；等待期间改设置不能吞掉已提交的意见。
+    segment_automatic: bool
 
 
 def initial_state(params: dict) -> WriteState:
@@ -153,6 +181,15 @@ async def decide(session: AsyncSession, book_id: uuid.UUID, state: WriteState) -
     book = await session.get(Book, book_id)
     if book is None:
         raise ValueError("书不存在")
+    if state.get("until") == "segment":
+        if state.get("segment_done"):
+            volumes = (state.get("segment_split") or {}).get("volumes") or []
+            first = volumes[0].get("index", 1) if volumes else 1
+            return {"step": "done", "reason": f"下一段定好了，开写时从第{first}卷接着写。"}
+        last = await _last_segment(session, book.id)
+        if last is not None and last.kind == "ending":
+            return {"step": "done", "reason": "全书已经规划到结局了。"}
+        return {"step": "plan_segment"}
     finals = await session.scalar(
         select(func.count()).select_from(Chapter).where(Chapter.book_id == book_id, Chapter.status == "final")
     )
@@ -175,6 +212,15 @@ async def _has_finals(session: AsyncSession, volume_id: uuid.UUID) -> bool:
         select(Chapter.id).where(Chapter.volume_id == volume_id, Chapter.status == "final").limit(1)
     )
     return found is not None
+
+
+async def _last_segment(session: AsyncSession, book_id: uuid.UUID) -> StoryNode | None:
+    return await session.scalar(
+        select(StoryNode)
+        .where(StoryNode.book_id == book_id, StoryNode.segment.is_not(None))
+        .order_by(StoryNode.position.desc())
+        .limit(1)
+    )
 
 
 async def _next_step(session: AsyncSession, book: Book, state: WriteState) -> dict:
@@ -231,17 +277,15 @@ async def _next_step(session: AsyncSession, book: Book, state: WriteState) -> di
         if not volume.recap.strip():
             return {**out, "step": "recap_volume"}
         volume.status = "done"
-    segmented = await session.scalar(
-        select(StoryNode.id).where(StoryNode.book_id == book.id, StoryNode.segment.is_not(None)).limit(1)
-    )
-    target = (
-        await session.get(StoryNode, volumes[-1].target_node_id) if volumes and volumes[-1].target_node_id else None
-    )
-    if segmented and (target is None or target.kind != "ending"):
-        return {
-            "step": "done",
-            "reason": "这一段写完了。下一段怎么走，等「定下一段」功能接入后由主编来定，先停在这里。",
-        }
+    last = await _last_segment(session, book.id)
+    if last is not None and last.kind != "ending":
+        if until == "volume" and state.get("start_volume"):
+            start = state["start_volume"]
+            return {
+                "step": "done",
+                "reason": f"第{start}卷写完了。下一段还没定，下次开写时主编先来定下一段。",
+            }
+        return {"step": "plan_segment"}
     book.status = "completed"
     return {"step": "done", "reason": "全书写完了！"}
 
@@ -284,6 +328,241 @@ async def dispatch_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
 
 def route_step(state: WriteState) -> str:
     return state.get("step") or "done"
+
+
+async def plan_segment_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
+    """先只生成检查点里的下一段；不提前改节点、人物或卷卡片。"""
+    d = runtime.context
+    await d.check_cancel()
+    async with d.sessionmaker() as session:
+        book = await session.get(Book, d.book_id)
+        lengths = await segment_lengths(session, book)
+        blocks = await segment_blocks(session, book)
+        setup = await setup_store.load_setup(session, d.book_id)
+    number = lengths["segments"] + 1
+    feedback = state.get("segment_feedback", "")
+    blocks["revision"] = (
+        format_revision("当前的下一段", format_next_segment(state.get("segment_plan") or {}), feedback)
+        if feedback
+        else ""
+    )
+    await d.emit.status(
+        "chief",
+        f"主编正在按你的意见修改第 {number} 段…"
+        if feedback
+        else f"主编正在定下一段（第 {number} 段）：上一段的线头、主角的追求、下一张地图…",
+    )
+    result = await editorial.plan_segment(d.llm, blocks)
+    plan, notes = normalize_next_segment(
+        result.model_dump(), setup["segment"]["nodes"], setup["world"]["characters"], lengths=lengths
+    )
+    await d.emit.artifact(
+        "chief",
+        f"第 {number} 段：走到「{plan.get('end', {}).get('title', '')}」",
+        {"type": "segment_plan", "data": plan},
+    )
+    if result.remark:
+        await d.emit.say("chief", result.remark)
+    return {
+        "segment_plan": plan,
+        "segment_number": number,
+        "segment_round": state.get("segment_round", 1),
+        "segment_notes": notes,
+    }
+
+
+def _segment_info(plan: dict, number: int, planned_at: int) -> dict:
+    info = {
+        key: plan.get(key, "")
+        for key in (
+            "map",
+            "trouble",
+            "opponent",
+            "goal",
+            "goal_link",
+            "reveal",
+            "carried",
+            "pursuit",
+            "finger_next",
+            "answers",
+            "finale",
+        )
+    }
+    return {
+        **info,
+        "number": number,
+        "planned_at": planned_at,
+        "opening": None,
+        "wait": (plan.get("wait") or {}).get("description", ""),
+    }
+
+
+async def split_segment_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
+    d = runtime.context
+    await d.check_cancel()
+    plan = deepcopy(state.get("segment_plan") or {})
+    number = state.get("segment_number", 2)
+    async with d.sessionmaker() as session:
+        book = await session.get(Book, d.book_id)
+        lengths = await segment_lengths(session, book)
+        blocks = await segment_blocks(session, book)
+        setup = await setup_store.load_setup(session, d.book_id)
+        playbook = pick(book.concept, settings_of(book)["playbook"])
+        world, spine = deepcopy(book.world or {}), deepcopy(book.spine or {})
+    first = lengths["next_volume"]
+    if plan.get("new_characters"):
+        blocks["world"] += "\n\n新登场的人物：\n" + "\n\n".join(
+            format_character(character) for character in plan["new_characters"]
+        )
+    if plan.get("new_map"):
+        blocks["world"] += "\n\n" + format_world({"maps": [plan["new_map"]]})
+    blocks.update(
+        segment=format_spine({**spine, "nodes": plan["nodes_view"]}, world)
+        + "\n\n这一段的规划：\n"
+        + format_segment_info(_segment_info(plan, number, lengths["final_chapters"]), world),
+        threads=format_threads(setup["volumes"]["threads"], volume=first),
+        playbook=playbook.text("outline"),
+        volume_hint=lengths["volume_hint"],
+        revision=(
+            format_revision(
+                "当前的分卷与线索", format_volumes_part(state.get("segment_split") or {}), state["segment_feedback"]
+            )
+            if state.get("segment_feedback")
+            else ""
+        ),
+    )
+    await d.emit.status("chief", f"主编正在给第 {number} 段分卷、排线索…")
+    result = await editorial.split_next_segment(d.llm, blocks)
+    part, normalized, notes = normalize_volumes(
+        result.model_dump(),
+        {"nodes": plan["nodes_view"], "expectations": [plan["wait"]]},
+        [*setup["world"]["characters"], *(plan.get("new_characters") or [])],
+        start=first,
+        end_index=plan["end_index"],
+    )
+    plan["nodes_view"] = normalized["nodes"]
+    plan["wait"] = normalized["expectations"][0]
+    plan["end"] = {**plan["end"], "volume": normalized["nodes"][plan["end_index"] - 1].get("volume")}
+    count = sum(volume.get("chapter_count", 0) for volume in part["volumes"])
+    if lengths["planned_total"] > 0 and count > lengths["remaining"]:
+        notes.append(
+            {"question": "volumes", "text": f"这一段约 {count} 章，超过了剩下的约 {lengths['remaining']} 章。"}
+        )
+    appeared = {anchor["character"] for anchor in part["anchors"] if anchor.get("kind") == "登场"}
+    for character in plan.get("new_characters") or []:
+        if character["name"] not in appeared:
+            notes.append({"question": "cast", "text": f"「{character['name']}」还没写什么时候登场。"})
+    await d.emit.artifact(
+        "chief",
+        f"第 {number} 段分 {len(part['volumes'])} 卷，约 {count} 章",
+        {"type": "segment_volumes", "data": part},
+    )
+    if result.remark:
+        await d.emit.say("chief", result.remark)
+    automatic = (
+        state["segment_automatic"]
+        if state.get("segment_feedback") and "segment_automatic" in state
+        else not (await live_settings(d))["segment_approval"]
+    )
+    return {
+        "segment_plan": plan,
+        "segment_split": part,
+        "segment_notes": [*(state.get("segment_notes") or []), *notes],
+        "segment_automatic": automatic,
+    }
+
+
+async def segment_gate_node(
+    state: WriteState, runtime: Runtime[GraphDeps]
+) -> Command[Literal["plan_segment", "dispatch"]]:
+    # interrupt 前只有读操作；恢复时会从头重跑，不得提前写入下一段。
+    d = runtime.context
+    plan, split = deepcopy(state.get("segment_plan") or {}), state.get("segment_split") or {}
+    number = state.get("segment_number", 2)
+    async with d.sessionmaker() as session:
+        book = await session.get(Book, d.book_id)
+        nodes = await setup_store.load_nodes(session, d.book_id)
+        ledger = await setup_store.load_ledger(session, d.book_id)
+        warnings, flags = segment_checks(plan, split, book.world or {}, ledger, nodes, state.get("segment_notes"))
+        automatic = state.get("segment_automatic", not settings_of(book)["segment_approval"])
+    adopt = plan.get("adopt") or {}
+    current = next((node for node in nodes if node.get("id") == adopt.get("node_id")), None)
+    plan["end"] = {
+        **plan.get("end", {}),
+        "adopted": bool(adopt),
+        "status": current.get("status", "pencil") if current else "pencil",
+    }
+    decision = (
+        {"action": "confirm"}
+        if automatic
+        else interrupt(
+            {
+                "kind": "segment_review",
+                "flow": 2,
+                "number": number,
+                "round": state.get("segment_round", 1),
+                "plan": plan,
+                "split": split,
+                "warnings": warnings,
+                "flags": flags,
+                "decisions": [*(plan.get("decisions") or []), *(split.get("decisions") or [])],
+            }
+        )
+    )
+    feedback = str(decision.get("feedback") or "").strip()
+    flips = decision.get("flips") or []
+    async with d.sessionmaker() as session:
+        if not decision.get("requirement_saved"):
+            if feedback:
+                await _requirement(session, d.book_id, feedback, f"segment:{number}")
+            for flip in flips:
+                await _requirement(session, d.book_id, f"「{flip['topic']}」改成：{flip['choice']}", "answer")
+        if decision.get("action") == "revise":
+            await session.commit()
+            feedback = "\n".join(
+                [*([feedback] if feedback else []), *(f"把「{f['topic']}」改成「{f['choice']}」" for f in flips)]
+            )
+            return Command(
+                goto="plan_segment",
+                update={
+                    "segment_feedback": feedback,
+                    "segment_round": state.get("segment_round", 1) + 1,
+                },
+            )
+        book = await session.get(Book, d.book_id)
+        stats = await writing_store.save_segment(
+            session,
+            book,
+            state["segment_plan"],
+            split,
+            number=number,
+            status="auto" if automatic else "confirmed",
+            pin_end=bool(decision.get("pin_end")),
+        )
+        await session.commit()
+    end_title, first = stats["end_title"], stats["first_volume"]
+    if automatic:
+        text = (
+            f"第 {number} 段按设置自动通过：走到「{end_title}」，共 {stats['volumes']} 卷、约 {stats['chapters']} 章。"
+            "全书地图上已经标出来了，节点是暂定的，随时可以改。"
+        )
+    else:
+        following = (
+            f"开写时先拆第 {first} 卷卷纲。" if state.get("until") == "segment" else f"接下来拆第 {first} 卷卷纲。"
+        )
+        text = f"第 {number} 段定好了：走到「{end_title}」，共 {stats['volumes']} 卷、约 {stats['chapters']} 章。{following}"
+    if stats.get("preserved_end"):
+        text += "终点节点在等待期间被你改过，保留了你的版本。"
+    await d.emit.say("system", text, kind="decision")
+    return Command(
+        goto="dispatch",
+        update={
+            "segment_done": state.get("until") == "segment",
+            "segment_feedback": "",
+            "segment_round": 1,
+            "segment_notes": [],
+        },
+    )
 
 
 async def _volume_context(d: GraphDeps, volume_id: str) -> tuple[Volume, Playbook, dict[str, Any]]:
@@ -500,6 +779,26 @@ async def audit_volume_node(state: WriteState, runtime: Runtime[GraphDeps]) -> d
         ),
         *expectation_issues(units, plan.get("new_expectations") or [], ledger, index, first),
     ]
+    if not str(plan.get("want") or "").strip():
+        found.append(
+            {
+                "aspect": "rhythm",
+                "severity": "low",
+                "problem": "本卷没写「这一卷想做成什么」。",
+                "suggestion": "补上本卷的具体目标。",
+            }
+        )
+    for unit in units:
+        if not str(unit.get("loop") or "").strip():
+            found.append(
+                {
+                    "aspect": "rhythm",
+                    "severity": "low",
+                    "unit": unit.get("index"),
+                    "problem": "这个单元没写核心循环。",
+                    "suggestion": "补上这一单元怎样把核心循环跑一遍。",
+                }
+            )
     await d.emit.status("reviewer", f"审稿正在给第{index}卷做专项审稿：反派智商、爽点节奏、伏笔排期、套路重复、期待感…")
     result = await editorial.audit_volume(
         d.llm,
@@ -1466,6 +1765,9 @@ def _chapter_loop(graph: StateGraph) -> None:
 def build_write_graph() -> StateGraph:
     graph = StateGraph(WriteState, context_schema=GraphDeps)
     graph.add_node("dispatch", dispatch_node)
+    graph.add_node("plan_segment", plan_segment_node)
+    graph.add_node("split_segment", split_segment_node)
+    graph.add_node("segment_gate", segment_gate_node)
     graph.add_node("plan_volume", plan_volume_node)
     graph.add_node("draft_pitch", draft_pitch_node)
     graph.add_node("judge_pitches", judge_pitches_node)
@@ -1485,6 +1787,7 @@ def build_write_graph() -> StateGraph:
         "dispatch",
         route_step,
         {
+            "plan_segment": "plan_segment",
             "plan_volume": "plan_volume",
             "volume_gate": "volume_gate",
             "plan_chapters": "plan_chapters",
@@ -1495,6 +1798,8 @@ def build_write_graph() -> StateGraph:
             "done": END,
         },
     )
+    graph.add_edge("plan_segment", "split_segment")
+    graph.add_edge("split_segment", "segment_gate")
     for source in ("save_volume", "plan_chapters", "finalize", "trial_gate", "recap_unit", "recap_volume"):
         graph.add_edge(source, "dispatch")
     # 拆卷纲：想方向 → 各方向并行起草 → 比稿 →（融合）→ 专项审稿 →（自动改一轮）→ 存库 → 回到 dispatch 等拍板

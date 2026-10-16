@@ -7,15 +7,15 @@ from app.agents import editorial
 from app.prompts import VARIABLE, default_content, render
 from app.prompts.catalog import BY_NAME, VARIABLE_LABELS, variables
 
-# 原设计稿在任务开始时的 Git blob；文本读取统一换行，与 Git 的标准文本存储一致。
+# 原设计稿的 Git blob（其中五份于第二包任务 4 按新设计替换）；文本读取统一换行，与 Git 的标准文本存储一致。
 PROMPT_BLOBS = {
-    "volume_directions": "ccf7cb1d15aab4483e1a06c1ddd1368ff311c0d1",
-    "audit_volume": "29421dc1d473844210b395e7ac636f44395ca3a1",
-    "plan_chapters": "35b2501f07920e3c122eccbab7958efd4d693315",
+    "volume_directions": "dd76ef2a771b108b923fafbc9efd42ec9a08a93f",
+    "audit_volume": "8d4298085a876e4a750cecc30431108c0010bbb6",
+    "plan_chapters": "89520ac5bfa259475ff831a867b8e7d94739528b",
     "prepare_chapter": "1f2246e3568111f6f18cbb30f50347bec9804152",
-    "write_chapter": "62907539b5c999ca6d5877ce96e8c16fbafcff4c",
+    "write_chapter": "552334325a50476fa570fe5e17c3fc90d1702624",
     "check_consistency": "bace136fa067545cf03089c955a4aaf4a182c704",
-    "digest_chapter": "617d97c60b66a5391d5b55ac9a2d82c6ff5028c6",
+    "digest_chapter": "1f8d84c9eb8eb89ef9924ea9de9f3d70eeb3381a",
     "review_chapter": "0461852be16ad7f0a4f81c4f537be0f9041da04e",
     "recap_unit": "c564536ba7ae7825f2bc2ed813d342df7a4439fe",
     "recap_volume": "a060bdccbe7e54325d0787388702e72c5403cd68",

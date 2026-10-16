@@ -407,6 +407,79 @@ def format_volumes_part(volumes: dict) -> str:
     )
 
 
+def format_next_segment(plan: dict) -> str:
+    """修改下一段时带回作者正在确认的整份走向，不带旧轮意见。"""
+    if not plan:
+        return "（暂无）"
+    lines = []
+    for label, key in (
+        ("上一段留下的线头", "carried"),
+        ("主角的追求", "pursuit"),
+        ("金手指下一阶段", "finger_next"),
+        ("定下的谜底", "answers"),
+        ("地图", "map"),
+    ):
+        if plan.get(key):
+            lines.append(f"{label}：{plan[key]}")
+    item = plan.get("new_map") or {}
+    if item:
+        details = "；".join(
+            f"{label}：{item[key]}"
+            for label, key in (
+                ("谁说了算", "powers"),
+                ("天花板", "ceiling"),
+                ("特有的规矩", "rules"),
+                ("主角从这里起步", "start"),
+                ("能拿到", "gains"),
+            )
+            if item.get(key)
+        )
+        lines.append(f"新地图「{item.get('name', '')}」：{details}")
+    for label, key in (("力量规则往上", "power"), ("开头的小麻烦", "trouble"), ("大对手", "opponent")):
+        if plan.get(key):
+            lines.append(f"{label}：{plan[key]}")
+    if plan.get("new_characters"):
+        lines.append(
+            "新登场的人物："
+            + "；".join(
+                f"{person.get('name', '')}（{person.get('role_type', '')}）：想要{person.get('goal', '')}"
+                + (f"；此刻想要{person['want']}" if person.get("want") else "")
+                for person in plan["new_characters"]
+            )
+        )
+    if plan.get("goal") or plan.get("goal_link"):
+        lines.append(f"这一段的目标：{plan.get('goal', '')}（为什么离长线追求更近：{plan.get('goal_link', '')}）")
+    wait = plan.get("wait") or {}
+    if wait:
+        lines.append(
+            f"读者在等：{wait.get('description', '')}（立下：{wait.get('plant_plan', '')}；兑现：{wait.get('payoff_plan', '')}）"
+        )
+    if plan.get("reveal"):
+        lines.append(f"这一段揭开什么：{plan['reveal']}")
+    if plan.get("secrets"):
+        lines.append(
+            "新的信息差："
+            + "；".join(
+                f"{secret.get('title', '')}：{secret.get('truth', '')}（知道的人："
+                + "、".join(
+                    item if isinstance(item, str) else item.get("name", "") for item in secret.get("knowers") or []
+                )
+                + "）"
+                for secret in plan["secrets"]
+            )
+        )
+    end = plan.get("end") or {}
+    if end:
+        adopted = "沿用" if plan.get("adopt") else "新起"
+        lines.append(
+            f"终点：节点 {plan.get('end_index', '')}「{end.get('title', '')}」（{adopted}）"
+            f"发生：{end.get('event', '')}；之前得先有：{end.get('prerequisite', '')}；之后变成：{end.get('consequence', '')}"
+        )
+    if plan.get("ending"):
+        lines.append(f"结局方向：{plan['ending']}")
+    return "\n".join(lines)
+
+
 def format_threads(threads: dict[str, Any] | list[dict[str, Any]], volume: int | None = None) -> str:
     """线索列表；给了 volume 时只列出这一卷前后的节拍，控制篇幅。"""
     items = threads.get("threads", []) if isinstance(threads, dict) else threads

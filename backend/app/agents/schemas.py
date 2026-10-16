@@ -418,6 +418,49 @@ class SegmentDraft(Lenient):
     remark: str = remark_field("这一段的目标和终点是什么、第一段怎么兑现核心卖点、结局大概往哪去")
 
 
+class NextSegmentDraft(Lenient):
+    """定下一段：题目同开书时的③④，把「第一张地图」换成「下一张地图」，另外先回答四件事。"""
+
+    carried: str = Field(
+        description="上一段留下的线头：还开着的期待和伏笔里，哪些带进这一段、在这一段收掉（用台账编号，如 E3、F5），40-120 字"
+    )
+    pursuit: str = Field(
+        description="主角的追求：舞台变大以后要不要升级或更换；换的话在哪个节点换、为什么换；不换就说明这一段怎么让它往前走，30-80 字"
+    )
+    finger_next: str = Field(description="金手指下一阶段：这一段解锁什么、限制有没有变，30-80 字")
+    answers: str = Field(
+        default="", description="临近揭晓的谜团：核心谜团在这一段或下一段就要揭开时，写下定好的谜底；还远就留空"
+    )
+    map: str = Field(description="这一段在哪张地图：沿用上一张就写原来的名字，换地图就写新地图的名字")
+    new_map: MapDraft | None = Field(default=None, description="换到新地图时写下一张地图的详情；不换地图就留空")
+    power: str = Field(default="", description="力量规则往上的几层：这一段用得到的新层级叫什么、差距多大；用不到就留空")
+    trouble: str = Field(description="开头压着主角的小麻烦：是谁、怎么压着他，一两句")
+    opponent: str = Field(
+        description="这一段的大对手：是谁、想要什么、为什么和主角撞上、手里有什么牌、会怎么谋划；他比主角强，会先赢一次，60-120 字"
+    )
+    new_characters: list[CharacterDraft] = Field(
+        default_factory=list, description="这一段新登场的要紧人物（女主、伙伴、导师、对手）；已经在人物表里的不用重写"
+    )
+    relationships: list[RelationshipDraft] = Field(default_factory=list, description="新人物和已有人物之间的重要关系")
+    goal: str = Field(
+        description="这一段的目标：主角这一段想做成的那件事，要具体，有期限或有对手，不能是「变强」，30-60 字"
+    )
+    goal_link: str = Field(description="做成它为什么能离长线追求更近，一句话")
+    wait: ExpectationDraft = Field(
+        description="这一段让读者等什么：一件读者明确在等的事，在终点前后兑现；它就是这一段的长线期待"
+    )
+    reveal: str = Field(description="这一段揭开什么：核心谜团露出哪一角，同时冒出什么新问题，40-80 字")
+    secrets: list[SecretDraft] = Field(
+        default_factory=list, description="这一段新用到的信息差；已经在信息差表里的不用重写"
+    )
+    end: StoryNodeDraft = Field(
+        description="这一段的终点，也是这一段的最高潮：全书方向里紧接着的远景节点落在这一段的，直接用它（ref 填它现在的序号）；否则新起一个（ref 填 0）；这一段就写到结局时，ref 填结局的序号"
+    )
+    ending: str = Field(default="", description="结局方向要调就写新的一两句（结局是铁钉时不能改）；不调就留空")
+    decisions: list[AuthorChoice] = decisions_field()
+    remark: str = remark_field("这一段的目标和终点是什么、主角的追求怎么变、为什么这样接上一段")
+
+
 class SegmentVolumesDraft(Lenient):
     """这一段分几卷、几条线在这一段走到哪一步、人物什么时候登场。"""
 
@@ -671,6 +714,7 @@ class CharacterUpdate(Lenient):
     name: str = Field(description="人物姓名（必须是设定库里已有的人物）")
     location: str = Field(default="", description="本章结束时所在位置；没变就留空")
     condition: str = Field(default="", description="本章结束时的状态，如伤势、处境、心境；没变就留空")
+    want: str = Field(default="", description="本章结束时此人此刻最想马上做成的事；变了才写，没变就留空")
     abilities: str = Field(default="", description="能力或修为的最新情况；没变就留空")
     is_alive: bool = Field(default=True, description="本章结束时是否还活着")
 

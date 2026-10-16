@@ -181,6 +181,16 @@ async def split_segment(
     )
 
 
+async def plan_segment(llm: LLMRouter, blocks: dict[str, str]) -> s.NextSegmentDraft:
+    user = render("plan_segment", **blocks)
+    return await llm.structured("chief", s.NextSegmentDraft, persona("chief"), user, purpose="写作·定下一段")
+
+
+async def split_next_segment(llm: LLMRouter, blocks: dict[str, str]) -> s.SegmentVolumesDraft:
+    user = render("split_segment", **blocks)
+    return await llm.structured("chief", s.SegmentVolumesDraft, persona("chief"), user, purpose="写作·下一段分卷")
+
+
 async def plan_volume(
     llm: LLMRouter, blocks: dict[str, str], current: dict, instructions: str, *, purpose: str
 ) -> s.VolumePlanDraft:

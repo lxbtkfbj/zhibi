@@ -53,8 +53,8 @@ test('新书第一段写完但未到结局时不显示全书完结，旧书与�
   assert.equal(isWritingComplete(volumes, chapters, nodes), false)
   assert.equal(isWritingComplete(volumes, chapters), true)
   assert.equal(isWritingComplete([{ ...volumes[0], target_node_id: 'final' }], chapters, nodes), true)
-  assert.equal(writingPositionText(writingPosition(nodes, volumes, chapters), volumes, chapters, nodes), '这一段已写完，下一段待规划')
-  assert.equal(progressText({ chapters_final: 1, status: 'writing', active_job: null }, [], null, null, { nodes, volumes, chapters }), '第 1 卷 · 已定稿 1 章 · 这一段已写完，下一段待规划')
+  assert.equal(writingPositionText(writingPosition(nodes, volumes, chapters), volumes, chapters, nodes), '第 1 段写完了 · 下一段写到再定')
+  assert.equal(progressText({ chapters_final: 1, status: 'writing', active_job: null }, [], null, null, { nodes, volumes, chapters }), '第 1 卷 · 已定稿 1 章 · 第 1 段写完了 · 下一段写到再定')
 })
 
 

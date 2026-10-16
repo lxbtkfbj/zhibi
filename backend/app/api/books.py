@@ -12,7 +12,7 @@ from app.agents.glossary import clean_techniques
 from app.api.book_settings import new_book_defaults
 from app.api.deps import SessionDep, ensure_idle, get_book, get_redis
 from app.api.story_map import validate_node
-from app.models import Book, Chapter, Job, PlotUnit, StoryThread, Volume
+from app.models import Book, Chapter, Job, PlotUnit, StoryNode, StoryThread, Volume
 from app.schemas import (
     BookCreate,
     BookCreated,
@@ -281,6 +281,9 @@ async def rewrite_chapter(
 
     后面还有已定稿的章节时，后面的章节不会跟着改，需要作者确认（confirm）。
     """
+    book = await session.scalar(
+        select(Book).where(Book.id == book.id).with_for_update().execution_options(populate_existing=True)
+    )
     chapter = await _chapter(session, book.id, index)
     if chapter.status != "final":
         raise HTTPException(409, "只有已定稿的章节可以按意见重写；还没定稿的章节会在写到时按流程处理")
@@ -374,6 +377,45 @@ async def export_book(book: Book = Depends(get_book), session: AsyncSession = Se
 WRITE_LABEL = {"count": "写 {count} 章", "volume": "写完这一卷", "book": "一直写到完本"}
 
 
+@router.post("/books/{book_id}/plan-segment", response_model=JobOut, status_code=201)
+async def plan_segment(
+    book: Book = Depends(get_book),
+    session: AsyncSession = SessionDep,
+    redis: Redis = Depends(get_redis),
+) -> JobOut:
+    # 与同入口的重复请求串行；保留等待作者的任务，不能从旁再开规划任务。
+    book = await session.scalar(
+        select(Book).where(Book.id == book.id).with_for_update().execution_options(populate_existing=True)
+    )
+    if book.status not in ("ready", "writing"):
+        raise HTTPException(409, "全书已经写完了" if book.status == "completed" else "开书方案还没定稿")
+    current = await session.scalar(
+        select(Job.id).where(Job.book_id == book.id, Job.status.in_(jobs.ACTIVE_STATUSES)).limit(1)
+    )
+    if current is not None:
+        raise HTTPException(409, "编辑部手上还有没做完的事，先处理完再规划下一段")
+    last = await session.scalar(
+        select(StoryNode)
+        .where(StoryNode.book_id == book.id, StoryNode.segment.is_not(None))
+        .order_by(StoryNode.position.desc())
+        .limit(1)
+    )
+    if last is None:
+        raise HTTPException(409, "这本书开书时没有分段规划，不需要定下一段")
+    if last.kind == "ending":
+        raise HTTPException(409, "全书已经规划到结局了")
+    job = jobs.new_write_job(book, "segment", 1)
+    session.add(job)
+    book.status = "writing"
+    await session.flush()
+    await post_message(
+        session, redis, book_id=book.id, job_id=job.id, speaker="author", kind="speech", content="现在就规划下一段。"
+    )
+    await session.refresh(job)
+    jobs.enqueue(job.id)
+    return JobOut.model_validate(job)
+
+
 @router.post("/books/{book_id}/write", response_model=JobOut, status_code=201)
 async def start_writing(
     body: WriteRequest,
@@ -382,6 +424,9 @@ async def start_writing(
     redis: Redis = Depends(get_redis),
 ) -> JobOut:
     """开写：编辑部按卷纲和章纲逐章写作，写够这一轮就停。"""
+    book = await session.scalar(
+        select(Book).where(Book.id == book.id).with_for_update().execution_options(populate_existing=True)
+    )
     if book.status not in ("ready", "writing"):
         raise HTTPException(409, "全书已经写完了" if book.status == "completed" else "开书方案还没定稿")
     current = await jobs.active_job(session, book.id)

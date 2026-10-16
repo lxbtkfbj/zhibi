@@ -17,6 +17,7 @@ CATALOG = [
     ("setup_critique", "审开书方案", "开书", "reviewer", "审阅完整开书方案"),
     ("setup_triage", "处理作者意见", "开书", "chief", "收到开书方案修改意见时"),
     ("setup_notes", "处理作者插话", "开书", "chief", "开书进行中处理插话与设置修改"),
+    ("plan_segment", "定下一段", "规划", "chief", "每一段开写前规划下一段"),
     ("volume_directions", "卷纲方向", "规划", "chief", "卷纲比稿前提出不同方向"),
     ("plan_volume", "拆卷纲", "规划", "chief", "规划每一卷的剧情单元"),
     ("judge_pitches", "卷纲比稿评审", "规划", "reviewer", "多个卷纲方案比稿时"),
@@ -43,6 +44,8 @@ CATALOG = [
 BY_NAME = {row[0]: row for row in CATALOG}
 
 VARIABLE_LABELS = {
+    "last_segment": "上一段",
+    "length": "篇幅与收束",
     "protagonist": "主角卡",
     "segment": "这一段",
     "volumes": "分卷与线索",

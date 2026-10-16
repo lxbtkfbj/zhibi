@@ -30,9 +30,10 @@ const QUICK_PHRASES = {
 /** 每个会话保留自己的草稿；切稿件路由不会重挂载这块区域。 */
 function NoteComposer() {
   const { job, working, waiting, asking, bookId, book, conversation, focusComposer, composerNode, setComposerNode, composerDrafts: drafts, setComposerDrafts: setDrafts } = useBookContext()
-  const { note, decide, directions, piece } = useJobActions(bookId)
+  const { note, decide, directions, piece, segment, segmentPending } = useJobActions(bookId)
   const [sent, setSent] = useState<{ conversation: string; message: string } | null>(null)
   const ref = useRef<HTMLTextAreaElement>(null)
+  const sending = useRef(false)
   const text = drafts[conversation] ?? ''
   const direct = conversation !== 'group'
   const oldSetup = job?.kind === 'book_setup' && job.setup_flow === 1
@@ -41,8 +42,8 @@ function NoteComposer() {
   const feedbackPrefix = direct ? `（给${ROLE_META[conversation].name}）` : ''
   const inputLimit = waiting ? 5000 - feedbackPrefix.length : 5000
   const tooLong = text.trim().length > inputLimit
-  const pending = note.isPending || decide.isPending || directions.isPending || piece.isPending
-  const error = note.error ?? decide.error ?? directions.error ?? piece.error
+  const pending = note.isPending || decide.isPending || directions.isPending || piece.isPending || segmentPending
+  const error = note.error ?? decide.error ?? directions.error ?? piece.error ?? segment.error
   const idle = !working && !waiting && !asking
   const resumable = job?.status === 'failed' || job?.status === 'cancelled'
 
@@ -69,7 +70,8 @@ function NoteComposer() {
   }
   const send = async () => {
     const content = text.trim()
-    if (!content || pending || tooLong || blocked) return
+    if (!content || pending || sending.current || tooLong || blocked) return
+    sending.current = true
     const sentConversation = conversation
     try {
       const route = composerRoute(job, text, conversation === 'group' ? composerNode : null, direct)
@@ -78,6 +80,8 @@ function NoteComposer() {
         await directions.mutateAsync({ jobId: job.id, action: 'redo', feedback: `${feedbackPrefix}${content}` })
       } else if (route.kind === 'piece' && job) {
         await piece.mutateAsync({ jobId: job.id, action: 'revise', piece: route.piece, feedback: `${feedbackPrefix}${content}`, ...('node_id' in route ? { node_id: route.node_id } : {}) })
+      } else if (route.kind === 'segment' && job) {
+        await segment.mutateAsync({ jobId: job.id, action: 'revise', feedback: `${feedbackPrefix}${content}` })
       } else if (route.kind === 'decision' && job) {
         await decide.mutateAsync({
           jobId: job.id,
@@ -97,7 +101,7 @@ function NoteComposer() {
       })
     } catch {
       // 错误由 ErrorText 展示；失败时保留作者原文，不清空、不重发。
-    }
+    } finally { sending.current = false }
   }
 
   const placeholder = blocked ? '这本书要先按新流程重开，重开后再提意见' : direct

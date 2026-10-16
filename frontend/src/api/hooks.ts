@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { del, get, patch, post, put } from './client'
 import type {
   Bible,
@@ -260,6 +260,9 @@ export function useSecretMutations(bookId: string) {
 
 export function useJobActions(bookId: string) {
   const qc = useQueryClient()
+  // 拍板条与对话框共享锁定状态，避免确认和修改意见同时提交。
+  const segmentKey = ['segment-decision', bookId]
+  const segmentPending = useIsMutating({ mutationKey: segmentKey }) > 0
   const setJob = (job: Job) =>
     qc.setQueryData<BookDetail>(keys.book(bookId), (old) => (old ? { ...old, active_job: job } : old))
   const directions = useMutation({
@@ -281,7 +284,13 @@ export function useJobActions(bookId: string) {
     onSuccess: setJob,
   })
   return {
-    directions, chooseDirection, redoDirections, piece, pieceAction: piece,
+    directions, chooseDirection, redoDirections, piece, pieceAction: piece, segmentPending,
+    segment: useMutation({
+      mutationKey: segmentKey,
+      mutationFn: ({ jobId, ...body }: { jobId: string; action: 'confirm' | 'delegate' | 'revise'; feedback?: string; flips?: { topic: string; choice: string }[]; pin_end?: boolean }) =>
+        post<Job>(`/jobs/${jobId}/segment`, body),
+      onSuccess: setJob,
+    }),
     decide: useMutation({
       mutationFn: ({ jobId, action, feedback }: { jobId: string; action: 'approve' | 'revise'; feedback?: string }) =>
         post<Job>(`/jobs/${jobId}/decision`, { action, feedback: feedback ?? '' }),

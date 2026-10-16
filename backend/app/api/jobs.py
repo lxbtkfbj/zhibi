@@ -15,7 +15,17 @@ from app.api.deps import SessionDep, get_book, get_redis
 from app.db import get_sessionmaker
 from app.graphs.deps import cancel_key
 from app.models import Book, Job, LlmCall, MeetingMessage, StoryNode
-from app.schemas import Answers, Decision, DirectionDecision, JobOut, MeetingMessageOut, NoteIn, PieceDecision, UsageOut
+from app.schemas import (
+    Answers,
+    Decision,
+    DirectionDecision,
+    JobOut,
+    MeetingMessageOut,
+    NoteIn,
+    PieceDecision,
+    SegmentDecision,
+    UsageOut,
+)
 from app.services import jobs, setup_store
 from app.services.meeting import job_dict, message_dict, post_message, publish, stream_key
 from app.services.requirements import add_requirement, note_source
@@ -169,6 +179,40 @@ async def choose_direction(
         content = feedback
     resume = {**body.model_dump(), "mix": mix, "length": length, "feedback": feedback}
     return await _queue_setup_response(session, redis, job, content, resume)
+
+
+@router.post("/jobs/{job_id}/segment", response_model=JobOut)
+async def decide_segment(
+    job_id: uuid.UUID,
+    body: SegmentDecision,
+    session: AsyncSession = SessionDep,
+    redis: Redis = Depends(get_redis),
+) -> JobOut:
+    job = await session.scalar(select(Job).where(Job.id == job_id).with_for_update())
+    if job is None:
+        raise HTTPException(404, "任务不存在")
+    if jobs.pending_kind(job) != "segment_review":
+        raise HTTPException(409, "当前没有等待你确认的下一段")
+    feedback = (body.feedback or "").strip()
+    if body.action == "revise" and not (feedback or body.flips):
+        raise HTTPException(422, "请写下修改意见或选择要改的决定")
+    pending = job.pending or {}
+    number = pending.get("number", 2)
+    if feedback:
+        await add_requirement(session, job.book_id, feedback, f"segment:{number}")
+    for flip in body.flips:
+        await add_requirement(session, job.book_id, f"「{flip.topic}」改成：{flip.choice}", "answer")
+    if body.action == "confirm":
+        volumes = (pending.get("split") or {}).get("volumes") or []
+        first = volumes[0].get("index", 1) if volumes else 1
+        content = f"确认第 {number} 段，开拆第 {first} 卷。" + ("终点钉死。" if body.pin_end else "")
+    elif body.action == "delegate":
+        content = f"第 {number} 段交给编辑部定。"
+    else:
+        content = feedback or "\n".join(f"「{flip.topic}」改成：{flip.choice}" for flip in body.flips)
+    return await _queue_setup_response(
+        session, redis, job, content, {**body.model_dump(mode="json"), "feedback": feedback}
+    )
 
 
 @router.post("/jobs/{job_id}/piece", response_model=JobOut, dependencies=[Depends(_reject_legacy_setup)])
@@ -355,9 +399,20 @@ async def restart_setup(
 
 @router.post("/jobs/{job_id}/resume", response_model=JobOut)
 async def resume(job_id: uuid.UUID, session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)) -> JobOut:
-    job = await _job(session, job_id)
+    job = await session.scalar(select(Job).where(Job.id == job_id).with_for_update())
+    if job is None:
+        raise HTTPException(404, "任务不存在")
     if job.status not in ("failed", "cancelled"):
         raise HTTPException(409, "只有失败或已停止的任务可以继续")
+    # 与手动规划、开写和重写共用书锁，旧失败任务不能从恢复入口绕过同书单任务约束。
+    await session.execute(select(Book.id).where(Book.id == job.book_id).with_for_update())
+    active = await session.scalar(
+        select(Job.id)
+        .where(Job.book_id == job.book_id, Job.id != job.id, Job.status.in_(jobs.ACTIVE_STATUSES))
+        .limit(1)
+    )
+    if active is not None:
+        raise HTTPException(409, "编辑部手上还有没做完的事，先处理完再继续")
     await redis.delete(cancel_key(job.id))
     out = await _set_status(session, redis, job, "queued")
     jobs.enqueue(job.id, None)

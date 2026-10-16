@@ -667,6 +667,13 @@ class PieceDecision(BaseModel):
     flips: list[ChoiceFlip] = Field(default_factory=list, max_length=3)
 
 
+class SegmentDecision(BaseModel):
+    action: Literal["confirm", "delegate", "revise"]
+    feedback: str | None = Field("", max_length=20000)
+    flips: list[ChoiceFlip] = Field(default_factory=list, max_length=6)
+    pin_end: bool = False
+
+
 class Answer(BaseModel):
     # 对应提问的序号；answer 为空表示交给编辑部决定
     index: int = Field(ge=0)

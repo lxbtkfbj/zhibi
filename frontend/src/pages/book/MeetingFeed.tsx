@@ -1,4 +1,4 @@
-import { protagonistFields, segmentFields, worldFields, type SetupField } from '../../lib/setupPresentation'
+import { nextSegmentFields, protagonistFields, segmentFields, worldFields, type SetupField } from '../../lib/setupPresentation'
 import { useReducedMotion } from '../../lib/appearance'
 import clsx from 'clsx'
 import { AlertTriangle, Check, ChevronDown, X } from 'lucide-react'
@@ -306,6 +306,7 @@ export function ArtifactBody({ message }: { message: MeetingMessage }) {
   if (type === 'protagonist') return <SetupFields fields={protagonistFields(data)} />
   if (type === 'world') return <div className="space-y-3"><SetupFields fields={worldFields(data)} /><ArtifactBody message={{ ...message, payload: { type: 'lore', data } }} /></div>
   if (type === 'segment') return <div className="space-y-4"><SetupFields fields={segmentFields(data)} /><ArtifactBody message={{ ...message, payload: { type: 'spine', data } }} /></div>
+  if (type === 'segment_plan') return <SetupFields fields={nextSegmentFields(data)} />
   if (type === 'segment_volumes') {
     const draft = data && typeof data === 'object' ? data as { threads?: StoryThread[] } : {}
     return <div className="space-y-4"><ArtifactBody message={{ ...message, payload: { type: 'outline', data } }} />{!!draft.threads?.length && <ArtifactBody message={{ ...message, payload: { type: 'threads', data } }} />}<ArtifactBody message={{ ...message, payload: { type: 'lore', data } }} /></div>

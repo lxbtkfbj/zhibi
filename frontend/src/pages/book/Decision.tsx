@@ -2,7 +2,7 @@ import { needsSetupRestart } from '../../lib/setupPresentation'
 import { SetupRestartCard } from './SetupRestartCard'
 import clsx from 'clsx'
 import { AlertTriangle, Check, CirclePause, PenLine, RotateCcw, Stamp } from 'lucide-react'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useJobActions } from '../../api/hooks'
 import type { InterviewQuestion, Job, NodeUpdateProposal, WriteUntil } from '../../api/types'
@@ -37,7 +37,8 @@ function NodeUpdateComparison({ proposal }: { proposal: NodeUpdateProposal }) {
 
 export function DecisionBar() {
   const { book, bookId, job, waiting, requestFeedback, manualNavigate, celebrate } = useBookContext()
-  const { pieceAction } = useJobActions(bookId)
+  const { pieceAction, segment, segmentPending } = useJobActions(bookId)
+  const segmentSubmitting = useRef(false)
   const reduce = useReducedMotion()
   const pending = job?.pending
   const volumePending = pending?.kind === 'volume_review' ? pending : null
@@ -45,6 +46,7 @@ export function DecisionBar() {
   const writingIssues = (pending?.kind === 'volume_review' || pending?.kind === 'chapter_stuck' ? decisionCopy(pending, bookId).issues ?? [] : []).filter(issue => !/^节点冲突[：:]/.test(issue) && !(volumePending?.node_update && issue.startsWith('节点调整：')))
   const target = pendingTarget(pending, bookId)
   const piece = pending?.kind === 'setup_piece' ? pending : null
+  const nextSegment = pending?.kind === 'segment_review' ? pending : null
   const name = PIECES.find(item => item.key === piece?.piece)?.name ?? ''
   const review = piece?.review ?? []
   const reminders = review.length + (piece?.warnings?.length ?? 0) + (piece?.suggestions?.length ?? 0) + (piece?.unlock_requests?.length ?? 0)
@@ -55,19 +57,34 @@ export function DecisionBar() {
       if (piece.piece === 'first_volume') celebrate()
     } catch { /* 失败保留待确认内容。 */ }
   }
+  const actSegment = async (action: 'confirm' | 'delegate') => {
+    if (!job || !nextSegment || segmentPending || segmentSubmitting.current) return
+    segmentSubmitting.current = true
+    try {
+      await segment.mutateAsync({ jobId: job.id, action })
+    } catch { /* 失败保留下一段和作者意见，允许重试。 */ }
+    finally { segmentSubmitting.current = false }
+  }
   if (needsSetupRestart(book, job) && job) return <div data-testid="restart-setup-bar" className="z-10 max-h-[42vh] shrink-0 overflow-y-auto border-b border-seal/25 bg-paper-2 px-5 py-3">
     <SetupRestartCard />
   </div>
   return <AnimatePresence initial={false}>{waiting && job && target && <motion.div key="decision" data-testid="decision-bar" initial={reduce ? false : { opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: reduce ? 0 : 0.28, ease: 'easeOut' }} className="z-10 max-h-[42vh] shrink-0 overflow-y-auto border-b border-seal/25 bg-paper-2 px-5 py-3">
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <p className="text-sm font-medium text-seal">{piece ? `待你确认：${name}${piece.warnings?.[0] ? `（${piece.warnings[0]}）` : ''}` : pending?.kind === 'setup_directions' ? '待你选择：开书方向' : `待你拍板：${target.label}`}</p>
+      <p className="text-sm font-medium text-seal">{nextSegment ? `待你确认：第 ${nextSegment.number} 段${nextSegment.warnings?.[0] ? `（${nextSegment.warnings[0]}）` : ''}` : piece ? `待你确认：${name}${piece.warnings?.[0] ? `（${piece.warnings[0]}）` : ''}` : pending?.kind === 'setup_directions' ? '待你选择：开书方向' : `待你拍板：${target.label}`}</p>
       <div className="flex flex-wrap items-center gap-2">{piece ? <>
         <Button size="sm" variant="seal" loading={pieceAction.isPending && pieceAction.variables?.action === 'confirm'} disabled={pieceAction.isPending} onClick={() => void act('confirm')}>确认这一块</Button>
         <Button size="sm" variant="ghost" loading={pieceAction.isPending && pieceAction.variables?.action === 'delegate'} disabled={pieceAction.isPending} onClick={() => void act('delegate')}>交给编辑部定</Button>
+      </> : nextSegment ? <>
+        <Button size="sm" variant="seal" loading={segment.isPending && segment.variables?.action === 'confirm'} disabled={segmentPending} onClick={() => void actSegment('confirm')}>确认这一段</Button>
+        <Button size="sm" variant="ghost" loading={segment.isPending && segment.variables?.action === 'delegate'} disabled={segmentPending} onClick={() => void actSegment('delegate')}>交给编辑部定</Button>
       </> : pending?.kind === 'setup_directions' ? <button className="text-sm text-chief underline underline-offset-4" onClick={() => manualNavigate(`/books/${bookId}`)}>去选择 →</button> : <><ApproveButton job={job} /><Button size="sm" variant="ghost" onClick={requestFeedback}>提意见</Button></>}</div>
     </div>
     {conflicts.map((conflict, index) => <div key={index} role="alert" className="mt-3 flex items-start gap-2 rounded-lg border border-reviewer/35 bg-reviewer-soft px-3 py-2 text-sm leading-relaxed text-seal-dark"><AlertTriangle className="mt-0.5 size-4 shrink-0" /><p>{conflict}</p></div>)}
     {volumePending?.node_update && <NodeUpdateComparison proposal={volumePending.node_update} />}
+    {!!nextSegment?.warnings?.length && <details className="mt-3 border-t border-divider pt-2">
+      <summary className="cursor-pointer text-xs text-ink-2">下一段的提醒（{nextSegment.warnings.length}）</summary>
+      <ul aria-label="下一段的提醒" className="mt-3 space-y-2 text-sm leading-relaxed text-ink-2">{nextSegment.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>
+    </details>}
     {!!reminders && piece && <details className="mt-3 border-t border-divider pt-2">
       <summary className="cursor-pointer text-xs text-ink-2">提醒与审稿建议（{reminders}）</summary>
       <ul className="mt-3 space-y-3 text-sm leading-relaxed text-ink-2">
@@ -79,6 +96,7 @@ export function DecisionBar() {
     </details>}
     {!!writingIssues?.length && <ul aria-label="卷纲与章节提醒" className="mt-3 space-y-1.5 border-t border-divider pt-2 text-sm leading-relaxed text-ink-2">{writingIssues.map((issue, index) => <li key={index}>{issue}</li>)}</ul>}
     <ErrorText error={pieceAction.error} />
+    <ErrorText error={segment.error} />
   </motion.div>}</AnimatePresence>
 }
 

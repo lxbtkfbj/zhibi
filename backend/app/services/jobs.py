@@ -59,7 +59,15 @@ def new_rewrite_job(book: Book, chapter: Chapter, feedback: str) -> Job:
 
 
 # 等作者拍板、可以用「批准 / 提意见」回应的内容
-DECISION_KINDS = ("setup_review", "volume_review", "trial_read", "chapter_stuck", "setup_directions", "setup_piece")
+DECISION_KINDS = (
+    "setup_review",
+    "volume_review",
+    "trial_read",
+    "chapter_stuck",
+    "setup_directions",
+    "setup_piece",
+    "segment_review",
+)
 
 
 def pending_kind(job: Job) -> str:

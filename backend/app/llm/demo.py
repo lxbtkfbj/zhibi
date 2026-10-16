@@ -126,6 +126,12 @@ def _concept(user: str) -> s.BookConcept:
             concept.selling_points.append(f"{prefix}；感情线：{feeling}")
     if "测试提醒" in user:
         concept.target_reader = ""
+    if "测试短段" in user or "测试收尾" in user:
+        marker = "测试收尾" if "测试收尾" in user else "测试短段"
+        concept.benchmark = f"演示验收：{marker}，每段一卷六章。"
+        if marker == "测试收尾":
+            concept.target_length = 5
+            concept.target_volumes = 3
     return concept
 
 
@@ -438,6 +444,105 @@ def _segment(user: str = "") -> s.SegmentDraft:
     )
 
 
+def _next_segment(user: str = "") -> s.NextSegmentDraft:
+    """下一段演示：只读篇幅栏判断收尾，不把模板中的条件句误当成触发。"""
+    length = _section(user, "篇幅").split("\n\n", 1)[0]
+    last_one = "只够一段" in length
+    finale = last_one or "只够两段左右" in length
+    spine = _section(user, "全书方向：关键节点")
+    ending = re.search(r"节点 (\d+)「([^」]+)」· 结局", spine)
+    number = int(_match(r"第 (\d+) 段", _section(user, "上一段")) or 1) + 1
+    current = _section(user, "当前的下一段")
+    feedback = _section(user, "修改要求")
+    goal = _match(r"(?:这一段的目标|目标)[：:]([^\n]+)", current) or "在寒潮封路前追回旧村契约原本，救出被扣押的证人。"
+    changed_goal = _match(r"(?:目标)?改成[：: ]*[「]?([^」\n。]+)", feedback)
+    if changed_goal:
+        goal = changed_goal
+    known = _match(r"【人物当前状态】\n(.*?)(?=【还开着的期待和伏笔】|\Z)", user)
+    newcomer = "顾霜" if "顾霜" not in known else f"寒原信使{number}"
+    plan = s.NextSegmentDraft(
+        carried="、".join(dict.fromkeys(re.findall(r"[FE]\d+", _section(user, "还开着的期待和伏笔"))))
+        + "：把旧案的证据与约定带进寒原追查，在这一段终点兑现。",
+        pursuit="追查父母旧案的方向不变，在寒原终点由找出真相升级为救出证人并阻止新的寿元交易。",
+        finger_next="青灯解锁比对契约残痕的能力，但每次仍消耗一天寿元，必须亲近原件才能使用。",
+        answers="旧村兽潮是寿元契约制造的掩护，宗门高层用村民寿元维持长明灯。" if finale else "",
+        map="北境寒原",
+        new_map=s.MapDraft(
+            name="北境寒原",
+            powers="守关军掌路引，商盟管补给，旧村遗民暗中互助。",
+            ceiling="守关统领筑基后期，比陆远强一整个阶段。",
+            rules="寒潮前最后一批商队过关必须交验契约。",
+            start="陆远没有路引，只能随商队入关。",
+            gains="旧村契约原本与幸存证人。",
+        ),
+        power="筑基中后期可隔空封住路口，但持续施术必须消耗灵石。",
+        trouble="守关军扣住路引，逼陆远交出青灯换过关资格。",
+        opponent="守关统领想销毁旧村契约，陆远的搜证触及他的交易；他掌握关卡和补给，先截走证人，再用假路引诱陆远进入封山禁地。",
+        new_characters=[
+            s.CharacterDraft(
+                name=newcomer,
+                role_type="配角",
+                gender="女",
+                age="二十岁",
+                personality="冷静谨慎却愿意替弱者冒险，说话短句直问、不说空话。",
+                background="替旧村遗民递信的寒原向导",
+                goal="救回被扣押的亲人",
+                want="趁寒潮前带证人过关",
+            )
+        ],
+        relationships=[
+            s.RelationshipDraft(
+                source="陆远",
+                target=newcomer,
+                kind="互相试探的同盟",
+                description="各握一半契约证据，必须互相信任才能救人。",
+            )
+        ],
+        goal=goal,
+        goal_link="契约与证人能把父母的死因指向真正的买主。",
+        wait=s.ExpectationDraft(
+            description="陆远要带着证人与契约穿过封锁",
+            plant_plan="统领当众封关并限定交证期限",
+            payoff_plan="不只救出证人，还让关内百姓看清交易真相",
+            plant_volume=1,
+            payoff_volume=2,
+        ),
+        reveal="旧村兽潮与宗门寿元契约相连；幕后买主为何必须持续点燃长明灯？",
+        secrets=[
+            s.SecretDraft(
+                title=f"寒原契约{number}",
+                truth="原契约藏在守关军的补给封条里",
+                knowers=[newcomer],
+                reader_knows="不知道",
+                reveal_plan="向导以旧封条引陆远找到证据",
+            )
+        ],
+        end=s.StoryNodeDraft(
+            ref=int(ending[1]) if last_one and ending else 0,
+            kind="结局" if last_one else "节点",
+            volume=number,
+            title=ending[2] if last_one and ending else f"寒原追查{number if number > 2 else ''}",
+            event="陆远公开契约救出证人，让寿元买卖的真相无法再被掩盖。",
+            prerequisite="契约原本到手，证人脱险，同伴愿意共同出面。",
+            consequence="交易链条被切断，陆远与同伴能够重建家园。" if last_one else "幕后买主暴露，追查可以更进一步。",
+        ),
+        decisions=[
+            s.AuthorChoice(
+                topic="救人与取证",
+                chosen="先救证人再公开契约",
+                alternatives=["先公开契约逼对手放人"],
+                why="让主角先守住在乎的人",
+            )
+        ],
+        remark="先接住上一段留下的线头，再让寒原的选择推动主角的追求。",
+    )
+    choice = _match(r"把「救人与取证」改成「([^」]+)」", feedback)
+    if choice:
+        plan.decisions[0].chosen = choice
+        plan.goal = "先公开契约逼对手放人，再护送证人穿过封锁。"
+    return plan
+
+
 def _revise_demo_pins(nodes: list[s.StoryNodeDraft], current: str, user: str) -> bool:
     """演示用确定性规则：只把本轮授权节点的「改为／改成」落实到事件，不模拟自然语言理解。"""
     instruction = _match(r"【修改要求】\n(.*?)(?=\n\n请在当前版本|\n\n要求：|\Z)", user)
@@ -566,6 +671,37 @@ def _segment_volumes(user: str = "") -> s.SegmentVolumesDraft:
         ],
         remark="第一段分两卷，31 章加 30 章，每卷都走向外门考核。",
     )
+    start = int(_match(r"卷号从第 (\d+) 卷开始", user) or 1)
+    short = "测试短段" in user or "测试收尾" in user
+    if short:
+        result.volumes = result.volumes[:1]
+        result.volumes[0].chapter_count = 6
+        result.remark = "这一段分一卷六章，两个单元各三章，卷末走到这一段终点。"
+    end_index = 2
+    if start > 1:
+        segment = _section(user, "这一段")
+        proposed = _match(r"节点 (\d+)「[^」]+」[^\n]*发生：陆远公开契约救出证人", segment)
+        planned = [int(x) for x in re.findall(r"节点 (\d+)[^\n]*\n(?:  [^\n]*\n)*  这是第 \d+ 段的终点", segment)]
+        end_index = int(proposed) if proposed else max(planned, default=1) + 1
+        result.remark = f"从第 {start} 卷接着分卷，先取证再救人，走到这一段的终点。"
+    for i, volume in enumerate(result.volumes):
+        volume.index = start + i
+        volume.target_node = end_index
+        volume.reaches_node = i == len(result.volumes) - 1
+        if start > 1:
+            volume.title = "寒原取证" if i == 0 else "封关救人"
+            volume.stage = "北境寒原"
+    for thread in result.threads:
+        thread.beats = thread.beats[: len(result.volumes)]
+        for i, beat in enumerate(thread.beats):
+            beat.volume = start + i
+    if start > 1:
+        # 人物卡自带【姓名】，不能用通用 _section 截断整个人物列表。
+        people = _match(r"【世界与人】\n(.*?)(?=【这一段】|\Z)", user)
+        result.anchors = [
+            s.NodeAnchorDraft(character=name, node=end_index, kind="登场", note="寒原路口为主角引路")
+            for name in dict.fromkeys(re.findall(r"【([^】]+)】(?:配角|女主|男主|反派|主角)", people))
+        ]
     if "测试提醒" in user:
         result.volumes[0].want = ""
     return result
@@ -824,6 +960,14 @@ def _base_volume_plan(user: str) -> s.VolumePlanDraft:
 def _volume_plan(user: str) -> s.VolumePlanDraft:
     plan = _base_volume_plan(user)
     volume = int(_match(r"请为第 (\d+) 卷写「卷纲」", user) or 1)
+    if "测试短段" in user or "测试收尾" in user:
+        plan.units = plan.units[:2]
+        for unit in plan.units:
+            unit.chapter_count = 3
+        plan.new_foreshadowings = [f for f in plan.new_foreshadowings if f.plant_unit <= 2]
+        for item in plan.new_foreshadowings:
+            item.payoff_unit = min(item.payoff_unit, 2)
+        plan.remark = f"第{volume}卷两个单元各三章，共六章，卷末完成这一段的高潮。"
     plan.want = (
         "拿到报名资格与药碗证据，为外门考核翻盘铺路" if volume == 1 else "完成本卷取证与反击，为这一段终点创造条件"
     )
@@ -1174,7 +1318,19 @@ def _digest(user: str) -> s.ChapterDigest:
     reveals = re.findall(r"（揭晓·(S\d+)·([^·）]+)·([^）]+)）", _section(user, "正文"))
     return s.ChapterDigest(
         summary=f"《{title}》：陆远借青灯看穿对手的底牌，当场反将一军；结尾灯火里出现了一个只剩三天寿元的人。",
-        character_updates=[s.CharacterUpdate(name="陆远", condition="伤势好转，心事更重")],
+        character_updates=[
+            s.CharacterUpdate(
+                name="陆远",
+                condition="伤势好转，心事更重",
+                want=(
+                    "查清师兄的死因"
+                    if int(_match(r"第 (\d+) 章", user) or 1) % 6 == 0
+                    else "拿到外门考核资格并保护老人"
+                )
+                if int(_match(r"第 (\d+) 章", user) or 1) % 3 == 0
+                else "",
+            )
+        ],
         foreshadow_updates=[s.ForeshadowUpdate(ref=ref, action=act) for act, ref in marks],
         secret_updates=[
             s.SecretUpdate(ref=ref, learned_by=[] if to in ("读者", "众人") else [to], public=to == "众人", how=how)
@@ -1413,6 +1569,7 @@ async def respond(schema: type[BaseModel], system: str, user: str) -> BaseModel:
         s.ProtagonistDraft: lambda: _protagonist(user),
         s.WorldDraft: lambda: _world(user),
         s.SegmentDraft: lambda: _segment(user),
+        s.NextSegmentDraft: lambda: _next_segment(user),
         s.SegmentVolumesDraft: lambda: _segment_volumes(user),
         s.VolumePlanDraft: lambda: _volume_plan(user),
         s.VolumeDirections: lambda: _directions(user),

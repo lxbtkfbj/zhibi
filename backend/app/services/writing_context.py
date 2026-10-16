@@ -7,6 +7,7 @@
 
 import re
 import uuid
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from sqlalchemy import func, select
@@ -32,6 +33,8 @@ from app.agents.context import (
     format_threads,
     format_unit,
     format_volume_card,
+    format_world,
+    planned_chapters,
 )
 from app.agents.glossary import glossary_block
 from app.agents.planning import ref_seq, relevant_ledger, secret_seq, unit_hint
@@ -523,11 +526,7 @@ async def volume_blocks(
     following = next((v for v in volumes if v.index == volume.index + 1), None)
     target = next((node for node in nodes if str(node.get("id")) == str(volume.target_node_id)), {})
     segment = target.get("segment") or {}
-    no_following = (
-        "无（后面的卷写到再定）"
-        if segment and target.get("kind") != "ending" and not segment.get("finale")
-        else "无（这是最后一卷）"
-    )
+    no_following = "无（后面的卷写到再定）" if segment and target.get("kind") != "ending" else "无（这是最后一卷）"
     neighbors = []
     if prev is not None:
         units = list(
@@ -620,6 +619,7 @@ async def chapter_plan_blocks(
         if c.role_type == "主角" or any(name in mentioned for name in [c.name, *(c.aliases or [])] if name)
     ]
     nodes = await load_nodes(session, book.id)
+    first_segment = next((node["segment"] for node in nodes if (node.get("segment") or {}).get("number") == 1), {})
     card = volume_dict(volume, nodes)
     target = card.get("target_node")
     reveal_seqs = {secret_seq(reveal.get("ref", "")) for reveal in unit.reveals or []}
@@ -642,6 +642,7 @@ async def chapter_plan_blocks(
     ):
         ledger_text += "\n提示：本单元开始时没有开着的中长线期待，请安排新立一条，让读者知道接下来在等什么。"
     return {
+        "opening": format_opening(first_segment.get("opening")) if volume.index == 1 and unit.index == 1 else "",
         "volume_index": str(volume.index),
         "unit_index": str(unit.index),
         "chapter_count": str(count),
@@ -720,6 +721,120 @@ async def chapter_blocks(session: AsyncSession, book: Book, chapter: Chapter) ->
 
 def chapter_words(book: Book) -> int:
     return int(settings_of(book)["chapter_words"] or (book.concept or {}).get("chapter_words") or 3000)
+
+
+async def segment_lengths(session: AsyncSession, book: Book) -> dict[str, Any]:
+    """规划的是尚未写成的整段；已拆单元的卷按单元的真实计划章数计算。"""
+    volumes = list(
+        (await session.execute(select(Volume).where(Volume.book_id == book.id).order_by(Volume.index))).scalars()
+    )
+    counts = dict(
+        (
+            await session.execute(
+                select(PlotUnit.volume_id, func.sum(PlotUnit.chapter_count))
+                .where(PlotUnit.book_id == book.id)
+                .group_by(PlotUnit.volume_id)
+            )
+        ).all()
+    )
+    nodes = await load_nodes(session, book.id)
+    segments = sum(node.get("segment") is not None for node in nodes)
+    planned_so_far = sum(int(counts.get(volume.id, volume.chapter_count) or 0) for volume in volumes)
+    planned_total = planned_chapters({**(book.concept or {}), "chapter_words": chapter_words(book)})
+    avg = int((Decimal(planned_so_far) / segments).quantize(Decimal("1"), rounding=ROUND_HALF_UP)) if segments else 0
+    remaining = planned_total - planned_so_far
+    finale = planned_total > 0 and remaining <= 2 * avg
+    last_one = planned_total > 0 and remaining <= avg
+    final_chapters = int(
+        await session.scalar(
+            select(func.count(Chapter.id)).where(Chapter.book_id == book.id, Chapter.status == "final")
+        )
+        or 0
+    )
+    next_volume = max((volume.index for volume in volumes), default=0) + 1
+    length = (book.concept or {}).get("target_length") or 0
+    if planned_total:
+        first_line = (
+            f"全书计划约 {length} 万字、约 {planned_total} 章；已经规划了 {segments} 段、{len(volumes)} 卷、"
+            f"约 {planned_so_far} 章（已定稿 {final_chapters} 章），还剩约 {remaining} 章；前面每段平均约 {avg} 章。"
+        )
+        if last_one:
+            second_line = "剩下的篇幅只够一段了：这一段就是最后一段，终点就是结局。"
+        elif finale:
+            second_line = "剩下的篇幅只够两段左右：这一段是收尾段——开始收线，揭开核心谜团的谜底，逼近终极敌人，往结局方向走，不要再开大的新坑。"
+        else:
+            second_line = "篇幅还宽裕，按正常的一段来规划。"
+    else:
+        first_line, second_line = "这本书没有定全书篇幅。", "按正常的一段来规划。"
+    volume_hint = f"卷号从第 {next_volume} 卷开始（前面已经规划了 {len(volumes)} 卷、约 {planned_so_far} 章）。"
+    if planned_total:
+        volume_hint += f"全书计划约 {length} 万字、约 {planned_total} 章，还剩约 {remaining} 章。"
+    volume_hint += "每卷通常 25-60 万字。"
+    return {
+        "planned_total": planned_total,
+        "planned_so_far": planned_so_far,
+        "segments": segments,
+        "avg": avg,
+        "remaining": remaining,
+        "finale": finale,
+        "last_one": last_one,
+        "volumes": len(volumes),
+        "next_volume": next_volume,
+        "final_chapters": final_chapters,
+        "text": first_line + "\n" + second_line,
+        "volume_hint": volume_hint,
+    }
+
+
+async def segment_blocks(session: AsyncSession, book: Book) -> dict[str, str]:
+    nodes = await load_nodes(session, book.id)
+    last_index = max((i for i, node in enumerate(nodes, 1) if node.get("segment") is not None), default=0)
+    last = nodes[last_index - 1] if last_index else {}
+    last_text = format_segment_info(last["segment"], book.world) if last else "（暂无）"
+    if last:
+        volume_indices = list(
+            (
+                await session.execute(
+                    select(Volume.index)
+                    .where(Volume.book_id == book.id, Volume.target_node_id == uuid.UUID(last["id"]))
+                    .order_by(Volume.index)
+                )
+            ).scalars()
+        )
+        last_text += f"\n终点：节点 {last_index}「{last.get('title', '')}」：{last.get('event', '')}"
+        if volume_indices:
+            last_text += f"\n这一段写了第 {min(volume_indices)}-{max(volume_indices)} 卷。"
+    characters = await _characters(session, book.id)
+    protagonist = next((_char_dict(person) for person in characters if person.role_type == "主角"), None)
+    lengths = await segment_lengths(session, book)
+    next_chapter = int(await session.scalar(select(func.max(Chapter.index)).where(Chapter.book_id == book.id)) or 0) + 1
+    world = {
+        key: value
+        for key, value in (book.world or {}).items()
+        if key not in {"characters", "relationships", "world_entries"}
+    }
+    return {
+        "concept": format_concept({**(book.concept or {}), "chapter_words": chapter_words(book)}),
+        "protagonist": format_protagonist(
+            book.protagonist or {}, protagonist, hook=(book.concept or {}).get("protagonist_hook", "")
+        ),
+        "world": format_world(world),
+        "spine": format_spine({**(book.spine or {}), "nodes": nodes}, book.world),
+        "last_segment": last_text,
+        "story_so_far": await story_so_far(session, book, lengths["next_volume"], before_chapter=next_chapter),
+        "characters": character_states(characters),
+        "ledger": format_ledger(
+            [item for item in await load_ledger(session, book.id) if item.get("status") in {"planned", "planted"}]
+        ),
+        "secrets": format_secrets(
+            [item for item in await load_secrets(session, book.id, nodes) if item.get("status") == "hidden"][:20]
+        ),
+        "length": lengths["text"],
+        "playbook": pick(book.concept, settings_of(book)["playbook"]).text("nodes"),
+        "requirements": await requirements_of(book, session),
+        "glossary": glossary_block(),
+        "revision": "",
+    }
 
 
 # ---------- 回顾 ----------

@@ -69,6 +69,16 @@ export function segmentFields(value: unknown): SetupField[] {
   ].filter(item => item.value)
 }
 
+/** 定下一段会议卡只展示本轮规划快照，不展开任务 5 的完整确认页。 */
+export function nextSegmentFields(value: unknown): SetupField[] {
+  const plan = record(value)
+  const end = record(plan.end)
+  return [
+    { label: '终点', value: [text(end.title), text(end.event)].filter(Boolean).join('：') },
+    field(plan, '地图', 'map'), field(plan, '目标', 'goal'), field(plan, '主角的追求', 'pursuit'),
+  ].filter(item => item.value)
+}
+
 export function needsSetupRestart(book: Pick<BookDetail, 'status'>, job: Job | null): boolean {
   return (book.status === 'setting_up' || book.status === 'awaiting_approval') && job?.kind === 'book_setup' &&
     job.setup_flow === 1 && ['waiting_author', 'failed', 'cancelled'].includes(job.status)
