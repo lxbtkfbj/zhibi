@@ -1,24 +1,26 @@
 import clsx from 'clsx'
 import { ArrowDown, ArrowUp, Check, ChevronDown, MessageSquare, Pin, PinOff, Plus, Shuffle, Trash2 } from 'lucide-react'
-import { type ReactNode, useState } from 'react'
-import { useBible, useJobActions, useNodeMutations, useNodes, useUpdateBook } from '../../../api/hooks'
+import { type ReactNode, useEffect, useState } from 'react'
+import { useLocation } from 'react-router-dom'
+import { useBible, useChapters, useJobActions, useNodeMutations, useNodes, useUpdateBook } from '../../../api/hooks'
 import type { Spine, StoryNode, Volume } from '../../../api/types'
 import { EditableText } from '../../../components/Editable'
 import { TechniqueChip } from '../../../components/TechniqueChip'
+import { StoryMapStrip } from '../../../components/StoryMapStrip'
 import { Button, Card, ErrorText, inputClass, Modal, Reveal, Skeleton } from '../../../components/ui'
-import { nodeCounts, NODE_STATUS, segments } from '../../../lib/storyMap'
+import { isWritingComplete, nodeCounts, NODE_STATUS, plannedVolumeChapters, segments, writingPosition, type WritingPosition } from '../../../lib/storyMap'
 import { useBookContext } from '../context'
 import { PieceDecisions } from '../PieceDecisions'
 import { FieldBlock, Locked, PageHeader } from './common'
 
 type Candidate = Pick<StoryNode, 'title' | 'event' | 'prerequisite' | 'consequence' | 'volume'> & Partial<Pick<StoryNode, 'editor_note' | 'techniques'>>
 
-function NodeMarker({ node }: { node: StoryNode }) {
-  return <span aria-label={NODE_STATUS[node.status]} className={clsx(
+function NodeMarker({ node, passed }: { node: StoryNode; passed: boolean }) {
+  return <span aria-label={`${NODE_STATUS[node.status]}${passed ? ' · 已写到' : ''}`} className={clsx(
     'flex size-8 items-center justify-center rounded-full font-serif text-sm',
     node.status === 'pinned' ? 'bg-seal text-paper-2 shadow-[var(--shadow-paper)]' :
       node.status === 'pencil' ? 'border-2 border-dashed border-chief bg-paper text-chief' : 'border-2 border-dotted border-ink-3 bg-paper text-ink-2',
-  )}>{node.status === 'pinned' ? <Pin className="size-4" /> : node.index}</span>
+  )}>{passed ? <Check className="size-4" /> : node.status === 'pinned' ? <Pin className="size-4" /> : node.index}</span>
 }
 
 function NodeAction({ label, children, onClick, disabled }: { label: string; children: ReactNode; onClick: () => void; disabled?: boolean }) {
@@ -37,15 +39,16 @@ function CandidateCard({ candidate, onChoose, busy }: { candidate: Candidate; on
   </div>
 }
 
-function SegmentBand({ volumes, chapters, unassignedVolumes }: { volumes: Volume[]; chapters: number; unassignedVolumes?: Volume[] }) {
+function SegmentBand({ volumes, chapters, unassignedVolumes, position, complete }: { volumes: Volume[]; chapters: number; unassignedVolumes?: Volume[]; position: WritingPosition; complete: boolean }) {
   const { bookId, manualNavigate } = useBookContext()
   if (!volumes.length) return null
   const first = volumes[0].index
   const last = volumes.at(-1)!.index
-  return <details className="group mt-4 rounded-lg border border-line bg-paper/80 text-sm" data-testid="node-segment">
-    <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 px-3 py-2.5 text-chief focus-visible:outline-2 focus-visible:outline-seal"><ChevronDown className="size-4 transition-transform group-open:rotate-180 motion-reduce:transition-none" /><span>第 {first === last ? first : `${first}-${last}`} 卷 · 约 {chapters} 章</span>{!!unassignedVolumes?.length && <span className="text-xs text-ink-2">含 {unassignedVolumes.length} 卷未指定目标节点</span>}</summary>
+  const active = !complete && volumes.some(volume => volume.index === position.volume)
+  return <details className={clsx('group mt-4 rounded-lg border text-sm', active ? 'border-seal/45 bg-seal-soft/45' : 'border-line bg-paper/80')} data-testid="node-segment" data-active={active}>
+    <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 px-3 py-2.5 text-chief focus-visible:outline-2 focus-visible:outline-seal"><ChevronDown className="size-4 transition-transform group-open:rotate-180 motion-reduce:transition-none" /><span>第 {first === last ? first : `${first}-${last}`} 卷 · 约 {chapters} 章</span>{active && <span className="basis-full pl-6 text-xs font-medium text-seal">正在写：第 {position.volume} 卷 {position.doneInVolume}/{position.volumeChapters} 章</span>}{!!unassignedVolumes?.length && <span className="text-xs text-ink-2">含 {unassignedVolumes.length} 卷未指定目标节点</span>}</summary>
     <div className="space-y-2 border-t border-line p-3">{volumes.map(volume => <button type="button" key={volume.id} onClick={() => manualNavigate(`/books/${bookId}/volume/${volume.index}`)} className="block w-full rounded-lg border border-line bg-card p-3 text-left hover:border-chief/50">
-      <span className="flex flex-wrap justify-between gap-2"><span className="font-serif font-bold text-ink">第 {volume.index} 卷 · {volume.title}</span><span className="text-xs text-ink-2">约 {volume.chapter_count} 章 →</span></span>
+      <span className="flex flex-wrap justify-between gap-2"><span className="font-serif font-bold text-ink">第 {volume.index} 卷 · {volume.title}</span><span className="text-xs text-ink-2">约 {plannedVolumeChapters(volume)} 章 →</span></span>
       <span className="mt-1 block text-ink-2">卷末目标：{volume.goal || volume.climax || '待确定'}</span>
       {!volume.target_node_id && <span className="mt-1 block text-xs text-seal">尚未指定目标节点，暂归在最后一段</span>}
     </button>)}</div>
@@ -67,9 +70,11 @@ function EmptyNodeForm({ disabled, onFill, onCandidates }: { disabled: boolean; 
 
 /** 节点是全书地图的唯一事实来源；作者编辑永不写入会议快照。 */
 export function SpinePage() {
-  const { book, bookId, job, outline, working, requestNodeFeedback } = useBookContext()
+  const { book, bookId, job, outline, working, requestNodeFeedback, manualNavigate } = useBookContext()
+  const location = useLocation()
   const update = useUpdateBook(bookId)
   const query = useNodes(bookId)
+  const { data: chapters = [] } = useChapters(bookId)
   const bible = useBible(bookId)
   const mutations = useNodeMutations(bookId)
   const { pieceAction } = useJobActions(bookId)
@@ -80,14 +85,17 @@ export function SpinePage() {
   const [dismissedCandidates, setDismissedCandidates] = useState('')
   const spine: Spine = book.spine ?? {}
   const nodes = query.data ?? []
+  const position = writingPosition(nodes, outline?.volumes ?? [], chapters)
+  const complete = isWritingComplete(outline?.volumes ?? [], chapters)
+  const writing = chapters.some(chapter => chapter.status === 'final')
   const setup = book.status === 'setting_up' || (job?.kind === 'book_setup' && ['queued', 'running', 'waiting_author'].includes(job.status))
   const pending = job?.status === 'waiting_author' && job.pending?.kind === 'setup_piece' ? job.pending : null
-  const canRequestNodes = setup && pending?.piece === 'nodes'
+  const canRequestNodes = !writing && setup && pending?.piece === 'nodes'
   const busy = working || pieceAction.isPending || mutations.create.isPending || mutations.update.isPending || mutations.remove.isPending || mutations.reorder.isPending
   const counts = nodeCounts(nodes)
   const bands = segments(nodes, outline?.volumes ?? [])
   const candidateKey = JSON.stringify(pending?.candidates ?? null)
-  const candidates = candidateKey !== dismissedCandidates ? pending?.candidates : null
+  const candidates = !writing && candidateKey !== dismissedCandidates ? pending?.candidates : null
   const longThreads = (bible.data?.foreshadowings ?? []).filter(item => item.span === '长').sort((a, b) => Number(b.kind === '期待') - Number(a.kind === '期待') || a.seq - b.seq)
   const save = (patch: Partial<Spine>) => update.mutateAsync({ spine: patch })
   const run = async (action: () => Promise<unknown>) => {
@@ -112,12 +120,23 @@ export function SpinePage() {
     void run(() => mutations.reorder.mutateAsync(ids))
   }
 
+  useEffect(() => {
+    if (!location.hash.startsWith('#story-node-')) return
+    const frame = requestAnimationFrame(() => {
+      const target = document.getElementById(location.hash.slice(1))
+      target?.scrollIntoView({ block: 'center', behavior: 'instant' })
+      target?.focus({ preventScroll: true })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [location.hash, location.key, query.data])
+
   if (query.isLoading) return <Skeleton className="h-64" />
   if (query.isError) return <div><ErrorText error={query.error} /><Button variant="soft" onClick={() => void query.refetch()}>重新加载节点</Button></div>
 
   return <div data-testid="story-puzzle-board">
     <PieceDecisions piece="nodes" /><PieceDecisions piece="fill" />
     <PageHeader eyebrow="全书地图" title={setup && book.setup_progress?.pieces?.nodes !== 'confirmed' ? '关键节点' : '从开篇到结局'} subtitle={<><span className="block" data-testid="node-counts">{counts.total} 个节点 · {counts.pinned} 铁钉 · {counts.pencil} 暂定 · {counts.empty} 留空</span><span className="mt-1 block text-sm">先钉住故事的重要转折，再把人物与每一卷放到合适的位置。</span></>} />
+    {writing && <div className="mb-8 border-b border-line pb-6"><StoryMapStrip nodes={nodes} volumes={outline?.volumes ?? []} chapters={chapters} onNodeSelect={node => manualNavigate(`/books/${bookId}/spine#story-node-${node.id}`)} /></div>}
     <Locked locked={working} />
     <ErrorText error={error} />
     {!nodes.length ? <p className="py-8 text-sm leading-relaxed text-ink-2">{setup ? '主编还在准备关键节点。新产出会先以只读稿展示，保存后就能在这里钉节点、改文字。' : '这本书尚未建立关键节点，原有书稿和续写不受影响。'}</p> : <>
@@ -126,13 +145,14 @@ export function SpinePage() {
         <FieldBlock label="主角成长弧"><EditableText value={spine.protagonist_arc ?? ''} onSave={protagonist_arc => save({ protagonist_arc })} locked={busy} multiline /></FieldBlock>
         <FieldBlock label="主题"><EditableText value={spine.theme ?? ''} onSave={theme => save({ theme })} locked={busy} multiline className="font-serif" /></FieldBlock>
       </section></Reveal>
-      {bands.filter(band => !band.from).map((band, i) => <div className="mb-4 pl-10" key={`before-${i}`}><SegmentBand {...band} /></div>)}
+      {bands.filter(band => !band.from).map((band, i) => <div className="mb-4 pl-10" key={`before-${i}`}><SegmentBand {...band} position={position} complete={complete} /></div>)}
       {nodes.map((node, i) => <Reveal key={node.id} delay={Math.min(i * 0.025, 0.2)} className={clsx('relative pl-10', i < nodes.length - 1 && 'pb-6')}>
         {i < nodes.length - 1 && <span aria-hidden className="absolute top-6 bottom-0 left-[15px] w-px bg-line-2" />}
-        <span className="absolute top-4 left-0"><NodeMarker node={node} /></span>
-        <div data-testid={`story-node-${node.id}`} data-node-status={node.status}>
+        <span className="absolute top-4 left-0"><NodeMarker node={node} passed={position.passed.includes(node.id)} /></span>
+        <div id={`story-node-${node.id}`} tabIndex={-1} className="scroll-mt-6 rounded-xl focus-visible:outline-2 focus-visible:outline-seal" data-testid={`story-node-${node.id}`} data-node-status={node.status} data-passed={position.passed.includes(node.id)}>
           <Card className={clsx('p-4 @lg/manuscript:p-5', node.status === 'empty' && '!border-2 !border-dotted !border-line-2 !bg-paper/50 !shadow-none', node.status === 'pinned' && '!border-seal/30')}>
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-ink-2"><span>节点 {node.index}{node.kind === 'opening' ? ' · 开篇' : node.kind === 'ending' ? ' · 结局' : ''}</span><span className={node.status === 'pinned' ? 'text-seal' : node.status === 'pencil' ? 'text-chief' : 'text-ink-2'}>{NODE_STATUS[node.status]}</span></div>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-ink-2"><span>节点 {node.index}{node.kind === 'opening' ? ' · 开篇' : node.kind === 'ending' ? ' · 结局' : ''}</span>{position.passed.includes(node.id) && <span className="inline-flex items-center gap-1 text-seal"><Check className="size-3.5" />已写到</span>}<span className={node.status === 'pinned' ? 'text-seal' : node.status === 'pencil' ? 'text-chief' : 'text-ink-2'}>{NODE_STATUS[node.status]}</span></div>
+            {node.updated_by_volume != null && <p className="mb-3 text-xs text-ink-2">第 {node.updated_by_volume} 卷拆卷纲时调整过</p>}
             <div className="mb-3"><EditableText value={node.title} onSave={title => mutations.update.mutateAsync({ id: node.id, title })} locked={busy} placeholder="（未命名节点）" className="font-serif text-lg font-bold" /></div>
             <div className="mb-4 flex items-center gap-1.5 text-xs text-ink-2"><span>约第</span><EditableText value={node.volume == null ? '' : String(node.volume)} placeholder="待定" locked={busy} onSave={value => { const volume = value.trim() ? Number(value) : null; if (volume != null && (!Number.isInteger(volume) || volume < 1)) return Promise.reject(new Error('卷数请填大于 0 的整数')); return mutations.update.mutateAsync({ id: node.id, volume }) }} /><span>卷</span></div>
             <FieldBlock label="发生什么"><EditableText value={node.event} onSave={event => mutations.update.mutateAsync({ id: node.id, event })} locked={busy} multiline placeholder={node.status === 'empty' ? '把这段故事先留给想象' : '（未定）'} /></FieldBlock>
@@ -142,7 +162,7 @@ export function SpinePage() {
             </div>
             {!!node.anchors?.length && <div className="mt-4 flex flex-wrap gap-2">{node.anchors.map(anchor => <span key={anchor.id} tabIndex={0} className="group/anchor relative rounded-full bg-lore-soft px-2.5 py-1 text-xs text-lore focus-visible:outline-2 focus-visible:outline-lore" title={anchor.note}>{anchor.character_name} · {anchor.kind}{anchor.note && <span role="tooltip" className="pointer-events-none absolute bottom-full left-0 z-10 mb-2 hidden w-56 rounded-lg border border-line-2 bg-card p-3 text-xs leading-relaxed text-ink shadow-[var(--shadow-paper)] group-hover/anchor:block group-focus/anchor:block">{anchor.note}</span>}</span>)}</div>}
             <div className="mt-4 border-t border-line pt-3 text-xs text-ink-2"><p className="mb-1">批注</p><EditableText value={node.editor_note} onSave={editor_note => mutations.update.mutateAsync({ id: node.id, editor_note })} locked={busy} multiline placeholder="（暂无批注）" className="text-xs" />{!!node.techniques?.length && <div className="mt-2 flex flex-wrap gap-1.5">{node.techniques.map(name => <TechniqueChip key={name} name={name} />)}</div>}</div>
-            {node.status === 'empty' && <><EmptyNodeForm disabled={busy || !canRequestNodes} onFill={feedback => requestNode(node, 'fill', feedback)} onCandidates={() => void requestNode(node, 'candidates')} />{!canRequestNodes && !working && <p className="mt-2 text-xs leading-relaxed text-ink-2">请先重新打开「关键节点」，再让编辑部补全这个空位。</p>}</>}
+            {!writing && node.status === 'empty' && <><EmptyNodeForm disabled={busy || !canRequestNodes} onFill={feedback => requestNode(node, 'fill', feedback)} onCandidates={() => void requestNode(node, 'candidates')} />{!canRequestNodes && !working && <p className="mt-2 text-xs leading-relaxed text-ink-2">请先重新打开「关键节点」，再让编辑部补全这个空位。</p>}</>}
             <div className="mt-4 flex flex-wrap items-center gap-1 border-t border-line pt-2">
               {node.status !== 'empty' && <NodeAction label={`${node.status === 'pinned' ? '改暂定' : '钉死'}节点 ${node.index}`} disabled={busy} onClick={() => void run(() => mutations.update.mutateAsync({ id: node.id, status: node.status === 'pinned' ? 'pencil' : 'pinned' }))}>{node.status === 'pinned' ? <PinOff className="size-4" /> : <Pin className="size-4" />}</NodeAction>}
               <NodeAction label={`改节点 ${node.index}「${node.title}」`} disabled={busy} onClick={() => requestNodeFeedback(node)}><MessageSquare className="size-4" /></NodeAction>
@@ -160,7 +180,7 @@ export function SpinePage() {
             {candidates.nodes.map((candidate, candidateIndex) => <CandidateCard key={candidateIndex} candidate={candidate} busy={busy} onChoose={() => void run(async () => { await mutations.update.mutateAsync({ id: node.id, title: candidate.title, event: candidate.event, prerequisite: candidate.prerequisite, consequence: candidate.consequence, volume: candidate.volume, status: node.status === 'empty' ? 'pencil' : node.status }); setDismissedCandidates(candidateKey) })} />)}
           </section>}
         </div>
-        {bands.filter(band => band.from?.id === node.id).map((band, bandIndex) => <SegmentBand key={bandIndex} {...band} />)}
+        {bands.filter(band => band.from?.id === node.id).map((band, bandIndex) => <SegmentBand key={bandIndex} {...band} position={position} complete={complete} />)}
       </Reveal>)}
     </>}
     {!!outline?.volumes.length && <details className="group mt-8 border-t border-line pt-5" data-testid="long-story-threads"><summary className="flex cursor-pointer list-none items-center gap-2 font-serif text-lg font-bold"><ChevronDown className="size-4 transition-transform group-open:rotate-180 motion-reduce:transition-none" />长线伏笔与期待<span className="font-sans text-xs font-normal text-ink-2">{longThreads.length} 条</span></summary><div className="mt-4 space-y-3">{longThreads.map(item => <div key={item.id} className="rounded-lg border border-line bg-card p-3 text-sm leading-relaxed"><p><span className={clsx('mr-2 font-medium', item.kind === '期待' ? 'text-chief' : 'text-lore')}>{item.code}</span>{item.description}</p><p className="mt-1 text-xs text-ink-2">{item.kind === '期待' ? '立下' : '埋下'}：{item.plant_volume ? `第 ${item.plant_volume} 卷` : '待定'} → {item.kind === '期待' ? '兑现' : '回收'}：{item.payoff_volume ? `第 ${item.payoff_volume} 卷` : '待定'}</p></div>)}{!longThreads.length && <p className="text-sm text-ink-2">暂时没有长线伏笔与期待。</p>}<ErrorText error={bible.error} /></div></details>}

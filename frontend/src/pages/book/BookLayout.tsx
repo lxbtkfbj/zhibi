@@ -4,7 +4,7 @@ import { BookOpenText, ChevronLeft, Settings, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from 'react'
 import { Link, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { useBook, useOutline } from '../../api/hooks'
+import { useBook, useChapters, useNodes, useOutline } from '../../api/hooks'
 import type { BookDetail, Conversation } from '../../api/types'
 import { Seal } from '../../components/decor'
 import { EmptyState, Skeleton } from '../../components/ui'
@@ -32,6 +32,8 @@ function BookWorkspace({ bookId, book }: { bookId: string; book: BookDetail }) {
   const { openSettings } = useSettingsModal()
   const { messages, connected, draft } = useMeeting(bookId)
   const { data: outline } = useOutline(bookId)
+  const { data: nodes = [] } = useNodes(bookId)
+  const { data: chapters = [] } = useChapters(bookId)
   const [conversation, setConversationState] = useState<Conversation>('group')
   const [following, setFollowing] = useState(() => !window.location.pathname.endsWith('/settings'))
   const [focusComposer, setFocusComposer] = useState(0)
@@ -102,7 +104,7 @@ function BookWorkspace({ bookId, book }: { bookId: string; book: BookDetail }) {
     if (href?.startsWith(`/books/${bookId}`) && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.button === 0) { setFollowing(false); setTab('manuscript') }
   }
   const ctx: BookContextValue = { bookId, book, job, messages, connected, draft, working, waiting, asking, outline, conversation, setConversation, unread, following, followTarget, manualNavigate, focusComposer, requestFeedback, requestNodeFeedback, composerNode, setComposerNode, composerDrafts, setComposerDrafts, celebrate }
-  const progress = progressText(book, messages, draft, followTarget)
+  const progress = progressText(book, messages, draft, followTarget, { nodes, volumes: outline?.volumes ?? [], chapters })
   return <BookContext.Provider value={ctx}>
     <div className="flex h-full min-h-0 flex-col" onClickCapture={captureManualLink}>
       <header className="z-20 flex h-16 shrink-0 items-center gap-3 border-b border-divider bg-paper-2 px-4">

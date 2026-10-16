@@ -1,7 +1,8 @@
 import { BookMarked, Flag, Lightbulb, MessageCircleQuestion, Route, Users } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { useBible, useNodes, useOutline } from '../../../api/hooks'
+import { useBible, useChapters, useNodes, useOutline } from '../../../api/hooks'
 import { Cloud } from '../../../components/decor'
+import { StoryMapStrip } from '../../../components/StoryMapStrip'
 import { Button, Card, CountUp, Reveal } from '../../../components/ui'
 import { cleanTitle, cleanVolumeTitle, totalChapters } from '../../../lib/status'
 import { directionProgressText } from '../../../lib/workspace'
@@ -61,10 +62,11 @@ function Stat({ value, label, suffix }: { value: number; label: string; suffix: 
 }
 
 export function Overview() {
-  const { book, bookId } = useBookContext()
+  const { book, bookId, manualNavigate } = useBookContext()
   const { data: outline } = useOutline(bookId)
   const { data: bible } = useBible(bookId)
   const { data: nodes = [] } = useNodes(bookId)
+  const { data: chapterList = [] } = useChapters(bookId)
   const base = `/books/${bookId}`
   const concept = book.concept
   const opening = nodes.find((node) => node.kind === 'opening')
@@ -138,7 +140,7 @@ export function Overview() {
         </Reveal>
       )}
 
-      {nodes.length > 0 && (
+      {(nodes.length > 0 || writing) && (
         <Reveal delay={0.17} className="mt-8">
           <section className="border-b border-line pb-8">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -151,7 +153,7 @@ export function Overview() {
                 完整地图 →
               </Link>
             </div>
-            <div className="grid gap-4 @2xl/manuscript:grid-cols-2">
+            {writing ? <StoryMapStrip nodes={nodes} volumes={outline?.volumes ?? []} chapters={chapterList} onNodeSelect={node => manualNavigate(`${base}/spine#story-node-${node.id}`)} /> : <div className="grid gap-4 @2xl/manuscript:grid-cols-2">
               <div className="border-l border-line pl-4">
                 <p className="mb-1 flex items-center gap-1.5 text-xs text-ink-2">
                   <Flag className="size-3.5" />
@@ -166,7 +168,7 @@ export function Overview() {
                 </p>
                 <p className="line-clamp-4 text-[14px] leading-relaxed">{ending?.event || '（未定）'}</p>
               </div>
-            </div>
+            </div>}
           </section>
         </Reveal>
       )}

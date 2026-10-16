@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useParams } from 'react-router-dom'
-import { useChapter, useChapters, useJobActions, useOutline, useUpdateChapter } from '../../../api/hooks'
+import { useBible, useChapter, useChapters, useJobActions, useOutline, useUpdateChapter } from '../../../api/hooks'
 import type { ChapterBrief } from '../../../api/types'
 import { EditableText } from '../../../components/Editable'
 import { Badge, Button, Card, ErrorText, inputClass, Reveal, Skeleton, TypingDots } from '../../../components/ui'
@@ -13,6 +13,8 @@ import { cleanVolumeTitle } from '../../../lib/status'
 import { useBookContext } from '../context'
 import { PageHeader } from './common'
 import { ForeshadowChips } from './VolumePage'
+import { RevealChips } from '../../../components/WritingLabels'
+import { emotionText } from '../../../lib/writingUi'
 
 const STATUS: Record<ChapterBrief['status'], [string, 'idle' | 'busy' | 'ok']> = {
   planned: ['只有章纲', 'idle'],
@@ -221,6 +223,7 @@ export function ChapterPage() {
 function ChapterContent({ n }: { n: number }) {
   const { bookId, working, waiting, asking, draft } = useBookContext()
   const { data: chapter, isLoading, error } = useChapter(bookId, n)
+  const { data: bible } = useBible(bookId)
   const { data: chapters } = useChapters(bookId)
   const update = useUpdateChapter(bookId)
   const [editing, setEditing] = useState(false)
@@ -254,7 +257,8 @@ function ChapterContent({ n }: { n: number }) {
   const [label] = live ? (['写作中', 'busy'] as const) : STATUS[chapter.status]
   const o = chapter.outline ?? {}
   const m = chapter.materials ?? {}
-  const hasOutline = !!(o.goal || o.scenes?.length || o.conflict || o.cool_point || o.hook || o.characters?.length || o.foreshadow_actions?.length)
+  const emotion = emotionText(o.emotion)
+  const hasOutline = !!(o.goal || o.scenes?.length || o.conflict || o.cool_point || o.hook || o.characters?.length || o.foreshadow_actions?.length || emotion || o.mood || o.reveals?.length)
   const hasMaterials = !!(m.characters?.length || m.world?.length || m.chapters?.length || m.notes?.length)
   const review = chapter.review?.review
   const consistency = chapter.review?.consistency
@@ -279,13 +283,16 @@ function ChapterContent({ n }: { n: number }) {
     outline: (
       <div className="space-y-4">
         {!hasOutline && <p>章纲还没有准备好。</p>}
+        {emotion && <p data-testid="chapter-emotion"><span className="font-medium text-ink">情绪：</span>{emotion}{o.mood ? `（${o.mood}）` : ''}</p>}
+        {!emotion && o.mood && <p><span className="font-medium text-ink">主情绪：</span>{o.mood}</p>}
         {o.goal && <p><span className="font-medium text-ink">目标：</span>{o.goal}</p>}
         {!!o.scenes?.length && <ol className="list-inside list-decimal space-y-2">{o.scenes.map((scene, i) => <li key={i}>{scene}</li>)}</ol>}
         {o.conflict && <p><span className="font-medium text-ink">冲突：</span>{o.conflict}</p>}
         {o.cool_point && <p><span className="text-seal">爽点：</span>{o.cool_point}</p>}
         {o.hook && <p><span className="font-medium text-ink">结尾钩子：</span>{o.hook}</p>}
         {!!o.characters?.length && <p><span className="font-medium text-ink">出场：</span>{o.characters.join('、')}</p>}
-        {!!o.foreshadow_actions?.length && <ForeshadowChips actions={o.foreshadow_actions} />}
+        {!!o.foreshadow_actions?.length && <ForeshadowChips actions={o.foreshadow_actions} ledger={bible?.foreshadowings ?? []} />}
+        <RevealChips reveals={o.reveals} />
       </div>
     ),
     materials: (

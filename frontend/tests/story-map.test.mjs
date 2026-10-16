@@ -78,6 +78,7 @@ test('old and missing lore, outline, directions fields remain displayable', () =
 })
 
 import { PIECES, nodeCounts, pieceStatuses, segments } from '../src/lib/storyMap.ts'
+import { isWritingComplete, plannedVolumeChapters, storyMapNodeChapters, storyMapWritingIndex, visibleStoryMapNodes, writingPosition, writingPositionText } from '../src/lib/storyMap.ts'
 
 test('all five puzzle pieces have stable keys and destination paths', () => {
   assert.deepEqual(PIECES.map(({key,path}) => [key,path]), [['concept','/concept'],['nodes','/spine'],['cast','/characters'],['fill','/spine'],['first_volume','/volume/1']])
@@ -121,4 +122,168 @@ test('new artifact annotations survive while absent historical metadata remains 
     assert.deepEqual(item.techniques, annotation.techniques)
   }
   assert.equal(Object.hasOwn(spineArtifactNodes({ nodes: [{ title: '旧稿' }] })[0], 'editor_note'), false)
+})
+
+const mapNodes = [
+  { id: 'opening', index: 1, kind: 'opening', title: '山村初醒', volume: 1 },
+  { id: 'ascend', index: 2, kind: 'milestone', title: '飞升神界', volume: 2 },
+  { id: 'ending', index: 3, kind: 'ending', title: '终局', volume: 3 },
+]
+const mapVolumes = [
+  { id: 'v1', index: 1, chapter_count: 10, units: [{ chapter_count: 3 }, { chapter_count: 3 }], target_node_id: 'ascend', reaches_node: false, status: 'approved' },
+  { id: 'v2', index: 2, chapter_count: 8, units: [], target_node_id: 'ascend', reaches_node: true, status: 'planned' },
+  { id: 'v3', index: 3, chapter_count: 6, units: [], target_node_id: 'ending', reaches_node: true, status: 'planned' },
+]
+const mapChapters = (volume, count, start = 1) => Array.from({ length: count }, (_, index) => ({ id: `${volume}-${index}`, volume_id: volume, index: start + index, status: 'final' }))
+
+test('writing position stays hidden before the first finalized chapter, including a first draft', () => {
+  const actual = writingPosition(mapNodes, mapVolumes, [{ index: 1, volume_id: 'v1', status: 'drafting' }])
+  assert.deepEqual(actual, { volume: null, doneInVolume: 0, volumeChapters: 0, nextNode: null, chaptersToNode: null, passed: [], ratio: 0 })
+  assert.equal(writingPositionText(actual, mapVolumes, []), '')
+})
+
+test('middle of a volume uses units for planning and sums every volume leading to the next node', () => {
+  const chapters = mapChapters('v1', 3)
+  const before = JSON.stringify([mapNodes, mapVolumes, chapters])
+  const actual = writingPosition(mapNodes, mapVolumes, chapters)
+  assert.deepEqual(actual, { volume: 1, doneInVolume: 3, volumeChapters: 6, nextNode: mapNodes[1], chaptersToNode: 11, passed: ['opening'], ratio: 0.15 })
+  assert.equal(plannedVolumeChapters(mapVolumes[0]), 6)
+  assert.equal(writingPositionText(actual, mapVolumes, chapters), '第 1 卷 3/6 章 · 离「飞升神界」还有 11 章')
+  assert.equal(JSON.stringify([mapNodes, mapVolumes, chapters]), before)
+})
+
+test('at a completed intermediate volume the cursor advances without prematurely passing its target', () => {
+  const actual = writingPosition(mapNodes, mapVolumes, mapChapters('v1', 6))
+  assert.equal(actual.volume, 2)
+  assert.equal(actual.doneInVolume, 0)
+  assert.equal(actual.nextNode.id, 'ascend')
+  assert.equal(actual.chaptersToNode, 8)
+  assert.deepEqual(actual.passed, ['opening'])
+})
+
+test('finishing the volume where a node happens advances to the next target and marks the node passed', () => {
+  const actual = writingPosition(mapNodes, mapVolumes, [...mapChapters('v1', 6), ...mapChapters('v2', 8, 7)])
+  assert.equal(actual.volume, 3)
+  assert.equal(actual.nextNode.id, 'ending')
+  assert.equal(actual.chaptersToNode, 6)
+  assert.deepEqual(actual.passed, ['opening', 'ascend'])
+})
+
+test('active drafting takes precedence over the last finalized chapter; planned outlines do not', () => {
+  const chapters = [...mapChapters('v1', 3), { index: 4, volume_id: 'v2', status: 'drafting' }, { index: 10, volume_id: 'v3', status: 'planned' }]
+  const actual = writingPosition(mapNodes, mapVolumes, chapters)
+  assert.equal(actual.volume, 2)
+  assert.equal(actual.ratio, 3 / 20)
+  assert.equal(actual.chaptersToNode, 8)
+})
+
+test('whole-book completion keeps the last volume, reaches every node and has no next target', () => {
+  const chapters = [...mapChapters('v1', 6), ...mapChapters('v2', 8, 7), ...mapChapters('v3', 6, 15)]
+  const actual = writingPosition(mapNodes, mapVolumes, chapters)
+  assert.deepEqual(actual, { volume: 3, doneInVolume: 6, volumeChapters: 6, nextNode: null, chaptersToNode: null, passed: ['opening', 'ascend', 'ending'], ratio: 1 })
+  assert.equal(writingPositionText(actual, mapVolumes, chapters), '全书完结')
+})
+
+test('legacy untargeted volumes show chapter progress without claiming a node or a final segment', () => {
+  const volumes = mapVolumes.map(volume => ({ ...volume, target_node_id: null }))
+  const chapters = mapChapters('v1', 3)
+  const actual = writingPosition(mapNodes, volumes, chapters)
+  assert.equal(actual.volume, 1)
+  assert.equal(actual.nextNode, null)
+  assert.equal(actual.chaptersToNode, null)
+  assert.equal(actual.ratio, 0.15)
+  assert.equal(writingPositionText(actual, volumes, chapters), '第 1 卷 3/6 章 · 全书已定稿 3/20 章')
+  assert.equal(writingPosition([], [], chapters).volume, null)
+})
+
+test('a final untargeted stretch in an otherwise mapped book counts chapters to the ending', () => {
+  const volumes = mapVolumes.map(volume => volume.index === 3 ? { ...volume, target_node_id: null } : volume)
+  const chapters = [...mapChapters('v1', 6), ...mapChapters('v2', 8, 7), ...mapChapters('v3', 2, 15)]
+  assert.equal(writingPositionText(writingPosition(mapNodes, volumes, chapters), volumes, chapters), '第 3 卷 2/6 章 · 正在写最后一段，离结局还有 4 章')
+})
+
+test('map cursor interpolates actual finalized chapters between chapter-positioned nodes', () => {
+  const positions = storyMapNodeChapters(mapNodes, mapVolumes)
+  assert.deepEqual(positions, [1, 14, 20])
+  assert.equal(storyMapWritingIndex(positions, 1), 0)
+  assert.equal(storyMapWritingIndex(positions, 3), 2 / 13)
+  assert.equal(storyMapWritingIndex(positions, 17), 1.5)
+  assert.equal(storyMapWritingIndex(positions, 20), 2)
+  assert.equal(storyMapWritingIndex([1, 1, 4], 1), 1)
+  assert.equal(storyMapWritingIndex([], 3), 0)
+})
+
+test('map omission keeps endpoints and two neighbors on either side, inserting one gap per skipped group', () => {
+  const nodes = Array.from({ length: 12 }, (_, index) => ({ id: `n${index}`, index: index + 1 }))
+  const ids = values => values.map(node => node?.id ?? '…')
+  assert.deepEqual(ids(visibleStoryMapNodes(nodes, 5.5, 900)), ['n0', '…', 'n4', 'n5', 'n6', 'n7', '…', 'n11'])
+  assert.deepEqual(ids(visibleStoryMapNodes(nodes, 0.5, 900)), ['n0', 'n1', 'n2', '…', 'n11'])
+  assert.deepEqual(ids(visibleStoryMapNodes(nodes.slice(0, 8), 3.5, 559)), ['n0', '…', 'n2', 'n3', 'n4', 'n5', '…', 'n7'])
+  assert.equal(visibleStoryMapNodes(nodes.slice(0, 8), 3.5, 560).length, 8)
+  assert.deepEqual(visibleStoryMapNodes([], 0, 300), [])
+})
+
+test('segment chapter totals also use the actual planned units', () => {
+  assert.equal(segments(mapNodes, mapVolumes)[0].chapters, 14)
+})
+
+test('rewriting a chapter in a done volume keeps that volume active and does not call the book complete', () => {
+  const volumes = mapVolumes.map(volume => ({ ...volume, status: 'done' }))
+  const chapters = [...mapChapters('v1', 6), ...mapChapters('v2', 8, 7), ...mapChapters('v3', 6, 15)]
+    .map(chapter => chapter.index === 20 ? { ...chapter, status: 'drafting' } : chapter)
+  const position = writingPosition(mapNodes, volumes, chapters)
+  assert.equal(position.volume, 3)
+  assert.equal(position.nextNode.id, 'ending')
+  assert.equal(position.chaptersToNode, 1)
+  assert.deepEqual(position.passed, ['opening', 'ascend'])
+  assert.equal(isWritingComplete(volumes, chapters), false)
+  assert.equal(writingPositionText(position, volumes, chapters), '第 3 卷 5/6 章 · 离「终局」还有 1 章')
+})
+
+test('a progress ratio of one does not mean complete when a stale plan still has an unfinished chapter', () => {
+  const volumes = [{ ...mapVolumes[2], chapter_count: 2, status: 'done' }]
+  for (const status of ['drafting', 'planned']) {
+    const chapters = [...mapChapters('v3', 2), { volume_id: 'v3', index: 3, status }]
+    const position = writingPosition(mapNodes, volumes, chapters)
+    assert.equal(position.ratio, 1)
+    assert.equal(position.nextNode.id, 'ending')
+    assert.equal(isWritingComplete(volumes, chapters), false)
+    assert.notEqual(writingPositionText(position, volumes, chapters), '全书完结')
+  }
+  assert.equal(isWritingComplete([], []), false)
+  assert.equal(isWritingComplete(mapVolumes, []), false)
+})
+
+test('unassigned legacy volumes remain in the chapter axis between target-node boundaries', () => {
+  const volumes = [
+    { ...mapVolumes[0], chapter_count: 2, units: [], target_node_id: null },
+    { ...mapVolumes[1], chapter_count: 4 },
+    { ...mapVolumes[2], chapter_count: 3 },
+  ]
+  const positions = storyMapNodeChapters(mapNodes, volumes)
+  assert.deepEqual(positions, [1, 6, 9])
+  assert.equal(storyMapWritingIndex(positions, 2), 1 / 5)
+  assert.equal(storyMapWritingIndex(positions, 6), 1)
+  assert.equal(storyMapWritingIndex(positions, 7), 1 + 1 / 3)
+  assert.equal(storyMapWritingIndex(positions, 100), 2)
+})
+
+test('chapter-axis interpolation stays finite at zero-length and coincident node boundaries', () => {
+  assert.equal(storyMapWritingIndex([1, 5, 5, 9], 5), 2)
+  assert.equal(storyMapWritingIndex([1, 5, 5, 9], 7), 2.5)
+  assert.equal(storyMapWritingIndex([0, 0, 0], 0), 2)
+  assert.deepEqual(storyMapNodeChapters(mapNodes, []), [0, 0, 0])
+  assert.equal(storyMapWritingIndex([1, 5], -1), 0)
+})
+
+test('both adjacent node segments can span multiple volumes without re-counting earlier finalized volumes', () => {
+  const volumes = [...mapVolumes.map(volume => volume.index === 3 ? { ...volume, reaches_node: false } : volume),
+    { ...mapVolumes[2], id: 'v4', index: 4, chapter_count: 4, reaches_node: true }]
+  const chapters = [...mapChapters('v1', 6), ...mapChapters('v2', 8, 7), ...mapChapters('v3', 2, 15)]
+  const position = writingPosition(mapNodes, volumes, chapters)
+  assert.equal(position.volume, 3)
+  assert.equal(position.nextNode.id, 'ending')
+  assert.equal(position.chaptersToNode, 8)
+  assert.deepEqual(position.passed, ['opening', 'ascend'])
+  assert.equal(storyMapWritingIndex(storyMapNodeChapters(mapNodes, volumes), 16), 1.2)
 })

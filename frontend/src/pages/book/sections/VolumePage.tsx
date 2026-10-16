@@ -1,13 +1,17 @@
 import clsx from 'clsx'
-import { ChevronDown, Flag, Flame, MapPin, Skull, Swords, Target, TrendingUp, UserPlus } from 'lucide-react'
+import { AlertTriangle, ChevronDown, Flag, Flame, MapPin, Pin, Skull, Swords, Target, TrendingUp, UserPlus } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { useChapters, useOutline, useUpdateUnit, useUpdateVolume } from '../../../api/hooks'
-import type { ChapterBrief, ForeshadowStep, PlotUnit, ThreadStep, Volume } from '../../../api/types'
+import { useBible, useChapters, useNodes, useOutline, useUpdateUnit, useUpdateVolume } from '../../../api/hooks'
+import type { ChapterBrief, Foreshadowing, ForeshadowStep, PlotUnit, ThreadStep, Volume } from '../../../api/types'
 import { EditableList, EditableText } from '../../../components/Editable'
+import { EmotionCurve } from '../../../components/EmotionCurve'
+import { EditorAnnotations, RevealChips, WritingHint } from '../../../components/WritingLabels'
 import { Badge, Card, Reveal, Skeleton } from '../../../components/ui'
+import { useReducedMotion } from '../../../lib/appearance'
 import type { Tone } from '../../../lib/status'
+import { emotionText, foreshadowAction } from '../../../lib/writingUi'
 import { useBookContext } from '../context'
 import { PieceDecisions } from '../PieceDecisions'
 import { FieldBlock, Locked, PageHeader } from './common'
@@ -43,18 +47,16 @@ export function ThreadChips({ steps }: { steps: ThreadStep[] }) {
   )
 }
 
-const ACTION_TONE: Record<string, string> = { 埋下: 'bg-lore-soft text-lore', 提醒: 'bg-line/70 text-ink-2', 回收: 'bg-seal-soft text-seal' }
+const ACTION_TONE: Record<string, string> = { 埋下: 'bg-lore-soft text-lore', 立下: 'bg-chief-soft text-chief', 提醒: 'bg-line/70 text-ink-2', 回收: 'bg-seal-soft text-seal-dark', 兑现: 'bg-seal-soft text-seal-dark' }
 
-export function ForeshadowChips({ actions }: { actions: ForeshadowStep[] }) {
+export function ForeshadowChips({ actions, ledger = [] }: { actions: ForeshadowStep[]; ledger?: Foreshadowing[] }) {
   if (!actions.length) return null
   return (
-    <ul className="flex flex-wrap gap-1.5">
-      {actions.map((a, i) => (
-        <li key={i} title={a.detail} className={clsx('rounded-full px-2.5 py-0.5 text-sm', ACTION_TONE[a.action] ?? 'bg-line/70 text-ink-2')}>
-          {a.action} {a.ref}
-          {a.detail && <span className="ml-1">· {a.detail.length > 18 ? `${a.detail.slice(0, 18)}…` : a.detail}</span>}
-        </li>
-      ))}
+    <ul aria-label="期待与伏笔动作" className="flex flex-wrap gap-1.5">
+      {actions.map((action, i) => {
+        const { label, code, hint } = foreshadowAction(action, ledger)
+        return <li key={i}><WritingHint label={`${label} ${code}`} hint={hint} className={clsx('rounded-full px-2.5 py-0.5 text-xs', ACTION_TONE[label] ?? 'bg-line/70 text-ink-2')}>{label} {code}</WritingHint></li>
+      })}
     </ul>
   )
 }
@@ -71,8 +73,9 @@ function Beat({ icon, label, children }: { icon: ReactNode; label: string; child
   )
 }
 
-function ChapterRow({ chapter, bookId }: { chapter: ChapterBrief; bookId: string }) {
+function ChapterRow({ chapter, bookId, ledger }: { chapter: ChapterBrief; bookId: string; ledger: Foreshadowing[] }) {
   const [open, setOpen] = useState(false)
+  const reduce = useReducedMotion()
   const [label, tone] = CHAPTER_STATUS[chapter.status]
   const o = chapter.outline ?? {}
   return (
@@ -95,7 +98,7 @@ function ChapterRow({ chapter, bookId }: { chapter: ChapterBrief; bookId: string
       </div>
       <AnimatePresence initial={false}>
         {open && (
-          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.25 }} className="overflow-hidden">
+          <motion.div initial={reduce ? false : { height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: reduce ? 0 : 0.25 }} className="overflow-hidden">
             <div className="space-y-1.5 px-9 pb-3 text-[14px] leading-relaxed text-ink-2">
               {o.goal && <p><span className="text-ink-2">目标：</span>{o.goal}</p>}
               {o.scenes && o.scenes.length > 0 && (
@@ -107,7 +110,9 @@ function ChapterRow({ chapter, bookId }: { chapter: ChapterBrief; bookId: string
               )}
               {o.cool_point && <p><span className="text-seal">爽点：</span>{o.cool_point}</p>}
               {o.hook && <p><span className="text-ink-2">结尾钩子：</span>{o.hook}</p>}
-              {o.foreshadow_actions && o.foreshadow_actions.length > 0 && <ForeshadowChips actions={o.foreshadow_actions} />}
+              {emotionText(o.emotion) && <p>情绪：{emotionText(o.emotion)}{o.mood ? `（${o.mood}）` : ''}</p>}
+              {o.foreshadow_actions && o.foreshadow_actions.length > 0 && <ForeshadowChips actions={o.foreshadow_actions} ledger={ledger} />}
+              <RevealChips reveals={o.reveals} />
               {chapter.summary && <p className="border-t border-line pt-1.5"><span className="text-ink-2">实际写了：</span>{chapter.summary}</p>}
             </div>
           </motion.div>
@@ -124,6 +129,7 @@ function UnitCard({
   locked,
   delay,
   last,
+  ledger,
 }: {
   unit: PlotUnit
   chapters: ChapterBrief[]
@@ -131,6 +137,7 @@ function UnitCard({
   locked: boolean
   delay: number
   last: boolean
+  ledger: Foreshadowing[]
 }) {
   const update = useUpdateUnit(bookId)
   const save = (patch: Partial<PlotUnit>) => update.mutateAsync({ id: unit.id, ...patch })
@@ -148,6 +155,10 @@ function UnitCard({
         {unit.index}
       </span>
       <Card hover className="p-5 @lg/manuscript:p-6">
+        {!!unit.plan_issues?.length && <details className="mb-4 rounded-lg border border-reviewer/30 bg-reviewer-soft px-3 py-2 text-sm text-seal-dark" data-testid="unit-plan-issues">
+          <summary className="flex cursor-pointer items-center gap-2 focus-visible:outline-2 focus-visible:outline-reviewer"><AlertTriangle className="size-4 shrink-0" />章纲还有 {unit.plan_issues.length} 处节奏问题<ChevronDown className="ml-auto size-3.5" /></summary>
+          <ul className="mt-2 list-disc space-y-1 border-t border-reviewer/20 pt-2 pl-5 leading-relaxed">{unit.plan_issues.map((issue, i) => <li key={i}>{issue}</li>)}</ul>
+        </details>}
         <div className="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <EditableText value={unit.title} onSave={(title) => save({ title })} locked={locked} className="font-serif text-xl font-bold" />
           <span className="text-sm text-ink-2">
@@ -158,6 +169,7 @@ function UnitCard({
             {unit.status === 'outlined' && chapters.length > 0 && ` ${finals}/${chapters.length}`}
           </Badge>
         </div>
+        <EmotionCurve chapters={chapters} />
         <div className="grid gap-2.5 @lg/manuscript:grid-cols-2">
           <Beat icon={<Target className="size-3.5" />} label="目标">
             <EditableText value={unit.goal} onSave={(goal) => save({ goal })} locked={locked} multiline />
@@ -197,10 +209,11 @@ function UnitCard({
               </FieldBlock>
             )}
             {unit.foreshadow_actions.length > 0 && (
-              <FieldBlock label="伏笔">
-                <ForeshadowChips actions={unit.foreshadow_actions} />
+              <FieldBlock label="期待与伏笔动作">
+                <ForeshadowChips actions={unit.foreshadow_actions} ledger={ledger} />
               </FieldBlock>
             )}
+            {!!unit.reveals?.length && <FieldBlock label="揭晓"><RevealChips reveals={unit.reveals} /></FieldBlock>}
           </div>
         </div>
         {unit.recap && (
@@ -214,11 +227,12 @@ function UnitCard({
             <p className="mb-1.5 text-xs tracking-[0.15em] text-ink-2">章纲</p>
             <ul className="-mx-2.5 space-y-0.5">
               {chapters.map((c) => (
-                <ChapterRow key={c.id} chapter={c} bookId={bookId} />
+                <ChapterRow key={c.id} chapter={c} bookId={bookId} ledger={ledger} />
               ))}
             </ul>
           </div>
         )}
+        <EditorAnnotations note={unit.editor_note} techniques={unit.techniques} />
       </Card>
     </Reveal>
   )
@@ -238,9 +252,11 @@ function CardField({ icon, label, value, onSave, locked }: { icon: ReactNode; la
 
 export function VolumePage() {
   const { index = '1' } = useParams()
-  const { bookId, working } = useBookContext()
+  const { bookId, working, manualNavigate } = useBookContext()
   const { data, isLoading } = useOutline(bookId)
   const { data: chapters = [] } = useChapters(bookId, Number(index))
+  const { data: nodes = [] } = useNodes(bookId)
+  const { data: bible } = useBible(bookId)
   const update = useUpdateVolume(bookId)
   const volume = data?.volumes.find((v) => v.index === Number(index))
 
@@ -257,6 +273,7 @@ export function VolumePage() {
   const [label, tone] = VOLUME_STATUS[volume.status] ?? VOLUME_STATUS.planned
   const total = volume.units.reduce((sum, u) => sum + u.chapter_count, 0) || volume.chapter_count
   const save = (patch: Parameters<typeof update.mutateAsync>[0]) => update.mutateAsync(patch)
+  const targetNode = nodes.find(node => node.id === volume.target_node_id)
 
   return (
     <div>
@@ -281,6 +298,12 @@ export function VolumePage() {
       />
       <Locked locked={working} />
       <Reveal>
+        {targetNode && <section aria-label="本卷走向" className="mb-5 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-paper-2 px-4 py-3 text-sm">
+          <span className="text-ink-2">走向：</span>
+          <button type="button" onClick={() => manualNavigate(`/books/${bookId}/spine#story-node-${targetNode.id}`)} className="font-medium text-chief underline decoration-chief/35 underline-offset-4 hover:decoration-chief focus-visible:outline-2 focus-visible:outline-chief">节点 {targetNode.index}「{targetNode.title}」</button>
+          <span className={clsx('inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs', targetNode.status === 'pinned' ? 'border-seal/35 bg-seal-soft text-seal' : 'border-dashed border-chief/50 text-chief')}>{targetNode.status === 'pinned' ? <><Pin className="size-3" />铁钉</> : targetNode.status === 'empty' ? '留空' : '暂定'}</span>
+          {volume.reaches_node && <span className="text-xs text-seal">本卷发生</span>}
+        </section>}
         <section className="mb-8 grid gap-6 border-b border-line pb-8 @lg/manuscript:grid-cols-2">
           <CardField icon={<MapPin className="size-4" />} label="舞台" value={volume.stage} onSave={(stage) => save({ id: volume.id, stage })} locked={working} />
           <CardField icon={<Skull className="size-4" />} label="主要对手" value={volume.antagonist} onSave={(antagonist) => save({ id: volume.id, antagonist })} locked={working} />
@@ -302,6 +325,7 @@ export function VolumePage() {
               <ThreadChips steps={volume.thread_beats} />
             </div>
           )}
+          {(volume.editor_note || volume.techniques?.length > 0) && <div className="@lg/manuscript:col-span-2"><EditorAnnotations note={volume.editor_note} techniques={volume.techniques} /></div>}
         </section>
       </Reveal>
       {volume.recap && (
@@ -323,6 +347,7 @@ export function VolumePage() {
               locked={working}
               delay={0.06 * i}
               last={i === volume.units.length - 1}
+              ledger={bible?.foreshadowings ?? []}
             />
           ))}
         </div>

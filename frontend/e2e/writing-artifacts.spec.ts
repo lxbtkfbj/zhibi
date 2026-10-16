@@ -1,4 +1,4 @@
-/** 任务 4 的最小界面回归：拦截全部 API，仅使用内存稿件，绝不访问作者数据库。 */
+/** 任务 5 延续写作产出回归：拦截全部 API，仅使用内存稿件，绝不访问作者数据库。 */
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
 import path from 'node:path'
@@ -112,7 +112,7 @@ async function noHorizontalOverflow(locator: Locator) {
 }
 
 async function screenshot(page: Page, name: string) {
-  await page.screenshot({ path: path.join(evidence, `任务4-补充-${name}.png`), fullPage: true })
+  await page.screenshot({ path: path.join(evidence, `任务5-回归-${name}.png`), fullPage: true })
 }
 
 test.beforeEach(async ({ page }) => {
@@ -148,11 +148,25 @@ test('专项审稿五项中文展示，拍板条同时说明节点调整与冲�
   }
   await expect(audit.locator('li')).toHaveCount(5)
   await expect(audit).not.toContainText('expectation')
-  const issues = page.getByTestId('decision-bar').getByRole('list', { name: '卷纲与章节提醒' })
-  await expect(issues).toContainText('节点冲突：下一处铁钉要求保留证人')
-  await expect(issues).toContainText('节点调整：暂定节点 3「夜探古城」拟改为「当众举证」')
-  await expect(issues).toContainText('批准卷纲后应用')
-  await expect(issues.locator('li')).toHaveCount(2)
+  const bar = page.getByTestId('decision-bar')
+  await expect(bar.getByRole('alert')).toHaveText('节点冲突：下一处铁钉要求保留证人，卷纲不得安排证人提前退场。')
+  const proposal = bar.getByRole('region', { name: '暂定节点调整提议' })
+  await expect(proposal).toContainText('这一卷建议调整暂定节点「夜探古城」')
+  await expect(proposal).toContainText('批准卷纲会同时应用这个调整')
+  await expect(proposal).toContainText('前文已经取得证据，改为公开对质更自然')
+  for (const [field, before, after] of [
+    ['名称', '夜探古城', '当众举证'],
+    ['发生什么', '潜入古城', '在城门口展示账册'],
+    ['之前得先有', '取得密道图', '证人愿意出面'],
+    ['之后变成', '找到证据', '旧敌失势'],
+  ]) {
+    await expect(proposal.getByText(`调整前 · ${field}`, { exact: true }).locator('..')).toContainText(before)
+    await expect(proposal.getByText(`调整后 · ${field}`, { exact: true }).locator('..')).toContainText(after)
+    await expect(proposal.locator('u', { hasText: before })).toHaveCount(1)
+    await expect(proposal.locator('u', { hasText: after })).toHaveCount(1)
+  }
+  await expect(bar.getByRole('button', { name: '批准开写', exact: true })).toBeVisible()
+  await expect(bar.getByRole('list', { name: '卷纲与章节提醒' })).toHaveCount(0)
   await screenshot(page, '五项审稿与节点拍板')
   expect(state.unexpected).toEqual([])
   expect(state.writes).toEqual([])
@@ -187,8 +201,15 @@ test('390 像素暗色：情绪揭晓、五项审稿与节点提醒可见且不�
   await page.getByRole('tab', { name: '稿件', exact: true }).click()
   const bar = page.getByTestId('decision-bar')
   await expect(bar).toBeVisible()
-  await expect(bar.getByText(/节点调整：暂定节点 3/)).toBeVisible()
-  await expect(bar.getByText(/节点冲突：下一处铁钉/)).toBeVisible()
+  const proposal = bar.getByRole('region', { name: '暂定节点调整提议' })
+  await expect(proposal.getByText('这一卷建议调整暂定节点「夜探古城」', { exact: true })).toBeVisible()
+  await expect(proposal).toContainText('批准卷纲会同时应用这个调整')
+  await expect(proposal).toContainText('调整前 · 之前得先有')
+  await expect(proposal).toContainText('证人愿意出面')
+  await expect(proposal.locator('u')).toHaveCount(8)
+  await expect(bar.getByRole('alert')).toHaveText('节点冲突：下一处铁钉要求保留证人，卷纲不得安排证人提前退场。')
+  await expect(bar.getByRole('alert')).toBeVisible()
+  await noHorizontalOverflow(proposal)
   await noHorizontalOverflow(page.locator('html'))
   await noHorizontalOverflow(page.getByRole('main', { name: '稿件' }))
   await noHorizontalOverflow(bar)

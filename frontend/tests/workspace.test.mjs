@@ -1,8 +1,41 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { artifactTarget, composerRoute, conversationContains, currentTarget, directionProgressText, nodeFeedback, pendingTarget, progressText, retainedNodeFeedback, unreadCount } from '../src/lib/workspace.ts'
+import { artifactTarget, composerRoute, conversationContains, currentTarget, directionProgressText, nodeFeedback, pendingTarget, progressText, puzzleSidebarActive, retainedNodeFeedback, unreadCount } from '../src/lib/workspace.ts'
 const job = { id: 'job', kind: 'book_setup', status: 'running', pending: null }
 const msg = (type, data = {}, extra = {}) => ({ id: 1, job_id: 'job', kind: 'artifact', speaker: 'chief', content: '', payload: { type, data }, ...extra })
+
+test('开书左栏共用地图路径的两块只选中当前块，其他三块保持路由判断', () => {
+  for (const current of ['nodes', 'fill', 'cast', null]) {
+    assert.equal(puzzleSidebarActive('nodes', current), current === 'nodes')
+    assert.equal(puzzleSidebarActive('fill', current), current === 'fill')
+  }
+  for (const piece of ['concept', 'cast', 'first_volume']) assert.equal(puzzleSidebarActive(piece, piece), undefined)
+})
+
+test('写作顶栏用真实卷位置和距节点章数，并保留工作、等待、失败状态', () => {
+  const nodes = [{id: 'opening', kind: 'opening', index: 1}, {id: 'next', kind: 'milestone', index: 2, title: '飞升神界'}]
+  const volumes = [{id: 'v3', index: 3, chapter_count: 60, units: [], status: 'approved', target_node_id: 'next', reaches_node: true}]
+  const chapters = Array.from({length: 42}, (_, i) => ({id: `c${i}`, index: i + 79, volume_id: 'v3', status: 'final'}))
+  const writing = {nodes, volumes, chapters}
+  const book = {chapters_final: 120, status: 'writing', active_job: null}
+  const base = '第 3 卷 · 已定稿 120 章 · 离「飞升神界」还有 18 章'
+  assert.equal(progressText(book, [], null, null, writing), `${base} · 编辑部空闲`)
+  assert.equal(progressText({...book,active_job:{...job,kind:'write_book'}}, [msg('',{}, {kind:'status',content:'设定师在备资料…'})], null, null, writing), `${base} · 设定师在备资料`)
+  assert.equal(progressText({...book,active_job:{...job,kind:'write_book'}}, [], {job_id:'job',chapter:121,done:false}, null, writing), `${base} · 写手在写第 121 章`)
+  assert.equal(progressText({...book,active_job:{...job,kind:'write_book',status:'waiting_author',pending:{kind:'volume_review',volume:3}}}, [], null, {label:'第 3 卷卷纲'}, writing), `${base} · 等你拍板：第 3 卷卷纲`)
+  assert.equal(progressText({...book,active_job:{...job,status:'failed'}}, [], null, null, writing), `${base} · 任务出错，可继续`)
+})
+
+test('写作顶栏兼容旧卷、未开写、最后一段及完结', () => {
+  const volume = {id:'v1',index:1,chapter_count:2,units:[],status:'approved',target_node_id:null}
+  const chapter = {id:'c1',index:1,volume_id:'v1',status:'final'}
+  const book = {chapters_final:1,status:'writing',active_job:null}
+  const writing = {nodes:[],volumes:[volume],chapters:[chapter]}
+  assert.equal(progressText(book,[],null,null,writing), '第 1 卷 · 已定稿 1 章 · 编辑部空闲')
+  assert.equal(progressText({...book,chapters_final:0},[],null,null,{...writing,chapters:[]}), '已定稿 0 章 · 编辑部空闲')
+  assert.equal(progressText(book,[],null,null,{...writing,volumes:[{...volume,target_node_id:'deleted-node'}]}), '第 1 卷 · 已定稿 1 章 · 正在写最后一段，离结局还有 1 章 · 编辑部空闲')
+  assert.equal(progressText({...book,chapters_final:2},[],null,null,{...writing,chapters:[chapter,{...chapter,id:'c2',index:2}]}), '第 1 卷 · 已定稿 2 章 · 全书完结')
+})
 for (const [type, suffix] of [['concept', '/concept'], ['lore', '/characters'], ['spine', '/spine'], ['threads', '/threads'], ['outline', '/spine']]) {
   test(`setup follows ${type}`, () => assert.equal(currentTarget('book', job, [msg(type)], null).path, `/books/book${suffix}`))
 }

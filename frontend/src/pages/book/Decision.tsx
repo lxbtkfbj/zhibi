@@ -1,22 +1,46 @@
 import clsx from 'clsx'
-import { Check, CirclePause, PenLine, RotateCcw, Stamp } from 'lucide-react'
+import { AlertTriangle, Check, CirclePause, PenLine, RotateCcw, Stamp } from 'lucide-react'
 import { useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useJobActions } from '../../api/hooks'
-import type { InterviewQuestion, Job, WriteUntil } from '../../api/types'
+import type { InterviewQuestion, Job, NodeUpdateProposal, WriteUntil } from '../../api/types'
 import { Button, ErrorText, inputClass, TypingDots } from '../../components/ui'
 import { decisionCopy } from '../../lib/decision'
 import { useReducedMotion } from '../../lib/appearance'
 import { PIECES, targetPiece } from '../../lib/storyMap'
 import { pendingTarget } from '../../lib/workspace'
+import { changedText } from '../../lib/writingUi'
 import { useBookContext } from './context'
+
+const NODE_COMPARISON_FIELDS = [
+  ['title', '名称'], ['event', '发生什么'], ['prerequisite', '之前得先有'], ['consequence', '之后变成'],
+] as const
+
+function NodeUpdateComparison({ proposal }: { proposal: NodeUpdateProposal }) {
+  return <section aria-label="暂定节点调整提议" className="mt-3 border-t border-divider pt-3" data-testid="node-update-comparison">
+    <p className="text-sm font-medium text-chief">这一卷建议调整暂定节点「{proposal.current.title}」</p>
+    <p className="mt-1 text-xs text-ink-2">批准卷纲会同时应用这个调整；下划线标出改动。</p>
+    <div className="mt-3 space-y-3">{NODE_COMPARISON_FIELDS.map(([key, label]) => {
+      const diff = changedText(proposal.current[key] ?? '', proposal.proposed[key] ?? '')
+      return <div key={key} className="grid gap-2 @lg/manuscript:grid-cols-2">
+        {(['before', 'after'] as const).map(side => <div key={side} className={clsx('min-w-0 rounded-lg border px-3 py-2', side === 'after' ? 'border-chief/20 bg-chief-soft/50' : 'border-line bg-card/60')}>
+          <p className="mb-1 text-xs text-ink-2">{side === 'before' ? '调整前' : '调整后'} · {label}</p>
+          <p className="text-sm leading-relaxed break-words whitespace-pre-wrap">{diff[side].prefix}{diff[side].changed ? diff.differs ? <u className="decoration-seal decoration-2 underline-offset-4">{diff[side].changed}</u> : diff[side].changed : null}{diff[side].suffix}{!diff[side].prefix && !diff[side].changed && !diff[side].suffix && <span className={clsx('text-ink-2', diff.differs && 'underline decoration-seal decoration-2 underline-offset-4')}>（空）</span>}</p>
+        </div>)}
+      </div>
+    })}</div>
+    <p className="mt-3 text-xs leading-relaxed text-ink-2"><span className="mr-2 text-chief">调整理由</span>{proposal.reason || '主编尚未说明理由，可先提意见再批准。'}</p>
+  </section>
+}
 
 export function DecisionBar() {
   const { bookId, job, waiting, requestFeedback, manualNavigate, celebrate } = useBookContext()
   const { pieceAction } = useJobActions(bookId)
   const reduce = useReducedMotion()
   const pending = job?.pending
-  const writingIssues = pending?.kind === 'volume_review' || pending?.kind === 'chapter_stuck' ? decisionCopy(pending, bookId).issues : []
+  const volumePending = pending?.kind === 'volume_review' ? pending : null
+  const conflicts = [...new Set([...(volumePending?.issues ?? []).filter(issue => /^节点冲突[：:]/.test(issue)), ...(volumePending?.node_conflict ? [`节点冲突：${volumePending.node_conflict}`] : [])])]
+  const writingIssues = (pending?.kind === 'volume_review' || pending?.kind === 'chapter_stuck' ? decisionCopy(pending, bookId).issues ?? [] : []).filter(issue => !/^节点冲突[：:]/.test(issue) && !(volumePending?.node_update && issue.startsWith('节点调整：')))
   const target = pendingTarget(pending, bookId)
   const piece = pending?.kind === 'setup_piece' ? pending : null
   const name = PIECES.find(item => item.key === piece?.piece)?.name ?? ''
@@ -36,6 +60,8 @@ export function DecisionBar() {
         <Button size="sm" variant="ghost" loading={pieceAction.isPending && pieceAction.variables?.action === 'delegate'} disabled={pieceAction.isPending} onClick={() => void act('delegate')}>交给编辑部定</Button>
       </> : pending?.kind === 'setup_directions' ? <button className="text-sm text-chief underline underline-offset-4" onClick={() => manualNavigate(`/books/${bookId}`)}>去选择 →</button> : <><ApproveButton job={job} /><Button size="sm" variant="ghost" onClick={requestFeedback}>提意见</Button></>}</div>
     </div>
+    {conflicts.map((conflict, index) => <div key={index} role="alert" className="mt-3 flex items-start gap-2 rounded-lg border border-reviewer/35 bg-reviewer-soft px-3 py-2 text-sm leading-relaxed text-seal-dark"><AlertTriangle className="mt-0.5 size-4 shrink-0" /><p>{conflict}</p></div>)}
+    {volumePending?.node_update && <NodeUpdateComparison proposal={volumePending.node_update} />}
     {!!reminders && piece && <details className="mt-3 border-t border-divider pt-2">
       <summary className="cursor-pointer text-xs text-ink-2">提醒与审稿建议（{reminders}）</summary>
       <ul className="mt-3 space-y-3 text-sm leading-relaxed text-ink-2">

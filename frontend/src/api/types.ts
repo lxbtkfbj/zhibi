@@ -63,7 +63,7 @@ export type Pending =
   | { kind: 'setup_review'; round: number; title?: string }
   | { kind: 'setup_directions'; directions: BookDirection[]; recommended: number; length: InterviewQuestion }
   | { kind: 'setup_piece'; piece: PieceKey; round: number; warnings?: string[]; decisions?: AuthorChoice[]; suggestions?: SetupSuggestion[]; unlock_requests?: { target: SetupTarget; reason: string }[]; candidates?: { node_id: string; nodes: NodeCandidate[] } | null }
-  | { kind: 'volume_review'; volume: number; title: string; issues?: string[]; node_update?: NodeUpdateProposal | null }
+  | { kind: 'volume_review'; volume: number; title: string; issues?: string[]; node_update?: NodeUpdateProposal | null; node_conflict?: string }
   | { kind: 'trial_read'; chapters: number }
   | { kind: 'chapter_stuck'; chapter: number; title: string; issues: string[] }
 
