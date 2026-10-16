@@ -35,6 +35,9 @@ function NoteComposer() {
   const ref = useRef<HTMLTextAreaElement>(null)
   const text = drafts[conversation] ?? ''
   const direct = conversation !== 'group'
+  const oldSetup = job?.kind === 'book_setup' && job.setup_flow === 1
+  const blocked = oldSetup && !direct
+  const revising = waiting && !oldSetup
   const feedbackPrefix = direct ? `（给${ROLE_META[conversation].name}）` : ''
   const inputLimit = waiting ? 5000 - feedbackPrefix.length : 5000
   const tooLong = text.trim().length > inputLimit
@@ -66,10 +69,11 @@ function NoteComposer() {
   }
   const send = async () => {
     const content = text.trim()
-    if (!content || pending || tooLong) return
+    if (!content || pending || tooLong || blocked) return
     const sentConversation = conversation
     try {
-      const route = composerRoute(job, text, conversation === 'group' ? composerNode : null)
+      const route = composerRoute(job, text, conversation === 'group' ? composerNode : null, direct)
+      if (route.kind === 'blocked') return
       if (route.kind === 'directions' && job) {
         await directions.mutateAsync({ jobId: job.id, action: 'redo', feedback: `${feedbackPrefix}${content}` })
       } else if (route.kind === 'piece' && job) {
@@ -87,7 +91,7 @@ function NoteComposer() {
       if (sentConversation === 'group') setComposerNode(null)
       setSent({
         conversation: sentConversation,
-        message: waiting ? '意见已交给编辑部，按你的要求修改。' : asking || (working && (job?.kind === 'book_setup' || job?.kind === 'write_book'))
+        message: revising ? '意见已交给编辑部，按你的要求修改。' : !oldSetup && (asking || (working && (job?.kind === 'book_setup' || job?.kind === 'write_book')))
           ? '已送达。做完手头这一步后，编辑部会处理你的要求。'
           : '已记下，下次开工会按你的要求来。',
       })
@@ -96,9 +100,9 @@ function NoteComposer() {
     }
   }
 
-  const placeholder = waiting && job?.pending?.kind === 'setup_piece' ? '说说这一块想怎么改…' : direct
+  const placeholder = blocked ? '这本书要先按新流程重开，重开后再提意见' : direct
     ? `发消息给${ROLE_META[conversation].name}…`
-    : waiting
+    : waiting && job?.pending?.kind === 'setup_piece' ? '说说这一块想怎么改…' : waiting
       ? job?.pending?.kind === 'setup_directions'
         ? '写下哪里不满意，主编会重新出开书方向…'
         : decisionCopy(job?.pending, bookId).placeholder
@@ -125,7 +129,7 @@ function NoteComposer() {
           ))}
         </div>
       )}
-      {waiting && <p className="mb-2 text-xs font-medium text-seal">提意见 · 发送后会修改当前待拍板的方案</p>}
+      {revising && <p className="mb-2 text-xs font-medium text-seal">提意见 · 发送后会修改当前待拍板的方案</p>}
       <div className="flex items-end gap-2 rounded-xl border border-divider bg-card px-3 py-2 transition-shadow focus-within:border-ink-3 focus-within:shadow-[var(--shadow-paper)]">
         <textarea
           ref={ref}
@@ -141,11 +145,11 @@ function NoteComposer() {
             }
           }}
           placeholder={placeholder}
-          aria-label={direct ? `发消息给${ROLE_META[conversation].name}` : waiting ? '修改意见' : '给编辑部发消息'}
+          aria-label={direct ? `发消息给${ROLE_META[conversation].name}` : revising ? '修改意见' : '给编辑部发消息'}
           className="scroll-thin max-h-40 min-h-12 min-w-0 flex-1 resize-none bg-transparent py-1 text-sm leading-[1.75] text-ink placeholder:text-ink-3 focus:outline-none"
         />
-        <Button size="sm" variant={waiting ? 'primary' : 'seal'} onClick={() => void send()} loading={pending} disabled={!text.trim() || tooLong} aria-label="发送">
-          {waiting ? '提意见' : <SendHorizontal className="size-4" />}
+        <Button size="sm" variant={revising ? 'primary' : 'seal'} onClick={() => void send()} loading={pending} disabled={!text.trim() || tooLong || blocked} aria-label="发送">
+          {revising ? '提意见' : <SendHorizontal className="size-4" />}
         </Button>
       </div>
       <p className="mt-2 text-xs leading-relaxed text-ink-2" role="status">

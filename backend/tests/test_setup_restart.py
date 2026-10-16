@@ -298,3 +298,31 @@ async def test_worker_reads_raw_old_checkpoint_or_gracefully_starts_without_it(
             assert captured == [{}]
             assert job.pending["kind"] == "setup_directions"
         assert (await session.get(Book, bid)).idea == "寻找失踪妹妹"
+
+
+@pytest.mark.parametrize("status", ["waiting_author", "failed", "cancelled", "running"])
+async def test_legacy_private_note_records_requirement_without_resuming_old_graph(client, sessionmaker, queued, status):
+    bid, jid = await old_job(sessionmaker, status=status)
+    response = await client.post(f"/api/books/{bid}/notes", json={"content": "保留妹妹的记忆", "to": "lorekeeper"})
+    assert response.status_code == 201, response.text
+    assert response.json()["job_id"] is None
+    assert response.json()["payload"]["thread"] == "lorekeeper"
+    async with sessionmaker() as session:
+        assert (await session.get(Job, jid)).status == status
+        requirements = list(
+            (await session.scalars(select(AuthorRequirement).where(AuthorRequirement.book_id == bid))).all()
+        )
+        assert any(row.text == "保留妹妹的记忆" and row.source == "private:lorekeeper" for row in requirements)
+        reply = await session.scalar(
+            select(MeetingMessage).where(MeetingMessage.book_id == bid).order_by(MeetingMessage.id.desc())
+        )
+        assert reply.speaker == "lorekeeper" and reply.content == "记下了，下次开工就照办。"
+    assert queued == []
+    if status == "waiting_author":
+        assert (await client.post(f"/api/books/{bid}/notes", json={"content": "不能绕过重开"})).status_code == 409
+
+
+async def test_new_setup_waiting_private_note_still_requires_piece_action(client, sessionmaker):
+    bid, _ = await old_job(sessionmaker, flow=2)
+    response = await client.post(f"/api/books/{bid}/notes", json={"content": "按原流程提意见", "to": "chief"})
+    assert response.status_code == 409

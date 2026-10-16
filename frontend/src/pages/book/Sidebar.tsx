@@ -73,7 +73,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     </section>
     <nav aria-label="书稿目录" className="scroll-thin min-h-0 flex-1 overflow-y-auto px-3 pt-5 pb-6">
       <h2 className="mb-3 px-2.5 text-xs tracking-[0.25em] text-ink-2">书稿</h2>
-      {puzzle.show && <div className="mb-5"><h3 className="mb-2 px-2.5 text-xs tracking-[0.2em] text-ink-2">开书拼图</h3><ol className="space-y-0.5">{puzzle.pieces.map(piece => <li key={piece.key}><Item to={`${base}${piece.path}`} active={puzzleSidebarActive()} icon={<PieceStatusIcon status={piece.status} />} label={<span title={`${piece.name} · ${PIECE_STATUS_LABELS[piece.status]}`}>{piece.number} {piece.name}<span className="ml-1 text-xs text-ink-2">{piece.status === 'waiting' ? '待确认' : ''}</span></span>} onNavigate={onNavigate} /></li>)}</ol></div>}
+      {puzzle.show && <div className="mb-5"><h3 className="mb-2 px-2.5 text-xs tracking-[0.2em] text-ink-2">开书拼图</h3><ol className="space-y-0.5">{puzzle.pieces.map(piece => <li key={piece.key}><Item to={`${base}${piece.path}`} active={puzzleSidebarActive()} icon={<PieceStatusIcon status={piece.status} piece={piece.key} />} label={<span title={`${piece.name} · ${PIECE_STATUS_LABELS[piece.status]}`}>{piece.number} {piece.name}<span className="ml-1 text-xs text-ink-2">{piece.status === 'waiting' ? '待确认' : ''}</span></span>} onNavigate={onNavigate} /></li>)}</ol></div>}
       <div className="space-y-0.5">
         <Item to={base} end icon={<LayoutDashboard className={icon} />} label="概览" onNavigate={onNavigate} />
         <Item to={`${base}/concept`} icon={<Lightbulb className={icon} />} label="书的概念" onNavigate={onNavigate} />
@@ -89,7 +89,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       </Group>
       <Group title="设定库">
         <Item to={`${base}/characters`} icon={<Users className={icon} />} label="人物" count={bible?.characters.length} onNavigate={onNavigate} />
-        <Item to={`${base}/world`} icon={<Globe2 className={icon} />} label="世界观" count={bible?.world_entries.length} onNavigate={onNavigate} />
+        <Item to={`${base}/world`} icon={<Globe2 className={icon} />} label="世界与地图" count={bible?.world_entries.length} onNavigate={onNavigate} />
         <Item to={`${base}/relations`} icon={<Network className={icon} />} label="人物关系" count={bible?.relationships.length} onNavigate={onNavigate} />
         <Item to={`${base}/secrets`} icon={<EyeOff className={icon} />} label="信息差" count={bible?.secrets.length} onNavigate={onNavigate} />
         <Item to={`${base}/foreshadowing`} icon={<ScrollText className={icon} />} label="伏笔与期待" count={bible?.foreshadowings.length} onNavigate={onNavigate} />

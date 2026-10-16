@@ -265,7 +265,8 @@ async def add_note(
 ) -> MeetingMessageOut:
     """工作中由流程消费插话；空闲或不读插话的任务中，直接记为下次开工的要求。"""
     job = await jobs.active_job(session, book.id)
-    if job is not None and jobs.pending_kind(job) in jobs.DECISION_KINDS:
+    legacy_private = job is not None and jobs.is_legacy_setup(job) and body.to is not None
+    if job is not None and jobs.pending_kind(job) in jobs.DECISION_KINDS and not legacy_private:
         raise HTTPException(409, "等你拍板时请直接提意见")
     content = body.content.strip()
     if not content:
@@ -273,6 +274,7 @@ async def add_note(
     payload = {"requirement_saved": True, **({"thread": body.to} if body.to else {})}
     deferred = (
         job is not None
+        and not legacy_private
         and job.kind in ("book_setup", "write_book")
         and (job.status in jobs.BUSY_STATUSES or jobs.pending_kind(job) == "setup_questions")
     )

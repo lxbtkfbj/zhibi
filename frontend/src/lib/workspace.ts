@@ -149,7 +149,9 @@ export function retainedNodeFeedback(text: string, selected: NodeFeedback | null
   return selected && text.startsWith(selected.prefix) ? selected : null
 }
 
-export function composerRoute(job: Job | null, text: string, selected: NodeFeedback | null) {
+export function composerRoute(job: Job | null, text: string, selected: NodeFeedback | null, direct = false) {
+  // 旧图不再接受修改；点名私聊只记作者要求，不触发旧流程。
+  if (job?.kind === 'book_setup' && job.setup_flow === 1) return { kind: direct ? 'note' as const : 'blocked' as const }
   // 其他块等待时，节点仍受块锁定保护；让主编根据原文提出解锁请求，不越过 API 的节点操作门禁。
   if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_piece') return { kind: 'piece' as const, action: 'revise' as const, piece: job.pending.piece, ...(job.pending.piece === 'segment' && retainedNodeFeedback(text, selected) ? { node_id: selected!.nodeId } : {}) }
   if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_directions') return { kind: 'directions' as const, action: 'redo' as const }

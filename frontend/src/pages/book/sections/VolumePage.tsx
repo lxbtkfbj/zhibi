@@ -1,11 +1,14 @@
 import clsx from 'clsx'
-import { AlertTriangle, ChevronDown, Flag, Flame, MapPin, Pin, Skull, Swords, Target, TrendingUp, UserPlus } from 'lucide-react'
+import { AlertTriangle, ChevronDown, Flag, Flame, Pin, Repeat2, Swords, Target } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useBible, useChapters, useNodes, useOutline, useUpdateUnit, useUpdateVolume } from '../../../api/hooks'
 import type { ChapterBrief, Foreshadowing, ForeshadowStep, PlotUnit, ThreadStep, Volume } from '../../../api/types'
 import { EditableList, EditableText } from '../../../components/Editable'
+import { FactTable } from '../../../components/FactTable'
+import { FocusQuestions, QuestionField, QuestionSection } from '../../../components/QuestionSection'
+import { firstSegment, OPENING_FIELDS } from '../../../lib/setupSegment'
 import { EmotionCurve } from '../../../components/EmotionCurve'
 import { EditorAnnotations, RevealChips, WritingHint } from '../../../components/WritingLabels'
 import { Badge, Card, Reveal, Skeleton } from '../../../components/ui'
@@ -183,7 +186,7 @@ function UnitCard({
           <Beat icon={<Flag className="size-3.5" />} label="结果与钩子">
             <EditableText value={unit.outcome} onSave={(outcome) => save({ outcome })} locked={locked} multiline />
           </Beat>
-          <Beat icon={<TrendingUp className="size-3.5" />} label="核心循环">
+          <Beat icon={<Repeat2 className="size-3.5" />} label="核心循环">
             <EditableText value={unit.loop ?? ''} onSave={(loop) => save({ loop })} locked={locked} multiline />
           </Beat>
         </div>
@@ -241,129 +244,66 @@ function UnitCard({
   )
 }
 
-function CardField({ icon, label, value, onSave, locked }: { icon: ReactNode; label: string; value: string; onSave: (v: string) => Promise<unknown>; locked: boolean }) {
-  return (
-    <div className="flex gap-3">
-      <span className="mt-0.5 text-ink-2">{icon}</span>
-      <div className="min-w-0 flex-1">
-        <p className="text-xs text-ink-2">{label}</p>
-        <EditableText value={value} onSave={onSave} locked={locked} multiline className="text-[14px] leading-relaxed" />
-      </div>
-    </div>
-  )
-}
-
 export function VolumePage() {
   const { index = '1' } = useParams()
-  const { bookId, working, manualNavigate } = useBookContext()
+  const { bookId, book, job, working, manualNavigate } = useBookContext()
   const { data, isLoading } = useOutline(bookId)
   const { data: chapters = [] } = useChapters(bookId, Number(index))
   const { data: nodes = [] } = useNodes(bookId)
   const { data: bible } = useBible(bookId)
   const update = useUpdateVolume(bookId)
-  const volume = data?.volumes.find((v) => v.index === Number(index))
+  const volume = data?.volumes.find(v => v.index === Number(index))
 
   if (isLoading) return <Skeleton className="h-64" />
-  if (!volume) {
-    return (
-      <PageHeader
-        eyebrow="大纲"
-        title="这一卷还不存在"
-        subtitle={<Link to={`/books/${bookId}`} className="text-seal underline">回到概览</Link>}
-      />
-    )
-  }
-  const [label, tone] = VOLUME_STATUS[volume.status] ?? VOLUME_STATUS.planned
-  const total = volume.units.reduce((sum, u) => sum + u.chapter_count, 0) || volume.chapter_count
-  const save = (patch: Parameters<typeof update.mutateAsync>[0]) => update.mutateAsync(patch)
-  const targetNode = nodes.find(node => node.id === volume.target_node_id)
+  if (!volume) return <PageHeader eyebrow="大纲" title="这一卷还不存在" subtitle={<Link to={`/books/${bookId}`} className="text-seal underline">回到概览</Link>} />
 
-  return (
-    <div>
-      {Number(index) === 1 && <PieceDecisions piece="first_volume" />}
-      <PageHeader
-        eyebrow={`第${volume.index}卷`}
-        title={
-          <EditableText
-            value={volume.title}
-            onSave={(title) => save({ id: volume.id, title })}
-            locked={working}
-            inputClassName="font-serif text-[26px] font-bold"
-          />
-        }
-        action={
-          <div className="flex items-center gap-2">
-            <Badge tone={tone}>{label}</Badge>
-            {total > 0 && <span className="text-sm text-ink-2">共约 {total} 章</span>}
-          </div>
-        }
-        subtitle={<EditableText value={volume.summary} onSave={(summary) => save({ id: volume.id, summary })} locked={working} multiline />}
-      />
-      <Locked locked={working} />
-      <Reveal>
-        {targetNode && <section aria-label="本卷走向" className="mb-5 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-paper-2 px-4 py-3 text-sm">
-          <span className="text-ink-2">走向：</span>
-          <button type="button" onClick={() => manualNavigate(`/books/${bookId}/spine#story-node-${targetNode.id}`)} className="font-medium text-chief underline decoration-chief/35 underline-offset-4 hover:decoration-chief focus-visible:outline-2 focus-visible:outline-chief">节点 {targetNode.index}「{targetNode.title}」</button>
-          <span className={clsx('inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs', targetNode.status === 'pinned' ? 'border-seal/35 bg-seal-soft text-seal' : 'border-dashed border-chief/50 text-chief')}>{targetNode.status === 'pinned' ? <><Pin className="size-3" />铁钉</> : targetNode.status === 'empty' ? '留空' : '暂定'}</span>
-          {volume.reaches_node && <span className="text-xs text-seal">本卷发生</span>}
-        </section>}
-        <section className="mb-8 grid gap-6 border-b border-line pb-8 @lg/manuscript:grid-cols-2">
-          <CardField icon={<Target className="size-4" />} label="这一卷想做成" value={volume.want ?? ''} onSave={(want) => save({ id: volume.id, want })} locked={working} />
-          <CardField icon={<Swords className="size-4" />} label="卷首处境" value={volume.pressure ?? ''} onSave={(pressure) => save({ id: volume.id, pressure })} locked={working} />
-          <CardField icon={<MapPin className="size-4" />} label="舞台" value={volume.stage} onSave={(stage) => save({ id: volume.id, stage })} locked={working} />
-          <CardField icon={<Skull className="size-4" />} label="主要对手" value={volume.antagonist} onSave={(antagonist) => save({ id: volume.id, antagonist })} locked={working} />
-          <CardField icon={<TrendingUp className="size-4" />} label="主角实力" value={volume.power_range} onSave={(power_range) => save({ id: volume.id, power_range })} locked={working} />
-          <CardField icon={<Flame className="size-4 text-seal" />} label="本卷高潮" value={volume.climax} onSave={(climax) => save({ id: volume.id, climax })} locked={working} />
-          <CardField icon={<Flag className="size-4" />} label="卷末目标" value={volume.goal} onSave={(goal) => save({ id: volume.id, goal })} locked={working} />
-          <div className="flex gap-3">
-            <span className="mt-0.5 text-ink-2">
-              <UserPlus className="size-4" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="text-xs text-ink-2">新登场</p>
-              <EditableList items={volume.new_characters} onSave={(new_characters) => save({ id: volume.id, new_characters })} locked={working} />
-            </div>
-          </div>
-          {volume.thread_beats.length > 0 && (
-            <div className="@lg/manuscript:col-span-2">
-              <p className="mb-1.5 text-xs text-ink-2">本卷推进的线索</p>
-              <ThreadChips steps={volume.thread_beats} />
-            </div>
-          )}
-          {(volume.editor_note || volume.techniques?.length > 0) && <div className="@lg/manuscript:col-span-2"><EditorAnnotations note={volume.editor_note} techniques={volume.techniques} /></div>}
-        </section>
-      </Reveal>
-      {volume.recap && (
-        <Reveal>
-          <section className="mb-8 border-b border-line pb-8">
-            <p className="mb-1.5 text-xs tracking-[0.15em] text-lore">卷回顾 · 这一卷写完后设定师写的，后面各卷规划和写作都靠它记住前情</p>
-            <p className="font-serif text-[15px] leading-relaxed whitespace-pre-wrap text-ink-2">{volume.recap}</p>
-          </section>
-        </Reveal>
-      )}
-      {volume.units.length > 0 ? (
-        <div>
-          {volume.units.map((unit, i) => (
-            <UnitCard
-              key={unit.id}
-              unit={unit}
-              chapters={chapters.filter((c) => c.unit_id === unit.id)}
-              bookId={bookId}
-              locked={working}
-              delay={0.06 * i}
-              last={i === volume.units.length - 1}
-              ledger={bible?.foreshadowings ?? []}
-            />
-          ))}
-        </div>
-      ) : (
-        <section className="py-10 text-center">
-          <p className="font-serif text-lg text-ink-2">这一卷还没有拆成剧情单元</p>
-          <p className="mt-1 text-sm text-ink-2">
-            {volume.chapter_count > 0 ? `这一卷计划约 ${volume.chapter_count} 章。` : ''}写到这一卷之前，主编会按总纲和线索把它拆成剧情单元，再请你拍板。
-          </p>
-        </section>
-      )}
-    </div>
-  )
+  const [label, tone] = VOLUME_STATUS[volume.status] ?? VOLUME_STATUS.planned
+  const total = volume.units.reduce((sum, unit) => sum + unit.chapter_count, 0) || volume.chapter_count
+  const save = (patch: Parameters<typeof update.mutateAsync>[0]) => update.mutateAsync(patch)
+  const locked = working || update.isPending
+  const targetNode = nodes.find(node => node.id === volume.target_node_id)
+  const firstSetup = volume.index === 1 && (['setting_up', 'awaiting_approval'].includes(book.status) ||
+    (job?.kind === 'book_setup' && ['queued', 'running', 'waiting_author'].includes(job.status)))
+  const pending = firstSetup && job?.status === 'waiting_author' ? job.pending : null
+  const opening = volume.index === 1 ? firstSegment(nodes).endpoint?.segment?.opening : null
+  const section = (questionKey: string, children: ReactNode) => <QuestionSection piece="first_volume" questionKey={questionKey} pending={pending}>{children}</QuestionSection>
+  const field = (key: 'want' | 'pressure' | 'climax' | 'goal' | 'antagonist' | 'power_range') => <EditableText value={volume[key] ?? ''} onSave={value => save({ id: volume.id, [key]: value })} locked={locked} multiline />
+
+  return <div data-testid="volume-questions">
+    <PageHeader
+      eyebrow={`第${volume.index}卷`}
+      title={<EditableText value={volume.title} onSave={title => save({ id: volume.id, title })} locked={locked} inputClassName="font-serif text-[26px] font-bold" />}
+      action={<div className="flex items-center gap-2"><Badge tone={tone}>{label}</Badge>{total > 0 && <span className="text-sm text-ink-2">共约 {total} 章</span>}</div>}
+      subtitle={<EditableText value={volume.summary} onSave={summary => save({ id: volume.id, summary })} locked={locked} multiline />}
+    />
+    {firstSetup && <><PieceDecisions piece="first_volume" /><FocusQuestions piece="first_volume" /></>}
+    <Locked locked={working} />
+    <FactTable className="mb-6" rows={[
+      { label: '舞台', value: <EditableText value={volume.stage} onSave={stage => save({ id: volume.id, stage })} locked={locked} multiline /> },
+      { label: '预计章数', value: <div className="flex items-center gap-2"><EditableText value={String(volume.chapter_count || '')} placeholder="（未定）" onSave={value => {
+        const chapter_count = Number(value)
+        if (!Number.isInteger(chapter_count) || chapter_count < 1) return Promise.reject(new Error('预计章数请填大于 0 的整数'))
+        return save({ id: volume.id, chapter_count })
+      }} locked={locked} /><span className="text-xs text-ink-2">章{volume.units.length > 0 && ` · 已拆单元共 ${total} 章`}</span></div> },
+    ]} />
+    {targetNode && <section aria-label="本卷走向" className="mb-6 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-paper-2 px-4 py-3 text-sm">
+      <span className="text-ink-2">走向：</span>
+      <button type="button" onClick={() => manualNavigate(`/books/${bookId}/spine#story-node-${targetNode.id}`)} className="font-medium text-chief underline decoration-chief/35 underline-offset-4 hover:decoration-chief focus-visible:outline-2 focus-visible:outline-chief">节点 {targetNode.index}「{targetNode.title}」</button>
+      <span className={clsx('inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs', targetNode.status === 'pinned' ? 'border-seal/35 bg-seal-soft text-seal' : 'border-dashed border-chief/50 text-chief')}>{targetNode.status === 'pinned' ? <><Pin className="size-3" />铁钉</> : targetNode.status === 'empty' ? '留空' : '暂定'}</span>
+      {volume.reaches_node && <span className="text-xs text-seal">本卷发生</span>}
+    </section>}
+    {section('want', field('want'))}
+    {section('pressure', field('pressure'))}
+    {section('climax', <div className="space-y-4"><QuestionField label="卷末高潮">{field('climax')}</QuestionField><QuestionField label="卷末结果">{field('goal')}</QuestionField></div>)}
+    {section('rival', field('antagonist'))}
+    {(volume.thread_beats.length > 0 || volume.editor_note || volume.techniques?.length > 0) && <section className="mb-7 space-y-4 border-b border-line pb-6">
+      {volume.thread_beats.length > 0 && <FieldBlock label="本卷推进的线索"><ThreadChips steps={volume.thread_beats} /></FieldBlock>}
+      <EditorAnnotations note={volume.editor_note} techniques={volume.techniques} />
+    </section>}
+    {volume.recap && <Reveal><section className="mb-8 border-b border-line pb-8"><p className="mb-1.5 text-xs tracking-[0.15em] text-lore">卷回顾 · 这一卷写完后设定师写的，后面各卷规划和写作都靠它记住前情</p><p className="font-serif text-[15px] leading-relaxed whitespace-pre-wrap text-ink-2">{volume.recap}</p></section></Reveal>}
+    {section('units', volume.units.length > 0 ? <div>{volume.units.map((unit, i) => <UnitCard key={unit.id} unit={unit} chapters={chapters.filter(chapter => chapter.unit_id === unit.id)} bookId={bookId} locked={working} delay={0.06 * i} last={i === volume.units.length - 1} ledger={bible?.foreshadowings ?? []} />)}</div> : <div className="py-6 text-center"><p className="font-serif text-lg text-ink-2">这一卷还没有拆成剧情单元</p><p className="mt-2 text-sm leading-relaxed text-ink-2">{volume.chapter_count > 0 ? `这一卷计划约 ${volume.chapter_count} 章。` : ''}写到这一卷之前，主编会按总纲和线索把它拆成剧情单元，再请你拍板。</p></div>)}
+    {section('growth', field('power_range'))}
+    {section('newcomers', <EditableList items={volume.new_characters ?? []} onSave={new_characters => save({ id: volume.id, new_characters })} locked={locked} />)}
+    {opening && section('landing', <div className="space-y-4"><FactTable rows={OPENING_FIELDS.map(([key, label]) => ({ label, value: <p className="whitespace-pre-wrap text-sm leading-relaxed">{opening[key] || '（未定）'}</p> }))} /><p className="text-xs text-ink-2">第一个单元出章纲时照这个来</p><button type="button" onClick={() => manualNavigate(`/books/${bookId}/spine#q-opening`)} className="text-sm text-chief underline decoration-chief/35 underline-offset-4 focus-visible:outline-2 focus-visible:outline-chief">去第一段面板查看和修改开篇 →</button></div>)}
+  </div>
 }

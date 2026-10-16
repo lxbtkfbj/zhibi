@@ -101,7 +101,7 @@ function BookWorkspace({ bookId, book }: { bookId: string; book: BookDetail }) {
   }, [following, targetPath, navigate])
   const captureManualLink = (event: MouseEvent<HTMLDivElement>) => {
     const href = (event.target as Element).closest('a[href]')?.getAttribute('href')
-    if (href?.startsWith(`/books/${bookId}`) && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.button === 0) { setFollowing(false); setTab('manuscript') }
+    if ((href?.startsWith(`/books/${bookId}`) || href?.startsWith('#')) && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.button === 0) { setFollowing(false); setTab('manuscript') }
   }
   const ctx: BookContextValue = { bookId, book, job, messages, connected, draft, working, waiting, asking, outline, conversation, setConversation, unread, following, followTarget, manualNavigate, focusComposer, requestFeedback, requestNodeFeedback, composerNode, setComposerNode, composerDrafts, setComposerDrafts, celebrate }
   const progress = progressText(book, messages, draft, followTarget, { nodes, volumes: outline?.volumes ?? [], chapters })

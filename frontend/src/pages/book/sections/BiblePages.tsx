@@ -2,17 +2,18 @@ import { useReducedMotion } from '../../../lib/appearance'
 import clsx from 'clsx'
 import { BookOpen, Castle, Gem, Landmark, MapPin, Mountain, Plus, ScrollText, Sparkles, Trash2, Zap } from 'lucide-react'
 import { motion } from 'motion/react'
-import { type ReactNode, useMemo, useState } from 'react'
+import { type ReactNode, useEffect, useMemo, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { useBible, useBibleMutations, useNodes } from '../../../api/hooks'
 import type { Character, Foreshadowing, ForeshadowingStatus } from '../../../api/types'
 import { EditableText } from '../../../components/Editable'
 import { Badge, Button, Card, EmptyState, ErrorText, inputClass, Sheet, Skeleton } from '../../../components/ui'
 import type { Tone } from '../../../lib/status'
-import { worldFields } from '../../../lib/setupPresentation'
 import { useBookContext } from '../context'
 import { PieceDecisions } from '../PieceDecisions'
 import { CharacterAnchors } from './CharacterAnchors'
 import { FieldBlock, Locked, PageHeader } from './common'
+import { WorldSetup } from './WorldSetup'
 
 function Stagger({ i, children, className }: { i: number; children: ReactNode; className?: string }) {
   const reduce = useReducedMotion()
@@ -113,6 +114,18 @@ export function CharactersPage() {
   const [openId, setOpenId] = useState<string | null>(null)
   const characters = data?.characters ?? []
   const opened = characters.find((c) => c.id === openId)
+  const { hash, key: locationKey } = useLocation()
+  const reduce = useReducedMotion()
+  useEffect(() => {
+    if (!hash.startsWith('#character-')) return
+    const frame = requestAnimationFrame(() => {
+      const target = document.getElementById(hash.slice(1))
+      if (!target) return
+      target.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'center' })
+      target.focus({ preventScroll: true })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [hash, locationKey, data, reduce])
 
   const add = async () => {
     const name = prompt('新人物的名字')?.trim()
@@ -150,7 +163,7 @@ export function CharactersPage() {
           const style = ROLE_STYLE[c.role_type] ?? DEFAULT_ROLE
           return (
             <Stagger key={c.id} i={i}>
-              <button onClick={() => setOpenId(c.id)} className="block h-full w-full text-left">
+              <button id={`character-${c.id}`} tabIndex={0} onClick={() => setOpenId(c.id)} className="block h-full w-full scroll-mt-6 rounded-xl text-left focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-chief">
                 <Card hover className="flex h-full flex-col p-5">
                   <div className="flex items-center gap-3">
                     <span className={clsx('flex size-12 items-center justify-center rounded-full font-serif text-xl font-bold ring-2', style.bg, style.text, style.ring)}>
@@ -189,7 +202,7 @@ export function CharactersPage() {
   )
 }
 
-// ---------- 世界观 ----------
+// ---------- 世界与地图 ----------
 
 const CATEGORIES: Record<string, ReactNode> = {
   力量体系: <Zap className="size-4" />,
@@ -202,8 +215,8 @@ const CATEGORIES: Record<string, ReactNode> = {
 }
 
 export function WorldPage() {
-  const { book, manualNavigate } = useBookContext()
-  const { bookId, locked, data, isLoading } = useBibleData()
+  const { book } = useBookContext()
+  const { bookId, locked, data, isLoading, error } = useBibleData()
   const { create, update, remove } = useBibleMutations(bookId, 'world_entries')
   const [category, setCategory] = useState('其他')
   const [name, setName] = useState('')
@@ -212,14 +225,17 @@ export function WorldPage() {
     const order = [...Object.keys(CATEGORIES), ...new Set(entries.map((e) => e.category))]
     return [...new Set(order)].map((cat) => ({ cat, items: entries.filter((e) => e.category === cat) })).filter((g) => g.items.length)
   }, [entries])
+  const hasWorld = !!Object.keys(book.world ?? {}).length
+  const settingUp = book.status === 'setting_up' || book.status === 'awaiting_approval'
 
   return (
     <div>
-      <PieceDecisions piece="world" />
-      <PageHeader eyebrow="设定库" title="世界观" subtitle="力量体系、势力、地理与规则。好的设定都有限制和代价。" />
-      {!!Object.keys(book.world ?? {}).length && <section aria-label="世界与地图" className="mb-8 space-y-5 border-b border-line pb-7">{worldFields(book.world).map(({ label, value }) => <FieldBlock key={label} label={label}><p className="text-sm leading-relaxed whitespace-pre-wrap">{value || '（未定）'}</p></FieldBlock>)}<div className="flex gap-4 text-sm text-chief">{[['这里的人', 'characters'], ['人物关系', 'relations']].map(([label, path]) => <a key={path} href={`/books/${bookId}/${path}`} onClick={event => { event.preventDefault(); manualNavigate(`/books/${bookId}/${path}`) }} className="underline underline-offset-4">{label} →</a>)}</div></section>}
+      <PageHeader eyebrow="世界与地图" title={hasWorld && settingUp ? '世界、第一张地图和这里的人' : '世界与地图'} subtitle="近处写细，远处先留影子；写到这里之前，再把下一张地图定下来。" />
+      {hasWorld && <PieceDecisions piece="world" />}
       <Locked locked={locked} />
       {isLoading && <Skeleton className="h-48" />}
+      {hasWorld && <WorldSetup bible={data} />}
+      <h2 className="mb-6 border-t border-line pt-6 font-serif text-lg font-bold">设定条目 <span className="font-sans text-xs font-normal text-ink-2">· 写手写正文时查</span></h2>
       <div className="space-y-9">
         {groups.map(({ cat, items }) => (
           <section key={cat}>
@@ -264,8 +280,10 @@ export function WorldPage() {
             disabled={!name.trim()}
             loading={create.isPending}
             onClick={async () => {
-              await create.mutateAsync({ category, name: name.trim(), content: '' })
-              setName('')
+              try {
+                await create.mutateAsync({ category, name: name.trim(), content: '' })
+                setName('')
+              } catch { /* 保留输入和错误，供作者重试。 */ }
             }}
           >
             <Plus className="size-4" />
@@ -273,6 +291,7 @@ export function WorldPage() {
           </Button>
         </section>
       )}
+      <ErrorText error={error ?? create.error ?? update.error ?? remove.error} />
     </div>
   )
 }

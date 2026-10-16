@@ -29,6 +29,7 @@ export function EditableText({ value, onSave, locked, multiline, placeholder = '
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const ref = useRef<HTMLTextAreaElement>(null)
+  const committing = useRef(false)
   useAutosize(ref, draft, editing)
 
   const startEditing = () => {
@@ -44,10 +45,12 @@ export function EditableText({ value, onSave, locked, multiline, placeholder = '
   }, [editing])
 
   const commit = async () => {
+    if (committing.current || locked) return
     if (draft === value) {
       setEditing(false)
       return
     }
+    committing.current = true
     setSaving(true)
     setError('')
     try {
@@ -56,12 +59,15 @@ export function EditableText({ value, onSave, locked, multiline, placeholder = '
     } catch (e) {
       setError(e instanceof Error ? e.message : '保存失败')
     } finally {
+      committing.current = false
       setSaving(false)
     }
   }
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.nativeEvent.isComposing || saving) return
     if (e.key === 'Escape') {
+      e.preventDefault()
       setDraft(value)
       setEditing(false)
     } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey || !multiline)) {
@@ -72,20 +78,22 @@ export function EditableText({ value, onSave, locked, multiline, placeholder = '
 
   if (editing) {
     return (
-      <div className="relative">
+      <div className={clsx('relative -mx-2', className)}>
         <textarea
           ref={ref}
           value={draft}
           rows={1}
+          disabled={saving || locked}
+          aria-label="编辑文字"
           onChange={(e) => setDraft(e.target.value)}
           onBlur={() => void commit()}
           onKeyDown={onKeyDown}
           className={clsx(
-            'w-full resize-none rounded-md border border-seal/50 bg-card px-2 py-1 leading-relaxed text-ink focus:outline-none focus:ring-2 focus:ring-seal/15',
+            'block w-full resize-none rounded-md border border-seal/50 bg-card px-[7px] py-px leading-relaxed text-ink focus:outline-none focus:ring-2 focus:ring-seal/15',
             inputClassName,
           )}
         />
-        <div className="mt-1 flex items-center gap-2 text-xs text-ink-2">
+        <div className="mt-1 flex items-center gap-2 px-2 font-sans text-xs font-normal text-ink-2">
           {saving ? <Spinner className="size-3" /> : <Check className="size-3" />}
           {multiline ? 'Ctrl+Enter 保存，Esc 取消' : 'Enter 保存，Esc 取消'}
           {error && <span className="text-seal">{error}</span>}
@@ -101,7 +109,7 @@ export function EditableText({ value, onSave, locked, multiline, placeholder = '
       onClick={() => !locked && startEditing()}
       onKeyDown={(e) => !locked && e.key === 'Enter' && startEditing()}
       className={clsx(
-        'group relative -mx-1 rounded-md px-1 leading-relaxed whitespace-pre-wrap',
+        'group relative -mx-2 rounded-md px-2 py-0.5 pr-6 leading-relaxed whitespace-pre-wrap',
         !locked && 'cursor-text hover:bg-line/40',
         className,
       )}
@@ -109,7 +117,7 @@ export function EditableText({ value, onSave, locked, multiline, placeholder = '
     >
       {value || <span className="text-ink-3">{placeholder}</span>}
       {!locked && (
-        <Pencil className="absolute top-1 -right-4 size-3 text-ink-3 opacity-0 transition-opacity group-hover:opacity-100" />
+        <Pencil aria-hidden className="absolute top-1.5 right-1.5 size-3 text-ink-3 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 motion-reduce:transition-none" />
       )}
     </div>
   )
@@ -138,6 +146,7 @@ export function EditableList({
           await onSave(text.split('\n').map((s) => s.trim()).filter(Boolean))
         }}
         onDone={() => setEditing(false)}
+        locked={locked}
       />
     )
   }
@@ -147,7 +156,7 @@ export function EditableList({
       tabIndex={locked ? undefined : 0}
       onClick={() => !locked && setEditing(true)}
       onKeyDown={(e) => !locked && e.key === 'Enter' && setEditing(true)}
-      className={clsx('group -mx-1 rounded-md px-1', !locked && 'cursor-text hover:bg-line/40')}
+      className={clsx('group relative -mx-2 rounded-md px-2 py-0.5 pr-6', !locked && 'cursor-text hover:bg-line/40')}
       title={locked ? '编辑部工作时不能修改' : '点击修改（每行一条）'}
     >
       {items.length ? (
@@ -162,43 +171,57 @@ export function EditableList({
       ) : (
         <span className="text-ink-3">{placeholder}</span>
       )}
+      {!locked && <Pencil aria-hidden className="absolute top-1.5 right-1.5 size-3 text-ink-3 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 motion-reduce:transition-none" />}
     </div>
   )
 }
 
-function EditableTextAutoOpen({ value, onSave, onDone }: { value: string; onSave: (v: string) => Promise<void>; onDone: () => void }) {
+function EditableTextAutoOpen({ value, onSave, onDone, locked }: { value: string; onSave: (v: string) => Promise<void>; onDone: () => void; locked?: boolean }) {
   const [draft, setDraft] = useState(value)
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const committing = useRef(false)
   const ref = useRef<HTMLTextAreaElement>(null)
   useAutosize(ref, draft, true)
   useEffect(() => ref.current?.focus(), [])
   const commit = async () => {
+    if (committing.current || locked) return
     if (draft !== value) {
+      committing.current = true
       setSaving(true)
+      setError('')
       try {
         await onSave(draft)
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : '保存失败')
+        return
       } finally {
+        committing.current = false
         setSaving(false)
       }
     }
     onDone()
   }
   return (
-    <div>
+    <div className="-mx-2">
       <textarea
         ref={ref}
         value={draft}
         rows={2}
+        disabled={saving || locked}
+        aria-label="编辑列表，每行一条"
         onChange={(e) => setDraft(e.target.value)}
         onBlur={() => void commit()}
         onKeyDown={(e) => {
+          if (e.nativeEvent.isComposing || saving) return
           if (e.key === 'Escape') onDone()
-          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) void commit()
+          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void commit() }
         }}
-        className="w-full resize-none rounded-md border border-seal/50 bg-card px-2 py-1 leading-relaxed focus:outline-none focus:ring-2 focus:ring-seal/15"
+        className="block w-full resize-none rounded-md border border-seal/50 bg-card px-[7px] py-px leading-relaxed focus:outline-none focus:ring-2 focus:ring-seal/15"
       />
-      <div className="mt-1 flex items-center gap-2 text-xs text-ink-2">
+      <div className="mt-1 flex items-center gap-2 px-2 text-xs text-ink-2">
         {saving && <Spinner className="size-3" />}每行一条 · Ctrl+Enter 保存 · Esc 取消
+        {error && <span role="alert" className="text-seal">{error}</span>}
       </div>
     </div>
   )

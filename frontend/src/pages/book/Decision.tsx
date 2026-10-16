@@ -1,4 +1,5 @@
-import { LEGACY_SETUP_NOTICE, needsSetupRestart } from '../../lib/setupPresentation'
+import { needsSetupRestart } from '../../lib/setupPresentation'
+import { SetupRestartCard } from './SetupRestartCard'
 import clsx from 'clsx'
 import { AlertTriangle, Check, CirclePause, PenLine, RotateCcw, Stamp } from 'lucide-react'
 import { useState } from 'react'
@@ -36,7 +37,7 @@ function NodeUpdateComparison({ proposal }: { proposal: NodeUpdateProposal }) {
 
 export function DecisionBar() {
   const { book, bookId, job, waiting, requestFeedback, manualNavigate, celebrate } = useBookContext()
-  const { pieceAction, restartSetup } = useJobActions(bookId)
+  const { pieceAction } = useJobActions(bookId)
   const reduce = useReducedMotion()
   const pending = job?.pending
   const volumePending = pending?.kind === 'volume_review' ? pending : null
@@ -55,9 +56,7 @@ export function DecisionBar() {
     } catch { /* 失败保留待确认内容。 */ }
   }
   if (needsSetupRestart(book, job) && job) return <div data-testid="restart-setup-bar" className="z-10 max-h-[42vh] shrink-0 overflow-y-auto border-b border-seal/25 bg-paper-2 px-5 py-3">
-    <p className="text-sm leading-relaxed text-seal">{LEGACY_SETUP_NOTICE}</p>
-    <Button className="mt-3" size="sm" variant="seal" loading={restartSetup.isPending} disabled={restartSetup.isPending} onClick={() => restartSetup.mutate(job.id)}>按新流程重开</Button>
-    <ErrorText error={restartSetup.error} />
+    <SetupRestartCard />
   </div>
   return <AnimatePresence initial={false}>{waiting && job && target && <motion.div key="decision" data-testid="decision-bar" initial={reduce ? false : { opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: reduce ? 0 : 0.28, ease: 'easeOut' }} className="z-10 max-h-[42vh] shrink-0 overflow-y-auto border-b border-seal/25 bg-paper-2 px-5 py-3">
     <div className="flex flex-wrap items-center justify-between gap-3">
@@ -73,7 +72,7 @@ export function DecisionBar() {
       <summary className="cursor-pointer text-xs text-ink-2">提醒与审稿建议（{reminders}）</summary>
       <ul className="mt-3 space-y-3 text-sm leading-relaxed text-ink-2">
         {piece.warnings?.map((warning, index) => <li key={`warning-${index}`}><span className="mr-2 text-xs text-seal">提醒</span>{warning}</li>)}
-        {review.map((issue, index) => <li key={`review-${index}`}><span className="mr-2 text-xs text-chief">本块审稿</span>{issue.problem}<p className="mt-1">{issue.suggestion}</p></li>)}
+        {review.map((issue, index) => <li key={`review-${index}`}>审稿：{issue.problem}——{issue.suggestion}</li>)}
         {piece.suggestions?.map((suggestion, index) => <li key={`suggestion-${index}`}><span className="mr-2 text-xs text-chief">审稿建议</span>{suggestion.problem}<p className="mt-1">{suggestion.suggestion}</p><Button size="sm" variant="ghost" className="mt-1" disabled={pieceAction.isPending} loading={pieceAction.isPending && pieceAction.variables?.feedback === `${suggestion.problem}\n${suggestion.suggestion}`} onClick={() => pieceAction.mutate({ jobId: job.id, action: 'unlock', piece: targetPiece[suggestion.target], feedback: `${suggestion.problem}\n${suggestion.suggestion}` })}>解锁并修改</Button></li>)}
         {piece.unlock_requests?.map((request, index) => <li key={`unlock-${index}`}><span className="mr-2 text-xs text-chief">解锁请求</span>{request.reason}<div><Button size="sm" variant="ghost" className="mt-1" disabled={pieceAction.isPending} loading={pieceAction.isPending && pieceAction.variables?.feedback === request.reason} onClick={() => pieceAction.mutate({ jobId: job.id, action: 'unlock', piece: targetPiece[request.target], feedback: request.reason })}>解锁并修改</Button></div></li>)}
       </ul>

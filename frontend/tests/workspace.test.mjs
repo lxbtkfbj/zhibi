@@ -119,3 +119,13 @@ test('direction loading differentiates preparing options from following an actua
   assert.equal(directionProgressText('job', [{...chosen,kind:'note'}]), '主编正在拟定开书方向…')
   assert.equal(directionProgressText('job', [{...chosen,speaker:'chief'}]), '主编正在拟定开书方向…')
 })
+
+
+test('旧流程任务的群聊不可提意见，点名私聊始终只记要求', () => {
+  for (const status of ['queued', 'running', 'waiting_author', 'failed', 'cancelled']) {
+    const legacy = { kind: 'book_setup', setup_flow: 1, status, pending: { kind: 'setup_piece', piece: 'nodes' } }
+    assert.equal(composerRoute(legacy, '保留原文', null).kind, 'blocked')
+    assert.equal(composerRoute(legacy, '保留原文', null, true).kind, 'note')
+  }
+  assert.equal(composerRoute({ kind: 'book_setup', setup_flow: 2, status: 'waiting_author', pending: { kind: 'setup_piece', piece: 'world' } }, '修改', null, true).kind, 'piece')
+})

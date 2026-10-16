@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { LATER_ANSWER, LEGACY_SETUP_NOTICE, needsSetupRestart, protagonistFields, segmentFields, worldFields } from '../src/lib/setupPresentation.ts'
+import { LATER_ANSWER, LEGACY_SETUP_NOTICE, needsSetupRestart, protagonistFields, segmentFields, setupOverviewStats, worldFields } from '../src/lib/setupPresentation.ts'
 import { isWritingComplete, targetPiece, writingPosition, writingPositionText } from '../src/lib/storyMap.ts'
 import { progressText } from '../src/lib/workspace.ts'
 
@@ -55,4 +55,13 @@ test('新书第一段写完但未到结局时不显示全书完结，旧书与�
   assert.equal(isWritingComplete([{ ...volumes[0], target_node_id: 'final' }], chapters, nodes), true)
   assert.equal(writingPositionText(writingPosition(nodes, volumes, chapters), volumes, chapters, nodes), '这一段已写完，下一段待规划')
   assert.equal(progressText({ chapters_final: 1, status: 'writing', active_job: null }, [], null, null, { nodes, volumes, chapters }), '第 1 卷 · 已定稿 1 章 · 这一段已写完，下一段待规划')
+})
+
+
+test('分段书只统计已规划卷，全书约章数来自概念；旧书仍按完整卷卡统计', () => {
+  const concept = { target_length: 200, chapter_words: 3000 }
+  const volumes = [{ chapter_count: 31 }, { chapter_count: 30 }]
+  assert.deepEqual(setupOverviewStats(concept, volumes, [{ segment: { number: 1 } }]), { segmented: true, volumeLabel: '已规划 2 卷', chapters: 667 })
+  assert.deepEqual(setupOverviewStats(concept, volumes, [{ segment: null }, { segment: {} }]), { segmented: false, volumeLabel: '全书 2 卷', chapters: 61 })
+  assert.equal(setupOverviewStats({}, volumes, [{ segment: { number: 1 } }]).chapters, 0)
 })

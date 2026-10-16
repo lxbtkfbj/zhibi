@@ -4,17 +4,19 @@ import { useBible, useChapters, useNodes, useOutline } from '../../../api/hooks'
 import { Cloud } from '../../../components/decor'
 import { StoryMapStrip } from '../../../components/StoryMapStrip'
 import { Button, Card, CountUp, Reveal } from '../../../components/ui'
-import { cleanTitle, cleanVolumeTitle, totalChapters } from '../../../lib/status'
-import { needsSetupRestart } from '../../../lib/setupPresentation'
+import { cleanTitle, cleanVolumeTitle } from '../../../lib/status'
+import { needsSetupRestart, setupOverviewStats } from '../../../lib/setupPresentation'
+import { firstSegment } from '../../../lib/setupSegment'
 import { directionProgressText } from '../../../lib/workspace'
 import { useBookContext } from '../context'
 import { InterviewForm, ResumeControls } from '../Decision'
 import { DirectionSelection } from '../DirectionSelection'
+import { SetupRestartCard } from '../SetupRestartCard'
 import { PageHeader } from './common'
 
 function NextStep() {
   const { book, job, bookId, messages } = useBookContext()
-  if (needsSetupRestart(book, job)) return null
+  if (needsSetupRestart(book, job)) return <div data-testid="restart-setup-overview"><p className="mb-2 text-xs text-ink-2">下一步</p><SetupRestartCard /></div>
   if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_directions') {
     return <DirectionSelection key={`${job.id}-${job.updated_at}`} job={job} pending={job.pending} />
   }
@@ -51,11 +53,12 @@ function NextStep() {
   return null
 }
 
-function Stat({ value, label, suffix }: { value: number; label: string; suffix: string }) {
+function Stat({ value, label, suffix, prefix }: { value: number; label: string; suffix: string; prefix?: string }) {
   return (
     <div className="px-1 py-2">
       <p className="text-xs text-ink-2">{label}</p>
       <p className="mt-1 font-serif text-3xl font-bold">
+        {prefix && <span className="mr-1 text-sm font-normal text-ink-2">{prefix}</span>}
         <CountUp value={value} />
         <span className="ml-1 text-sm font-normal text-ink-2">{suffix}</span>
       </p>
@@ -75,7 +78,12 @@ export function Overview() {
   const ending = nodes.find((node) => node.kind === 'ending')
   const first = outline?.volumes[0]
   const chapters = first?.units.reduce((sum, u) => sum + u.chapter_count, 0) || first?.chapter_count || 0
-  const total = totalChapters(concept, outline?.volumes ?? [])
+  const overviewStats = setupOverviewStats(concept, outline?.volumes ?? [], nodes)
+  const total = overviewStats.chapters
+  const segmented = overviewStats.segmented
+  const endpoint = firstSegment(nodes).endpoint
+  const protagonist = book.protagonist
+  const hasProtagonist = !!protagonist && Object.keys(protagonist).length > 0
   const volumes = outline?.volumes.length ?? 0
   const writing = book.chapters_final > 0
   const stats = [
@@ -89,9 +97,9 @@ export function Overview() {
         ? { value: Math.round(book.words_final / 10000), label: '已写', suffix: '万字' }
         : { value: book.words_final, label: '已写', suffix: '字' }
       : total
-        ? { value: total, label: `全书 ${volumes} 卷`, suffix: '章' }
+        ? { value: total, label: overviewStats.volumeLabel, prefix: segmented ? '全书约' : undefined, suffix: '章' }
         : { value: volumes, label: '计划', suffix: '卷' },
-    writing && total ? { value: total, label: `全书 ${volumes} 卷`, suffix: '章' } : { value: chapters, label: '第一卷', suffix: '章' },
+    writing && total ? { value: total, label: overviewStats.volumeLabel, prefix: segmented ? '全书约' : undefined, suffix: '章' } : { value: chapters, label: '第一卷', suffix: '章' },
     { value: bible?.characters.length ?? 0, label: '人物', suffix: '位' },
   ]
 
@@ -110,7 +118,7 @@ export function Overview() {
         </Reveal>
       )}
 
-      {concept.selling_points && concept.selling_points.length > 0 && (
+      {(hasProtagonist || concept.protagonist_hook || !!concept.selling_points?.length) && (
         <Reveal delay={0.14} className="mt-8 grid gap-8 border-b border-line pb-8 @2xl/manuscript:grid-cols-5">
           <section className="@2xl/manuscript:col-span-3">
             <div className="mb-3 flex items-center justify-between">
@@ -123,7 +131,7 @@ export function Overview() {
               </Link>
             </div>
             <ul className="space-y-2.5 text-[15px] leading-relaxed">
-              {concept.selling_points.map((p) => (
+              {concept.selling_points?.map((p) => (
                 <li key={p} className="flex gap-2.5">
                   <span className="mt-[9px] size-1.5 shrink-0 rotate-45 bg-seal" />
                   {p}
@@ -134,9 +142,13 @@ export function Overview() {
           <section className="@2xl/manuscript:col-span-2">
             <h3 className="mb-3 flex flex-wrap items-center gap-2 font-serif text-lg font-bold">
               <Users className="size-4 text-lore" />
-              {concept.core_loop ? '核心循环' : concept.protagonist_hook ? '主角钩子' : '基调与文风'}
+              {hasProtagonist ? '主角' : concept.protagonist_hook ? '主角钩子' : '基调与文风'}
             </h3>
-            <p className="font-serif text-[17px] leading-relaxed text-ink-2">{concept.core_loop || concept.protagonist_hook || concept.tone}</p>
+            {hasProtagonist ? <div className="space-y-2 text-sm leading-relaxed text-ink-2" data-testid="overview-protagonist">
+              <p><span className="text-ink">姓名：</span><Link to={`${base}/protagonist`} className="text-chief underline-offset-4 hover:underline">{protagonist.name || '（未定）'}</Link></p>
+              <p><span className="text-ink">长线追求：</span>{protagonist.pursuit || '（未定）'}</p>
+              <p><span className="text-ink">开局动机：</span>{protagonist.trigger || '（未定）'}</p>
+            </div> : <p className="font-serif text-[17px] leading-relaxed text-ink-2">{concept.protagonist_hook || concept.tone}</p>}
             <p className="mt-4 text-sm text-ink-2">基调：{concept.tone}</p>
           </section>
         </Reveal>
@@ -155,7 +167,7 @@ export function Overview() {
                 完整地图 →
               </Link>
             </div>
-            {writing ? <StoryMapStrip nodes={nodes} volumes={outline?.volumes ?? []} chapters={chapterList} onNodeSelect={node => manualNavigate(`${base}/spine#story-node-${node.id}`)} /> : <div className="grid gap-4 @2xl/manuscript:grid-cols-2">
+            {writing ? <StoryMapStrip nodes={nodes} volumes={outline?.volumes ?? []} chapters={chapterList} onNodeSelect={node => manualNavigate(`${base}/spine#story-node-${node.id}`)} /> : <div data-testid="overview-map" className={`grid gap-4 ${segmented ? '@2xl/manuscript:grid-cols-3' : '@2xl/manuscript:grid-cols-2'}`}>
               <div className="border-l border-line pl-4">
                 <p className="mb-1 flex items-center gap-1.5 text-xs text-ink-2">
                   <Flag className="size-3.5" />
@@ -163,10 +175,11 @@ export function Overview() {
                 </p>
                 <p className="line-clamp-4 text-[14px] leading-relaxed">{opening?.event || '（未定）'}</p>
               </div>
+              {segmented && <div className="border-l border-line pl-4"><p className="mb-1 text-xs text-chief">第一段的终点</p><p className="line-clamp-4 text-sm leading-relaxed">{endpoint?.event || '（未定）'}</p></div>}
               <div className="border-l border-line pl-4">
                 <p className="mb-1 flex items-center gap-1.5 text-xs text-seal">
                   <Flag className="size-3.5" />
-                  结局
+                  {segmented ? '结局方向' : '结局'}
                 </p>
                 <p className="line-clamp-4 text-[14px] leading-relaxed">{ending?.event || '（未定）'}</p>
               </div>

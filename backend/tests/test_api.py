@@ -384,7 +384,7 @@ async def note_book(sessionmaker, kind=None, status="queued", pending=None):
                 status=status,
                 pending=pending,
                 thread_id=f"note-{uuid.uuid4()}",
-                params={},
+                params={"flow": 2} if kind == "book_setup" else {},
             )
             session.add(job)
         await session.commit()

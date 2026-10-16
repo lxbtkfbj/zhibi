@@ -16,9 +16,11 @@ import type {
   NodeAnchor,
   Outline,
   PlotUnit,
+  Protagonist,
   Relationship,
   RoleAssignments,
   Secret,
+  SegmentPlan,
   SetupPiece,
   StoryNode,
   StoryThread,
@@ -26,6 +28,7 @@ import type {
   Usage,
   Volume,
   WorldEntry,
+  World,
   WriteUntil,
 } from './types'
 
@@ -96,7 +99,7 @@ export function useUpdateBook(bookId: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (
-      body: Partial<{ title: string; style_reference: string; concept: Record<string, unknown>; spine: Record<string, unknown> }>,
+      body: Partial<{ title: string; style_reference: string; concept: Record<string, unknown>; spine: Record<string, unknown>; protagonist: Partial<Protagonist>; world: Partial<World> }>,
     ) =>
       patch<BookDetail>(`/books/${bookId}`, body),
     onSuccess: (data) => {
@@ -125,7 +128,7 @@ export function useNodeMutations(bookId: string) {
     onSuccess: refresh,
   })
   const update = useMutation({
-    mutationFn: ({ id, ...body }: { id: string } & Partial<Pick<StoryNode, NodeFields | 'editor_note'>>) =>
+    mutationFn: ({ id, ...body }: { id: string; segment?: Partial<SegmentPlan> } & Partial<Pick<StoryNode, NodeFields | 'editor_note'>>) =>
       patch<StoryNode>(`/nodes/${id}`, body),
     onSuccess: (node) => qc.setQueryData<StoryNode[]>(keys.nodes(bookId), (old) => patchInCache(old, node)),
   })
@@ -308,6 +311,7 @@ export function useJobActions(bookId: string) {
       onSuccess: setJob,
     }),
     restartSetup: useMutation({
+      mutationKey: ['restart-setup', bookId],
       mutationFn: (jobId: string) => post<Job>(`/jobs/${jobId}/restart-setup`),
       onSuccess: (job) => {
         setJob(job)

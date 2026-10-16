@@ -1,4 +1,15 @@
-import type { BookDetail, Job } from '../api/types'
+import type { BookDetail, Concept, Job, StoryNode, Volume } from '../api/types'
+import { totalChapters } from './status.ts'
+
+/** 分段只规划近处卷卡，不能用这几卷的章数冒充全书篇幅。旧书沿用原统计。 */
+export function setupOverviewStats(concept: Concept, volumes: Pick<Volume, 'chapter_count'>[], nodes: Pick<StoryNode, 'segment'>[]) {
+  const segmented = nodes.some(node => !!node.segment && Object.keys(node.segment).length > 0)
+  return {
+    segmented,
+    volumeLabel: `${segmented ? '已规划' : '全书'} ${volumes.length} 卷`,
+    chapters: segmented ? totalChapters(concept, []) : totalChapters(concept, volumes),
+  }
+}
 
 export type SetupField = { label: string; value: string }
 export const LATER_ANSWER = '先空着，写到这里时主编会来问你'
