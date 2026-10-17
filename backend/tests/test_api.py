@@ -21,6 +21,7 @@ from app.main import create_app
 from app.models import Book, Job, MeetingMessage, StoryThread
 from app.services import jobs
 from app.services.job_runner import execute_job
+from tests.test_setup_puzzle_flow import legacy_piece_gates  # noqa: F401
 
 
 @pytest.fixture(autouse=True)
@@ -123,7 +124,8 @@ async def test_profiles_and_roles(client):
     assert (await client.post("/api/llm/profiles", json={"name": "演示", "provider": "demo"})).status_code == 409
 
 
-async def test_new_book_flow(client, queued):
+@pytest.mark.usefixtures("legacy_piece_gates")
+async def test_legacy_new_book_flow_still_accepts_outline_feedback(client, queued):
     res = await client.post("/api/books", json={"idea": "一个能看见别人寿命的少年", "mode": "oneshot"})
     assert res.status_code == 201, res.text
     book_id, job_id = res.json()["book"]["id"], res.json()["job"]["id"]
@@ -233,7 +235,7 @@ async def test_sse_replays_history_then_streams(client, queued, live_server):
                     event = line.split(":", 1)[1].strip()
                 elif line.startswith("data:") and event:
                     received.append({"event": event, "data": json.loads(line.split(":", 1)[1])})
-                    if event == "job" and received[-1]["data"]["status"] == "waiting_author":
+                    if event == "job" and received[-1]["data"]["status"] == "succeeded":
                         return
 
     listener = asyncio.create_task(listen())
@@ -249,7 +251,7 @@ async def test_sse_replays_history_then_streams(client, queued, live_server):
 
 
 async def test_ask_is_ignored_and_queued_note_is_read_before_outline(client, queued):
-    """旧 ask 参数忽略；工作中插话仍被消费，三步完成后停在大纲等待。"""
+    """旧 ask 参数忽略；工作中插话仍被消费，三步连续完成但不开写。"""
     res = await client.post("/api/books", json={"idea": "一个能看见别人寿命的少年", "mode": "oneshot", "ask": True})
     book_id, job_id = res.json()["book"]["id"], res.json()["job"]["id"]
     assert res.json()["job"]["setup_flow"] == 3
@@ -268,11 +270,10 @@ async def test_ask_is_ignored_and_queued_note_is_read_before_outline(client, que
     await run_queued(queued)
 
     job = (await client.get(f"/api/jobs/{job_id}")).json()
-    assert job["status"] == "waiting_author"
-    assert job["pending"]["kind"] == "setup_piece" and job["pending"]["piece"] == "outline"
+    assert job["status"] == "succeeded" and not job["pending"]
     book = (await client.get(f"/api/books/{book_id}")).json()
-    assert book["status"] == "setting_up"
-    assert book["setup_progress"]["pieces"] == {"concept": "confirmed", "settings": "confirmed", "outline": "waiting"}
+    assert book["status"] == "ready"
+    assert book["setup_progress"]["pieces"] == dict.fromkeys(("concept", "settings", "outline"), "confirmed")
     nodes = (await client.get(f"/api/books/{book_id}/nodes")).json()
     assert any(node["kind"] == "milestone" for node in nodes)
     assert "milestones" not in book["spine"]
@@ -293,8 +294,9 @@ async def test_ask_is_ignored_and_queued_note_is_read_before_outline(client, que
     assert {"pitches", "concept", "settings_focus", "settings_rest", "outline", "chapter_plan"} <= types
     assert not {"questions", "critique", "segment"}.intersection(types)
     assert "开局节奏一定要快" in book["requirements"]
-    # 大纲等待时继续走本步意见，不接受普通插话和旧 answers 接口。
-    assert (await client.post(f"/api/books/{book_id}/notes", json={"content": "再改改"})).status_code == 409
+    # 连续完成后群聊按空闲处理，不再把这句话交给大纲等待关；旧 answers 仍退役。
+    response = await client.post(f"/api/books/{book_id}/notes", json={"content": "再改改"})
+    assert response.status_code == 201 and response.json()["job_id"] is None
     assert (await client.post(f"/api/jobs/{job_id}/answers", json={})).status_code == 409
 
     ending = next(node for node in nodes if node["kind"] == "ending")
@@ -341,8 +343,7 @@ async def test_write_chapters_and_read_them(client, queued, legacy_thread_book):
     # 方案还没定稿不能开写
     assert (await client.post(f"/api/books/{book_id}/write", json={"count": 1})).status_code == 409
     await run_queued(queued)
-    await client.post(f"/api/jobs/{job_id}/piece", json={"action": "confirm"})
-    await run_queued(queued)
+    assert (await client.get(f"/api/jobs/{job_id}")).json()["status"] == "succeeded"
 
     assert (await client.get(f"/api/books/{book_id}/threads")).json() == []
     threads = (await client.get(f"/api/books/{legacy_thread_book}/threads")).json()

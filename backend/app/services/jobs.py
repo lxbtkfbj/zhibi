@@ -17,6 +17,17 @@ def is_legacy_setup(job: Job) -> bool:
     return job.kind == "book_setup" and (job.params or {}).get("flow") != 3
 
 
+def open_wait(job) -> bool:
+    """等作者挑故事方向的这一步：聊天和方案卡照空闲时处理。"""
+    return (
+        job is not None
+        and job.status == "waiting_author"
+        and job.kind == "book_setup"
+        and not is_legacy_setup(job)
+        and (job.pending or {}).get("kind") == "setup_pitches"
+    )
+
+
 def new_setup_job(book: Book, ask: bool = False, mode: str | None = None, prefill: bool = False) -> Job:
     return Job(
         book_id=book.id,

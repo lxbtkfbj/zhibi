@@ -41,6 +41,7 @@ from app.services.setup_store_v3 import save_library_focus, save_library_rest
 from tests.test_chat_task6 import client as _client  # noqa: F401
 from tests.test_chat_task6 import final_message, seed
 from tests.test_setup_puzzle_flow import flow as _flow
+from tests.test_setup_puzzle_flow import legacy_piece_gates  # noqa: F401
 
 client = _client
 flow = _flow
@@ -254,7 +255,6 @@ async def test_waiting_after_chat_makes_plan_not_feedback(client, sessionmaker):
 @pytest.mark.parametrize(
     "pending,label,action",
     [
-        ({"kind": "setup_pitches"}, "重出三个故事方向", "redo"),
         ({"kind": "setup_piece", "piece": "outline"}, "改大纲", "revise"),
         ({"kind": "segment_review", "flow": 3}, "重出这一篇", "revise"),
         ({"kind": "volume_review"}, "改卷纲", "revise"),
@@ -470,7 +470,8 @@ async def test_plan_edit_stays_undoable_when_followup_review_fails(client, sessi
 
 
 @pytest.mark.parametrize("mode", ["puzzle", "oneshot"])
-async def test_prefill_start_only_here_and_chat_does_not_resume(flow, mode):
+@pytest.mark.usefixtures("legacy_piece_gates", "legacy_prefill")
+async def test_legacy_prefill_start_only_here_and_chat_does_not_resume(flow, mode):
     created = await flow("POST", "/books", {"idea": "先写设定", "mode": mode, "prefill": True})
     bid, jid = created["book"]["id"], created["job"]["id"]
     await flow("POST", f"/books/{bid}/notes", {"content": "下一章快一点"})
@@ -485,7 +486,16 @@ async def test_prefill_start_only_here_and_chat_does_not_resume(flow, mode):
         assert job["pending"]["piece"] == "outline"
 
 
-async def test_prefill_combined_and_existing_text(flow, sessionmaker):
+@pytest.fixture
+def legacy_prefill(monkeypatch):
+    """仅构造已经停在旧 setup_prefill 的检查点；新任务不再走这里。"""
+    from app.graphs import book_setup
+
+    monkeypatch.setattr(book_setup, "route_start", lambda state: "prefill_gate" if state.get("prefill") else "pitches")
+
+
+@pytest.mark.usefixtures("legacy_piece_gates", "legacy_prefill")
+async def test_legacy_prefill_combined_and_existing_text(flow, sessionmaker):
     created = await flow("POST", "/books", {"idea": "作者已有主角和法宝", "mode": "puzzle", "prefill": True})
     bid, jid = created["book"]["id"], created["job"]["id"]
     assert (await flow("GET", f"/jobs/{jid}"))["pending"]["kind"] == "setup_prefill"

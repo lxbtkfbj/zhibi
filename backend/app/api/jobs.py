@@ -203,24 +203,30 @@ async def choose_pitch(
     if body.action == "redo":
         return await feedback_to_job(session, redis, job, body.feedback.strip())
     feedback = body.feedback.strip()
-    if body.action == "pick":
+    if body.action == "fill":
+        book = await session.get(Book, job.book_id)
+        if not (book.concept or {}).get("story", "").strip():
+            raise HTTPException(422, "还没有定调。先挑一个故事方向，或者在群聊里聊定了让我照方案办。")
+        content = "不挑方向了，用现在的定调和设定补齐开书稿。"
+        await add_requirement(session, job.book_id, "开书不挑故事方向，用已经写好的定调和设定补齐。", "answer")
+    elif body.action == "pick":
         pitches = (job.pending or {}).get("pitches") or []
         if body.index is None or body.index > len(pitches):
             raise HTTPException(422, "请选择一个故事方向")
         chosen = pitches[body.index - 1]
         content = f"选用第 {body.index} 个故事方向「{chosen.get('name', '')}」。"
         await add_requirement(session, job.book_id, f"开书的故事方向：选用「{chosen.get('name', '')}」", "answer")
-        if body.length is not None:
-            await add_requirement(session, job.book_id, f"这本书打算写 {body.length} 万字。", "answer")
-        if body.title is not None:
-            if not body.title.strip():
-                raise HTTPException(422, "书名不能为空")
-            await add_requirement(session, job.book_id, f"书名用《{body.title.strip()}》", "answer")
     else:
         if not feedback:
             raise HTTPException(422, "请写下重新出故事方向的要求")
         await add_requirement(session, job.book_id, feedback, "note")
         content = feedback
+    if body.length is not None:
+        await add_requirement(session, job.book_id, f"这本书打算写 {body.length} 万字。", "answer")
+    if body.title is not None:
+        if not body.title.strip():
+            raise HTTPException(422, "书名不能为空")
+        await add_requirement(session, job.book_id, f"书名用《{body.title.strip()}》", "answer")
     resume = {**body.model_dump(), "feedback": feedback}
     return await _queue_setup_response(session, redis, job, content, resume)
 

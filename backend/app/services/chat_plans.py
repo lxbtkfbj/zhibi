@@ -296,7 +296,8 @@ async def apply_background(message_id, redis):
         )
         await lock_book(session, book_id)
         job = await active_note_job(session, book_id)
-        key = (job.pending or {}).get("kind") if job and job.status == "waiting_author" else ""
+        opened = jobs.open_wait(job)
+        key = (job.pending or {}).get("kind") if job and job.status == "waiting_author" and not opened else ""
         if key == "setup_piece":
             key = "outline" if job.pending.get("piece") == "outline" else ""
         if key in FEEDBACK_LABELS:
@@ -322,6 +323,7 @@ async def apply_background(message_id, redis):
         else:
             items = plan["items"]
         await session.commit()
+        setup_applied = False
         for item in items:
             try:
                 result = await apply_item(session, redis, book_id, message_id, plan["title"], item)
@@ -329,6 +331,8 @@ async def apply_background(message_id, redis):
             except Exception as exc:
                 await session.rollback()
                 result = {"kind": "failed", "reason": str(getattr(exc, "detail", exc))}
+            if item["where"] in {"定调", "设定库"} and result["kind"] in {"edit", "created"}:
+                setup_applied = True
             await append_result(session, redis, message_id, result)
         row = await session.get(MeetingMessage, message_id)
         results = row.payload["results"]
@@ -360,6 +364,16 @@ async def apply_background(message_id, redis):
             content=content,
             payload={"reply_to": [message_id], **({"thread": thread} if thread != "group" else {})},
         )
+        if opened and setup_applied and jobs.open_wait(await active_note_job(session, book_id)):
+            await post_message(
+                session,
+                redis,
+                book_id=book_id,
+                job_id=None,
+                speaker="chief",
+                kind="speech",
+                content="照方案办好了。要我按现在的定调和设定把开书稿补齐吗？点底部的「补齐开书稿」就行；想先看看三个故事方向也可以，挑一个，我按那个方向写。",
+            )
 
 
 async def undo_created(session, redis, message_id, index):

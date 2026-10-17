@@ -330,6 +330,25 @@ def wants_plan(text):
     )
 
 
+def wants_new_pitches(text):
+    text = _plain(text)
+    return len(text) <= 200 and any(
+        word in text
+        for word in (
+            "再来三个",
+            "再出三个",
+            "重出",
+            "重新出",
+            "换三个",
+            "换一批",
+            "换几个方向",
+            "都不要",
+            "都不满意",
+            "都不喜欢",
+        )
+    )
+
+
 def accepts_plan(text):
     text = _plain(text)
     return len(text) <= 20 and any(

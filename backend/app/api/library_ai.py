@@ -135,7 +135,9 @@ async def rewrite_target(
         if not allow_waiting and await session.scalar(
             select(Job.id)
             .where(
-                Job.book_id == book_id, Job.status == "waiting_author", Job.pending["kind"].astext != "setup_prefill"
+                Job.book_id == book_id,
+                Job.status == "waiting_author",
+                Job.pending["kind"].astext.not_in(["setup_prefill", "setup_pitches"]),
             )
             .limit(1)
         ):

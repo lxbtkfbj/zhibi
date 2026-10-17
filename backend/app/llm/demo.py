@@ -883,6 +883,8 @@ def _library_intent(user: str) -> s.LibraryIntent:
     library = _match(r"【设定库目录】\n(.*?)(?=\n【最近的对话】|\Z)", user)
     names = re.findall(r"^- ([^\n（：]+)", library, re.M)
     name = next((name for name in names if name in note), "")
+    if not name and "主角" in note:
+        name = next(iter(re.findall(r"^- ([^（：\n]+)（主角）", library, re.M)), "")
     if not name and "师父" in note:
         name = next(iter(re.findall(r"^- ([^（：\n]+)（导师）", library, re.M)), "")
     if not name and "境界" in note:
@@ -891,7 +893,15 @@ def _library_intent(user: str) -> s.LibraryIntent:
         return s.LibraryIntent(
             kind="改设定",
             target_name=name,
-            part="名称" if "名称" in note or "名字" in note else "身世" if "师父" in note else "一段话",
+            part=(
+                "名称"
+                if "名称" in note or "名字" in note
+                else "性格与说话方式"
+                if "性格" in note
+                else "身世"
+                if "师父" in note
+                else "一段话"
+            ),
             mode="照作者的意思改" if "改成" in note or "变成" in note else "给几个写法",
             instruction=note,
             reply=(

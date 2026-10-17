@@ -20,6 +20,7 @@ from app.services.chat_context import (
     dialogue_text,
     obvious_question,
     thread_of,
+    wants_new_pitches,
     wants_plan,
 )
 from app.services.library import lock_book
@@ -39,7 +40,12 @@ async def active_note_job(session, book_id):
 
 
 def waiting_feedback(job):
-    return job and job.status == "waiting_author" and (job.pending or {}).get("kind") != "setup_prefill"
+    return (
+        job
+        and job.status == "waiting_author"
+        and (job.pending or {}).get("kind") != "setup_prefill"
+        and not jobs.open_wait(job)
+    )
 
 
 async def update_message(session, redis, message, **payload):
@@ -117,6 +123,8 @@ async def receive_note(body, background_tasks, book, session, redis):
         task = "reply"
     else:
         job = await active_note_job(session, book_id)
+        if jobs.open_wait(job) and wants_new_pitches(text):
+            raise HTTPException(409, {"code": "use_feedback", "message": "等你拍板时请直接提意见"})
         if waiting_feedback(job):
             try:
                 intent = await classify(session, book_id, text)

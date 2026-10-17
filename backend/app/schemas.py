@@ -747,7 +747,7 @@ SetupPiece = Literal["concept", "settings", "outline"]
 
 
 class PitchDecision(BaseModel):
-    action: Literal["pick", "redo", "start"]
+    action: Literal["pick", "redo", "start", "fill"]
     index: int | None = Field(None, ge=1, le=3)
     length: Literal[50, 100, 200, 300, 500] | None = None
     title: str | None = Field(None, min_length=1, max_length=200)

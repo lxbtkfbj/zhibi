@@ -51,10 +51,26 @@ async def new_puzzle(flow, idea="楚风重生，测试自建类别"):
     return bid, jid
 
 
+@pytest.fixture
+def legacy_piece_gates(monkeypatch):
+    """模拟补丁 2 之前已离开挑方向的检查点：没有 piece_gates 字段。"""
+    from app.graphs import book_setup
+
+    original = book_setup.pitches_gate_node
+
+    async def old_gate(state, runtime):
+        result = await original(state, runtime)
+        result.update.pop("piece_gates", None)
+        return result
+
+    monkeypatch.setattr(book_setup, "pitches_gate_node", old_gate)
+
+
 async def confirm(flow, jid):
     return await flow("POST", f"/jobs/{jid}/piece", {"action": "confirm"})
 
 
+@pytest.mark.usefixtures("legacy_piece_gates")
 async def test_complete_flow_focus_saved_first_and_write_reuses_first_unit(flow, sessionmaker, monkeypatch):
     calls, inspected = Counter(), []
     original = demo.respond
@@ -139,17 +155,16 @@ async def test_redo_exact_previous_latest_round_title_and_requirements(flow, mon
     assert {"保留经营", "加入追凶"} <= {row["text"] for row in requirements}
 
 
-async def test_oneshot_stops_only_at_outline(flow):
+async def test_oneshot_finishes_without_piece_waits(flow):
     result = await flow("POST", "/books", {"idea": "楚风带着轮回镜重生", "mode": "oneshot", "ask": True})
     bid, jid = result["book"]["id"], result["job"]["id"]
-    gate = (await flow("GET", f"/jobs/{jid}"))["pending"]
-    assert gate["kind"] == "setup_piece" and gate["piece"] == "outline"
+    assert (await flow("GET", f"/jobs/{jid}"))["status"] == "succeeded"
     book = await flow("GET", f"/books/{bid}")
-    assert book["setup_progress"]["pieces"] == {"concept": "confirmed", "settings": "confirmed", "outline": "waiting"}
-    await confirm(flow, jid)
+    assert book["setup_progress"]["pieces"] == dict.fromkeys(PIECE_ORDER, "confirmed")
     assert (await flow("GET", f"/books/{bid}"))["status"] == "ready"
 
 
+@pytest.mark.usefixtures("legacy_piece_gates")
 async def test_concept_length_retry_once_and_empty_secret_warning(flow, monkeypatch):
     prompts = []
     original = demo.respond
@@ -170,6 +185,7 @@ async def test_concept_length_retry_once_and_empty_secret_warning(flow, monkeypa
     assert gate["piece"] == "settings"
 
 
+@pytest.mark.usefixtures("legacy_piece_gates")
 async def test_live_author_edits_are_not_overwritten_on_confirm(flow, sessionmaker):
     bid, jid = await new_puzzle(flow)
     async with sessionmaker() as session:
@@ -185,6 +201,7 @@ async def test_live_author_edits_are_not_overwritten_on_confirm(flow, sessionmak
         assert secret.content == "作者改过的底牌"
 
 
+@pytest.mark.usefixtures("legacy_piece_gates")
 async def test_settings_failed_checks_retry_once_notes_review_and_flips(flow, monkeypatch):
     counts, scopes = Counter(), []
     original = demo.respond
@@ -220,6 +237,7 @@ async def test_settings_failed_checks_retry_once_notes_review_and_flips(flow, mo
     assert counts["LibraryRest"] == 2
 
 
+@pytest.mark.usefixtures("legacy_piece_gates")
 async def test_outline_revise_keeps_locked_nodes_and_unchanged_chapters(flow, sessionmaker, monkeypatch):
     prompts = []
     original = demo.respond
@@ -256,6 +274,7 @@ async def test_retired_piece_actions_return_422(flow, action):
 
 
 @pytest.mark.parametrize("change", ["saved_title", "deleted_requirement", "edited_requirement"])
+@pytest.mark.usefixtures("legacy_piece_gates")
 async def test_concept_revision_uses_live_title_and_never_revives_old_title_requirement(flow, monkeypatch, change):
     from app.agents import editorial
     from app.llm import demo_setup
