@@ -104,7 +104,14 @@ async def save_story_concept(session: AsyncSession, book_id: uuid.UUID, concept:
 
 
 async def _character(session, book_id, data, *, protagonist=False, position=0):
-    row = await session.scalar(select(Character).where(Character.book_id == book_id, Character.name == data["name"]))
+    row = next(
+        (
+            r
+            for r in await _rows(session, Character, book_id)
+            if data["name"] in [r.name, *(r.aliases or [])] or r.name in (data.get("aliases") or [])
+        ),
+        None,
+    )
     if row is not None and (row.source not in {"ai", "migration"} or row.locked):
         return row
     before = snapshot_of(row) if row is not None else None
@@ -130,10 +137,14 @@ async def _character(session, book_id, data, *, protagonist=False, position=0):
 async def _entry(session, book_id, data, *, position=0, tags=()):
     category = data.get("category", "特殊规则")
     category = category if category in _BUILTINS else "特殊规则"
-    row = await session.scalar(
-        select(WorldEntry).where(
-            WorldEntry.book_id == book_id, WorldEntry.category == category, WorldEntry.name == data["name"]
-        )
+    row = next(
+        (
+            r
+            for r in await _rows(session, WorldEntry, book_id)
+            if r.category == category
+            and (data["name"] in [r.name, *(r.aliases or [])] or r.name in (data.get("aliases") or []))
+        ),
+        None,
     )
     if row is not None and (row.source not in {"ai", "migration"} or row.locked):
         return row, False, None
@@ -153,22 +164,62 @@ async def _entry(session, book_id, data, *, position=0, tags=()):
     return row, True, before
 
 
+async def _fill_focus(session, book_id, row, values):
+    before = snapshot_of(row)
+    if not row.locked:
+        for key, value in values.items():
+            if key not in {"name", "source", "position"} and hasattr(row, key) and not getattr(row, key):
+                setattr(row, key, deepcopy(value))
+        await _version(
+            session, book_id, "character" if isinstance(row, Character) else "entry", row, before, "开书：补空"
+        )
+    return row
+
+
 async def save_library_focus(session: AsyncSession, book_id: uuid.UUID, focus: dict) -> None:
     await lock_book(session, book_id)
-    protagonist = await _character(session, book_id, focus["protagonist"], protagonist=True)
+    characters = await _rows(session, Character, book_id)
+    entries = await _rows(session, WorldEntry, book_id)
+    protagonist = next((r for r in characters if r.role_type == "主角"), None)
+    if protagonist is None:
+        protagonist = await _character(session, book_id, focus["protagonist"], protagonist=True)
+    else:
+        protagonist = await _fill_focus(
+            session,
+            book_id,
+            protagonist,
+            {key: value for key, value in focus["protagonist"].items() if key in _CHARACTER_FIELDS},
+        )
     finger = focus["finger"]
-    if finger["place"] == "角色卡片":
-        if protagonist.source in {"ai", "migration"} and not protagonist.locked:
+    existing = next((r for r in [*characters, *entries] if "金手指" in (r.tags or [])), None)
+    if existing is not None:
+        values = (
+            {"abilities": finger.get("content", "")}
+            if isinstance(existing, Character)
+            else {key: finger.get(key, "") for key in ("one_line", "content")}
+        )
+        await _fill_focus(session, book_id, existing, values)
+    elif finger["place"] == "角色卡片":
+        if not protagonist.locked:
             before = snapshot_of(protagonist)
-            content = finger.get("content", "")
-            if content and content not in protagonist.abilities:
-                protagonist.abilities = "\n".join(filter(None, [protagonist.abilities, content]))
+            if not protagonist.abilities:
+                protagonist.abilities = finger.get("content", "")
             protagonist.tags = list(dict.fromkeys([*(protagonist.tags or []), "金手指"]))
             await _version(session, book_id, "character", protagonist, before, "开书：金手指")
     else:
-        row, writable, before = await _entry(session, book_id, {**finger, "category": finger["place"]}, tags=["金手指"])
-        if writable:
-            await _version(session, book_id, "entry", row, before, "开书：金手指")
+        # A same-name card/entry is also only filled, even if it lacked the tag.
+        same = next(
+            (r for r in entries if r.category == finger["place"] and finger["name"] in [r.name, *(r.aliases or [])]),
+            None,
+        )
+        if same is not None:
+            await _fill_focus(session, book_id, same, {key: finger.get(key, "") for key in ("one_line", "content")})
+        else:
+            row, writable, before = await _entry(
+                session, book_id, {**finger, "category": finger["place"]}, tags=["金手指"]
+            )
+            if writable:
+                await _version(session, book_id, "entry", row, before, "开书：金手指")
 
 
 async def _suggest(session, book_id, *, kind, title, payload, origin):
@@ -192,6 +243,14 @@ async def _suggest(session, book_id, *, kind, title, payload, origin):
 async def save_library_rest(session: AsyncSession, book_id: uuid.UUID, rest: dict) -> None:
     await lock_book(session, book_id)
     for index, character in enumerate(rest.get("characters") or [], 1):
+        rows = await _rows(session, Character, book_id)
+        if any(
+            character["name"] in [r.name, *(r.aliases or [])]
+            or r.name in (character.get("aliases") or [])
+            or (character.get("role_type") == "主角" and r.role_type == "主角")
+            for r in rows
+        ):
+            continue
         await _character(session, book_id, character, position=index)
     categories = {category["name"]: category for category in rest.get("categories") or []}
     pending_entries = {name: [] for name in categories}
@@ -200,6 +259,10 @@ async def save_library_rest(session: AsyncSession, book_id: uuid.UUID, rest: dic
         category = entry.get("category")
         if category not in _BUILTINS and category in categories:
             pending_entries[category].append(deepcopy(entry))
+            continue
+        if entry.get("name") == "世界概况" and any(
+            r.category == "世界与地图" and r.name == "世界概况" for r in await _rows(session, WorldEntry, book_id)
+        ):
             continue
         row, writable, before = await _entry(session, book_id, entry, position=index)
         if writable:

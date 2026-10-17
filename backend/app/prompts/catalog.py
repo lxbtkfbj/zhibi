@@ -6,8 +6,8 @@ from app.prompts import VARIABLE, canonical_name, default_content
 
 # 名称、中文名、分组、实际调用角色、使用时机。顺序就是界面顺序。
 CATALOG = [
-    ("setup_pitches", "三个短版", "开书", "chief", "开书第一步：按点子给三个短版定调"),
-    ("setup_story", "定调", "开书", "chief", "把挑中的短版展开成定调"),
+    ("setup_pitches", "三个故事方向", "开书", "chief", "开书第一步：按点子给三个故事方向"),
+    ("setup_story", "定调", "开书", "chief", "把挑中的故事方向展开成定调"),
     ("library_build_focus", "建库：主角和金手指", "开书", "lorekeeper", "开书第二步：先出重点"),
     ("library_build_rest", "建库：其余设定", "开书", "lorekeeper", "开书第二步：补齐设定库"),
     ("setup_outline", "出大纲", "开书", "chief", "开书第三步：大纲"),
@@ -18,9 +18,9 @@ CATALOG = [
     ("library_review", "查一遍", "设定库", "reviewer", "查设定库的矛盾、同根、好看、题材"),
     ("chat_reply", "聊天回答", "聊天", "chief", "作者在群聊提问或私聊时，角色回答；实际用聊天对象的角色"),
     ("chat_summary", "对话摘要", "聊天", "lorekeeper", "对话太长时把更早的部分折成摘要"),
-    ("chat_conclude", "聊出的结论", "聊天", "chief", "作者点「记成要求」「照这个改」时，把聊出的结论写成一句话"),
+    ("chat_plan", "总结方案", "聊天", "chief", "作者让编辑部把聊过的想法总结成方案卡；实际用聊天对象的角色"),
     ("requirements_tidy", "整理作者要求", "聊天", "chief", "把作者要求清单里像提问、闲聊、重复、过时的标出来"),
-    ("library_route", "群聊找目标", "设定库", "chief", "作者在群聊里说话时，判断是改设定、写作要求还是提问闲聊"),
+    ("library_route", "群聊分流", "聊天", "router", "作者在群聊里说话时，判断是改设定、写作要求还是提问闲聊"),
     ("plan_segment", "定下一篇", "规划", "chief", "每一篇开写前规划下一篇"),
     ("volume_directions", "卷纲方向", "规划", "chief", "卷纲比稿前提出不同方向"),
     ("plan_volume", "拆卷纲", "规划", "chief", "规划每一卷的剧情单元，开写前补齐第 1 卷"),
@@ -62,7 +62,8 @@ VARIABLE_LABELS = {
     "mode_rule": "怎么写",
     "no_secret": "这本书还没有底牌时的提示",
     "fixed": "已经定了的分卷或单元",
-    "pitch": "挑中的短版",
+    "existing": "设定库里已经有的",
+    "pitch": "挑中的故事方向",
     "category_hints": "每一类该写清什么",
     "library": "设定库目录",
     "library_full": "设定库全文",

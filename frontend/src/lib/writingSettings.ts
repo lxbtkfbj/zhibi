@@ -8,7 +8,7 @@ export function automaticPlaybookName(concept: { genre?: unknown; tags?: unknown
 }
 
 export function requirementSource(source: string): string {
-  const names: Record<string, string> = { answer: '动笔前的回答', note: '插话', trial: '试读意见', manual: '手动添加', legacy: '旧记录' }
+  const names: Record<string, string> = { answer: '动笔前的回答', note: '插话', trial: '试读意见', manual: '手动添加', legacy: '旧记录', plan: '方案卡' }
   if (source.startsWith('volume:')) return `第 ${source.slice(7)} 卷卷纲意见`
   if (source.startsWith('unit:')) return '单元章纲意见'
   if (source.startsWith('segment:')) return `第 ${source.slice(8)} 篇规划意见`

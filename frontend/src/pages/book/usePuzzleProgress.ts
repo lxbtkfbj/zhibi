@@ -8,10 +8,10 @@ export function usePuzzleProgress() {
   const progress = pieceStatuses(book.setup_progress, job?.setup_flow ?? (book.concept.story ? 3 : undefined))
   if (pending?.kind === 'setup_piece') {
     progress.current = pending.piece
-    progress.pieces = progress.pieces.map(piece => piece.key === pending.piece ? { ...piece, status: 'waiting', current: true } : { ...piece, current: false })
+    progress.pieces = progress.pieces.map(piece => (piece.key === pending.piece || (pending.flow === 3 && pending.piece === 'settings' && piece.key === 'concept')) ? { ...piece, status: 'waiting', current: true } : { ...piece, current: false })
   } else if ((pending?.kind === 'setup_directions' || pending?.kind === 'setup_pitches')) {
     progress.current = 'concept'
     progress.pieces = progress.pieces.map(piece => piece.key === 'concept' ? { ...piece, status: 'waiting', current: true } : piece)
   }
-  return { ...progress, show, choosing: (pending?.kind === 'setup_directions' || pending?.kind === 'setup_pitches') }
+  return { ...progress, show, prefill: pending?.kind === 'setup_prefill', choosing: (pending?.kind === 'setup_directions' || pending?.kind === 'setup_pitches') }
 }

@@ -23,6 +23,7 @@ const IDEAS = [
 function Composer({ autoFocus, flat }: { autoFocus?: boolean; flat?: boolean }) {
   const [idea, setIdea] = useState('')
   const [style, setStyle] = useState('')
+  const [prefill, setPrefill] = useState(false)
   const [showStyle, setShowStyle] = useState(false)
   const defaults = useNewBookDefaults()
   const [selectedMode, setSelectedMode] = useState<'puzzle' | 'oneshot' | null>(null)
@@ -48,7 +49,7 @@ function Composer({ autoFocus, flat }: { autoFocus?: boolean; flat?: boolean }) 
     // 快捷键会绕过按钮的禁用状态，这里再拦一次，避免重复建书
     if (!ready || create.isPending || !defaults.data) return
     try {
-      const result = await create.mutateAsync({ idea: idea.trim(), style_reference: style.trim(), mode })
+      const result = await create.mutateAsync({ idea: idea.trim(), style_reference: style.trim(), mode, prefill })
       navigate(`/books/${result.book.id}`)
     } catch { /* 错误在创建区显示，保留点子 */ }
   }
@@ -83,7 +84,8 @@ function Composer({ autoFocus, flat }: { autoFocus?: boolean; flat?: boolean }) 
         <span className="text-sm text-ink-2">开书方式</span>
         <Segmented label="开书方式" value={mode} options={[{ value: 'puzzle', label: '一步一步看' }, { value: 'oneshot', label: '一口气做完再给我看' }]} onChange={setSelectedMode} />
       </div>
-      {mode === 'oneshot' && <p className="px-4 pb-3 text-xs leading-relaxed text-ink-2">定调和设定库做完不停，停在大纲给你看</p>}
+      <div className="px-4 pb-3"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={prefill} onChange={event => setPrefill(event.target.checked)} className="accent-[var(--color-chief)]" />先写设定，写好了再出故事方向</label><p className="mt-1 text-xs leading-relaxed text-ink-2">有想好的金手指、境界、人物，可以先写进设定库，故事方向会围着它们出。</p></div>
+      {mode === 'oneshot'  && <p className="px-4 pb-3 text-xs leading-relaxed text-ink-2">定调和设定库做完不停，停在大纲给你看</p>}
       <div className="flex flex-wrap items-center gap-2 px-2 pb-1">
         <button
           onClick={() => setShowStyle(!showStyle)}
@@ -122,7 +124,7 @@ function NewBookDialog({ open, onClose }: { open: boolean; onClose: () => void }
   return (
     <Modal open={open} onClose={onClose} title="开一本新书" wide>
       <p className="mb-4 text-sm leading-relaxed text-ink-2">
-        写下你的点子，一句话就够。先挑短版，再一起完成定调、设定库和大纲。
+        写下你的点子，一句话就够。先挑故事方向，再一起完成定调、设定库和大纲。
       </p>
       <Composer autoFocus flat />
       <p className="mt-3 text-xs leading-relaxed text-ink-3">

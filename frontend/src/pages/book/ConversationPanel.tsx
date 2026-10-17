@@ -90,7 +90,7 @@ function NoteComposer() {
   const placeholder = direct ? `和${ROLE_META[conversation].name}聊聊，不会改动书稿…` : legacyArc ? '这一篇要先按新写法重出，重出后再提意见'
     : waiting && job?.pending?.kind === 'setup_piece' ? '说说这一块想怎么改…' : waiting
       ? job?.pending?.kind === 'setup_pitches'
-        ? '写下哪里不满意，主编会重新出三个短版…'
+        ? '写下哪里不满意，主编会重新出三个故事方向…'
         : job?.pending?.kind === 'setup_directions'
         ? '写下哪里不满意，主编会重新出开书方向…'
         : decisionCopy(job?.pending, bookId).placeholder
@@ -179,6 +179,7 @@ export function ConversationPanel() {
             <h2 className="text-sm font-medium text-ink">{direct ? ROLE_META[conversation].name : '编辑部群聊'}</h2>
             <p className="mt-0.5 text-xs text-ink-2">{direct ? DUTIES[conversation] : '主编 · 设定师 · 写手 · 审稿'}</p>
           </div>
+          <Button size="sm" variant="ghost" disabled={resetting} onClick={async () => { setResetting(true); setResetError(null); try { await post(`/books/${bookId}/notes`, { content: "总结一下前面聊的", ...(direct ? { to: conversation } : {}) }) } catch (cause) { setResetError(cause) } finally { setResetting(false) } }}>总结一下</Button>
           <Button size="sm" variant="ghost" disabled={resetting} onClick={async () => { setResetting(true); setResetError(null); try { await post(`/books/${bookId}/chat/${conversation}/reset`) } catch (cause) { setResetError(cause) } finally { setResetting(false) } }}>换个话题</Button>
           <span className={clsx('flex shrink-0 items-center gap-1 text-xs', connected ? 'text-lore' : 'text-ink-2')}>
             <span className={clsx('size-1.5 rounded-full', connected ? 'bg-lore' : 'bg-ink-3')} />
@@ -186,7 +187,7 @@ export function ConversationPanel() {
           </span>
         </div>
         <ErrorText error={resetError} />
-        {direct && <p className="mt-2 text-xs leading-relaxed text-ink-2">这里只聊天，不会改动书稿，也不会记成要求。聊出结论，点最新回复下面的「记成要求」或「照这个改」。</p>}
+        {direct && <p className="mt-2 text-xs leading-relaxed text-ink-2">这里只聊天，不会改动书稿，也不会记成要求。聊出想法以后说「总结一下」，看过方案再点「按这个来」。</p>}
         {direct && (
           <label className="mt-2.5 flex cursor-pointer items-center gap-2 text-xs text-ink-2">
             <input type="checkbox" checked={showGroup} onChange={(event) => setShowGroup(event.target.checked)} className="size-3.5 accent-[var(--color-chief)]" />
@@ -212,7 +213,7 @@ export function ConversationPanel() {
       <MeetingFeed messages={messages} working={working} draft={draft} conversation={conversation} showGroup={showGroup} className="min-h-0 flex-1 px-4 py-5" />
       {job && working && <div className="shrink-0 border-t border-divider px-4 py-2"><RunningControls job={job} /></div>}
       {job && (job.status === 'failed' || job.status === 'cancelled') && <div className="shrink-0 border-t border-divider px-4 py-3"><ResumeControls job={job} /></div>}
-      {Object.values(chatTyping).filter(value => typingVisible(value, conversation, now)).map(value => <p key={value.thread} role="status" className="px-4 py-2 text-xs text-chief">{ROLES[value.speaker as keyof typeof ROLES]?.name ?? '主编'}正在想…</p>)}
+      {Object.values(chatTyping).filter(value => typingVisible(value, conversation, now)).map(value => <p key={value.thread} role="status" className="px-4 py-2 text-xs text-chief">{ROLES[value.speaker as keyof typeof ROLES]?.name ?? '主编'}{value.mode === 'plan' ? '正在整理方案…' : '正在想…'}</p>)}
       <NoteComposer />
     </section>
   )

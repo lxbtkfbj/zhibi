@@ -13,7 +13,7 @@ test('automatic playbook requires both fantasy and payoff tags', () => {
 })
 
 test('author requirement source labels preserve all supported origins', () => {
-  for (const [source, label] of [['answer', '动笔前的回答'], ['note', '插话'], ['trial', '试读意见'], ['manual', '手动添加'], ['legacy', '旧记录'], ['volume:12', '第 12 卷卷纲意见'], ['private:lorekeeper', '私聊设定师'], ['private:chief', '私聊主编'], ['private:writer', '私聊写手'], ['private:reviewer', '私聊审稿']]) {
+  for (const [source, label] of [['answer', '动笔前的回答'], ['note', '插话'], ['trial', '试读意见'], ['manual', '手动添加'], ['legacy', '旧记录'], ['plan', '方案卡'], ['volume:12', '第 12 卷卷纲意见'], ['private:lorekeeper', '私聊设定师'], ['private:chief', '私聊主编'], ['private:writer', '私聊写手'], ['private:reviewer', '私聊审稿']]) {
     assert.equal(requirementSource(source), label)
   }
 })

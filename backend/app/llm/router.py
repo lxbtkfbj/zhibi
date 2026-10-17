@@ -267,7 +267,16 @@ class LLMRouter:
             if result.rowcount:
                 log.info("模型配置 %s (%s) 已自动改用 %s，已保存", profile.name, profile.profile_id, method)
 
-    async def structured[T: BaseModel](self, role: str, schema: type[T], system: str, user: str, *, purpose: str) -> T:
+    async def structured[T: BaseModel](
+        self,
+        role: str,
+        schema: type[T],
+        system: str,
+        user: str,
+        *,
+        purpose: str,
+        max_attempts: int = MAX_PARSE_ATTEMPTS,
+    ) -> T:
         profile = await self.resolve(role)
         if profile.provider == "demo":
             started = time.monotonic()
@@ -281,15 +290,23 @@ class LLMRouter:
                 role, profile, purpose, started, 0, 0, ok=True, request=request, response=result.model_dump_json()
             )
             return result
-        return await self._structured_remote(role, profile, schema, system, user, purpose)
+        return await self._structured_remote(role, profile, schema, system, user, purpose, max_attempts=max_attempts)
 
     async def _structured_remote[T: BaseModel](
-        self, role: str, profile: ResolvedProfile, schema: type[T], system: str, user: str, purpose: str
+        self,
+        role: str,
+        profile: ResolvedProfile,
+        schema: type[T],
+        system: str,
+        user: str,
+        purpose: str,
+        *,
+        max_attempts: int = MAX_PARSE_ATTEMPTS,
     ) -> T:
         method = profile.structured_method
         last_error = ""
         unsupported_method = False
-        for attempt in range(1, MAX_PARSE_ATTEMPTS + 1):
+        for attempt in range(1, max_attempts + 1):
             prompt_user = (
                 user
                 if not last_error
@@ -313,11 +330,7 @@ class LLMRouter:
                     request=request,
                     response=_error_response(exc),
                 )
-                if (
-                    method != "json_mode"
-                    and attempt < MAX_PARSE_ATTEMPTS
-                    and _unsupported_structured_method(exc, method)
-                ):
+                if method != "json_mode" and attempt < max_attempts and _unsupported_structured_method(exc, method):
                     log.warning("模型配置 %s 的结构化输出方式 %s 不受支持，尝试 json_mode", profile.name, method)
                     unsupported_method = True
                     method = "json_mode"
@@ -339,7 +352,7 @@ class LLMRouter:
                 retryable = isinstance(exc, (TimeoutError, openai.APIConnectionError)) or (
                     isinstance(exc, openai.APIStatusError) and (exc.status_code == 429 or exc.status_code >= 500)
                 )
-                if retryable and attempt < MAX_PARSE_ATTEMPTS:
+                if retryable and attempt < max_attempts:
                     continue
                 raise LLMError(f"调用模型失败（{profile.name}）：{exc}") from exc
             except Exception as exc:

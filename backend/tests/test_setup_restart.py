@@ -115,6 +115,7 @@ async def test_restart_is_atomic_preserves_author_history_and_other_book(client,
             "mode": "puzzle",
             "restart_from": str(jid),
             "keep_concept": confirmed,
+            "prefill": False,
         }
         assert book.title == old_concept["title"]
         assert book.concept == (old_concept if confirmed else {})
@@ -236,7 +237,7 @@ def test_restart_state_only_carries_author_materials(mode):
     assert state["flow"] == 3 and state["piece"] == "concept"
     assert (
         state["previous"]
-        == "【之前按旧流程选过的方向】\n作者选的方向：少年找回妹妹\n（作者之前选过它，三个短版里请保留它的好东西。）"
+        == "【之前按旧流程选过的方向】\n作者选的方向：少年找回妹妹\n（作者之前选过它，三个故事方向里请保留它的好东西。）"
     )
     assert state["queue"] == ["concept"] and state["brief"] == []
     assert "spine" not in state and state["pieces"]["concept"] != "confirmed"
@@ -313,7 +314,7 @@ async def test_legacy_private_note_only_chats_without_resuming_old_graph(client,
         assert reply.job_id is None and reply.payload["reply_to"] == [response.json()["id"]]
     assert queued == []
     if status == "waiting_author":
-        assert (await client.post(f"/api/books/{bid}/notes", json={"content": "不能绕过重开"})).status_code == 409
+        assert (await client.post(f"/api/books/{bid}/notes", json={"content": "下一章快一点"})).status_code == 409
 
 
 async def test_new_setup_waiting_private_note_only_chats(client, sessionmaker):

@@ -68,7 +68,11 @@ class LibraryContext:
     def concept(self) -> str:
         concept = self.book.concept or {}
         if not concept.get("story"):
-            return format_concept(concept)
+            return (
+                format_concept(concept)
+                if any(concept.get(key) for key in ("logline", "synopsis", "hook", "core_conflict"))
+                else (f"点子：{self.book.idea}" if self.book.idea else "（还没有定调）")
+            )
         lines = [concept["story"]]
         secret_id = concept.get("secret_entry_id")
         secret = next((entry for entry in self.entries if str(entry.id) == str(secret_id)), None)
@@ -318,3 +322,20 @@ async def load_context(session: AsyncSession, book: Book) -> LibraryContext:
     volumes = list(await session.scalars(select(Volume).where(Volume.book_id == book.id).order_by(Volume.index)))
     units = list(await session.scalars(select(PlotUnit).where(PlotUnit.book_id == book.id).order_by(PlotUnit.index)))
     return LibraryContext(book, characters, entries, categories, nodes, volumes, units)
+
+
+def existing_text(ctx, exclude=()):
+    targets = [target for target in ctx.targets if target.id not in {getattr(item, "id", item) for item in exclude}]
+    if not targets:
+        return ""
+    lines, compact = ["【设定库里已经有的】"], []
+    for target in targets:
+        full = ctx.entry_full_text(target)
+        if not compact and len("\n\n".join([*lines, full])) <= 8000:
+            lines.append(full)
+        else:
+            compact.append(f"- {target.name}：{target.one_line}")
+    text = "\n\n".join(lines)
+    if compact:
+        text += "\n（下面这些只列名字和一句话）\n" + "\n".join(compact)
+    return text

@@ -784,7 +784,7 @@ def _recap(user: str) -> s.StoryRecap:
 
 
 def _library_current(user: str) -> str:
-    match = re.search(r"(?:^|\n)原文：\n([^\n]*)", user)
+    match = re.search(r"(?:^|\n)原文：\n(.*?)(?=\n\n【|\Z)", user, re.S)
     return match[1].rstrip("\r") if match and match[1].strip() else "新写法"
 
 
@@ -867,6 +867,8 @@ def _library_review(user: str) -> s.LibraryReview:
 
 def _library_intent(user: str) -> s.LibraryIntent:
     note = _match(r"【作者的话】\n(.*?)(?=\n\n要求：|\Z)", user).strip()
+    if "测试分流出错" in note:
+        raise RuntimeError("演示分流出错")
     if note.endswith(("？", "?")) or any(word in note for word in ("吗", "为什么", "怎么样", "什么")):
         who = (
             "设定师"
@@ -881,16 +883,22 @@ def _library_intent(user: str) -> s.LibraryIntent:
     library = _match(r"【设定库目录】\n(.*?)(?=\n【最近的对话】|\Z)", user)
     names = re.findall(r"^- ([^\n（：]+)", library, re.M)
     name = next((name for name in names if name in note), "")
+    if not name and "师父" in note:
+        name = next(iter(re.findall(r"^- ([^（：\n]+)（导师）", library, re.M)), "")
     if not name and "境界" in note:
         name = next((name for name in names if "境界" in name), "")
     if name and any(w in note for w in ("改", "换", "重想")):
         return s.LibraryIntent(
             kind="改设定",
             target_name=name,
-            part="名称" if "名称" in note or "名字" in note else "一段话",
-            mode="给几个写法",
+            part="名称" if "名称" in note or "名字" in note else "身世" if "师父" in note else "一段话",
+            mode="照作者的意思改" if "改成" in note or "变成" in note else "给几个写法",
             instruction=note,
-            reply=f"好，我给「{name}」出三种写法，去设定库挑一个。",
+            reply=(
+                f"好，已经按你的意思改了「{name}」。"
+                if "改成" in note or "变成" in note
+                else f"好，我给「{name}」出三种写法，去设定库挑一个。"
+            ),
         )
     scope = (
         "只管下一章"
@@ -901,6 +909,25 @@ def _library_intent(user: str) -> s.LibraryIntent:
         if "下一卷" in note
         else "一直有效"
     )
+    if not any(
+        word in note
+        for word in (
+            "下一",
+            "以后",
+            "要",
+            "别",
+            "不要",
+            "改",
+            "换",
+            "就用",
+            "从现在",
+            "记下",
+            "记住",
+            "第一个单元",
+            "第三个单元",
+        )
+    ):
+        return s.LibraryIntent(kind="提问闲聊")
     return s.LibraryIntent(kind="写作要求", requirement=note, scope=scope, reply="记下了。")
 
 
@@ -912,10 +939,51 @@ def _chat_reply(system, user):
     return s.ChatReply(reply=f"（演示）{role}回答：{note[:20]}。相关资料里有：{'、'.join(names) or '没有'}。")
 
 
-def _chat_conclusion(user):
-    recent = _match(r"【最近的对话】\n(.*?)(?=\n\n要求：|\Z)", user)
-    notes = re.findall(r"^作者：(.*)$", recent, re.M)
-    return s.ChatConclusion(found=True, text="（演示）" + (notes[-1][:20] if notes else ""), scope="一直有效")
+def _chat_plan(user):
+    recent = _match(r"【最近的对话】\n(.*?)(?=\n\n【|\n\n要求：|\Z)", user)
+    library = _match(r"【设定库目录】\n(.*?)(?=\n\n【|\Z)", user)
+    entries = library.split("【", 1)[-1] if library else ""
+    entries = re.sub(r"角色卡片】.*?(?=【|\Z)", "", entries, flags=re.S)
+    target = next(iter(re.findall(r"^- ([^（：\n]+)", entries, re.M)), "世界概况")
+    items = [
+        s.PlanItem(where="写作要求", change="（演示）开篇两百字内进入压抑处境"),
+        s.PlanItem(where="设定库", target=target, part="一句话", change="（演示）改过的一句话"),
+        s.PlanItem(
+            where="设定库", target="老怪", category="角色卡片", change="（演示）表面是救命恩师，实际想夺舍主角。"
+        ),
+        s.PlanItem(where="大纲", target="第 1 卷", change="（演示）第 1 卷从夺舍反杀开始。"),
+    ]
+    has_notes = bool(re.search(r"^作者：", recent, re.M))
+    return s.ChatPlan(
+        title="（演示）方案",
+        summary="（演示）这是根据最近的对话整理的方案。",
+        items=items if has_notes else [],
+        open_questions=["（演示）老怪临死说了什么"] if has_notes else [],
+    )
+
+
+def _setup_notes(user):
+    notes = _match(r"【作者刚才的插话】\n(.*?)(?=\n\n要求：|\n【|\Z)", user)
+    parts = {"concept": [], "settings": [], "outline": []}
+    for clause in re.split(r"[，；。\n]", notes):
+        clause = clause.strip().removeprefix("- ")
+        if not clause.strip():
+            continue
+        matched = False
+        for key, words in (
+            ("concept", ("故事", "定调", "主线")),
+            ("settings", ("改成", "设定", "人物")),
+            ("outline", ("大纲", "篇", "卷")),
+        ):
+            if any(word in clause for word in words):
+                parts[key].append(clause)
+                matched = True
+        if not matched:
+            parts["settings"].append(clause)
+    return s.SetupNotePlan(
+        **{f"{key}_instructions": "；".join(value) for key, value in parts.items()},
+        remark="收到，定调、设定库和大纲的意见分别处理。",
+    )
 
 
 def _requirements_tidy(user):
@@ -942,7 +1010,7 @@ async def respond(schema: type[BaseModel], system: str, user: str) -> BaseModel:
         s.LibraryFocus: lambda: demo_setup.focus(user),
         s.LibraryRest: lambda: demo_setup.rest(user),
         s.OutlineDraft: lambda: demo_setup.outline(user),
-        s.SetupNotePlan: lambda: s.SetupNotePlan(remark="收到，后面的内容会照你的要求来写。"),
+        s.SetupNotePlan: lambda: _setup_notes(user),
         s.NextArcDraft: lambda: _next_segment(user),
         s.SegmentVolumesDraft: lambda: _segment_volumes(user),
         s.VolumePlanDraft: lambda: _volume_plan(user),
@@ -966,7 +1034,7 @@ async def respond(schema: type[BaseModel], system: str, user: str) -> BaseModel:
         s.ChatSummary: lambda: s.ChatSummary(
             summary=f"（演示）之前聊了 {len(re.findall(r'^(?:作者|主编|设定师|写手|审稿)：', _match(r'【要并进去的对话】\n(.*?)(?=\n\n要求：|\Z)', user), re.M))} 条。"
         ),
-        s.ChatConclusion: lambda: _chat_conclusion(user),
+        s.ChatPlan: lambda: _chat_plan(user),
         s.RequirementsTidy: lambda: _requirements_tidy(user),
     }
     if schema not in handlers:

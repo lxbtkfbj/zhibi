@@ -1,4 +1,4 @@
-import { ChatOutcome, ConclusionActions } from './ChatActions'
+import { ChatOutcome } from './ChatActions'
 import { nextSegmentFields, protagonistFields, segmentFields, worldFields, type SetupField } from '../../lib/setupPresentation'
 import { useReducedMotion } from '../../lib/appearance'
 import clsx from 'clsx'
@@ -13,6 +13,7 @@ import { isFresh, useTypewriter } from '../../lib/team'
 import { artifactTarget } from '../../lib/workspace'
 import { directionsArtifact, loreArtifact, outlineArtifact, spineArtifactNodes } from '../../lib/storyMap'
 import { useBookContext } from './context'
+import { PlanCard } from './PlanCard'
 
 export function RoleAvatar({
   speaker,
@@ -652,7 +653,7 @@ function GroupTag() {
   return <span className="rounded-sm border border-divider px-1 text-xs text-ink-2">群聊</span>
 }
 
-function MessageRow({ message, fromGroup, latestPrivate }: { message: MeetingMessage; fromGroup?: boolean; latestPrivate?: boolean }) {
+function MessageRow({ message, fromGroup }: { message: MeetingMessage; fromGroup?: boolean }) {
   const meta = ROLE_META[message.speaker] ?? ROLE_META.system
   const author = message.speaker === 'author'
   if (message.kind === 'error') {
@@ -679,10 +680,9 @@ function MessageRow({ message, fromGroup, latestPrivate }: { message: MeetingMes
           'border border-divider px-3 py-2.5 chat-text leading-[1.75] text-ink',
           author ? 'rounded-[12px_2px_12px_12px] bg-author-bubble whitespace-pre-wrap break-words' : 'rounded-[2px_12px_12px_12px] bg-card',
         )}>
-          {message.kind === 'artifact' ? <ArtifactCard message={message} /> : author ? message.content : <Speech message={message} />}
+          {message.kind === 'plan' ? <PlanCard message={message} /> : message.kind === 'artifact' ? <ArtifactCard message={message} /> : author ? message.content : <Speech message={message} />}
         </div>
         {author && !fromGroup && <ChatOutcome message={message} />}
-        {latestPrivate && message.payload?.thread && <ConclusionActions thread={message.payload.thread} />}
       </div>
     </div>
   )
@@ -764,7 +764,6 @@ export function MeetingFeed({
   const stick = useRef(true)
   const reduce = useReducedMotion()
   const entries = visibleEntries(messages, conversation, showGroup)
-  const latestPrivate = conversation !== 'group' ? messages.filter(m => m.payload?.thread === conversation && m.speaker === conversation && m.kind === 'speech').at(-1)?.id : undefined
   const showWriting = conversation === 'group' || (conversation === 'writer' && showGroup)
   const writing = working && draft && !draft.done && showWriting ? draft : null
   const lastEntry = entries.at(-1)
@@ -780,7 +779,7 @@ export function MeetingFeed({
   useEffect(() => {
     const element = scroller.current
     if (element && autoScroll && stick.current) element.scrollTo({ top: element.scrollHeight, behavior: reduce ? 'auto' : 'smooth' })
-  }, [messages.length, autoScroll, reduce, writing?.text.length])
+  }, [messages, autoScroll, reduce, writing?.text.length])
 
   return (
     <div
@@ -813,7 +812,7 @@ export function MeetingFeed({
             </button>
           ) : entry.statuses ? (
             <StatusGroup messages={entry.statuses} live={liveStatus && index === entries.length - 1} fromGroup={entry.fromGroup} />
-          ) : <MessageRow message={entry.message} fromGroup={entry.fromGroup} latestPrivate={entry.message.id === latestPrivate} />}
+          ) : <MessageRow message={entry.message} fromGroup={entry.fromGroup} />}
         </motion.div>
       ))}
       {writing && <LiveDraftRow draft={writing} fromGroup={conversation !== 'group'} />}

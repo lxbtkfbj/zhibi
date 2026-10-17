@@ -29,6 +29,7 @@ export interface BookContextValue {
   followTarget: WorkspaceTarget | null
   manualNavigate: (path: string) => void
   focusComposer: number
+  focusChat: () => void
   requestFeedback: () => void
   requestNodeFeedback: (node: Pick<StoryNode, 'id' | 'index' | 'title'>) => void
   composerNode: NodeFeedback | null

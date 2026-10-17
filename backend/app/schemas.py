@@ -80,6 +80,7 @@ class ModelListOut(BaseModel):
 
 
 class BookCreate(BaseModel):
+    prefill: bool = False
     idea: str = Field(min_length=4, max_length=5000)
     style_reference: str = Field("", max_length=20000)
     # 动笔前让主编先问几个关键问题（篇幅、主角、金手指、结局……）
@@ -746,7 +747,7 @@ SetupPiece = Literal["concept", "settings", "outline"]
 
 
 class PitchDecision(BaseModel):
-    action: Literal["pick", "redo"]
+    action: Literal["pick", "redo", "start"]
     index: int | None = Field(None, ge=1, le=3)
     length: Literal[50, 100, 200, 300, 500] | None = None
     title: str | None = Field(None, min_length=1, max_length=200)

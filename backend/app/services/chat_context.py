@@ -49,22 +49,22 @@ async def dialogue(session, book_id, thread, reset_after=0):
             and (
                 (m.speaker == "author" and m.kind in {"note", "decision"})
                 or (
-                    m.kind == "speech"
+                    m.kind in {"speech", "plan"}
                     and m.speaker in ROLES.values()
-                    and (thread != "group" or "reply_to" in (m.payload or {}))
+                    and (thread != "group" or m.kind == "plan" or "reply_to" in (m.payload or {}))
                 )
             )
         )
     ]
 
 
-def dialogue_text(rows, *, limited=True):
+def dialogue_text(rows, *, limited=True, limit=6000):
     lines = [
         f"{SPEAKER_NAMES.get(m.speaker, m.speaker)}：{m.content[:800] + ('……' if len(m.content) > 800 else '')}"
         for m in rows
     ]
     if limited:
-        while lines and len("\n".join(lines)) > 6000:
+        while lines and len("\n".join(lines)) > limit:
             lines.pop(0)
     return "\n".join(lines) or "（没有）"
 
@@ -267,7 +267,9 @@ def pending_of(job, ctx):
     else:
         unit = next((u for u in ctx.units if str(u.id) == p.get("unit_id")), None)
         name = {
-            "setup_piece": {"concept": "定调", "settings": "设定库", "outline": "大纲"}.get(p.get("piece"), "定调"),
+            "setup_piece": {"concept": "定调", "settings": "定调和设定库", "outline": "大纲"}.get(
+                p.get("piece"), "定调"
+            ),
             "setup_review": "大纲",
             "volume_review": f"第 {p.get('volume')} 卷卷纲",
             "chapters_review": f"单元「{unit.title if unit else p.get('unit_title', '')}」的章纲",
@@ -305,9 +307,7 @@ async def reply_values(session, book, thread, role, rows, unanswered, summary):
         recent=dialogue_text(rows[-20:]),
         quote=quote,
         note=note,
-        how_to_apply="作者想让聊出来的结论生效，会点你回复下面的「记成要求」或「照这个改」；聊到可以落实的结论时，可以提醒他一句。"
-        if thread != "group"
-        else "作者想让编辑部照做，直接在群聊里交代就行；聊到可以落实的结论时，可以提醒他一句。",
+        how_to_apply="作者想让聊出来的想法生效，要先让你「总结一下」出一张方案卡，看过再点「按这个来」。聊到想法差不多成形时，可以提醒他一句；不要说「就这么定了」「咱们直接开始排……」，聊天里说的都还没生效。",
         role_focus={
             "chief": "你管剧情、节奏和方向：为什么这样安排、后面怎么走、哪里还能更爽。",
             "lorekeeper": "你管设定和前后一致：查清楚再答，说明出处（哪一条设定、第几章）。",
@@ -315,3 +315,67 @@ async def reply_values(session, book, thread, role, rows, unanswered, summary):
             "reviewer": "你管挑毛病：站在付费读者的角度，只说真正影响阅读的问题，按严重程度排。",
         }[role],
     )
+
+
+def _plain(text):
+    import unicodedata
+
+    return "".join(c for c in text if not c.isspace() and not unicodedata.category(c).startswith("P"))
+
+
+def wants_plan(text):
+    text = _plain(text)
+    return len(text) <= 40 and any(
+        word in text for word in ("总结", "归纳", "汇总", "整理一下", "整理成方案", "列个方案", "出个方案")
+    )
+
+
+def accepts_plan(text):
+    text = _plain(text)
+    return len(text) <= 20 and any(
+        word in text
+        for word in (
+            "按这个来",
+            "按这个办",
+            "照这个来",
+            "照这个办",
+            "就这么定",
+            "就这样定",
+            "就按这个",
+            "按方案来",
+            "就按方案",
+            "照方案",
+        )
+    )
+
+
+def obvious_question(text):
+    if not text.rstrip().endswith(("？", "?")) or any(
+        word in text
+        for word in (
+            "改",
+            "换",
+            "加",
+            "删",
+            "去掉",
+            "别",
+            "不要",
+            "以后",
+            "下一",
+            "从现在",
+            "帮我",
+            "记下",
+            "记住",
+            "照这个",
+            "按这个",
+        )
+    ):
+        return None
+    for role, words in (
+        ("lorekeeper", ("境界", "设定", "在哪", "谁知道", "前后")),
+        ("writer", ("怎么写", "文风", "示范", "写法")),
+        ("reviewer", ("毛病", "不好看", "漏洞", "问题")),
+    ):
+        if any(word in text for word in words):
+            return role
+    return "chief"

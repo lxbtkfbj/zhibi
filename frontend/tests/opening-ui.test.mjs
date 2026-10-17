@@ -24,7 +24,7 @@ test('旧路由落到新页和指定类别/卷，未知路径不擅自改写', (
 
 test('四种三步等待直接跟随正式页面与节点', () => {
   assert.equal(pendingTarget({ kind: 'setup_pitches', flow: 3 }, 'b').path, '/books/b/concept')
-  for (const [piece, target] of [['concept', 'concept'], ['settings', 'library?view=focus'], ['outline', 'outline?node=first-arc']]) assert.equal(pendingTarget({ kind: 'setup_piece', flow: 3, piece }, 'b').path, `/books/b/${target}`)
+  for (const [piece, target] of [['concept', 'concept'], ['settings', 'concept'], ['outline', 'outline?node=first-arc']]) assert.equal(pendingTarget({ kind: 'setup_piece', flow: 3, piece }, 'b').path, `/books/b/${target}`)
 })
 
 test('直接AI修改的标黄从完整字段响应取回选区，不把整字段错当替换片段', () => {

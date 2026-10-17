@@ -130,4 +130,6 @@ async def reply_background(book_id, thread, redis):
 
 
 def i_chat(message):
-    return (message.payload or {}).get("outcome", {}).get("kind") == "chat"
+    return (message.payload or {}).get("outcome", {}).get("kind") == "chat" and not (message.payload or {}).get(
+        "outcome", {}
+    ).get("handled")

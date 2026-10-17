@@ -19,7 +19,7 @@ from app.llm.router import LLMError
 from app.models import Book, Character, MeetingMessage, SettingSuggestion
 from app.prompts import render
 from app.services import setup_store
-from app.services.library_context import genre_defaults, load_context
+from app.services.library_context import existing_text, genre_defaults, load_context
 from app.services.meeting import publish
 from app.services.notes import note_prompt, note_thread
 from app.services.requirements import (
@@ -87,11 +87,18 @@ class SetupState(TypedDict, total=False):
     dirty_concept: bool
     library_reviewed: bool
     summary: str
+    prefill: bool
+    combined_gate: bool
+    concept_warnings: list[str]
 
 
-def initial_state(idea: str, style_reference: str = "", ask: bool = False, mode: str = "oneshot") -> SetupState:
+def initial_state(
+    idea: str, style_reference: str = "", ask: bool = False, mode: str = "oneshot", prefill: bool = False
+) -> SetupState:
     return {
         "flow": 3,
+        "combined_gate": True,
+        "prefill": prefill,
         "idea": idea,
         "style_reference": style_reference,
         "mode": mode,
@@ -203,7 +210,14 @@ def route_next(state: SetupState) -> str:
 
 
 def route_start(state: SetupState) -> str:
-    return "pitches"
+    return "prefill_gate" if state.get("prefill") else "pitches"
+
+
+async def prefill_gate_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
+    decision = interrupt({"kind": "setup_prefill", "flow": 3})
+    if decision.get("action") != "start":
+        raise ValueError("先写设定时请点「出三个故事方向」")
+    return {"prefill": False}
 
 
 def _revision(state: SetupState, target: str, current=None) -> str:
@@ -220,12 +234,13 @@ async def pitches_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     await d.check_cancel()
     pieces = {**_pieces(state), "concept": "drafting"}
     await mark_progress(d, {**state, "pieces": pieces})
-    await d.emit.status("chief", "主编正在写三个短版…")
+    await d.emit.status("chief", "主编正在想三个故事方向…")
     blocks = {
         "idea": state["idea"],
         "style": format_style(state.get("style_reference", "")),
         "requirements": requirements(state),
         "previous": state.get("previous", ""),
+        "existing": (await _library_blocks(d, state))["existing"],
     }
     for attempt in range(2):
         result = await editorial.draft_pitches(d.llm, blocks)
@@ -233,11 +248,11 @@ async def pitches_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
             break
     pitches = [pitch.model_dump() for pitch in result.pitches[:3]]
     if len(pitches) < 3:
-        raise ValueError("主编没有给出三个短版，请重试")
+        raise ValueError("主编没有给出三个故事方向，请重试")
     await d.emit.say("chief", result.reply)
     await d.emit.artifact(
         "chief",
-        "三个短版",
+        "三个故事方向",
         {
             "type": "pitches",
             "data": {"pitches": pitches, "benchmark": result.benchmark, "recommended": result.recommended},
@@ -268,13 +283,13 @@ async def pitches_gate_node(state: SetupState, runtime: Runtime[GraphDeps]) -> C
     if decision.get("action") == "redo":
         feedback = decision.get("feedback", "").strip()
         if not feedback:
-            raise ValueError("请写一句对短版的意见")
+            raise ValueError("请写一句对故事方向的意见")
         if not decision.get("requirement_saved"):
             async with d.sessionmaker() as session:
                 await add_requirement(session, d.book_id, feedback, "note")
                 await session.commit()
         previous = (
-            "【上一轮的短版】\n"
+            "【上一轮的故事方向】\n"
             + "\n".join(f"{index}. {pitch['name']}：{pitch['text']}" for index, pitch in enumerate(state["pitches"], 1))
             + f"\n【作者的意见】\n{feedback}"
         )
@@ -284,7 +299,7 @@ async def pitches_gate_node(state: SetupState, runtime: Runtime[GraphDeps]) -> C
         )
     index = decision.get("index")
     if decision.get("action") != "pick" or not isinstance(index, int) or not 1 <= index <= 3:
-        raise ValueError("请选择有效的短版")
+        raise ValueError("请选择一个故事方向")
     chosen_length = decision.get("length") or LENGTHS[length["recommended"]]
     if chosen_length not in LENGTHS:
         raise ValueError("请选择五档篇幅之一")
@@ -293,13 +308,13 @@ async def pitches_gate_node(state: SetupState, runtime: Runtime[GraphDeps]) -> C
         pitch["title"] = decision["title"].strip()
     if not decision.get("requirement_saved"):
         async with d.sessionmaker() as session:
-            await add_requirement(session, d.book_id, f"开书短版：选用「{pitch['name']}」", "answer")
+            await add_requirement(session, d.book_id, f"开书的故事方向：选用「{pitch['name']}」", "answer")
             await add_requirement(session, d.book_id, f"这本书打算写多长？——约 {chosen_length} 万字", "answer")
             if pitch.get("title"):
                 await add_requirement(session, d.book_id, f"书名用《{pitch['title']}》", "answer")
             await session.commit()
     if state.get("mode") == "oneshot":
-        await d.emit.say("chief", f"一口气模式：用了第 {index} 个短版「{pitch['name']}」。")
+        await d.emit.say("chief", f"一口气模式：用了第 {index} 个故事方向「{pitch['name']}」。")
     return Command(goto="intake", update={"pitch": pitch, "queue": ["concept"]})
 
 
@@ -334,11 +349,11 @@ async def _library_feedback(d: GraphDeps, feedback: str) -> None:
         recent = dialogue_text((await dialogue(session, d.book_id, "group", thread.reset_after))[-6:])
         await session.commit()
     result = await d.llm.structured(
-        "chief",
+        "router",
         schemas.LibraryIntent,
         editorial.persona("chief"),
         render("library_route", library=library, recent=recent, note=feedback),
-        purpose="library_route",
+        purpose="群聊分流",
     )
     if result.kind == "改设定":
         async with d.sessionmaker() as session:
@@ -359,6 +374,53 @@ async def _library_feedback(d: GraphDeps, feedback: str) -> None:
                     await d.emit.say("chief", result.reply)
                 return
     await _review(d, f"按作者的意见查一遍：{feedback}")
+
+
+async def _combined_feedback(d, state, feedback):
+    import re
+
+    from app.api.library_ai import RewriteIn, rewrite_target
+
+    result = await editorial.absorb_notes(
+        d.llm,
+        {"concept": state.get("concept", {}), "settings": state.get("library", {})},
+        [],
+        requirements(state),
+        [feedback],
+    )
+    await d.emit.say("chief", result.remark)
+    if result.concept_instructions:
+        clauses = re.split(r"[；\n]", result.concept_instructions)
+        metadata = [
+            c
+            for c in clauses
+            if any(w in c for w in ("底牌", "书名", "类型", "篇幅", "每章字数", "目标读者", "基调", "文风"))
+        ]
+        story = "；".join(c for c in clauses if c not in metadata)
+        async with d.sessionmaker() as session:
+            book = await session.get(Book, d.book_id)
+            if story.strip():
+                await rewrite_target(
+                    session,
+                    d.redis,
+                    book,
+                    RewriteIn(
+                        target_type="concept", target_id=d.book_id, path="story", mode="instruction", instruction=story
+                    ),
+                )
+            for clause in metadata:
+                session.add(
+                    SettingSuggestion(
+                        book_id=d.book_id, kind="review", title=clause, payload={"op": "note", "content": clause}
+                    )
+                )
+            await session.commit()
+    if result.settings_instructions:
+        await _library_feedback(d, result.settings_instructions)
+    if result.outline_instructions:
+        async with d.sessionmaker() as session:
+            await add_requirement(session, d.book_id, result.outline_instructions, "note")
+            await session.commit()
 
 
 async def intake_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
@@ -427,6 +489,7 @@ async def concept_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
         d.llm,
         {
             "idea": state["idea"],
+            "existing": (await _library_blocks(d, state))["existing"],
             "pitch": chosen,
             "style": format_style(state.get("style_reference", "")),
             "requirements": requirements(state),
@@ -446,7 +509,9 @@ async def concept_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
     return {**_finish(state, "concept", value, result), "dirty_concept": True}
 
 
-async def _library_blocks(d: GraphDeps, state: SetupState, *, secret: bool = False) -> dict:
+async def _library_blocks(
+    d: GraphDeps, state: SetupState, *, secret: bool = False, exclude_focus: bool = False
+) -> dict:
     async with d.sessionmaker() as session:
         ctx = await load_context(session, await session.get(Book, d.book_id))
         focus = [
@@ -457,6 +522,7 @@ async def _library_blocks(d: GraphDeps, state: SetupState, *, secret: bool = Fal
             or (secret and "底牌" in (target.tags or []))
         ]
         return {
+            "existing": existing_text(ctx, exclude=focus if exclude_focus else ()),
             "concept": ctx.concept,
             "library": ctx.library,
             "focus": "\n\n".join(ctx.entry_full_text(target) for target in focus),
@@ -473,7 +539,7 @@ async def settings_focus_node(state: SetupState, runtime: Runtime[GraphDeps]) ->
     blocks = await _library_blocks(d, state)
     result = await editorial.build_library_focus(
         d.llm,
-        {key: blocks[key] for key in ("concept", "genre_defaults", "requirements")}
+        {key: blocks[key] for key in ("concept", "genre_defaults", "requirements", "existing")}
         | {"revision": _revision(state, "settings_focus")},
     )
     value = result.model_dump()
@@ -493,7 +559,7 @@ async def settings_rest_node(state: SetupState, runtime: Runtime[GraphDeps]) -> 
     state = await live_state(state, d)
     await d.check_cancel()
     await d.emit.status("lorekeeper", "设定师正在补齐其余设定…")
-    blocks = await _library_blocks(d, state)
+    blocks = await _library_blocks(d, state, exclude_focus=True)
     blocks.pop("library")
     blocks["category_hints"] = "\n".join(
         f"【{category['name']}】{category['hint']}" for category in [CHARACTER_CATEGORY, *BUILTIN_CATEGORIES]
@@ -632,6 +698,7 @@ async def piece_persist_node(state: SetupState, runtime: Runtime[GraphDeps]) -> 
         summary=summary,
         pieces={**_pieces(state), piece: "waiting"},
         library_reviewed=piece == "settings" or state.get("library_reviewed", False),
+        concept_warnings=state.get("warnings", []) if piece == "concept" else state.get("concept_warnings", []),
     )
     await mark_progress(d, {**state, **update})
     return update
@@ -643,7 +710,12 @@ async def _confirm_piece(state: SetupState, d: GraphDeps) -> Command:
     update = {
         key: state[key] for key in ("concept", "library", "outline", "outline_chapters", "locked_names") if key in state
     }
-    update.update(pieces={**_pieces(state), piece: "confirmed"}, warnings=[], summary="", dirty_concept=False)
+    pieces = {**_pieces(state), piece: "confirmed"}
+    if piece == "concept" and state.get("mode") != "oneshot":
+        pieces["concept"] = "waiting"
+    if piece == "settings":
+        pieces["concept"] = "confirmed"
+    update.update(pieces=pieces, warnings=[], summary="", dirty_concept=False, combined_gate=True)
     if piece == "outline":
         await mark_progress(d, {**state, **update})
         return Command(goto="finalize", update=update)
@@ -657,7 +729,9 @@ async def piece_gate_node(
     state: SetupState, runtime: Runtime[GraphDeps]
 ) -> Command[Literal["intake", "piece_gate", "finalize"]]:
     d = runtime.context
-    if state.get("mode") == "oneshot" and state["piece"] != "outline":
+    if (state.get("mode") == "oneshot" and state["piece"] != "outline") or (
+        state.get("combined_gate") and state["piece"] == "concept"
+    ):
         return await _confirm_piece(state, d)
     # 中断前只有读取；恢复时必须读回作者刚保存的数据，不用检查点覆盖。
     state = await live_state(state, d, refresh=True)
@@ -668,6 +742,8 @@ async def piece_gate_node(
             "piece": state["piece"],
             "round": state.get("round", 1),
             "warnings": state.get("warnings", []),
+            "concept_warnings": state.get("concept_warnings", []),
+            "concept_decisions": state.get("decisions", {}).get("concept", []),
             "decisions": [
                 choice for target in PIECES[state["piece"]] for choice in state.get("decisions", {}).get(target, [])
             ],
@@ -696,10 +772,13 @@ async def piece_gate_node(
                 await add_requirement(session, d.book_id, f"「{flip['topic']}」改成：{flip['choice']}", "answer")
             await session.commit()
     if state["piece"] == "settings":
-        if feedback:
-            await _library_feedback(d, feedback)
-        for flip in flips:
-            await _review(d, f"作者把「{flip['topic']}」改成了「{flip['choice']}」，查一遍哪些设定要跟着改。")
+        concept_flips = flips if decision.get("decision_piece") == "concept" else []
+        settings_flips = [] if concept_flips else flips
+        notes = [feedback, *[f"把「{flip['topic']}」改成「{flip['choice']}」" for flip in concept_flips]]
+        if any(notes):
+            await _combined_feedback(d, state, "\n".join(filter(None, notes)))
+        for flip in settings_flips:
+            await _library_feedback(d, f"把「{flip['topic']}」改成「{flip['choice']}」")
         latest = await live_state(state, d, refresh=True)
         summary = latest.get("library", {}).get("summary", "")
         await d.emit.say("chief", summary)
@@ -757,7 +836,9 @@ def build_setup_graph() -> StateGraph:
         ("finalize", finalize_node),
     ):
         graph.add_node(name, node)
-    graph.add_edge(START, "pitches")
+    graph.add_node("prefill_gate", prefill_gate_node)
+    graph.add_conditional_edges(START, route_start, ["prefill_gate", "pitches"])
+    graph.add_edge("prefill_gate", "pitches")
     graph.add_edge("pitches", "pitches_gate")
     graph.add_conditional_edges("intake", route_next, [*ORDER, "piece_check"])
     for name in ORDER:
@@ -771,6 +852,6 @@ def restart_state(params: dict, old_values: dict, concept: dict) -> SetupState:
     state = initial_state(params.get("idea", ""), params.get("style_reference", ""), mode=params.get("mode", "puzzle"))
     if direction := old_values.get("direction"):
         state["previous"] = (
-            f"【之前按旧流程选过的方向】\n{direction.get('name', '')}：{direction.get('logline') or direction.get('story', '')}\n（作者之前选过它，三个短版里请保留它的好东西。）"
+            f"【之前按旧流程选过的方向】\n{direction.get('name', '')}：{direction.get('logline') or direction.get('story', '')}\n（作者之前选过它，三个故事方向里请保留它的好东西。）"
         )
     return state

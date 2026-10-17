@@ -18,6 +18,7 @@ def test_new_graph_has_only_three_steps_and_no_retired_nodes():
     assert PIECES["settings"] == ["settings_focus", "settings_rest"]
     graph = book_setup.build_setup_graph()
     assert set(graph.nodes) == {
+        "prefill_gate",
         "pitches",
         "pitches_gate",
         "intake",
@@ -42,7 +43,7 @@ def test_restart_remembers_only_old_chosen_direction_as_exact_previous():
     )
     assert (
         state["previous"]
-        == "【之前按旧流程选过的方向】\n逆袭：少年重生\n（作者之前选过它，三个短版里请保留它的好东西。）"
+        == "【之前按旧流程选过的方向】\n逆袭：少年重生\n（作者之前选过它，三个故事方向里请保留它的好东西。）"
     )
     assert state["queue"] == ["concept"] and "world" not in state and "concept" not in state
     assert state["pieces"] == dict.fromkeys(PIECE_ORDER, "todo")
@@ -202,3 +203,28 @@ async def test_original_outline_warning_survives_storage_normalization(monkeypat
     checked = await book_setup.piece_check_node({**update, "piece": "outline"}, rt)
     assert checked.goto == "piece_persist"
     assert "只有第一篇写细，后面的篇写到再定。" in checked.update["warnings"]
+
+
+async def test_pre_patch_concept_gate_can_confirm_then_use_combined_gate(monkeypatch):
+    state = book_setup.initial_state("旧任务", mode="puzzle")
+    state.pop("combined_gate")  # An actual checkpoint saved before this patch.
+    state["warnings"] = ["旧定调提醒"]
+    state["decisions"] = {"concept": [{"topic": "基调", "chosen": "热血"}]}
+
+    async def live(value, deps, **kwargs):
+        return value
+
+    captured = []
+
+    def confirm(pending):
+        captured.append(pending)
+        return {"action": "confirm"}
+
+    monkeypatch.setattr(book_setup, "live_state", live)
+    monkeypatch.setattr(book_setup, "interrupt", confirm)
+    monkeypatch.setattr(book_setup, "mark_progress", AsyncMock())
+    result = await book_setup.piece_gate_node(state, SimpleNamespace(context=None))
+    assert captured[0]["piece"] == "concept"
+    assert result.update["combined_gate"] is True
+    assert result.update["piece"] == "settings"
+    assert result.update["pieces"]["concept"] == "waiting"

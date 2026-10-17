@@ -77,7 +77,6 @@ async def test_complete_flow_focus_saved_first_and_write_reuses_first_unit(flow,
     bid, jid = await new_puzzle(flow)
     concept = (await flow("GET", f"/books/{bid}"))["concept"]
     assert concept["target_length"] == 300 and concept["story"] and concept["secret_entry_id"]
-    await confirm(flow, jid)
     gate = (await flow("GET", f"/jobs/{jid}"))["pending"]
     assert gate["piece"] == "settings" and gate["summary"].startswith("主编建了 ")
     assert "另外有 " in gate["summary"] and inspected
@@ -88,7 +87,7 @@ async def test_complete_flow_focus_saved_first_and_write_reuses_first_unit(flow,
     await flow("POST", f"/jobs/{jid}/piece", {"action": "revise", "feedback": "把境界改成九重天"})
     levels = next(entry for entry in gate["setup"]["settings"]["entries"] if entry["name"] == "武道境界")
     candidates = await flow("GET", f"/books/{bid}/candidates?target_type=entry&target_id={levels['id']}")
-    assert len(candidates) == 1 and len(candidates[0]["options"]) == 3
+    assert not candidates  # 明确说了改成什么，直接改这一处。
     assert calls["LibraryRest"] == 1  # 提意见绝不整库重建。
     await confirm(flow, jid)
     gate = (await flow("GET", f"/jobs/{jid}"))["pending"]
@@ -120,17 +119,17 @@ async def test_redo_exact_previous_latest_round_title_and_requirements(flow, mon
         result = await original(schema, system, user)
         if schema is schemas.PitchSet:
             captured.append(user)
-            result.pitches[0].name = f"仅第{len(captured)}轮短版"
+            result.pitches[0].name = f"仅第{len(captured)}轮故事方向"
         return result
 
     monkeypatch.setattr(demo, "respond", respond)
     created = await flow("POST", "/books", {"idea": "对标一部传统玄幻", "mode": "puzzle"})
     bid, jid = created["book"]["id"], created["job"]["id"]
-    assert "【上一轮的短版】\n" not in captured[0]
+    assert "【上一轮的故事方向】\n" not in captured[0]
     for feedback in ("保留经营", "加入追凶"):
         await flow("POST", f"/jobs/{jid}/pitches", {"action": "redo", "feedback": feedback})
-    assert "【上一轮的短版】\n1. 仅第2轮短版：" in captured[2]
-    assert "【作者的意见】\n加入追凶" in captured[2] and "仅第1轮短版" not in captured[2]
+    assert "【上一轮的故事方向】\n1. 仅第2轮故事方向：" in captured[2]
+    assert "【作者的意见】\n加入追凶" in captured[2] and "仅第1轮故事方向" not in captured[2]
     gate = (await flow("GET", f"/jobs/{jid}"))["pending"]
     assert gate["round"] == 3
     await flow("POST", f"/jobs/{jid}/pitches", {"action": "pick", "index": 1, "title": "作者自己起名", "length": 300})
@@ -167,9 +166,8 @@ async def test_concept_length_retry_once_and_empty_secret_warning(flow, monkeypa
     _, jid = await new_puzzle(flow)
     assert len(prompts) == 2 and "定调要写成一段话，200-400 字，现在是 1 字。" in prompts[1]
     gate = (await flow("GET", f"/jobs/{jid}"))["pending"]
-    assert len(gate["warnings"]) == 2
-    await confirm(flow, jid)
-    assert (await flow("GET", f"/jobs/{jid}"))["pending"]["piece"] == "settings"
+    assert len(gate["concept_warnings"]) == 2
+    assert gate["piece"] == "settings"
 
 
 async def test_live_author_edits_are_not_overwritten_on_confirm(flow, sessionmaker):
@@ -205,7 +203,6 @@ async def test_settings_failed_checks_retry_once_notes_review_and_flips(flow, mo
 
     monkeypatch.setattr(demo, "respond", respond)
     bid, jid = await new_puzzle(flow)
-    await confirm(flow, jid)
     assert counts["LibraryRest"] == 2
     suggestions = await flow("GET", f"/books/{bid}/suggestions")
     assert any(
@@ -219,7 +216,7 @@ async def test_settings_failed_checks_retry_once_notes_review_and_flips(flow, mo
         {"action": "revise", "feedback": "查一下是否矛盾", "flips": [{"topic": "主角性格", "choice": "沉稳"}]},
     )
     assert any("按作者的意见查一遍：查一下是否矛盾" in prompt for prompt in scopes)
-    assert any("作者把「主角性格」改成了「沉稳」，查一遍哪些设定要跟着改。" in prompt for prompt in scopes)
+    assert any("按作者的意见查一遍：把「主角性格」改成「沉稳」" in prompt for prompt in scopes)
     assert counts["LibraryRest"] == 2
 
 
@@ -235,7 +232,6 @@ async def test_outline_revise_keeps_locked_nodes_and_unchanged_chapters(flow, se
 
     monkeypatch.setattr(demo, "respond", respond)
     bid, jid = await new_puzzle(flow)
-    await confirm(flow, jid)
     await confirm(flow, jid)
     async with sessionmaker() as session:
         volume = await session.scalar(select(Volume).where(Volume.book_id == uuid.UUID(bid)).order_by(Volume.index))
@@ -285,16 +281,17 @@ async def test_concept_revision_uses_live_title_and_never_revives_old_title_requ
         expected = "作者手改名"
     elif change == "deleted_requirement":
         await flow("DELETE", f"/requirements/{title_row['id']}")
-        expected = model_title
+        expected = "最初选名"
     else:
         await flow("PATCH", f"/requirements/{title_row['id']}", {"text": "书名用《要求里新书名》"})
-        model_title = expected = "要求里新书名"
+        model_title = "要求里新书名"
+        expected = "最初选名"
     await flow("POST", f"/jobs/{jid}/piece", {"action": "revise", "feedback": "只把故事写得更紧凑"})
     book = await flow("GET", f"/books/{bid}")
     assert book["title"] == book["concept"]["title"] == expected
+    assert len(blocks_seen) == 1  # 合成确认后只局部改故事，不重生成整份定调。
+    rows = await flow("GET", f"/books/{bid}/requirements")
     if change != "saved_title":
-        assert "书名用《最初选名》" not in blocks_seen[-1]["requirements"]
-        rows = await flow("GET", f"/books/{bid}/requirements")
         assert "书名用《最初选名》" not in {row["text"] for row in rows}
     if change == "edited_requirement":
-        assert "书名用《要求里新书名》" in blocks_seen[-1]["requirements"]
+        assert "书名用《要求里新书名》" in {row["text"] for row in rows}

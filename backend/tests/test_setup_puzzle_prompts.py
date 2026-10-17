@@ -39,7 +39,14 @@ def test_task3_schema_fields_descriptions_and_order_match_verbatim():
             actual, expected = getattr(s, item.name), namespace[item.name]
             assert list(actual.model_fields) == list(expected.model_fields), item.name
             for name, field in expected.model_fields.items():
-                assert actual.model_fields[name].description == field.description, (item.name, name)
+                updated = {
+                    ("Pitch", "text"): "故事方向：一百字左右，一段话说清主角是谁、凭什么、想要什么、读者爽在哪",
+                    ("PitchSet", "pitches"): "三个故事方向，彼此在读者享受的东西上有实质差别；作者定下的东西三个都保留",
+                }
+                assert actual.model_fields[name].description == updated.get((item.name, name), field.description), (
+                    item.name,
+                    name,
+                )
                 assert actual.model_fields[name].default == field.default, (item.name, name)
 
 
@@ -77,10 +84,10 @@ async def test_prompt_metadata_marks_old_overrides_and_preserves_rendering(sessi
 
 PROMPT_HASHES = {
     "setup_notes": "6decc9266e64f6a871b8352e0aaa73db7c9a31b8c0b40149561fa853ea9fd7e0",
-    "setup_pitches": "68c32b42c7930ff630d9d33e11d30198afecd89842ce4abec9cbbbce39c05310",
-    "setup_story": "cd41168529586828a8acbaa525d0f0855e8332debb890a31d319f8e4ed2bb8e3",
-    "library_build_focus": "190c93ea4773ff77ff9815624b3f1ef367e11425ae7f0f4997488b8c69aa29af",
-    "library_build_rest": "1f7aa88a56589f3683ed43369fecb62adc3cc8f355c7426d12366de61e54ac94",
+    "setup_pitches": "b93adc4c08d74ed755f97f4e620c8d5afea595c0d6706e7bdfd9f14610d416b6",
+    "setup_story": "b1bc94d476a379e0c5485b4ec5d5d81af479ad668e87b7196b30f14f43a407b2",
+    "library_build_focus": "0284a4ca8634517709cc97949ea9920c7f6281e81e6d20dd30c30c49b2918822",
+    "library_build_rest": "4a97372a5144f59718def6ab894df35e82de3b8703191a38795225a8b2548df4",
     "setup_outline": "c63dbda748ff87e91737c1294b24c20b8e400ad67fb60c0cdf91fecb249fb147",
 }
 

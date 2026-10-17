@@ -81,7 +81,7 @@ export const useHealth = () =>
 export function useCreateBook() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (body: { idea: string; style_reference: string; ask?: boolean; mode?: 'puzzle' | 'oneshot' }) =>
+    mutationFn: (body: { idea: string; style_reference: string; ask?: boolean; prefill?: boolean; mode?: 'puzzle' | 'oneshot' }) =>
       post<{ book: BookDetail; job: Job }>('/books', body),
     onSuccess: (data) => {
       qc.setQueryData(keys.book(data.book.id), data.book)
@@ -274,7 +274,7 @@ export function useJobActions(bookId: string) {
     qc.setQueryData<BookDetail>(keys.book(bookId), (old) => (old ? { ...old, active_job: job } : old))
   const pitches = useMutation({
     mutationKey: setupKey,
-    mutationFn: ({ jobId, ...body }: { jobId: string; action: 'pick' | 'redo'; index?: number; title?: string; length?: number; feedback?: string }) => post<Job>(`/jobs/${jobId}/pitches`, body),
+    mutationFn: ({ jobId, ...body }: { jobId: string; action: 'pick' | 'redo' | 'start'; index?: number; title?: string; length?: number; feedback?: string }) => post<Job>(`/jobs/${jobId}/pitches`, body),
     onSuccess: setJob,
   })
   const directions = useMutation({

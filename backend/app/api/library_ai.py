@@ -49,12 +49,19 @@ class CheckIn(BaseModel):
     target_id: uuid.UUID
 
 
-async def call_model(book_id, role, schema, template, **values):
+async def call_model(book_id, role, schema, template, *, single_attempt=False, **values):
     """每个请求独占客户端；不在模型调用期间持有书锁（调用日志也会锁书）。"""
     llm = LLMRouter(get_sessionmaker(), book_id=book_id)
     try:
         try:
-            return await llm.structured(role, schema, persona(role), render(template, **values), purpose=template)
+            return await llm.structured(
+                role,
+                schema,
+                persona("chief" if role == "router" else role),
+                render(template, **values),
+                purpose="群聊分流" if template == "library_route" else template,
+                **({"max_attempts": 1} if single_attempt else {}),
+            )
         finally:
             await llm.aclose()
     except Exception as exc:
@@ -74,12 +81,26 @@ async def say(session, redis, book_id, speaker, content):
     )
 
 
-async def rewrite_target(session, redis, book, body: RewriteIn, *, require_idle=False):
+async def rewrite_target(
+    session,
+    redis,
+    book,
+    body: RewriteIn,
+    *,
+    require_idle=False,
+    allow_waiting=False,
+    require_unwritten=False,
+    single_attempt=False,
+):
     if body.mode == "instruction" and not body.instruction.strip():
         raise HTTPException(422, "先写一句你想怎么改")
     book_id = book.id
     target = await load_target(session, book_id, body.target_type, body.target_id)
     _unlocked(target)
+    if require_unwritten:
+        from app.services.library import ensure_unwritten
+
+        await ensure_unwritten(session, target)
     try:
         current = read_path(target, body.path)
         if not isinstance(current, str):
@@ -105,16 +126,25 @@ async def rewrite_target(session, redis, book, body: RewriteIn, *, require_idle=
         "lorekeeper",
         s.RewriteOptions if body.mode == "options" else s.RewriteOne,
         "library_rewrite",
+        **({"single_attempt": True} if single_attempt else {}),
         **values,
     )
     await lock_book(session, book_id)
     if require_idle:
         await ensure_idle(session, book_id)
-        if await session.scalar(select(Job.id).where(Job.book_id == book_id, Job.status == "waiting_author").limit(1)):
+        if not allow_waiting and await session.scalar(
+            select(Job.id)
+            .where(
+                Job.book_id == book_id, Job.status == "waiting_author", Job.pending["kind"].astext != "setup_prefill"
+            )
+            .limit(1)
+        ):
             # 作者消息已保存；不要返回 use_feedback，避免前端把同一句再交一次。
             raise HTTPException(409, "编辑部状态变了，请刷新后再改")
     target = await load_target(session, book_id, body.target_type, body.target_id, for_update=True)
     _unlocked(target)
+    if require_unwritten:
+        await ensure_unwritten(session, target)
     if body.mode == "options":
         if [item.label for item in result.options] != ["稳妥", "大胆", "出格"]:
             raise HTTPException(502, "模型出错了：没有按稳妥、大胆、出格给出三种写法")
@@ -167,7 +197,9 @@ async def rewrite_target(session, redis, book, body: RewriteIn, *, require_idle=
         "suggestions": [SuggestionOut.model_validate(row) for row in suggestions],
     }
     if isinstance(target, Book) and body.path.split("@", 1)[0] == "story":
-        await review_concept_change(session, redis, book_id, before.get("story", ""))
+        await review_concept_change(
+            session, redis, book_id, before.get("story", ""), **({"single_attempt": True} if single_attempt else {})
+        )
     return response
 
 
@@ -247,7 +279,14 @@ async def fill_gaps(
 
 
 async def review_library(
-    session, redis, book, check: CheckIn | None = None, *, scope: str | None = None, kind: str = "review"
+    session,
+    redis,
+    book,
+    check: CheckIn | None = None,
+    *,
+    scope: str | None = None,
+    kind: str = "review",
+    single_attempt=False,
 ):
     book_id = book.id
     ctx = await load_context(session, book)
@@ -257,7 +296,14 @@ async def review_library(
         scope = f"只查这一条：{ctx.target_heading(target)}；需要时对照别的条目。"
     values = dict(concept=ctx.concept, library_full=ctx.library_full, outline=ctx.outline, scope=scope)
     await session.rollback()
-    result = await call_model(book_id, "reviewer", s.LibraryReview, "library_review", **values)
+    result = await call_model(
+        book_id,
+        "reviewer",
+        s.LibraryReview,
+        "library_review",
+        **({"single_attempt": True} if single_attempt else {}),
+        **values,
+    )
     await lock_book(session, book_id)
     book = await session.get(Book, book_id)
     ctx = await load_context(session, book)
@@ -321,7 +367,7 @@ async def check(
     return await review_library(session, redis, book, body)
 
 
-async def review_concept_change(session, redis, book_id, old_story: str) -> None:
+async def review_concept_change(session, redis, book_id, old_story: str, *, single_attempt=False) -> None:
     book = await session.get(Book, book_id)
     new_story = (book.concept or {}).get("story", "")
     if old_story == new_story:
@@ -335,4 +381,20 @@ async def review_concept_change(session, redis, book_id, old_story: str) -> None
         return
     scope = f"定调改了。\n改之前：{old_story}\n改之后：{new_story}\n查设定库和大纲里哪些地方要跟着改。"
     await session.commit()
-    await review_library(session, redis, book, scope=scope, kind="concept")
+    try:
+        await review_library(
+            session, redis, book, scope=scope, kind="concept", **({"single_attempt": True} if single_attempt else {})
+        )
+    except HTTPException as exc:
+        if exc.status_code != 502:
+            raise
+        # The edit and its version have already committed. A failed follow-up
+        # review must not turn an undoable successful edit into a false failure.
+        await session.rollback()
+        warning = f"定调已经改好了，但连带检查没做成：{exc.detail}。可以稍后在设定库点「全部查一遍」。"
+        session.add(
+            SettingSuggestion(
+                book_id=book_id, kind="concept", title=warning, payload={"op": "note", "content": warning}
+            )
+        )
+        await say(session, redis, book_id, "reviewer", warning)

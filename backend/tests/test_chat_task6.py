@@ -36,7 +36,7 @@ from app.models import (
     Volume,
     WorldEntry,
 )
-from app.services import chat
+from app.services import chat, group_notes
 from app.services.chat_context import (
     dialogue,
     dialogue_text,
@@ -63,6 +63,10 @@ async def client():
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as c:
         yield c
     await app.state.redis.aclose()
+
+
+async def final_message(client, bid, mid):
+    return next(m for m in (await client.get(f"/api/books/{bid}/meeting?limit=2000")).json() if m["id"] == mid)
 
 
 async def seed(sm, state="idle", kind="write_book"):
@@ -158,7 +162,8 @@ async def test_group_requirement_saved_once(client, sessionmaker, state, kind, o
     bid = await seed(sessionmaker, state, kind)
     r = await client.post(f"/api/books/{bid}/notes", json={"content": "下一章节奏快一点"})
     assert r.status_code == 201, r.text
-    assert r.json()["payload"]["outcome"]["kind"] == outcome
+    assert r.json()["payload"]["outcome"]["kind"] == "pending"
+    assert (await final_message(client, bid, r.json()["id"]))["payload"]["outcome"]["kind"] == outcome
     async with sessionmaker() as session:
         row = await session.scalar(select(AuthorRequirement))
         assert row.scope == "chapter" and row.chapter_index == 1 and row.message_id == r.json()["id"]
@@ -167,8 +172,9 @@ async def test_group_requirement_saved_once(client, sessionmaker, state, kind, o
 async def test_working_setting_suggestion_and_run(client, sessionmaker):
     bid = await seed(sessionmaker, "running")
     r = await client.post(f"/api/books/{bid}/notes", json={"content": "把境界名称重想一下"})
-    assert r.json()["payload"]["outcome"]["kind"] == "later"
-    sid = r.json()["payload"]["outcome"]["suggestion_id"]
+    final = await final_message(client, bid, r.json()["id"])
+    assert final["payload"]["outcome"]["kind"] == "later"
+    sid = final["payload"]["outcome"]["suggestion_id"]
     assert (await client.post(f"/api/suggestions/{sid}/run-chat")).status_code == 409
     async with sessionmaker() as session:
         job = await session.scalar(select(Job))
@@ -176,7 +182,7 @@ async def test_working_setting_suggestion_and_run(client, sessionmaker):
         await session.commit()
     result = await client.post(f"/api/suggestions/{sid}/run-chat")
     assert result.status_code == 200, result.text
-    assert result.json()["payload"]["outcome"]["kind"] == "edit"
+    assert (await final_message(client, bid, result.json()["id"]))["payload"]["outcome"]["kind"] == "edit"
     async with sessionmaker() as session:
         assert (await session.scalar(select(SettingSuggestion))).status == "accepted"
 
@@ -242,14 +248,7 @@ async def test_promote_chat_tidy_apply_and_conclusion(client, sessionmaker):
     assert history[0]["payload"]["outcome"]["kind"] == "requirement"
     await client.post(f"/api/books/{bid}/notes", json={"content": "就用这个写法", "to": "chief"})
     result = await client.post(f"/api/books/{bid}/chat/chief/conclude", json={"mode": "requirement"})
-    assert result.json()["found"]
-    saved = await client.post(
-        f"/api/books/{bid}/requirements", json={"text": result.json()["text"], "source": "chat:chief"}
-    )
-    assert saved.status_code == 201, saved.text
-    rows = (await client.get(f"/api/books/{bid}/requirements")).json()
-    recorded = next(row for row in rows if row["id"] == saved.json()["id"])
-    assert recorded["text"] == result.json()["text"] and recorded["source"] == "chat:chief"
+    assert result.status_code == 404  # 补丁 1 退役旧结论入口，统一走方案卡。
 
 
 async def test_summary_reset_and_typing(client, sessionmaker):
@@ -311,13 +310,11 @@ async def test_classification_failure_not_feedback(client, sessionmaker, monkeyp
 
         raise HTTPException(502, "模型出错了：演示错误")
 
-    monkeypatch.setattr(jobs_api, "call_model", fail)
-    result = await client.post(f"/api/books/{bid}/notes", json={"content": "为什么？"})
+    monkeypatch.setattr(group_notes, "call_model", fail)
+    result = await client.post(f"/api/books/{bid}/notes", json={"content": "下一章快一点"})
     assert result.status_code == 502
     async with sessionmaker() as session:
-        message = await session.scalar(select(MeetingMessage))
-        assert message.content == "为什么？" and message.job_id is None
-        assert message.payload["outcome"]["kind"] == "chat"
+        assert not list(await session.scalars(select(MeetingMessage)))
         assert not list(await session.scalars(select(AuthorRequirement)))
 
 
@@ -340,6 +337,9 @@ def test_exact_templates_and_schema_contracts():
     root = Path(__file__).parents[2]
     hashes = json.loads(Path(__file__).with_name("chat_task6_prompt_hashes.json").read_text(encoding="utf-8"))
     for name, sha in hashes.items():
+        if name == "chat_conclude":
+            assert not (root / f"backend/app/prompts/{name}.md").exists()
+            continue
         assert hashlib.sha256((root / f"backend/app/prompts/{name}.md").read_bytes()).hexdigest() == sha
     task = (root / "docs/codex任务/第三包/6-和编辑部聊天.md").read_text(encoding="utf-8")
     actual = ast.parse((root / "backend/app/agents/schemas.py").read_text(encoding="utf-8"))
@@ -347,6 +347,9 @@ def test_exact_templates_and_schema_contracts():
         if not block.startswith("class "):
             continue
         for cls in ast.parse(block).body:
+            if cls.name == "ChatConclusion":
+                assert not hasattr(s, cls.name)
+                continue
             same = next(c for c in actual.body if isinstance(c, ast.ClassDef) and c.name == cls.name)
             assert ast.dump(same) == ast.dump(cls)
 
@@ -378,9 +381,9 @@ async def test_idle_edit_instruction_revert_and_not_found(client, sessionmaker, 
             kind="改设定", target_name="境界", part="一段话", mode="照作者的意思改", instruction="加一条代价"
         )
 
-    monkeypatch.setattr(jobs_api, "call_model", intent)
+    monkeypatch.setattr(group_notes, "call_model", intent)
     result = await client.post(f"/api/books/{bid}/notes", json={"content": "境界加代价"})
-    outcome = result.json()["payload"]["outcome"]
+    outcome = (await final_message(client, bid, result.json()["id"]))["payload"]["outcome"]
     assert outcome["kind"] == "edit" and outcome["revert_version_id"]
     for _ in range(2):
         response = await client.post(f"/api/versions/{outcome['revert_version_id']}/revert")
@@ -391,9 +394,9 @@ async def test_idle_edit_instruction_revert_and_not_found(client, sessionmaker, 
     async def missing(*args, **kwargs):
         return s.LibraryIntent(kind="改设定", target_name="不存在")
 
-    monkeypatch.setattr(jobs_api, "call_model", missing)
+    monkeypatch.setattr(group_notes, "call_model", missing)
     result = await client.post(f"/api/books/{bid}/notes", json={"content": "不存在换一个"})
-    assert result.json()["payload"]["outcome"]["kind"] == "not_found"
+    assert (await final_message(client, bid, result.json()["id"]))["payload"]["outcome"]["kind"] == "not_found"
 
 
 async def test_background_batches_unanswered_with_serial_lock(client, sessionmaker, monkeypatch):
@@ -451,7 +454,7 @@ async def test_summary_failure_uses_old_summary(client, sessionmaker, monkeypatc
 
 
 async def test_tidy_missing_items_keep_and_false_conclusion(client, sessionmaker, monkeypatch):
-    from app.api import chat as chat_api
+    from app.services import chat_plans
 
     bid = await seed(sessionmaker)
     await client.post(f"/api/books/{bid}/requirements", json={"text": "不能删"})
@@ -463,12 +466,15 @@ async def test_tidy_missing_items_keep_and_false_conclusion(client, sessionmaker
     response = await client.post(f"/api/books/{bid}/requirements/tidy")
     assert response.json()["items"][0]["action"] == "保留"
 
-    async def no_conclusion(*args, **kwargs):
-        return s.ChatConclusion(found=False)
+    async def no_plan(*args, **kwargs):
+        return s.ChatPlan(title="空方案", summary="没有结论")
 
-    monkeypatch.setattr(chat_api, "model", no_conclusion)
-    result = await client.post(f"/api/books/{bid}/chat/chief/conclude", json={"mode": "instruction"})
-    assert result.json() == {"found": False, "text": "", "scope": "一直有效"}
+    monkeypatch.setattr(chat_plans, "model", no_plan)
+    result = await client.post(f"/api/books/{bid}/notes", json={"content": "总结一下", "to": "chief"})
+    assert result.status_code == 201
+    rows = (await client.get(f"/api/books/{bid}/meeting")).json()
+    assert not any(m["kind"] == "plan" for m in rows)
+    assert any(m["content"] == "前面还没聊出要落实的东西。想好了再叫我总结。" for m in rows)
 
 
 def test_migration_roundtrip_and_unique_thread():
@@ -634,7 +640,7 @@ async def test_private_receipt_after_long_history_and_scope_only_patch(client, s
     message = (await client.post(f"/api/books/{bid}/notes", json={"content": "第一个单元换个对手"})).json()
     response = await client.post(f"/api/books/{bid}/chat/chief/receipt", json={"content": "第一个单元换个对手"})
     assert response.status_code == 200, response.text
-    row = message["payload"]["outcome"]["requirement_id"]
+    row = (await final_message(client, bid, message["id"]))["payload"]["outcome"]["requirement_id"]
     response = await client.patch(f"/api/requirements/{row}", json={"scope": "next_chapter"})
     assert response.status_code == 200 and response.json()["chapter_index"] == 1
 
@@ -662,6 +668,7 @@ async def test_setting_rewrite_rechecks_waiting_state_after_model(client, sessio
 
     monkeypatch.setattr(library_ai, "call_model", started)
     response = await client.post(f"/api/books/{bid}/notes", json={"content": "把境界名称重想一下"})
-    assert response.status_code == 409 and isinstance(response.json()["detail"], str)
+    assert response.status_code == 201
+    assert (await final_message(client, bid, response.json()["id"]))["payload"]["outcome"]["kind"] == "failed"
     async with sessionmaker() as session:
         assert (await session.scalar(select(WorldEntry))).name == "境界"

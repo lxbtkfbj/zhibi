@@ -17,13 +17,14 @@ def is_legacy_setup(job: Job) -> bool:
     return job.kind == "book_setup" and (job.params or {}).get("flow") != 3
 
 
-def new_setup_job(book: Book, ask: bool = False, mode: str | None = None) -> Job:
+def new_setup_job(book: Book, ask: bool = False, mode: str | None = None, prefill: bool = False) -> Job:
     return Job(
         book_id=book.id,
         kind="book_setup",
         thread_id=f"setup-{book.id}-{uuid.uuid4().hex[:8]}",
         params={
             "flow": 3,
+            "prefill": prefill,
             "idea": book.idea,
             "style_reference": book.style_reference,
             "mode": mode or (book.settings or {}).get("setup_mode", "oneshot"),

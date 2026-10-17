@@ -36,7 +36,11 @@ GRAPHS: dict[str, tuple[Callable[[], StateGraph], Callable[[dict], dict]]] = {
     "book_setup": (
         book_setup.build_setup_graph,
         lambda p: book_setup.initial_state(
-            p.get("idea", ""), p.get("style_reference", ""), bool(p.get("ask")), mode=p.get("mode", "oneshot")
+            p.get("idea", ""),
+            p.get("style_reference", ""),
+            bool(p.get("ask")),
+            mode=p.get("mode", "oneshot"),
+            prefill=bool(p.get("prefill")),
         ),
     ),
     "write_book": (write_book.build_write_graph, write_book.initial_state),
@@ -49,6 +53,7 @@ BOOK_STATUS_WHILE_WAITING = {
     "setup_review": "awaiting_approval",
     "setup_questions": "setting_up",
     "setup_pitches": "setting_up",
+    "setup_prefill": "setting_up",
     "setup_piece": "setting_up",
     "volume_review": "writing",
     "chapters_review": "writing",

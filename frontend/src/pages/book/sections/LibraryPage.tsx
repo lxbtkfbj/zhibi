@@ -1,3 +1,4 @@
+import { PrefillGate } from '../PrefillGate'
 import { libraryQuoteWhere } from '../../../lib/chat'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { post } from '../../../api/client'
@@ -185,6 +186,7 @@ export function LibraryPage() {
   }
   return <section data-testid="library-page" className="space-y-5">
     <PageHeader eyebrow="书稿 · 设定库" title="把故事里的人和事，放在手边" subtitle="先看重点；需要的时候，再把一处写清楚。修改只动你选中的地方。" />
+    <PrefillGate />
     {job?.kind === 'book_setup' && <div aria-label="设定库总结" className="rounded-xl border border-chief/20 bg-chief-soft/50 px-4 py-3 text-sm leading-relaxed text-chief">{pending?.summary || (working ? '重点先出来，其余设定正在补。先看「重点」就行。' : `主编建了 ${(data?.characters.length ?? 0) + (data?.entries.length ?? 0)} 条设定，先看「重点」就行。`)}</div>}
     {!!suggestions.data?.length && <SuggestionInbox bookId={bookId} suggestions={suggestions.data} library={data} onJump={jumpSuggestion} />}
     <nav aria-label="设定类别" className="flex flex-wrap gap-2 max-[768px]:flex-nowrap max-[768px]:overflow-x-auto max-[768px]:pb-2">

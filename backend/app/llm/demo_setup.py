@@ -1,5 +1,7 @@
 """第三包开书的确定性演示产出；不调用任何真实供应商。"""
 
+import re
+
 from app.agents import schemas as s
 
 STORY = (
@@ -40,12 +42,23 @@ def pitches(user: str) -> s.PitchSet:
     )
 
 
+def existing_names(user):
+    block = user.split("【设定库里已经有的】", 1)[-1] if "【设定库里已经有的】" in user else ""
+    block = re.split(r"\n\n(?:【|要求：)", block, maxsplit=1)[0]
+    hero = re.search(r"角色卡片 · ([^\n]+)\n(?:(?!\n\n).)*?定位：主角", block, re.S)
+    finger = re.search(r"([^\n]+) · ([^\n]+)\n(?:(?!\n\n).)*?标签：[^\n]*金手指", block, re.S)
+    if not finger:
+        finger = re.search(r"(物品与功法|特殊规则) · ([^\n]+)", block)
+    return hero[1] if hero else "楚风", finger[2] if finger else "轮回镜"
+
+
 def concept(user: str) -> s.StoryConcept:
+    hero, finger = existing_names(user)
     return s.StoryConcept(
-        story=STORY
+        story=STORY.replace("楚风", hero).replace("轮回镜", finger)
         + ("测试冲突：坊市的货币需要核对。" if "测试冲突" in user else "")
         + ("另外记录厉鬼的规律（测试自建类别）。" if "测试自建类别" in user else ""),
-        secret=SECRET,
+        secret=SECRET.replace("楚风", hero).replace("轮回镜", finger),
         title="逆世帝尊",
         alt_titles=["轮回镜主", "重踏九天"],
         genre="玄幻·修仙",
@@ -59,9 +72,10 @@ def concept(user: str) -> s.StoryConcept:
 
 
 def focus(user: str) -> s.LibraryFocus:
+    hero, finger = existing_names(user)
     return s.LibraryFocus(
         protagonist=s.CharacterCardDraft(
-            name="楚风",
+            name=hero,
             aliases=["九天帝尊"],
             role_type="主角",
             one_line="帝尊重生为丹田被封的楚家少爷。",
@@ -76,7 +90,7 @@ def focus(user: str) -> s.LibraryFocus:
         ),
         finger=s.FingerDraft(
             place="物品与功法",
-            name="轮回镜",
+            name=finger,
             one_line="照见物品来历，随境界修复并解开前世记忆的残镜。",
             content="楚风前世的本命法宝，碎了一半，把他送回五百年前，镜中住着凝霜。开局能识宝，每破一个大境界修好一片、多一种能力，也解开一段前世记忆。每次耗魂力，用多了会头痛、昏迷。拍卖会上，他用最后十块灵石买下黑石，发现前世找了三百年的神料。",
         ),

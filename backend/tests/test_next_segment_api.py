@@ -124,7 +124,7 @@ async def test_revise_requires_feedback_or_flips_and_waiting_notes_rejected(clie
     assert BOOK_STATUS_WHILE_WAITING["segment_review"] == "writing"
     response = await client.post(f"/api/jobs/{job_id}/segment", json={"action": "revise", "feedback": "  "})
     assert response.status_code == 422
-    response = await client.post(f"/api/books/{book_id}/notes", json={"content": "另一个入口"})
+    response = await client.post(f"/api/books/{book_id}/notes", json={"content": "把这一篇改成更多反转"})
     assert response.status_code == 409
     response = await client.post(
         f"/api/jobs/{job_id}/segment", json={"action": "revise", "flips": [{"topic": "地图", "choice": "原地"}]}

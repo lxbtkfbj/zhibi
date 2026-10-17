@@ -90,7 +90,7 @@ async def create_book(
     book.settings = {**book.settings, "setup_mode": mode}
     session.add(book)
     await session.flush()
-    job = jobs.new_setup_job(book, ask=body.ask, mode=mode)
+    job = jobs.new_setup_job(book, ask=body.ask, mode=mode, prefill=body.prefill)
     session.add(job)
     await session.commit()
     await session.refresh(book)

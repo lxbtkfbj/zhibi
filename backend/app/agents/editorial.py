@@ -15,7 +15,7 @@ def persona(role: str) -> str:
 
 async def draft_pitches(llm: LLMRouter, blocks: dict[str, str]) -> s.PitchSet:
     return await llm.structured(
-        "chief", s.PitchSet, persona("chief"), render("setup_pitches", **blocks), purpose="开书·三个短版"
+        "chief", s.PitchSet, persona("chief"), render("setup_pitches", **blocks), purpose="开书·三个故事方向"
     )
 
 

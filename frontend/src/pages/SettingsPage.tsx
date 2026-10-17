@@ -85,7 +85,7 @@ function ModelsPanel() {
     </SettingsGroup>
     <SettingsGroup title="编辑部分工">
       {roles.error && <SettingsRow label={<ErrorText error={roles.error} />} />}
-      {ROLE_KEYS.map(role => <SettingsRow key={role} label={role === 'default' ? '默认' : ROLE_KEY_LABEL[role]} hint={role === 'default' ? '未单独指定的角色都用它' : undefined}><select aria-label={`${role === 'default' ? '默认' : ROLE_KEY_LABEL[role]}使用的模型`} value={roles.data?.[role] ?? ''} disabled={!roles.data || setRoles.isPending} onChange={event => setRoles.mutate({ [role]: event.target.value || null } as Partial<Record<RoleKey, string | null>>)} className="settings-select max-w-60"><option value="">{role === 'default' ? '未设置，使用第一个配置' : '跟随默认'}</option>{profiles.data?.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></SettingsRow>)}
+      {ROLE_KEYS.map(role => <SettingsRow key={role} label={role === 'default' ? '默认' : ROLE_KEY_LABEL[role]} hint={role === 'default' ? '未单独指定的角色都用它' : role === 'router' ? '判断你在群聊里说的话是要改设定、记成要求还是提问。选一个快的模型就行，不用最强的。没选时用「默认」的模型。' : undefined}><select aria-label={`${role === 'default' ? '默认' : ROLE_KEY_LABEL[role]}使用的模型`} value={roles.data?.[role] ?? ''} disabled={!roles.data || setRoles.isPending} onChange={event => setRoles.mutate({ [role]: event.target.value || null } as Partial<Record<RoleKey, string | null>>)} className="settings-select max-w-60"><option value="">{role === 'default' ? '未设置，使用第一个配置' : '跟随默认'}</option>{profiles.data?.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></SettingsRow>)}
     </SettingsGroup>
     <ErrorText error={setRoles.error} />
   </>

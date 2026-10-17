@@ -11,12 +11,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
-from app.agents.schemas import LibraryIntent
 from app.api.deps import SessionDep, get_book, get_redis
-from app.api.library_ai import RewriteIn, call_model, rewrite_target, say
 from app.db import get_sessionmaker
 from app.graphs.deps import cancel_key
-from app.models import Book, Job, LlmCall, MeetingMessage, SettingSuggestion, SettingVersion
+from app.models import Book, Job, LlmCall, MeetingMessage
 from app.schemas import (
     Answers,
     Decision,
@@ -29,13 +27,10 @@ from app.schemas import (
     UsageOut,
 )
 from app.services import jobs, setup_store
-from app.services.chat import reply_background
-from app.services.chat_context import ROLES, dialogue, dialogue_text, thread_of
-from app.services.library_context import load_context
+from app.services.library import lock_book
 from app.services.meeting import job_dict, message_dict, post_message, publish, stream_key
-from app.services.requirements import SCOPE_INPUTS, add_requirement
+from app.services.requirements import add_requirement
 from app.services.usage import sum_known, token_sum
-from app.services.versions import target_type_of
 
 router = APIRouter(tags=["jobs"])
 
@@ -54,6 +49,16 @@ async def _job(session: AsyncSession, job_id: uuid.UUID) -> Job:
     if job is None:
         raise HTTPException(404, "任务不存在")
     return job
+
+
+async def _locked_job(session, job_id):
+    book_id = await session.scalar(select(Job.book_id).where(Job.id == job_id))
+    if book_id is None:
+        raise HTTPException(404, "任务不存在")
+    await lock_book(session, book_id)
+    return await session.scalar(
+        select(Job).where(Job.id == job_id).with_for_update().execution_options(populate_existing=True)
+    )
 
 
 async def _reject_legacy_setup(job_id: uuid.UUID, session: AsyncSession = SessionDep) -> None:
@@ -79,7 +84,7 @@ async def get_job(job_id: uuid.UUID, session: AsyncSession = SessionDep) -> JobO
 async def decide(
     job_id: uuid.UUID, body: Decision, session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)
 ) -> JobOut:
-    job = await session.scalar(select(Job).where(Job.id == job_id).with_for_update())
+    job = await _locked_job(session, job_id)
     if job is None:
         raise HTTPException(404, "任务不存在")
     kind = jobs.pending_kind(job)
@@ -90,6 +95,8 @@ async def decide(
     feedback = body.feedback.strip()
     if body.action == "revise" and not feedback:
         raise HTTPException(422, "请写下修改意见")
+    if body.action == "revise" and kind in {"volume_review", "chapters_review"}:
+        return await feedback_to_job(session, redis, job, feedback)
     if feedback:
         source = (
             "trial"
@@ -107,14 +114,15 @@ async def decide(
 
 async def _setup_gate(session: AsyncSession, job_id: uuid.UUID, kind: str) -> Job:
     # 锁住等待状态，重复点击或两个窗口同时提交只能接受一次。
-    job = await session.scalar(select(Job).where(Job.id == job_id).with_for_update())
+    job = await _locked_job(session, job_id)
     if job is None:
         raise HTTPException(404, "任务不存在")
     if jobs.is_legacy_setup(job):
         raise HTTPException(409, jobs.LEGACY_SETUP_MESSAGE)
     if job.kind != "book_setup" or jobs.pending_kind(job) != kind:
         raise HTTPException(
-            409, "当前没有等待你选择短版" if kind == "setup_pitches" else "当前没有等待你确认的开书步骤"
+            422 if kind == "setup_prefill" else 409,
+            "当前没有等待你选择故事方向" if kind == "setup_pitches" else "当前没有等待你确认的开书步骤",
         )
     return job
 
@@ -138,6 +146,41 @@ async def _queue_setup_response(session: AsyncSession, redis: Redis, job: Job, c
     return JobOut.model_validate(job)
 
 
+FEEDBACK_LABELS = {
+    "setup_pitches": "重出三个故事方向",
+    "outline": "改大纲",
+    "segment_review": "重出这一篇",
+    "volume_review": "改卷纲",
+    "chapters_review": "重出章纲",
+}
+
+
+async def feedback_to_job(session, redis, job, feedback, *, remember=True):
+    kind = jobs.pending_kind(job)
+    if jobs.is_legacy_setup(job):
+        raise HTTPException(409, jobs.LEGACY_SETUP_MESSAGE)
+    key = "outline" if kind == "setup_piece" and (job.pending or {}).get("piece") == "outline" else kind
+    if key not in FEEDBACK_LABELS:
+        raise HTTPException(409, "这一步不能接修改意见")
+    if not feedback.strip():
+        raise HTTPException(422, "请写下修改意见")
+    if remember:
+        source = (
+            f"volume:{job.pending.get('volume')}"
+            if kind == "volume_review"
+            else f"unit:{job.pending.get('unit_id')}"
+            if kind == "chapters_review"
+            else f"segment:{job.pending.get('number', 2)}"
+            if kind == "segment_review"
+            else "note"
+        )
+        await add_requirement(session, job.book_id, feedback, source)
+    resume = {"action": "redo" if kind == "setup_pitches" else "revise", "feedback": feedback}
+    if key == "outline":
+        resume["piece"] = "outline"
+    return await _queue_setup_response(session, redis, job, feedback, resume)
+
+
 @router.post("/jobs/{job_id}/directions")
 async def retired_directions(job_id: uuid.UUID, session: AsyncSession = SessionDep) -> None:
     await _job(session, job_id)
@@ -151,15 +194,22 @@ async def choose_pitch(
     session: AsyncSession = SessionDep,
     redis: Redis = Depends(get_redis),
 ) -> JobOut:
+    if body.action == "start":
+        job = await _setup_gate(session, job_id, "setup_prefill")
+        if body.feedback.strip():
+            await add_requirement(session, job.book_id, body.feedback.strip(), "note")
+        return await _queue_setup_response(session, redis, job, "出三个故事方向", {"action": "start"})
     job = await _setup_gate(session, job_id, "setup_pitches")
+    if body.action == "redo":
+        return await feedback_to_job(session, redis, job, body.feedback.strip())
     feedback = body.feedback.strip()
     if body.action == "pick":
         pitches = (job.pending or {}).get("pitches") or []
         if body.index is None or body.index > len(pitches):
-            raise HTTPException(422, "请选择一个现有的短版")
+            raise HTTPException(422, "请选择一个故事方向")
         chosen = pitches[body.index - 1]
-        content = f"选用第 {body.index} 个短版「{chosen.get('name', '')}」。"
-        await add_requirement(session, job.book_id, f"开书短版：选用「{chosen.get('name', '')}」", "answer")
+        content = f"选用第 {body.index} 个故事方向「{chosen.get('name', '')}」。"
+        await add_requirement(session, job.book_id, f"开书的故事方向：选用「{chosen.get('name', '')}」", "answer")
         if body.length is not None:
             await add_requirement(session, job.book_id, f"这本书打算写 {body.length} 万字。", "answer")
         if body.title is not None:
@@ -168,7 +218,7 @@ async def choose_pitch(
             await add_requirement(session, job.book_id, f"书名用《{body.title.strip()}》", "answer")
     else:
         if not feedback:
-            raise HTTPException(422, "请写下重新出短版的要求")
+            raise HTTPException(422, "请写下重新出故事方向的要求")
         await add_requirement(session, job.book_id, feedback, "note")
         content = feedback
     resume = {**body.model_dump(), "feedback": feedback}
@@ -182,7 +232,7 @@ async def decide_segment(
     session: AsyncSession = SessionDep,
     redis: Redis = Depends(get_redis),
 ) -> JobOut:
-    job = await session.scalar(select(Job).where(Job.id == job_id).with_for_update())
+    job = await _locked_job(session, job_id)
     if job is None:
         raise HTTPException(404, "任务不存在")
     if jobs.pending_kind(job) != "segment_review":
@@ -197,6 +247,8 @@ async def decide_segment(
     feedback = (body.feedback or "").strip()
     if body.action == "revise" and not (feedback or body.flips):
         raise HTTPException(422, "请写下修改意见或选择要改的决定")
+    if body.action == "revise" and not body.flips:
+        return await feedback_to_job(session, redis, job, feedback)
     pending = job.pending or {}
     number = pending.get("number", 2)
     if feedback:
@@ -225,12 +277,19 @@ async def decide_piece(
 ) -> JobOut:
     job = await _setup_gate(session, job_id, "setup_piece")
     current = (job.pending or {}).get("piece")
-    if current not in PIECE_NAMES or body.piece is not None and body.piece != current:
+    if (
+        current not in PIECE_NAMES
+        or body.piece is not None
+        and body.piece != current
+        and not (current == "settings" and body.piece == "concept")
+    ):
         raise HTTPException(409, "这一步已经变了，刷新一下再试")
     feedback = body.feedback.strip()
     if body.action == "revise" and not (feedback or body.flips):
         raise HTTPException(422, "请写下修改意见或选择要改的决定")
-    if feedback:
+    if current == "outline" and body.action == "revise" and not body.flips:
+        return await feedback_to_job(session, redis, job, feedback)
+    if feedback and current != "settings":
         await add_requirement(session, job.book_id, feedback, "note")
     for flip in body.flips:
         await add_requirement(session, job.book_id, f"「{flip.topic}」改成：{flip.choice}", "answer")
@@ -243,7 +302,12 @@ async def decide_piece(
         if body.action == "delegate"
         else "\n".join(value for value in (feedback, changes) if value)
     )
-    resume = {**body.model_dump(mode="json"), "piece": current, "feedback": feedback}
+    resume = {
+        **body.model_dump(mode="json"),
+        "piece": current,
+        "feedback": feedback,
+        "decision_piece": body.piece or current,
+    }
     return await _queue_setup_response(session, redis, job, content, resume)
 
 
@@ -284,185 +348,16 @@ async def add_note(
     session: AsyncSession = SessionDep,
     redis: Redis = Depends(get_redis),
 ) -> MeetingMessageOut:
-    content, book_id = body.content.strip(), book.id
-    if not content:
-        raise HTTPException(422, "请写下你的话")
-    payload = {
-        "requirement_saved": True,
-        **({"thread": body.to} if body.to else {}),
-        **({"quote": body.quote.model_dump()} if body.quote else {}),
-    }
-    # 私聊必须在任何作业状态之前分流，永远不进入分类、要求或重写路径。
-    if body.to:
-        payload.update(outcome={"kind": "chat"}, chat_role=body.to)
-        data = await post_message(
-            session,
-            redis,
-            book_id=book_id,
-            job_id=None,
-            speaker="author",
-            kind="note",
-            content=content,
-            payload=payload,
-        )
-        background_tasks.add_task(reply_background, book_id, body.to, redis)
-        return MeetingMessageOut(**data)
-    ctx = await load_context(session, book)
-    state = await thread_of(session, book_id, "group")
-    recent = dialogue_text((await dialogue(session, book_id, "group", state.reset_after))[-6:])
-    library = ctx.library
-    await session.commit()
-    try:
-        intent = await call_model(
-            book_id, "chief", LibraryIntent, "library_route", library=library, recent=recent, note=content
-        )
-    except HTTPException as exc:
-        if exc.status_code == 502:
-            # 分类失败不能当修改意见；保留作者的话但绝不写要求或唤醒作业。
-            await post_message(
-                session,
-                redis,
-                book_id=book_id,
-                job_id=None,
-                speaker="author",
-                kind="note",
-                content=content,
-                payload={**payload, "outcome": {"kind": "chat"}, "classification_failed": True},
-            )
-        raise
-    # 分类期间状态可能改变。重新取当前状态，不能按发问前的状态修改。
-    session.expire_all()
-    book = await session.get(Book, book_id)
-    job = await _active_note_job(session, book_id)
-    if intent.kind != "提问闲聊" and job and job.status == "waiting_author":
-        raise HTTPException(409, {"code": "use_feedback", "message": "等你拍板时请直接提意见"})
-    if intent.kind == "提问闲聊":
-        payload.update(outcome={"kind": "chat"}, chat_role=ROLES[intent.who])
-        data = await post_message(
-            session,
-            redis,
-            book_id=book_id,
-            job_id=None,
-            speaker="author",
-            kind="note",
-            content=content,
-            payload=payload,
-        )
-        background_tasks.add_task(reply_background, book_id, "group", redis)
-        return MeetingMessageOut(**data)
-    working = job is not None and job.status in jobs.BUSY_STATUSES
-    if intent.kind == "改设定" and working and job.kind in {"write_book", "rewrite_chapter"}:
-        title = content[:40] + ("……" if len(content) > 40 else "")
-        suggestion = SettingSuggestion(
-            book_id=book_id,
-            kind="chat",
-            title=f"群聊里说的：{title}（编辑部当时在写，没改）",
-            payload={"op": "note", "content": content},
-        )
-        session.add(suggestion)
-        await session.flush()
-        payload["outcome"] = {"kind": "later", "suggestion_id": str(suggestion.id)}
-        reply = "编辑部正在写，这一处等写完再改。我放进待处理的建议了，写完点「现在改」。"
-        data = await post_message(
-            session,
-            redis,
-            book_id=book_id,
-            job_id=None,
-            speaker="author",
-            kind="note",
-            content=content,
-            payload=payload,
-        )
-    elif intent.kind == "写作要求" or working:
-        row = await add_requirement(session, book_id, intent.requirement or content, "note", SCOPE_INPUTS[intent.scope])
-        payload["outcome"] = {"kind": "to_job" if working else "requirement", "requirement_id": str(row.id)}
-        data = await post_message(
-            session,
-            redis,
-            book_id=book_id,
-            job_id=job.id if working else None,
-            speaker="author",
-            kind="note",
-            content=content,
-            payload=payload,
-        )
-        row.message_id = data["id"]
-        await session.commit()
-        reply = intent.reply or "记下了。"
-    else:
-        ctx = await load_context(session, book)
-        target = ctx.find_target(intent.target_name)
-        payload["library_operation"] = True
-        payload["outcome"] = {"kind": "not_found", "target_name": intent.target_name}
-        if target is not None:
-            body_rewrite = RewriteIn(
-                target_type=target_type_of(target),
-                target_id=target.id,
-                path=ctx.route_path(target, intent.part, intent.quote),
-                mode="options" if intent.mode == "给几个写法" else "instruction",
-                instruction=intent.instruction or content,
-            )
-            outcome = {
-                "kind": "edit",
-                "target_type": body_rewrite.target_type,
-                "target_id": str(target.id),
-                "target_label": ctx.target_label(target, body_rewrite.path),
-                "mode": body_rewrite.mode,
-            }
-        data = await post_message(
-            session,
-            redis,
-            book_id=book_id,
-            job_id=None,
-            speaker="author",
-            kind="note",
-            content=content,
-            payload=payload,
-        )
-        if target is None:
-            reply = f"没找到「{intent.target_name}」这一条。去设定库点那一处改，或者告诉我它在哪一类。"
-        else:
-            result = await rewrite_target(session, redis, book, body_rewrite, require_idle=True)
-            if body_rewrite.mode == "options":
-                outcome["candidate_id"] = str(result["candidate"].id)
-            else:
-                versions = list(
-                    await session.scalars(
-                        select(SettingVersion)
-                        .where(
-                            SettingVersion.target_type == body_rewrite.target_type,
-                            SettingVersion.target_id == body_rewrite.target_id,
-                        )
-                        .order_by(SettingVersion.version.desc())
-                        .limit(2)
-                    )
-                )
-                outcome["revert_version_id"] = str(versions[1].id)
-            message = await session.get(MeetingMessage, data["id"])
-            message.payload = {**payload, "outcome": outcome}
-            await session.commit()
-            data = message_dict(message)
-            await publish(redis, book_id, "message_update", data)
-            reply = intent.reply or "改好了，去看看。"
-    if reply:
-        await say(session, redis, book_id, "chief", reply)
-    return MeetingMessageOut(**data)
+    from app.services.group_notes import receive_note
 
-
-async def _active_note_job(session: AsyncSession, book_id: uuid.UUID) -> Job | None:
-    return await session.scalar(
-        select(Job)
-        .where(Job.book_id == book_id, Job.status.in_(jobs.ACTIVE_STATUSES))
-        .order_by(Job.created_at.desc())
-        .limit(1)
-    )
+    return await receive_note(body, background_tasks, book, session, redis)
 
 
 @router.post("/jobs/{job_id}/restart-setup", response_model=JobOut)
 async def restart_setup(
     job_id: uuid.UUID, session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)
 ) -> JobOut:
-    job = await session.scalar(select(Job).where(Job.id == job_id).with_for_update())
+    job = await _locked_job(session, job_id)
     if job is None:
         raise HTTPException(404, "任务不存在")
     if not jobs.is_legacy_setup(job):
@@ -514,7 +409,7 @@ async def restart_setup(
 
 @router.post("/jobs/{job_id}/resume", response_model=JobOut)
 async def resume(job_id: uuid.UUID, session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)) -> JobOut:
-    job = await session.scalar(select(Job).where(Job.id == job_id).with_for_update())
+    job = await _locked_job(session, job_id)
     if job is None:
         raise HTTPException(404, "任务不存在")
     if job.kind == "outline_expand":

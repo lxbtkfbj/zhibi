@@ -228,14 +228,14 @@ async def test_idle_chat_routes_rewrite_not_requirement_and_other_persists(clien
 
 
 async def test_chat_target_missing_not_saved_as_requirement(client, sessionmaker, monkeypatch):
-    from app.api import jobs as jobs_api
+    from app.services import group_notes
 
     book_id, _, _ = await seed(sessionmaker)
 
     async def missing(*args, **kwargs):
         return s.LibraryIntent(kind="改设定", target_name="不在库里", reply="定位中")
 
-    monkeypatch.setattr(jobs_api, "call_model", missing)
+    monkeypatch.setattr(group_notes, "call_model", missing)
     response = await client.post(f"/api/books/{book_id}/notes", json={"content": "改一下"})
     assert response.status_code == 201, response.text
     async with sessionmaker() as session:
@@ -246,7 +246,7 @@ async def test_chat_target_missing_not_saved_as_requirement(client, sessionmaker
 
 @pytest.mark.parametrize("status", ["queued", "running", "waiting_author"])
 async def test_busy_chat_classifies_and_defers_but_direct_rewrite_is_allowed(client, sessionmaker, monkeypatch, status):
-    from app.api import jobs as jobs_api
+    from app.services import group_notes
 
     book_id, entry_id, _ = await seed(sessionmaker)
     async with sessionmaker() as session:
@@ -256,17 +256,19 @@ async def test_busy_chat_classifies_and_defers_but_direct_rewrite_is_allowed(cli
     async def classified(*args, **kwargs):
         return s.LibraryIntent(kind="改设定", target_name="境界")
 
-    monkeypatch.setattr(jobs_api, "call_model", classified)
+    monkeypatch.setattr(group_notes, "call_model", classified)
     response = await client.post(f"/api/books/{book_id}/notes", json={"content": "改境界"})
     assert response.status_code == (409 if status == "waiting_author" else 201), response.text
     if status != "waiting_author":
-        assert response.json()["payload"]["outcome"]["kind"] == "later"
+        assert response.json()["payload"]["outcome"]["kind"] == "pending"
+        messages = (await client.get(f"/api/books/{book_id}/meeting?limit=2000")).json()
+        assert next(m for m in messages if m["id"] == response.json()["id"])["payload"]["outcome"]["kind"] == "later"
     response = await client.post(f"/api/books/{book_id}/library/rewrite", json=rewrite_body(entry_id, mode="expand"))
     assert response.status_code == 200, response.text
 
 
 async def test_chat_started_during_routing_returns_to_normal_note_path(client, sessionmaker, monkeypatch):
-    from app.api import jobs as jobs_api
+    from app.services import group_notes
 
     book_id, _, _ = await seed(sessionmaker)
 
@@ -276,12 +278,14 @@ async def test_chat_started_during_routing_returns_to_normal_note_path(client, s
             await session.commit()
         return s.LibraryIntent(kind="改设定", target_name="境界", reply="改一下")
 
-    monkeypatch.setattr(jobs_api, "call_model", started)
+    monkeypatch.setattr(group_notes, "call_model", started)
     response = await client.post(f"/api/books/{book_id}/notes", json={"content": "把境界重想一下"})
     assert response.status_code == 201, response.text
     async with sessionmaker() as session:
         assert list(await session.scalars(select(SettingCandidate))) == []
         assert list(await session.scalars(select(AuthorRequirement))) == []
-        assert response.json()["payload"]["outcome"]["kind"] == "later"
+        assert response.json()["payload"]["outcome"]["kind"] == "pending"
+        messages = (await client.get(f"/api/books/{book_id}/meeting?limit=2000")).json()
+        assert next(m for m in messages if m["id"] == response.json()["id"])["payload"]["outcome"]["kind"] == "later"
         message = await session.scalar(select(MeetingMessage))
         assert message.job_id is None

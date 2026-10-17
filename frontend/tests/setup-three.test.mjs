@@ -8,13 +8,13 @@ import { initialWriteRequest, waitForSetupCompletion } from '../src/lib/setupThr
 test('新三步只显示定调、设定库、大纲，实际确认状态不由内容臆测', () => {
   assert.deepEqual(THREE_PIECES.map(piece => [piece.key, piece.name, piece.path]), [['concept', '定调', '/concept'], ['settings', '设定库', '/library?view=focus'], ['outline', '大纲', '/outline?node=first-arc']])
   assert.deepEqual(pieceStatuses({ current: 'settings', pieces: { concept: 'confirmed', settings: 'waiting' } }, 3).pieces.map(piece => piece.status), ['confirmed', 'waiting', 'todo'])
-  for (const piece of THREE_PIECES) assert.equal(pendingTarget({ kind: 'setup_piece', flow: 3, piece: piece.key }, 'book').path, `/books/book${piece.path}`)
-  assert.equal(pendingTarget({ kind: 'setup_pitches', flow: 3 }, 'book').label, '三个短版')
+  for (const piece of THREE_PIECES) assert.equal(pendingTarget({ kind: 'setup_piece', flow: 3, piece: piece.key }, 'book').path, `/books/book${piece.key === 'settings' ? '/concept' : piece.path}`)
+  assert.equal(pendingTarget({ kind: 'setup_pitches', flow: 3 }, 'book').label, '三个故事方向')
 })
 
 test('重点和其余设定产出自动跟随设定库，三步状态使用新名称', () => {
   for (const type of ['settings_focus', 'settings_rest']) assert.deepEqual(artifactTarget({ payload: { type, data: {} } }, 'book'), { path: '/books/book/library?view=focus', label: '设定库' })
-  assert.equal(progressText({ active_job: { setup_flow: 3, status: 'waiting_author', pending: { kind: 'setup_piece', flow: 3, piece: 'settings' } } }, [], null, null), '等你确认：设定库')
+  assert.equal(progressText({ active_job: { setup_flow: 3, status: 'waiting_author', pending: { kind: 'setup_piece', flow: 3, piece: 'settings' } } }, [], null, null), '等你确认：定调和设定库')
 })
 
 test('确认开写等待同一任务成功，不在运行中、失败、取消或超时后开写', async () => {

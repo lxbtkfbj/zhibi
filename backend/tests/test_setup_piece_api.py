@@ -100,7 +100,9 @@ async def test_piece_revision_saves_feedback_and_flips_once(client, queued, sess
     bid, jid, _ = await gate(sessionmaker, piece="settings")
     body = {"action": "revise", "feedback": "把境界改成九重天", "flips": [{"topic": "感情线", "choice": "单女主"}]}
     assert (await client.post(f"/api/jobs/{jid}/piece", json=body)).status_code == 200
-    assert ("把境界改成九重天", "note") in await requirements(sessionmaker, bid)
+    assert ("把境界改成九重天", "note") not in await requirements(
+        sessionmaker, bid
+    )  # 在合成关分块处理，不把整段存成要求。
     assert ("「感情线」改成：单女主", "answer") in await requirements(sessionmaker, bid)
     assert queued[0][1]["requirement_saved"]
 

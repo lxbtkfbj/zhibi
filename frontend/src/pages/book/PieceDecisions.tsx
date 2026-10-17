@@ -33,6 +33,7 @@ export function PieceDecisions({ piece }: { piece: SetupPiece }) {
   const { bookId, job } = useBookContext()
   const { pieceAction, setupPending } = useJobActions(bookId)
   const pending = job?.setup_flow === 3 && job.status === 'waiting_author' && job.pending?.kind === 'setup_piece' ? job.pending : null
-  if (pending?.piece !== piece || !pending.decisions?.length) return null
-  return <Decisions key={`${job?.id}-${pending.round}-${JSON.stringify(pending.decisions)}`} decisions={pending.decisions} name={`piece-${piece}`} disabled={setupPending} loading={pieceAction.isPending} error={pieceAction.error} onRevise={flips => job && pieceAction.mutate({ jobId: job.id, action: 'revise', piece, flips })} />
+  const decisions = piece === 'concept' && pending?.piece === 'settings' ? pending.concept_decisions : pending?.piece === piece ? pending.decisions : undefined
+  if (!decisions?.length) return null
+  return <Decisions key={`${job?.id}-${pending?.round}-${JSON.stringify(decisions)}`} decisions={decisions} name={`piece-${piece}`} disabled={setupPending} loading={pieceAction.isPending} error={pieceAction.error} onRevise={flips => job && pieceAction.mutate({ jobId: job.id, action: 'revise', piece, flips })} />
 }

@@ -205,12 +205,12 @@ async def test_writing_settings_change_is_group_system_message(client, sessionma
 @pytest.mark.parametrize("recipient", [None, "chief", "lorekeeper", "writer", "reviewer"])
 async def test_note_sources_and_deleted_pending_note(client, sessionmaker, recipient):
     book_id, job_id = await fixture_book(sessionmaker)
-    await client.post(f"/api/books/{book_id}/notes", json={"content": "只属于当前清单", "to": recipient})
+    await client.post(f"/api/books/{book_id}/notes", json={"content": "记下：只属于当前清单", "to": recipient})
     rows = (await client.get(f"/api/books/{book_id}/requirements")).json()
     if recipient:
         assert rows == []  # 任务6：私聊永远不再自动记要求。
     else:
-        assert rows[0]["text"] == "只属于当前清单"
+        assert rows[0]["text"] == "记下：只属于当前清单"
         assert rows[0]["source"] == "note"
         await client.delete(f"/api/requirements/{rows[0]['id']}")
     result = await intake_node({"queue": ["concept"]}, runtime(sessionmaker, book_id, job_id))

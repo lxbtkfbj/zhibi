@@ -47,6 +47,7 @@ export function useMeeting(bookId: string) {
         return { bookId, messages: [...base, message] }
       })
       void qc.invalidateQueries({ queryKey: settingsKeys.requirements(bookId) })
+      for (const key of [keys.book(bookId), keys.outline(bookId), libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), ['outline-tree', bookId]]) void qc.invalidateQueries({ queryKey: key })
       if (message.kind === 'artifact' && REFRESH_ON.has(message.payload?.type ?? '')) {
         for (const key of [libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), libraryKeys.candidates(bookId), libraryKeys.versions(bookId), ['outline-tree', bookId]]) void qc.invalidateQueries({ queryKey: key })
         for (const key of [keys.chapters(bookId), keys.outline(bookId), keys.book(bookId)]) qc.invalidateQueries({ queryKey: key })

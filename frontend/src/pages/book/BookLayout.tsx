@@ -131,7 +131,7 @@ function BookWorkspace({ bookId, book }: { bookId: string; book: BookDetail }) {
     const href = (event.target as Element).closest('a[href]')?.getAttribute('href')
     if ((href?.startsWith(`/books/${bookId}`) || href?.startsWith('#')) && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.button === 0) { setFollowing(false); setTab('manuscript') }
   }
-  const ctx: BookContextValue = { bookId, book, job, messages, connected, chatTyping, chatQuotes, setChatQuotes, askChief, draft, working, waiting, asking, outline, conversation, setConversation, unread, following, followTarget, manualNavigate, resumeFollow, focusComposer, requestFeedback, requestNodeFeedback, composerNode, setComposerNode, composerDrafts, setComposerDrafts, celebrate, segmentPinEnd, setSegmentPinEnd, segmentReview }
+  const ctx: BookContextValue = { bookId, book, job, messages, connected, chatTyping, chatQuotes, setChatQuotes, askChief, draft, working, waiting, asking, outline, conversation, setConversation, unread, following, followTarget, manualNavigate, resumeFollow, focusComposer, focusChat: () => setFocusComposer(n => n + 1), requestFeedback, requestNodeFeedback, composerNode, setComposerNode, composerDrafts, setComposerDrafts, celebrate, segmentPinEnd, setSegmentPinEnd, segmentReview }
   const progress = expanding ? '展开大纲 · 主编正在展开这一个' : progressText(book, messages, draft, followTarget, { nodes, volumes: outline?.volumes ?? [], chapters })
   return <BookContext.Provider value={ctx}>
     <div className="flex h-full min-h-0 flex-col" onClickCapture={captureManualLink}>

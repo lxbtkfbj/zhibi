@@ -130,3 +130,19 @@ async def validate_entry(
         if "secret_id" in values:
             values["secret_id"] = secret_id
     return values
+
+
+async def ensure_unwritten(session, target):
+    if not isinstance(target, (StoryNode, Volume, PlotUnit)):
+        return
+    query = select(Chapter.id).where(
+        Chapter.book_id == target.book_id, (Chapter.content != "") | (Chapter.status.in_(["drafting", "final"]))
+    )
+    if isinstance(target, StoryNode):
+        query = query.where(Chapter.volume_id.in_(select(Volume.id).where(Volume.target_node_id == target.id)))
+    elif isinstance(target, Volume):
+        query = query.where(Chapter.volume_id == target.id)
+    else:
+        query = query.where(Chapter.unit_id == target.id)
+    if await session.scalar(query.limit(1)):
+        raise HTTPException(409, "这一处已经开写了，不能改")

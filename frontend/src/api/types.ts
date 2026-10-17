@@ -113,11 +113,12 @@ export interface NextSegmentSplit {
  * segment_review 下一段确认；volume_review 某一卷的卷纲拍板；trial_read 前几章试读；chapter_stuck 某章重写两次仍未通过。
  */
 export type Pending =
+  | { kind: 'setup_prefill'; flow: 3 }
   | { kind: 'setup_questions'; flow?: number; questions: InterviewQuestion[] }
   | { kind: 'setup_review'; flow?: number; round: number; title?: string }
   | { kind: 'setup_directions'; flow?: number; reference?: string; directions: BookDirection[]; recommended: number; length: InterviewQuestion & { chapter_words?: number } }
   | { kind: 'setup_pitches'; flow: 3; round: number; benchmark: string; pitches: BookPitch[]; recommended: number; length: InterviewQuestion & { chapter_words?: number } }
-  | { kind: 'setup_piece'; flow?: number; flags?: Record<string, string[]>; review?: { question: string; problem: string; suggestion: string }[]; piece: SetupPiece; summary?: string; round: number; warnings?: string[]; decisions?: AuthorChoice[]; suggestions?: SetupSuggestion[]; unlock_requests?: { target: SetupTarget; reason: string }[]; candidates?: { node_id: string; nodes: NodeCandidate[] } | null }
+  | { kind: 'setup_piece'; flow?: number; flags?: Record<string, string[]>; review?: { question: string; problem: string; suggestion: string }[]; piece: SetupPiece; summary?: string; concept_warnings?: string[]; concept_decisions?: AuthorChoice[]; round: number; warnings?: string[]; decisions?: AuthorChoice[]; suggestions?: SetupSuggestion[]; unlock_requests?: { target: SetupTarget; reason: string }[]; candidates?: { node_id: string; nodes: NodeCandidate[] } | null }
   | { kind: 'segment_review'; flow: 2; number: number; round: number; plan: NextSegmentPlan; split: NextSegmentSplit; warnings: string[]; flags: Record<string, string[]>; decisions: AuthorChoice[] }
   | { kind: 'segment_review'; flow: 3; number: number; round: number; plan: NextArcPlan; split: NextSegmentSplit; warnings: string[]; decisions: AuthorChoice[] }
   | { kind: 'chapters_review'; volume: number; unit_id: string; unit_title: string; first: number; last: number }
@@ -511,9 +512,9 @@ export interface MeetingMessage {
   speaker: Speaker
   speaker_name: string
   /** note：作者在编辑部工作时插的话 */
-  kind: 'speech' | 'artifact' | 'status' | 'decision' | 'error' | 'note'
+  kind: 'plan' | 'speech' | 'artifact' | 'status' | 'decision' | 'error' | 'note'
   content: string
-  payload: { type?: string; data?: unknown; thread?: Speaker | 'group'; reply_to?: number[]; quote?: { text: string; where: string }; outcome?: ChatOutcome } | null
+  payload: { type?: string; data?: unknown; thread?: Speaker | 'group'; reply_to?: number[]; quote?: { text: string; where: string }; outcome?: ChatOutcome; plan?: ChatPlan; status?: 'open' | 'superseded' | 'applying' | 'applied'; results?: ChatOutcome[] } | null
   created_at: string | null
 }
 
@@ -565,7 +566,7 @@ export interface LlmProfileInput {
   reasoning_effort: string
 }
 
-export type RoleKey = 'default' | 'chief' | 'lorekeeper' | 'writer' | 'reviewer'
+export type RoleKey = 'default' | 'chief' | 'lorekeeper' | 'writer' | 'reviewer' | 'router'
 export type RoleAssignments = Record<RoleKey, string | null>
 
 export interface Health {
@@ -574,7 +575,12 @@ export interface Health {
 }
 
 export interface ChatOutcome {
-  kind: 'requirement' | 'to_job' | 'edit' | 'not_found' | 'later' | 'chat'
+  kind: 'requirement' | 'to_job' | 'edit' | 'not_found' | 'later' | 'chat' | 'pending' | 'too_late' | 'failed' | 'plan_apply' | 'plan_made' | 'plan_pending' | 'created' | 'suggestion' | 'feedback'
+  reason?: string
+  plan_id?: number
+  label?: string
+  undone?: boolean
+  snapshot?: Record<string, unknown>
   requirement_id?: string
   target_type?: string
   target_id?: string
@@ -584,3 +590,14 @@ export interface ChatOutcome {
   candidate_id?: string
   suggestion_id?: string
 }
+
+
+export interface PlanItem {
+  where: '定调' | '设定库' | '大纲' | '写作要求'
+  target: string
+  part: string
+  category: string
+  change: string
+  scope: '一直有效' | '只管下一章' | '只管这一卷' | '只管下一卷'
+}
+export interface ChatPlan { title: string; summary: string; items: PlanItem[]; open_questions: string[] }

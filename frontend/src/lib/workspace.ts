@@ -19,7 +19,7 @@ export function artifactTarget(message: MeetingMessage, bookId: string, outline?
   const page = (suffix: string, label: string) => ({ path: `${base}${suffix}`, label })
   switch (type) {
     case 'concept': return page('/concept', '定调')
-    case 'pitches': return page('/concept', '三个短版');
+    case 'pitches': return page('/concept', '三个故事方向');
     case 'settings_focus': case 'settings_rest': return page('/library?view=focus', '设定库');
     case 'directions': return page('', '开书方向')
     case 'protagonist': return page('/library?view=focus', '设定库 · 重点')
@@ -55,11 +55,13 @@ export function artifactTarget(message: MeetingMessage, bookId: string, outline?
 export function pendingTarget(pending: Pending | null | undefined, bookId: string): WorkspaceTarget | null {
   const base = `/books/${bookId}`
   switch (pending?.kind) {
+    case 'setup_prefill': return { path: `${base}/library`, label: '先写设定' }
     case 'setup_questions': return { path: base, label: '动笔前提问' }
     case 'setup_review': return { path: base, label: '开书方案' }
-    case 'setup_pitches': return { path: `${base}/concept`, label: '三个短版' };
+    case 'setup_pitches': return { path: `${base}/concept`, label: '三个故事方向' };
     case 'setup_directions': return { path: base, label: '开书方向' }
     case 'setup_piece': {
+      if (pending.flow === 3 && pending.piece === 'settings') return { path: `${base}/concept`, label: '定调和设定库' }
       const PIECES = setupPieces(pending.flow)
       const index = PIECES.findIndex(piece => piece.key === pending.piece)
       const piece = PIECES[index]
@@ -114,9 +116,10 @@ export function unreadCount(messages: MeetingMessage[], conversation: Conversati
 export function progressText(book: BookDetail, messages: MeetingMessage[], draft: LiveDraft | null, target: WorkspaceTarget | null, writing?: { nodes: StoryNode[]; volumes: Volume[]; chapters: ChapterBrief[] }) {
   const job = book.active_job
   const PIECES = setupPieces(job?.setup_flow)
-  if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_pitches') return '等你选择：三个短版'
+  if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_prefill') return '先写设定'
+  if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_pitches') return '等你选择：三个故事方向'
   if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_directions') return '等你选择：开书方向'
-  if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_piece') return `等你确认：${PIECES.find(piece => piece.key === (job.pending as Extract<Pending, { kind: 'setup_piece' }>).piece)?.name ?? '当前拼图'}`
+  if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_piece') return job.pending.flow === 3 && job.pending.piece === 'settings' ? '等你确认：定调和设定库' : `等你确认：${PIECES.find(piece => piece.key === (job.pending as Extract<Pending, { kind: 'setup_piece' }>).piece)?.name ?? '当前拼图'}`
   const position = writing && writingPosition(writing.nodes, writing.volumes, writing.chapters, book.concept)
   const mapReady = !!writing && (writing.nodes.length > 0 || !writing.volumes.some(volume => volume.target_node_id))
   const complete = !!writing && mapReady && isWritingComplete(writing.volumes, writing.chapters, writing.nodes)
@@ -171,6 +174,7 @@ export function composerRoute(job: Job | null, text: string, selected: NodeFeedb
   // 旧图不再接受修改；私聊只发聊天，不触发旧流程。
   if (job?.kind === 'book_setup' && job.setup_flow !== 3) return { kind: 'blocked' as const }
   // 新三步的意见只交给当前步骤；旧图已在上方阻断，不恢复旧块锁定或解锁动作。
+  if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_prefill') return { kind: 'note' as const }
   if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_piece') return { kind: 'piece' as const, action: 'revise' as const, piece: job.pending.piece, ...(job.pending.piece === 'segment' && retainedNodeFeedback(text, selected) ? { node_id: selected!.nodeId } : {}) }
   if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_pitches') return { kind: 'pitches' as const, action: 'redo' as const }
   if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_directions') return { kind: 'directions' as const, action: 'redo' as const }
@@ -181,6 +185,6 @@ export function composerRoute(job: Job | null, text: string, selected: NodeFeedb
 
 /** 初次出方向和选定方向后的定调是两种不同的等待，不假定作者已经做过选择。 */
 export function directionProgressText(jobId: string, messages: MeetingMessage[]) {
-  const chosen = messages.some(message => message.job_id === jobId && message.speaker === 'author' && message.kind === 'decision' && (message.content.startsWith('选方向「') || message.content.startsWith('选短版「')))
+  const chosen = messages.some(message => message.job_id === jobId && message.speaker === 'author' && message.kind === 'decision' && (message.content.startsWith('选方向「') || message.content.startsWith('选故事方向「')))
   return chosen ? '主编正在按你的选择定调…' : '主编正在拟定开书方向…'
 }

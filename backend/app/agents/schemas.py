@@ -660,7 +660,7 @@ class LibraryIntent(Lenient):
 
 class Pitch(Lenient):
     name: str = Field(description="方向名：给这个版本贴的标签，4-8 字，说清主打什么，如「废柴逆袭流」；不是书名")
-    text: str = Field(description="短版定调：一百字左右，一段话说清主角是谁、凭什么、想要什么、读者爽在哪")
+    text: str = Field(description="故事方向：一百字左右，一段话说清主角是谁、凭什么、想要什么、读者爽在哪")
     titles: list[str] = Field(description="2 个书名候选：一个突出金手指或核心意象，一个突出主角或反差")
 
 
@@ -669,7 +669,7 @@ class PitchSet(Lenient):
         default="",
         description="作者点名对标某本书时，写出你理解的读者爱那本书什么：核心设定、爽点、主角气质；拿不准的写「不确定」；没有对标就留空",
     )
-    pitches: list[Pitch] = Field(description="三个短版，彼此在读者享受的东西上有实质差别；作者定下的东西三个都保留")
+    pitches: list[Pitch] = Field(description="三个故事方向，彼此在读者享受的东西上有实质差别；作者定下的东西三个都保留")
     recommended: int = Field(ge=1, le=3, description="推荐第几个")
     reply: str = Field(
         description="主编在群聊里说的话：一两句白话说清推荐哪个、为什么；有对标时顺带请作者看看理解对不对"
@@ -895,12 +895,39 @@ class ChatSummary(Lenient):
     )
 
 
-class ChatConclusion(Lenient):
-    found: bool = Field(description="这段对话里有没有作者认可、可以落实的结论；只是问答、没有结论填 false")
-    text: str = Field(default="", description="要落实的那一句；没有结论留空")
+class PlanItem(Lenient):
+    where: Literal["定调", "设定库", "大纲", "写作要求"] = Field(
+        description="这一条落在哪：定调的一段话；设定库里的一条；大纲里的篇、卷、单元或结局；以后规划和写作都要照做的写作要求"
+    )
+    target: str = Field(
+        default="",
+        description="设定库写条目或角色卡片的名称（照设定库目录，新建的写新名字）；大纲写「第 N 篇」「第 N 卷」「单元「名称」」或「结局」；定调、写作要求留空",
+    )
+    part: str = Field(
+        default="",
+        description="设定库才写：改这一条的哪一处，卡片的字段名、等级的级名、「一句话」「一段话」；新建的和整条都要改的留空",
+    )
+    category: str = Field(
+        default="",
+        description="设定库里新建的才写：放进哪一类，七个默认类别之一（角色卡片、等级体系、世界与地图、势力划分、物品与功法、往事与秘密、特殊规则）或已有的自建类别",
+    )
+    change: str = Field(
+        description="要落实成什么，写清楚具体内容，不看前面的对话也能照做；不要写「方向一」「刚才说的那个」，要把内容写出来"
+    )
     scope: Literal["一直有效", "只管下一章", "只管这一卷", "只管下一卷"] = Field(
-        default="一直有效",
-        description="只在记成要求时才看：作者说了只管下一章、这一卷、下一卷的照选，没说的选一直有效",
+        default="一直有效", description="写作要求才看：作者说了只管下一章、这一卷、下一卷的照选，没说的选一直有效"
+    )
+
+
+class ChatPlan(Lenient):
+    title: str = Field(description="方案名，4-12 字，如「开篇和老怪」")
+    summary: str = Field(description="一段话说清和作者商量定了什么，100-300 字，给作者看")
+    items: list[PlanItem] = Field(
+        default_factory=list,
+        description="要落实的条目，按定调、设定库、大纲、写作要求的顺序排；只放作者提出或明确同意的，最多 12 条；什么都没定就留空",
+    )
+    open_questions: list[str] = Field(
+        default_factory=list, description="聊到了、但作者还没拍板的问题，每条一句；没有就留空"
     )
 
 
