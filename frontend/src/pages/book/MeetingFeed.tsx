@@ -4,7 +4,7 @@ import { useReducedMotion } from '../../lib/appearance'
 import clsx from 'clsx'
 import { AlertTriangle, ArrowRight, Check, ChevronDown, FileText, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
-import { useEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import type { Concept, InterviewQuestion, LiveDraft, MeetingMessage, PlotUnit, Speaker, StoryThread } from '../../api/types'
 import { TypingDots } from '../../components/ui'
 import { TechniqueChip } from '../../components/TechniqueChip'
@@ -31,7 +31,7 @@ export function RoleAvatar({
         'relative inline-flex shrink-0 items-center justify-center rounded-full font-serif font-bold text-on-role',
         meta.dot,
         working && 'breath',
-        { xs: 'size-5 text-[11px]', sm: 'size-6 text-xs', md: 'size-8 text-sm', lg: 'size-11 text-base' }[size],
+        { xs: 'size-5 text-[11px]', sm: 'size-6 text-xs', md: 'size-9 text-[15px]', lg: 'size-10 text-[17px]' }[size],
       )}
       title={meta.name}
     >
@@ -619,11 +619,21 @@ function ArtifactCard({ message }: { message: MeetingMessage }) {
   )
 }
 
+/** 长消息先收起五行，点「展开全文」再看全部；刚到的消息照旧打字机效果。 */
+function Folded({ text, children }: { text: string; children?: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  const long = text.length > 240 || text.split('\n').length > 6
+  return <>
+    <div className={clsx(long && !open && 'line-clamp-5')}>{children ?? <span className="break-words whitespace-pre-wrap">{text}</span>}</div>
+    {long && <button type="button" onClick={() => setOpen(value => !value)} className="mt-1 text-[13px] text-chief hover:underline">{open ? '收起' : '展开全文'}</button>}
+  </>
+}
+
 function Speech({ message }: { message: MeetingMessage }) {
   const reduce = useReducedMotion()
   const [fresh] = useState(() => isFresh(message.created_at))
   const { shown, typing } = useTypewriter(message.content, fresh && !reduce)
-  return <span className={clsx('whitespace-pre-wrap break-words', typing && 'caret')}>{shown}</span>
+  return <Folded text={message.content}><span className={clsx('break-words whitespace-pre-wrap', typing && 'caret')}>{shown}</span></Folded>
 }
 
 const DRAFT_MODE: Record<LiveDraft['mode'], string> = { write: '正在写', extend: '字数不够，正在接着写', ending: '正在改写结尾' }
@@ -658,6 +668,19 @@ function GroupTag() {
   return <span className="rounded border border-line-2 px-1 text-[11px] leading-4 text-ink-3">群聊</span>
 }
 
+/** 「按这个来」交给编辑部的方案：作者那一边只显示一行，点开看全文。 */
+function PlanSubmitted({ text }: { text: string }) {
+  const [open, setOpen] = useState(false)
+  const title = text.match(/【和作者商量定的方案：(.+?)】/)?.[1] ?? '方案'
+  return <div className="w-full max-w-[min(85%,40rem)] rounded-[16px_4px_16px_16px] bg-author-bubble px-4 py-2.5 text-sm text-ink">
+    <button type="button" aria-expanded={open} onClick={() => setOpen(value => !value)} className="flex w-full items-center gap-2 text-left">
+      <FileText className="size-4 shrink-0 text-ink-2" /><span className="min-w-0 flex-1">你把方案「{title}」交给了编辑部</span>
+      <ChevronDown className={clsx('size-4 shrink-0 text-ink-3 transition-transform', open && 'rotate-180')} />
+    </button>
+    {open && <p className="mt-2 border-t border-ink/10 pt-2 text-[13px] leading-relaxed break-words whitespace-pre-wrap text-ink-2">{text}</p>}
+  </div>
+}
+
 function MessageRow({ message, fromGroup, continued }: { message: MeetingMessage; fromGroup?: boolean; continued?: boolean }) {
   const meta = ROLE_META[message.speaker] ?? ROLE_META.system
   const author = message.speaker === 'author'
@@ -676,21 +699,23 @@ function MessageRow({ message, fromGroup, continued }: { message: MeetingMessage
   if (author) return (
     <div className={clsx('flex flex-col items-end', fromGroup && 'opacity-80', continued && '-mt-2.5')}>
       {fromGroup && <p className="mb-1 flex items-center gap-1.5 text-xs text-ink-3"><GroupTag />你</p>}
-      <div title={time(message.created_at)} className="max-w-[85%] rounded-[14px_4px_14px_14px] bg-author-bubble px-3.5 py-2.5 chat-text leading-[1.75] break-words whitespace-pre-wrap text-ink">{message.content}</div>
+      {message.kind === 'decision' && message.content.startsWith('【和作者商量定的方案')
+        ? <PlanSubmitted text={message.content} />
+        : <div title={time(message.created_at)} className="max-w-[min(85%,40rem)] rounded-[16px_4px_16px_16px] bg-author-bubble px-4 py-2.5 chat-text leading-[1.75] text-ink"><Folded text={message.content} /></div>}
       {!fromGroup && <ChatOutcome message={message} />}
     </div>
   )
   return (
     <div className={clsx('flex gap-2.5', fromGroup && 'opacity-80', continued && '-mt-2.5')}>
-      {continued ? <span aria-hidden className="w-8 shrink-0" /> : <RoleAvatar speaker={message.speaker} />}
-      <div className={clsx('min-w-0 max-w-[calc(100%-42px)]', wide && 'flex-1')}>
+      {continued ? <span aria-hidden className="w-9 shrink-0" /> : <RoleAvatar speaker={message.speaker} />}
+      <div className={clsx('min-w-0 max-w-[min(calc(100%-46px),40rem)]', wide && 'flex-1')}>
         {!continued && <p className="mb-1 flex flex-wrap items-center gap-1.5 text-xs">
           <span className={clsx('font-medium', meta.text)}>{meta.name}</span>
           {fromGroup && <GroupTag />}
           <time className="text-ink-3">{time(message.created_at)}</time>
         </p>}
         {message.kind === 'plan' ? <PlanCard message={message} /> : message.kind === 'artifact' ? <ArtifactCard message={message} />
-          : <div className="rounded-[4px_14px_14px_14px] bg-card px-3.5 py-2.5 chat-text leading-[1.75] text-ink ring-1 ring-line/70"><Speech message={message} /></div>}
+          : <div className="w-fit max-w-full rounded-[4px_16px_16px_16px] bg-card px-4 py-2.5 chat-text leading-[1.75] text-ink shadow-[0_1px_1px_rgb(60_40_20/0.05)]"><Speech message={message} /></div>}
       </div>
     </div>
   )

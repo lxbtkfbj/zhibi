@@ -7,18 +7,18 @@
   --font-serif: "Noto Serif SC", "Songti SC", "Source Han Serif SC", "SimSun", serif;
 
   /* 宣纸与墨 */
-  --color-paper: #f5f0e6;
-  --color-paper-2: #f9f5ed;
+  --color-paper: #f3eee5;
+  --color-paper-2: #efe9de;
   --color-sidebar: #ece4d4;
-  --color-conversation: #f4efe5;
-  --color-manuscript: #fffdf9;
+  --color-conversation: #f3eee5;
+  --color-manuscript: #fbf9f4;
   --color-divider: #e3dacb;
-  --color-card: #fffefb;
-  --color-ink: #24201c;
-  --color-ink-2: #5a534a;
-  --color-ink-3: #8b8478;
-  --color-line: #ebe4d6;
-  --color-line-2: #d9cfbe;
+  --color-card: #ffffff;
+  --color-ink: #221e1a;
+  --color-ink-2: #57504a;
+  --color-ink-3: #8a8378;
+  --color-line: #e7dfd0;
+  --color-line-2: #d8cdb9;
 
   /* 朱砂 */
   --color-seal: #b4432e;
@@ -35,10 +35,10 @@
   --color-reviewer: #9a4a3a;
   --color-reviewer-soft: #f3e3de;
   --color-pane-left: #ece4d4;
-  --color-pane-mid: #f4efe5;
-  --color-page: #fffdf9;
+  --color-pane-mid: #f3eee5;
+  --color-page: #fbf9f4;
   --color-settings-divider: #efe8da;
-  --color-author-bubble: #ebe2d1;
+  --color-author-bubble: #e7dece;
   --color-overlay: rgb(0 0 0 / 0.45);
   --color-on-role: #fffdf9;
   --color-edit-highlight: #f6e3a9;
@@ -47,11 +47,11 @@
   --color-cover-ink: #2a2622;
   --color-cover-shadow: #000000;
 
-  --shadow-paper: 0 1px 2px rgb(70 50 25 / 0.04), 0 4px 14px -10px rgb(70 50 25 / 0.14);
+  --shadow-paper: 0 1px 2px rgb(60 40 20 / 0.05), 0 6px 18px -10px rgb(60 40 20 / 0.18);
   --shadow-lift: 0 2px 4px rgb(70 50 25 / 0.06), 0 18px 40px -16px rgb(70 50 25 / 0.28);
   --shadow-panel: -8px 0 32px -18px rgb(70 50 25 / 0.25);
 
-  --color-subtle: #f5f0e7;
+  --color-subtle: #f6f2ea;
   --shadow-bar: 0 -10px 28px -18px rgb(70 50 25 / 0.28);
 
   --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
@@ -124,7 +124,7 @@
   font-size: var(--reading-size);
   line-height: var(--reading-leading);
 }
-.chat-text { font-size: calc(14px * var(--ui-scale)); }
+.chat-text { font-size: calc(15px * var(--ui-scale)); }
 html { font-size: calc(16px * var(--ui-scale)); }
 [data-reduced-motion="true"] *, [data-reduced-motion="true"] *::before, [data-reduced-motion="true"] *::after {
   animation-duration: 0.01ms !important;
@@ -153,9 +153,20 @@ body {
   background: var(--color-seal-soft);
 }
 
+/* 滚动条：细、圆角、平时很淡，鼠标移上去才深一点，没有两头的箭头。 */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 999px; background: rgb(60 40 20 / 0.14); background-clip: padding-box; }
+:hover::-webkit-scrollbar-thumb { background-color: rgb(60 40 20 / 0.24); }
+::-webkit-scrollbar-thumb:hover { background-color: rgb(60 40 20 / 0.36); }
+[data-theme="ink"] ::-webkit-scrollbar-thumb { background-color: rgb(255 245 230 / 0.12); }
+[data-theme="ink"] :hover::-webkit-scrollbar-thumb { background-color: rgb(255 245 230 / 0.22); }
+@supports not selector(::-webkit-scrollbar) {
+  * { scrollbar-width: thin; scrollbar-color: rgb(60 40 20 / 0.22) transparent; }
+}
 .scroll-thin {
-  scrollbar-width: thin;
-  scrollbar-color: var(--color-line-2) transparent;
+  scrollbar-gutter: auto;
 }
 .no-scrollbar {
   scrollbar-width: none;

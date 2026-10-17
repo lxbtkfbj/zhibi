@@ -274,7 +274,7 @@ export function useJobActions(bookId: string) {
     qc.setQueryData<BookDetail>(keys.book(bookId), (old) => (old ? { ...old, active_job: job } : old))
   const pitches = useMutation({
     mutationKey: setupKey,
-    mutationFn: ({ jobId, ...body }: { jobId: string; action: 'pick' | 'redo' | 'start'; index?: number; title?: string; length?: number; feedback?: string }) => post<Job>(`/jobs/${jobId}/pitches`, body),
+    mutationFn: ({ jobId, ...body }: { jobId: string; action: 'pick' | 'redo' | 'start' | 'fill'; index?: number; title?: string; length?: number; feedback?: string }) => post<Job>(`/jobs/${jobId}/pitches`, body),
     onSuccess: setJob,
   })
   const directions = useMutation({

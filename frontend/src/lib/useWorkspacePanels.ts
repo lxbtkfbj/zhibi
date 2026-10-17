@@ -4,9 +4,10 @@ import { conversationContains, unreadCount } from './workspace'
 
 const CONVERSATIONS: Conversation[] = ['group', 'chief', 'lorekeeper', 'writer', 'reviewer']
 const WIDTH_KEY = 'zhibi:conversation-ratio'
-const DEFAULT_RATIO = 0.36
-/** 聊天栏再宽也不好读；超宽屏把多出来的地方留给书稿。 */
-const MAX_CHAT = 860
+const DEFAULT_RATIO = 0.34
+/** 聊天栏最窄、最宽（含左边的头像栏）：再宽一行字太长不好读，多出来的地方留给书稿。 */
+export const MIN_CHAT = 380
+export const MAX_CHAT = 760
 function savedRatio() {
   try {
     const value = Number(localStorage.getItem(WIDTH_KEY))
@@ -20,8 +21,8 @@ export function useWorkspaceResize() {
   const [ratio, setRatio] = useState(savedRatio)
   const [available, setAvailable] = useState(1000)
   const [dragging, setDragging] = useState(false)
-  const max = Math.max(360, Math.min(MAX_CHAT, available - 321))
-  const width = Math.round(Math.max(360, Math.min(available * ratio, max)))
+  const max = Math.max(MIN_CHAT, Math.min(MAX_CHAT, available - 321))
+  const width = Math.round(Math.max(MIN_CHAT, Math.min(available * ratio, max)))
   useEffect(() => {
     const el = container.current
     if (!el) return
@@ -35,7 +36,7 @@ export function useWorkspaceResize() {
   }
   const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
     if (!event.currentTarget.hasPointerCapture(event.pointerId) || !container.current) return
-    const next = Math.max(360, Math.min(event.clientX - container.current.getBoundingClientRect().left, max))
+    const next = Math.max(MIN_CHAT, Math.min(event.clientX - container.current.getBoundingClientRect().left, max))
     save(next / available)
   }
   return {
@@ -54,7 +55,7 @@ export function useWorkspaceResize() {
       onLostPointerCapture: () => setDragging(false),
       onDoubleClick: () => save(DEFAULT_RATIO),
     },
-    step: (delta: number) => save(Math.max(360, Math.min(width + delta, max)) / available),
+    step: (delta: number) => save(Math.max(MIN_CHAT, Math.min(width + delta, max)) / available),
     reset: () => save(DEFAULT_RATIO),
   }
 }

@@ -21,7 +21,7 @@ export function PitchSelection({ job, pending }: { job: Job; pending: Extract<Pe
     setTitles(previous => ({ ...previous, [index]: title }))
     choose(index, title)
   }
-  return <section aria-label="选择故事方向">
+  return <section aria-label="选择故事方向" className="mx-auto max-w-[1500px]">
     <PageHeader eyebrow="书稿 · 定调" title="挑一个故事方向" subtitle="点一下卡片就选中，书名可以在卡片里挑，也可以自己写；选好后点底部的「用这个方向」，主编会把它展开成定调。" />
     {pending.benchmark && <section aria-label="主编对对标作品的理解" className="mb-6 rounded-xl border border-line bg-subtle px-4 py-3">
       <p className="text-xs text-ink-3">主编理解的对标作品</p>

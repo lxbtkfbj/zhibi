@@ -45,12 +45,13 @@ function ThreadCard({ thread, locked, delay }: { thread: StoryThread; locked: bo
 }
 
 /** 线索：主线、感情线、反派线、谜团线、成长线各走到哪一卷。 */
-export function ThreadsPage() {
+export function ThreadsPage({ embedded = false }: { embedded?: boolean }) {
   const { bookId, book, working } = useBookContext()
   const { data: threads, isLoading } = useThreads(bookId)
 
   if (isLoading) return <Skeleton className="h-64" />
   if (!threads?.length) {
+    if (embedded) return <p className="rounded-xl border border-dashed border-line-2 p-5 text-sm text-ink-2">{book.status === 'setting_up' ? '主编还没排线索，排大纲时会一起排。' : '这本书还没有线索，开写时主编会排好这一篇的线索。'}</p>
     return (
       <PageHeader
         eyebrow="线索"
@@ -61,11 +62,11 @@ export function ThreadsPage() {
   }
   return (
     <div>
-      <PageHeader
+      {embedded ? <h2 className="mb-3.5 flex flex-wrap items-center gap-2.5 text-[17px] font-semibold">{threads.length} 条线<span className="text-[13px] font-normal text-ink-3">长篇靠几条线轮流推进，任何一条都不会长时间断掉</span></h2> : <PageHeader
         eyebrow="线索"
         title={`${threads.length} 条线交织成一本书`}
         subtitle="长篇靠几条线轮流推进、互相牵动：每一卷、每个剧情单元都会标明推进了哪几条线，任何一条都不会长时间断掉。"
-      />
+      />}
       <Locked locked={working} />
       <div className="space-y-4">
         {threads.map((t, i) => (

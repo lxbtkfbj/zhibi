@@ -13,6 +13,7 @@ import { SetupGate } from '../SetupGate'
 import { PageHeader } from './common'
 import { SpinePage } from './SpinePage'
 import { ThreadsPage } from './ThreadsPage'
+import { ForeshadowingPage } from './BiblePages'
 import { writingOutline, outlineReviewMatches, selectOutlineItem } from '../../../lib/outlineWriting'
 import { ExpandOutline, OutlineWritingDetails } from './OutlineWriting'
 import { PendingArcReview } from './PendingArcReview'
@@ -153,8 +154,8 @@ export function OutlinePage() {
   }
   return <div data-testid="outline-page">
     <SetupGate piece="outline" />
-    <PageHeader eyebrow="书稿" title="大纲" subtitle="先看眼前要写的，再慢慢走向结局。" action={<Segmented label="大纲看法" value={view} options={[['tree', '树'], ['map', '地图'], ['threads', '线索']] as const} onChange={key => manualNavigate(`/books/${bookId}/outline?view=${key}${requested ? `&node=${encodeURIComponent(requested)}` : ''}`)} />} />
-    {view === 'map' ? <SpinePage /> : view === 'threads' ? <ThreadsPage /> : query.isLoading ? <Skeleton className="h-64" /> : query.isError ? <><ErrorText error={query.error} /><Button onClick={() => void query.refetch()}>重新加载大纲</Button></> : root && selected ? <div className="grid min-w-0 gap-5 @2xl/manuscript:grid-cols-[minmax(220px,300px)_minmax(0,1fr)]">
+    <PageHeader eyebrow="书稿" title="大纲" subtitle="先看眼前要写的，再慢慢走向结局。" action={<Segmented label="大纲看法" value={view} options={[['tree', '结构'], ['map', '地图'], ['threads', '线索与伏笔']] as const} onChange={key => manualNavigate(`/books/${bookId}/outline?view=${key}${requested ? `&node=${encodeURIComponent(requested)}` : ''}`)} />} />
+    {view === 'map' ? <SpinePage /> : view === 'threads' ? <div className="space-y-10"><ThreadsPage embedded /><ForeshadowingPage embedded /></div> : query.isLoading ? <Skeleton className="h-64" /> : query.isError ? <><ErrorText error={query.error} /><Button onClick={() => void query.refetch()}>重新加载大纲</Button></> : root && selected ? <div className="grid min-w-0 gap-5 @2xl/manuscript:grid-cols-[minmax(220px,300px)_minmax(0,1fr)]">
       <Card className={clsx('min-w-0 self-start p-2 shadow-none', showMobileDetail && 'max-[768px]:hidden')}><ul role="tree" aria-label="全书大纲树"><TreeRow item={root} selected={selected.key} expanded={open} toggle={key => setExpanded(() => { const next = new Set(open); if (next.has(key)) next.delete(key); else next.add(key); return { target: expansionKey(requested), keys: next } })} select={select} /></ul></Card>
       <Card className={clsx('min-w-0 p-5 shadow-none @3xl/manuscript:p-7', !showMobileDetail && 'max-[768px]:hidden')}><Button size="sm" variant="ghost" className="mb-4 min-[769px]:hidden" onClick={() => { setMobileDetail(false); setMobileListFor(selected.key) }}>返回树</Button><OutlineDetail key={selected.key} item={selected} select={select} afterVolumeId={afterVolumeId} tree={query.data!} /></Card>
     </div> : <p className="rounded-xl border border-dashed border-line-2 px-6 py-14 text-center text-sm text-ink-2">主编还在准备大纲，完成后会出现在这里。</p>}

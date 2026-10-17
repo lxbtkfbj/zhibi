@@ -19,7 +19,7 @@ export function SetupArtifactPreview({ children }: { children: ReactNode }) {
   if (needsSetupRestart(book, job)) return <section aria-label="旧开书产出（只读）"><p className="mb-4 text-sm leading-relaxed text-ink-2">这是旧流程的产出，只供查看。请在上方点「按新流程重开」。</p><fieldset disabled className="min-w-0 border-0 p-0">{children}</fieldset></section>
 
   // 正式三页始终读取最新数据库，旧会议快照不能盖住作者正在编辑的稿件。
-  if (['/concept', '/library', '/outline'].includes(pathname.slice(`/books/${bookId}`.length))) return children
+  if (['', '/', '/concept', '/library', '/outline'].includes(pathname.slice(`/books/${bookId}`.length))) return children
 
   return <>
     <div hidden={!!message}>{children}</div>

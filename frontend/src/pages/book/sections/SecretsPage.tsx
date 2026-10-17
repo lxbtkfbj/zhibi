@@ -7,7 +7,6 @@ import { EditableText } from '../../../components/Editable'
 import { Badge, Button, Card, ErrorText, inputClass, Skeleton } from '../../../components/ui'
 import { useBookContext } from '../context'
 import { FieldBlock, Locked, PageHeader } from './common'
-import { LibrarySubnav } from './LibrarySubnav'
 
 type Knower = Secret['knowers'][number]
 
@@ -29,7 +28,7 @@ function KnowerForm({ value, names, busy, onSave, onCancel }: { value: Knower; n
   </form>
 }
 
-function SecretCard({ secret, characters, nodes }: { secret: Secret; characters: Character[]; nodes: StoryNode[] }) {
+export function SecretCard({ secret, characters, nodes }: { secret: Secret; characters: Character[]; nodes: StoryNode[] }) {
   const { bookId, working } = useBookContext()
   const { update, remove } = useSecretMutations(bookId)
   // -1 means a new knower; null closes the small editor.
@@ -84,7 +83,6 @@ export function SecretsPage() {
   const [truth, setTruth] = useState('')
   return <div>
     <PageHeader eyebrow="设定库" title="设定库" subtitle="信息差：同一件事，谁已经知道、读者知道多少、准备什么时候揭开。" action={!working && <Button size="sm" variant="soft" disabled={create.isPending} onClick={() => setAdding(true)}><Plus className="size-4" />添加秘密</Button>} />
-    <LibrarySubnav current="secrets" />
     <Locked locked={working} />
     {adding && !working && <form className="mb-5 space-y-3 rounded-xl border border-line bg-card p-4" onSubmit={event => {
       event.preventDefault()

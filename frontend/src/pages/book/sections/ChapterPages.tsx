@@ -34,11 +34,11 @@ export function ContentsPage() {
     <div>
       <PageHeader
         eyebrow="正文"
-        title={book.chapters_final ? `已定稿 ${book.chapters_final} 章` : '还没有开写'}
+        title="正文"
         subtitle={
           book.chapters_final
-            ? `共 ${(book.words_final / 10000).toFixed(1)} 万字。章纲是编辑部写到那一段之前才出的，点开任何一章都能看到它的章纲和审稿意见。`
-            : '开写后，主编会按卷纲逐个单元出章纲，写手逐章写作，写好的章节都在这里。'
+            ? `已定稿 ${book.chapters_final} 章 · 共 ${(book.words_final / 10000).toFixed(1)} 万字。点开任何一章都能看到它的章纲和审稿意见。`
+            : '还没开写。开书稿觉得行了，点底部的「开写」；写的时候，这里会实时显示写手正在写的那一章。'
         }
         action={
           book.chapters_final > 0 && (

@@ -10,7 +10,6 @@ import { EditableText } from '../../../components/Editable'
 import { Badge, Button, Card, EmptyState, ErrorText, inputClass, Skeleton } from '../../../components/ui'
 import { useBookContext } from '../context'
 import { Locked, PageHeader } from './common'
-import { LibrarySubnav } from './LibrarySubnav'
 
 function Stagger({ i, children, className }: { i: number; children: ReactNode; className?: string }) {
   const reduce = useReducedMotion()
@@ -44,8 +43,7 @@ export function RelationsPage() {
 
   return (
     <div>
-      <PageHeader eyebrow="设定库" title="设定库" subtitle="人物关系：谁和谁是什么关系、之间有什么张力。" />
-      <LibrarySubnav current="relations" />
+      <PageHeader eyebrow="设定库" title="人物关系" subtitle="谁和谁是什么关系、之间有什么张力。" />
       <Locked locked={locked} />
       {isLoading && <Skeleton className="h-48" />}
       {!isLoading && relations.length === 0 && <EmptyState title="还没有人物关系" />}
@@ -130,7 +128,7 @@ const E_STATUS: Record<ForeshadowingStatus, { label: string; tone: Tone }> = {
   abandoned: { label: '放弃', tone: 'wait' },
 }
 
-export function ForeshadowingPage() {
+export function ForeshadowingPage({ embedded = false }: { embedded?: boolean }) {
   const { bookId, locked, data, isLoading, error } = useBibleData()
   const { create, update, remove } = useBibleMutations(bookId, 'foreshadowings')
   const [filter, setFilter] = useState<'全部' | Foreshadowing['kind']>('全部')
@@ -141,13 +139,9 @@ export function ForeshadowingPage() {
   const busy = locked || create.isPending || update.isPending || remove.isPending
   return (
     <div>
-      <PageHeader
-        eyebrow="设定库"
-        title="设定库"
-        subtitle="伏笔是暗中埋下的线，期待是读者明知并等着兑现的承诺。编辑部按台账安排立下、提醒与兑现。"
-        action={!locked && <Button size="sm" variant="soft" disabled={busy} onClick={() => { setNewKind(filter === '全部' ? '伏笔' : filter); setAdding(true) }}><Plus className="size-4" />添加条目</Button>}
-      />
-      <LibrarySubnav current="foreshadowing" />
+      {embedded
+        ? <h2 className="mb-1.5 flex flex-wrap items-center gap-2.5 text-[17px] font-semibold">伏笔与期待<span className="text-[13px] font-normal text-ink-3">写作时编辑部每章都会查这本账，防止埋了忘收、立了不兑现</span>{!locked && <Button className="ml-auto" size="sm" variant="outline" disabled={busy} onClick={() => { setNewKind(filter === '全部' ? '伏笔' : filter); setAdding(true) }}><Plus className="size-3.5" />添加</Button>}</h2>
+        : <PageHeader eyebrow="大纲" title="伏笔与期待" subtitle="伏笔是暗中埋下的线，期待是读者明知并等着兑现的承诺。编辑部按台账安排立下、提醒与兑现。" action={!locked && <Button size="sm" variant="outline" disabled={busy} onClick={() => { setNewKind(filter === '全部' ? '伏笔' : filter); setAdding(true) }}><Plus className="size-4" />添加条目</Button>} />}
       <Locked locked={locked} />
       <div role="group" aria-label="按台账类型筛选" className="mb-5 inline-flex gap-0.5 rounded-lg bg-line/70 p-0.5">
         {(['全部', '伏笔', '期待'] as const).map(value => <button key={value} aria-pressed={filter === value} onClick={() => setFilter(value)} className={clsx('rounded-md px-3 py-1 text-[13px] transition-colors', filter === value ? 'bg-card font-medium text-ink shadow-[0_1px_2px_rgb(0_0_0/0.06)]' : 'text-ink-2 hover:text-ink')}>{value}</button>)}

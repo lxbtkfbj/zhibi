@@ -12,7 +12,7 @@ import { Seal } from '../../components/decor'
 import { EmptyState, Skeleton } from '../../components/ui'
 import { cleanTitle } from '../../lib/status'
 import { useMeeting } from '../../lib/useMeeting'
-import { useConversationReads, useWorkspaceResize } from '../../lib/useWorkspacePanels'
+import { MIN_CHAT, useConversationReads, useWorkspaceResize } from '../../lib/useWorkspacePanels'
 import { currentTarget, nodeFeedback, progressText, type NodeFeedback } from '../../lib/workspace'
 import { ActionBar } from './ActionBar'
 import { BookContext, type BookContextValue, type PitchChoice } from './context'
@@ -140,10 +140,10 @@ function BookWorkspace({ bookId, book }: { bookId: string; book: BookDetail }) {
   const unreadTotal = Object.values(unread).reduce((sum, value) => sum + value, 0)
   return <BookContext.Provider value={ctx}>
     <div className="flex h-full min-h-0 flex-col" onClickCapture={captureManualLink}>
-      <header className="z-20 flex h-12 shrink-0 items-center gap-3 border-b border-divider bg-paper-2 px-4">
-        <Link to="/" title="返回书房" className="flex shrink-0 items-center gap-2 rounded-md py-1 pr-1 text-[13px] text-ink-2 hover:text-ink"><Seal size={24} /><span className="flex items-center"><ChevronLeft className="size-4" />书房</span></Link>
-        <span className="h-4 w-px shrink-0 bg-line-2" />
-        <h1 className="min-w-0 max-w-[32%] truncate font-serif text-base font-bold" title={cleanTitle(book.title)}>{cleanTitle(book.title)}</h1>
+      <header className="z-20 flex h-[52px] shrink-0 items-center gap-3.5 border-b border-divider bg-paper-2 px-[18px]">
+        <Link to="/" title="返回书房" className="flex shrink-0 items-center gap-2 rounded-md py-1 pr-1 text-sm text-ink-2 hover:text-ink"><Seal size={28} /><span className="flex items-center"><ChevronLeft className="size-4" />书房</span></Link>
+        <span className="h-[18px] w-px shrink-0 bg-line-2" />
+        <h1 className="min-w-0 max-w-[32%] truncate font-serif text-lg font-bold" title={cleanTitle(book.title)}>{cleanTitle(book.title)}</h1>
         <div role="tablist" aria-label="工作台视图" className="flex shrink-0 gap-0.5 rounded-lg bg-line/70 p-0.5 lg:hidden">{(['discussion', 'manuscript'] as const).map(value => <button key={value} role="tab" aria-selected={tab === value} onClick={() => setTab(value)} className={clsx('relative rounded-md px-3 py-1 text-[13px]', tab === value ? 'bg-card font-medium text-ink' : 'text-ink-2')}>{value === 'discussion' ? '讨论' : '稿件'}{value === 'discussion' && tab !== 'discussion' && unreadTotal > 0 && <span aria-label="有未读" className="absolute top-1 right-1 size-1.5 rounded-full bg-seal" />}{value === 'manuscript' && tab !== 'manuscript' && (waiting || asking) && <span aria-label="等你处理" className="absolute top-1 right-1 size-1.5 rounded-full bg-seal" />}</button>)}</div>
         <StatusPill book={book} progress={progress} waiting={waiting || asking} working={working} />
         <Link to={`/books/${bookId}/settings`} className={clsx('flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] text-ink-2 hover:bg-line/60 hover:text-ink', 'max-md:ml-auto')}><SlidersHorizontal className="size-4" /><span className="hidden sm:inline">本书设置</span></Link>
@@ -151,11 +151,20 @@ function BookWorkspace({ bookId, book }: { bookId: string; book: BookDetail }) {
       </header>
       <div ref={container} className={clsx('flex min-h-0 min-w-0 flex-1', dragging && 'select-none')} style={{ '--discussion-width': `${width}px` } as CSSProperties}>
         <section aria-label="当前会话" data-testid="conversation-pane" className={clsx('@container/chat h-full min-h-0 min-w-0 w-full shrink-0 flex-col bg-pane-mid lg:flex lg:w-[var(--discussion-width)]', tab === 'discussion' ? 'flex' : 'hidden')}><ConversationPanel /></section>
-        <div role="separator" aria-orientation="vertical" aria-label="调整讨论栏宽度" aria-valuemin={360} aria-valuemax={max} aria-valuenow={width} tabIndex={0} title="拖动调整宽度，双击恢复默认；方向键微调" {...separatorProps}
-          onKeyDown={event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); step(event.key === 'ArrowLeft' ? -24 : 24) } else if (event.key === 'Home') { event.preventDefault(); reset() } }} className={clsx('relative z-30 hidden w-px shrink-0 touch-none cursor-col-resize bg-divider outline-none before:absolute before:inset-y-0 before:-left-1 before:w-[9px] hover:bg-seal focus:bg-seal lg:block', dragging && 'bg-seal')} />
+        {/* 分隔线：鼠标靠近就显出把手；拖到最宽就停，再宽一行字太长不好读。 */}
+        <div role="separator" aria-orientation="vertical" aria-label="调整讨论栏宽度" aria-valuemin={MIN_CHAT} aria-valuemax={max} aria-valuenow={width} tabIndex={0} title="拖动调整聊天栏宽度，双击恢复默认；方向键微调" {...separatorProps}
+          onKeyDown={event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); step(event.key === 'ArrowLeft' ? -24 : 24) } else if (event.key === 'Home') { event.preventDefault(); reset() } }}
+          className={clsx('group relative z-30 hidden w-px shrink-0 touch-none cursor-col-resize bg-divider outline-none lg:block',
+            'before:absolute before:inset-y-0 before:-left-1.5 before:w-3 before:content-[""]',
+            'after:pointer-events-none after:absolute after:inset-y-0 after:-left-px after:w-[3px] after:rounded-full after:transition-colors after:content-[""] hover:after:bg-ink-3/40 focus-visible:after:bg-seal',
+            dragging && 'after:!bg-seal')}>
+          <span aria-hidden className={clsx('pointer-events-none absolute top-1/2 left-1/2 flex h-11 w-2 -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center gap-[3px] rounded-full bg-card shadow-[var(--shadow-paper)] ring-1 ring-line-2 transition-opacity', dragging ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100')}>
+            <span className="size-[3px] rounded-full bg-ink-3" /><span className="size-[3px] rounded-full bg-ink-3" /><span className="size-[3px] rounded-full bg-ink-3" />
+          </span>
+        </div>
         <main id="manuscript-pane" aria-label="稿件" className={clsx('@container/manuscript relative min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-page lg:flex', tab === 'manuscript' ? 'flex' : 'hidden')}>
           <ManuscriptTabs />
-          <div ref={manuscriptScroll} data-testid="manuscript-scroll" className="scroll-thin min-h-0 flex-1 overflow-y-auto"><div className="mx-auto w-full max-w-[1180px] px-5 pt-7 pb-12 @2xl/manuscript:px-8"><SetupArtifactPreview><Outlet /></SetupArtifactPreview></div></div>
+          <div ref={manuscriptScroll} data-testid="manuscript-scroll" className="scroll-thin min-h-0 flex-1 overflow-y-auto"><div className="mx-auto w-full max-w-[1800px] px-5 pt-7 pb-12 @2xl/manuscript:px-9"><SetupArtifactPreview><Outlet /></SetupArtifactPreview></div></div>
           <ActionBar />
         </main>
       </div>
