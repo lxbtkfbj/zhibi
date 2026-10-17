@@ -18,8 +18,6 @@ import { SetupGate } from '../SetupGate'
 import { PageHeader } from './common'
 import { CategoryModal } from './LibraryCategoryModal'
 
-// 界面照 docs/界面规矩.md：按钮两到四个字、一块一个主按钮、空着的项不占地方、分组靠留白。
-
 const CATEGORY_ICON: Record<string, typeof Users> = { 角色卡片: Users, 等级体系: Layers, 世界与地图: Globe2, 势力划分: Flag, 物品与功法: Gem, 往事与秘密: EyeOff, 特殊规则: ScrollText }
 /** 空页面上每类的一句话。类别自带的 hint 是写给 AI 的长说明，这里只要一眼看懂；不分题材。 */
 const CATEGORY_BLURB: Record<string, string> = {
