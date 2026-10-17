@@ -868,3 +868,104 @@ class InterviewDraft(Lenient):
 
     questions: list[InterviewQuestion] = Field(description="3-5 个问题，只问作者点子里没交代、又会大幅影响整本书的事")
     remark: str = remark_field("为什么要先问这几件事")
+
+
+class Renamed(Lenient):
+    old: str = Field(description="原来的叫法（人名、地名、境界名、物品名等专有名词），照原文抄")
+    new: str = Field(description="改成的新叫法")
+
+
+class RewriteOption(Lenient):
+    label: Literal["稳妥", "大胆", "出格"] = Field(description="这种写法的大胆程度")
+    text: str = Field(
+        description="换上去的新文字：只写要改的那一处，不写别的部分；格式和原文一致（原文是一句就写一句，原文是一段就写一段）"
+    )
+    renamed: list[Renamed] = Field(default_factory=list, description="这种写法里改了叫法的专有名词；没改就留空")
+    one_line: str = Field(
+        default="", description="只在改的是一段话、而且这一条的一句话也该跟着变时，写新的一句话；否则留空"
+    )
+
+
+class RewriteOptions(Lenient):
+    options: list[RewriteOption] = Field(description="三种写法，依次是稳妥、大胆、出格；稳妥的最贴近原来的意思")
+    note: str = Field(default="", description="给作者的一句话：三种写法各自好在哪，推荐哪一种")
+
+
+class RewriteOne(Lenient):
+    text: str = Field(description="换上去的新文字：只写要改的那一处，不写别的部分；格式和原文一致")
+    renamed: list[Renamed] = Field(default_factory=list, description="改了叫法的专有名词；没改就留空")
+    one_line: str = Field(
+        default="", description="只在改的是一段话、而且这一条的一句话也该跟着变时，写新的一句话；否则留空"
+    )
+    note: str = Field(default="", description="给作者的一句话：改了什么")
+
+
+class FieldValue(Lenient):
+    name: str = Field(description="字段名")
+    value: str = Field(description="字段的内容")
+
+
+class NewEntry(Lenient):
+    category: str = Field(
+        description="放进哪一类：角色卡片、等级体系、世界与地图、势力划分、物品与功法、往事与秘密、特殊规则，或已有的自建类别的名字"
+    )
+    name: str = Field(description="条目名称；角色卡片写人名")
+    status: Literal["现在要定", "一句话就好", "以后再说"] = Field(description="现在要定、一句话就好、以后再说")
+    one_line: str = Field(description="一句话")
+    content: str = Field(
+        default="", description="一段话；状态是一句话就好、以后再说的留空；角色卡片和卡片样式的类别留空，写在 fields 里"
+    )
+    fields: list[FieldValue] = Field(
+        default_factory=list,
+        description="角色卡片写定位、性别、年龄、外貌、性格与说话方式、身世、想要什么、能力、和主角的关系；卡片样式的自建类别写它的字段；其他留空",
+    )
+    why: str = Field(description="为什么要补这一条，一句话")
+
+
+class NewCategory(Lenient):
+    name: str = Field(description="自建类别的名字，如「厉鬼」「剧本」「灵宠」")
+    style: Literal["卡片", "段落"] = Field(description="卡片还是段落")
+    fields: list[str] = Field(default_factory=list, description="卡片样式的字段名，按顺序；段落样式留空")
+    hint: str = Field(description="这一类一段话里该说清什么，一句话")
+    why: str = Field(description="为什么这本书需要这一类，一句话")
+
+
+class GapReport(Lenient):
+    entries: list[NewEntry] = Field(default_factory=list, description="建议新增的条目，最多 8 条；已有的不要重复")
+    categories: list[NewCategory] = Field(
+        default_factory=list, description="建议新建的自建类别，最多 2 个；七个默认类别放得下的不要建"
+    )
+    note: str = Field(default="", description="给作者的一句话总结")
+
+
+class LibraryIssue(Lenient):
+    kind: Literal["矛盾", "同根", "好看", "题材", "该定没定", "其他"] = Field(description="问题属于哪一类")
+    title: str = Field(description="给作者看的一句话：哪里有问题")
+    target_name: str = Field(default="", description="问题在哪一条（条目或角色卡片的名称）；涉及好几条写最主要的一条")
+    quote: str = Field(default="", description="要改的原文，从那一条里照抄一句；不需要改原文的留空")
+    fix: str = Field(default="", description="建议换成的文字，只写换掉 quote 的那一句；没有具体改法的留空")
+    why: str = Field(description="为什么，一句话")
+
+
+class LibraryReview(Lenient):
+    issues: list[LibraryIssue] = Field(
+        default_factory=list, description="查出的问题，按严重程度排，最多 10 条；没有问题就留空"
+    )
+    note: str = Field(default="", description="给作者的一句话总结")
+
+
+class LibraryIntent(Lenient):
+    kind: Literal["改设定", "其他"] = Field(
+        description="作者这句话是不是要改设定库里的某一处；是写作要求、提问或闲聊的选「其他」"
+    )
+    target_name: str = Field(default="", description="要改哪一条：条目或角色卡片的名称，照设定库目录里的写法")
+    part: str = Field(
+        default="", description="改这一条的哪一处：卡片的字段名、等级的级名、「名称」「一句话」「一段话」"
+    )
+    quote: str = Field(default="", description="只改其中一句时，把那一句从原文里照抄出来；否则留空")
+    mode: Literal["给几个写法", "照作者的意思改"] = Field(
+        default="给几个写法",
+        description="作者只说了不满意、没说怎么改的，选给几个写法；说清了怎么改的，选照作者的意思改",
+    )
+    instruction: str = Field(default="", description="作者想怎么改，用作者的话概括一句")
+    reply: str = Field(description="主编在群聊里回作者的一句话")

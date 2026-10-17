@@ -1564,6 +1564,105 @@ def _recap(user: str) -> s.StoryRecap:
     return s.StoryRecap(recap=recap, remark=f"第{volume}卷的卷回顾写好了，后面拆卷纲时会带上。")
 
 
+def _library_current(user: str) -> str:
+    match = re.search(r"(?:^|\n)原文：\n([^\n]*)", user)
+    return match[1].rstrip("\r") if match and match[1].strip() else "新写法"
+
+
+def _library_options(user: str) -> s.RewriteOptions:
+    current = _library_current(user)
+    options = []
+    for label in ("稳妥", "大胆", "出格"):
+        renamed = [s.Renamed(old="灵海", new="灵渊")] if label == "大胆" and "灵海" in current else []
+        text = current.replace("灵海", "灵渊") if renamed else current
+        options.append(s.RewriteOption(label=label, text=f"（{label}）{text}", renamed=renamed))
+    return s.RewriteOptions(options=options, note="三种写法都备好了，推荐先看最贴近原意的稳妥写法。")
+
+
+def _library_gaps(user: str) -> s.GapReport:
+    library = _match(r"【设定库目录】\n(.*?)(?=\n\n要求：|\Z)", user)
+    categories = []
+    if "厉鬼" in library:
+        categories.append(
+            s.NewCategory(
+                name="厉鬼",
+                style="卡片",
+                fields=["外形", "杀人规律", "怎么应对", "现在在哪"],
+                hint="说清厉鬼的外形、杀人规律、怎么应对和现在在哪。",
+                why="每只厉鬼都有独立的规则，需要分开记录。",
+            )
+        )
+    return s.GapReport(
+        entries=[
+            s.NewEntry(
+                category="物品与功法",
+                name="九叶还魂草",
+                status="一句话就好",
+                one_line="能救命的珍稀药草，先记下名字和用途。",
+                why="后续救人的目标需要一个能找到的具体物品。",
+            ),
+            s.NewEntry(
+                category="角色卡片",
+                name="楚雄",
+                status="现在要定",
+                one_line="与主角争夺资源的对手。",
+                fields=[s.FieldValue(name="定位", value="对手")],
+                why="眼前的阻力需要落在具体的人身上。",
+            ),
+        ],
+        categories=categories,
+        note="建议补一件关键物品和一位对手，先把眼前用得上的设定记清。",
+    )
+
+
+def _library_review(user: str) -> s.LibraryReview:
+    library = _match(r"【设定库】\n(.*?)(?=\n【大纲】|\Z)", user)
+    issues = [
+        s.LibraryIssue(
+            kind="好看",
+            title="核心设定还可以多一个让人记住的名场面",
+            why="把能力与代价放进一次具体选择，读者更容易记住。",
+        )
+    ]
+    # 段落样式的一句话后才是一段话；卡片和阶梯不会被误当成正文。
+    for entry in re.split(r"\n\n(?=[^\n]+ · )", library):
+        match = re.match(r"[^\n]+ · ([^\n]+)\n一句话：[^\n]*\n(.+)", entry, re.S)
+        if not match or not match[2].strip():
+            continue
+        sentence = re.match(r"[^。！？!?\n]+[。！？!?]?", match[2].strip())
+        if sentence:
+            quote = sentence[0]
+            issues.append(
+                s.LibraryIssue(
+                    kind="矛盾",
+                    title="这句话需要对齐设定",
+                    target_name=match[1],
+                    quote=quote,
+                    fix=quote + "（已改）",
+                    why="把这处表述统一，避免后文产生不同理解。",
+                )
+            )
+            break
+    return s.LibraryReview(issues=issues, note="查过了，建议先核对具体表述，再补一个能体现设定代价的场面。")
+
+
+def _library_intent(user: str) -> s.LibraryIntent:
+    note = _match(r"【作者的话】\n(.*?)(?=\n\n要求：|\Z)", user)
+    if not any(word in note for word in ("改", "重想", "换个")):
+        return s.LibraryIntent(kind="其他", reply="记下了，下次开工就照办。")
+    library = _match(r"【设定库目录】\n(.*?)(?=\n【作者的话】|\Z)", user)
+    names = re.findall(r"^- ([^\n（：]+)", library, re.M)
+    name = next((name for name in names if name in note), names[0] if names else "")
+    return s.LibraryIntent(
+        kind="改设定",
+        target_name=name,
+        part="名称" if "名称" in note or "名字" in note else "一段话",
+        mode="给几个写法",
+        instruction=note,
+        reply=f"好，我给「{name}」出三种写法，去设定库挑一个。",
+    )
+
+
 async def respond(schema: type[BaseModel], system: str, user: str) -> BaseModel:
     await asyncio.sleep(DELAY_S)
     handlers = {
@@ -1588,6 +1687,13 @@ async def respond(schema: type[BaseModel], system: str, user: str) -> BaseModel:
         s.ChapterDigest: lambda: _digest(user),
         s.ChapterMaterials: lambda: _materials(user),
         s.StoryRecap: lambda: _recap(user),
+        s.RewriteOptions: lambda: _library_options(user),
+        s.RewriteOne: lambda: s.RewriteOne(
+            text=f"{_library_current(user)}（已按要求修改）", note="已按要求修改这一处。"
+        ),
+        s.GapReport: lambda: _library_gaps(user),
+        s.LibraryReview: lambda: _library_review(user),
+        s.LibraryIntent: lambda: _library_intent(user),
     }
     if schema not in handlers:
         raise NotImplementedError(f"演示模式暂不支持 {schema.__name__}")

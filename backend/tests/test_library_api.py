@@ -5,9 +5,11 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
+from redis.asyncio import Redis
 from sqlalchemy import select
 
 from app import library_config as config
+from app.config import get_settings
 from app.main import create_app
 from app.models import (
     Book,
@@ -23,8 +25,13 @@ from app.models import (
 
 @pytest.fixture
 async def client():
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=create_app()), base_url="http://test") as client:
-        yield client
+    app = create_app()
+    app.state.redis = Redis.from_url(get_settings().redis_url)
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            yield client
+    finally:
+        await app.state.redis.aclose()
 
 
 async def make_book(sessionmaker, **kwargs):

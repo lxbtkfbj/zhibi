@@ -16,7 +16,7 @@ from app.library_config import (
     category_style,
     normalize_category,
 )
-from app.models import Book, Character, PlotUnit, Secret, SettingCategory, StoryNode, Volume, WorldEntry
+from app.models import Book, Chapter, Character, PlotUnit, Secret, SettingCategory, StoryNode, Volume, WorldEntry
 
 TARGET_MODELS = {
     "character": Character,
@@ -25,6 +25,7 @@ TARGET_MODELS = {
     "segment": StoryNode,
     "volume": Volume,
     "unit": PlotUnit,
+    "chapter": Chapter,
 }
 
 

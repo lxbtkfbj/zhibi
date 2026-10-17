@@ -10,7 +10,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.library_config import CHARACTER_CATEGORY, SOURCES
-from app.models import Book, Character, PlotUnit, StoryNode, Volume, WorldEntry
+from app.models import Book, Chapter, Character, PlotUnit, StoryNode, Volume, WorldEntry
 from app.models.library import SettingVersion
 
 TARGET_MODELS = {
@@ -20,10 +20,12 @@ TARGET_MODELS = {
     "segment": StoryNode,
     "volume": Volume,
     "unit": PlotUnit,
+    "chapter": Chapter,
 }
 
 # 不含 ID、归属、时间戳、写作进度及每章更新的角色状态。
 EDITABLE_FIELDS = {
+    "chapter": ("title", "content"),
     "entry": (
         "category",
         "name",
@@ -128,6 +130,8 @@ def apply_snapshot(target: Any, snapshot: dict) -> None:
         return
     if set(values) - set(EDITABLE_FIELDS[target_type]):
         raise ValueError("版本快照包含不可编辑的字段")
+    if isinstance(target, Chapter) and any(not isinstance(value, str) for value in values.values()):
+        raise ValueError("章节版本中的标题和正文必须是文字")
     # 先完整校验再赋值，坏外键不会留下半个快照。
     for field in UUID_FIELDS & values.keys():
         if values[field] is not None:
@@ -137,6 +141,8 @@ def apply_snapshot(target: Any, snapshot: dict) -> None:
                 raise ValueError("版本快照中的引用无效") from exc
     for field, value in values.items():
         setattr(target, field, value)
+    if isinstance(target, Chapter):
+        target.word_count = len("".join(target.content.split()))
 
 
 async def record_version(

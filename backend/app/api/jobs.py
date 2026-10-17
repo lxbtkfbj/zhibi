@@ -11,7 +11,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
+from app.agents.schemas import LibraryIntent
 from app.api.deps import SessionDep, get_book, get_redis
+from app.api.library_ai import RewriteIn, call_model, rewrite_target, say
 from app.db import get_sessionmaker
 from app.graphs.deps import cancel_key
 from app.models import Book, Job, LlmCall, MeetingMessage, StoryNode
@@ -27,9 +29,11 @@ from app.schemas import (
     UsageOut,
 )
 from app.services import jobs, setup_store
+from app.services.library_context import load_context
 from app.services.meeting import job_dict, message_dict, post_message, publish, stream_key
 from app.services.requirements import add_requirement, note_source
 from app.services.usage import sum_known, token_sum
+from app.services.versions import target_type_of
 
 router = APIRouter(tags=["jobs"])
 
@@ -308,13 +312,62 @@ async def add_note(
     body: NoteIn, book: Book = Depends(get_book), session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)
 ) -> MeetingMessageOut:
     """工作中由流程消费插话；空闲或不读插话的任务中，直接记为下次开工的要求。"""
-    job = await jobs.active_job(session, book.id)
+    # 路由判定不能只看最近几条任务：较早的 waiting_author 仍属于不空闲。
+    job = await _active_note_job(session, book.id)
+    if job is None:
+        job = await jobs.active_job(session, book.id)
     legacy_private = job is not None and jobs.is_legacy_setup(job) and body.to is not None
     if job is not None and jobs.pending_kind(job) in jobs.DECISION_KINDS and not legacy_private:
         raise HTTPException(409, "等你拍板时请直接提意见")
     content = body.content.strip()
     if not content:
         raise HTTPException(422, "请写下你的话")
+    if job is None or job.status not in jobs.ACTIVE_STATUSES:
+        job = None
+        book_id = book.id
+        ctx = await load_context(session, book)
+        library = ctx.library
+        await session.rollback()
+        intent = await call_model(book_id, "chief", LibraryIntent, "library_route", library=library, note=content)
+        book = await session.get(Book, book_id)
+        # 路由耗时期间可能开工；此时不再把插话当作空闲编辑，回到原要求／拍板规则。
+        job = await _active_note_job(session, book_id)
+        legacy_private = job is not None and jobs.is_legacy_setup(job) and body.to is not None
+        if job is not None and jobs.pending_kind(job) in jobs.DECISION_KINDS and not legacy_private:
+            raise HTTPException(409, "等你拍板时请直接提意见")
+        if job is None and intent.kind == "改设定":
+            ctx = await load_context(session, book)
+            target = ctx.find_target(intent.target_name)
+            rewrite_body = None
+            if target is not None:
+                rewrite_body = RewriteIn(
+                    target_type=target_type_of(target),
+                    target_id=target.id,
+                    path=ctx.route_path(target, intent.part, intent.quote),
+                    mode="options" if intent.mode == "给几个写法" else "instruction",
+                    instruction=intent.instruction,
+                )
+            data = await post_message(
+                session,
+                redis,
+                book_id=book_id,
+                job_id=None,
+                speaker="author",
+                kind="note",
+                content=content,
+                payload={
+                    "library_operation": True,
+                    "requirement_saved": True,
+                    **({"thread": body.to} if body.to else {}),
+                },
+            )
+            if rewrite_body is None:
+                reply = f"没找到「{intent.target_name}」这一条。去设定库点那一处改，或者告诉我它在哪一类。"
+            else:
+                await rewrite_target(session, redis, book, rewrite_body)
+                reply = intent.reply
+            await say(session, redis, book_id, "chief", reply)
+            return MeetingMessageOut(**data)
     payload = {"requirement_saved": True, **({"thread": body.to} if body.to else {})}
     deferred = (
         job is not None
@@ -341,6 +394,15 @@ async def add_note(
             payload=payload,
         )
     return MeetingMessageOut(**data)
+
+
+async def _active_note_job(session: AsyncSession, book_id: uuid.UUID) -> Job | None:
+    return await session.scalar(
+        select(Job)
+        .where(Job.book_id == book_id, Job.status.in_(jobs.ACTIVE_STATUSES))
+        .order_by(Job.created_at.desc())
+        .limit(1)
+    )
 
 
 @router.post("/jobs/{job_id}/restart-setup", response_model=JobOut)

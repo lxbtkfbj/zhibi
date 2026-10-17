@@ -8,12 +8,13 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.encoders import jsonable_encoder
 from pydantic import ValidationError
+from redis.asyncio import Redis
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import library_config as config
-from app.api.deps import SessionDep, ensure_idle, get_book
+from app.api.deps import SessionDep, ensure_idle, get_book, get_redis
 from app.api.segment_models import SegmentPatch
 from app.api.story_map import validate_node
 from app.library_schemas import (
@@ -27,6 +28,7 @@ from app.library_schemas import (
 )
 from app.models import (
     Book,
+    Chapter,
     Character,
     PlotUnit,
     Secret,
@@ -49,11 +51,15 @@ from app.schemas import (
     WorldEntryOut,
 )
 from app.services.library import ensure_unlocked, load_target, lock_book, parse_uuid, validate_entry
+from app.services.library_cascade import generate_cascade_suggestions
+from app.services.library_context import load_context
+from app.services.meeting import post_message
 from app.services.splice import read_path, set_field, splice
 from app.services.versions import apply_snapshot, record_version, snapshot_of
 
 router = APIRouter(tags=["library"])
 TargetType = Literal["character", "entry", "concept", "segment", "volume", "unit"]
+VersionTargetType = Literal["character", "entry", "concept", "segment", "volume", "unit", "chapter"]
 
 
 @router.get("/library-config")
@@ -156,12 +162,13 @@ async def create_category(body: CategoryCreate, book: Book = Depends(get_book), 
     return row
 
 
-async def _editable_row(session: AsyncSession, model: Any, row_id: uuid.UUID):
+async def _editable_row(session: AsyncSession, model: Any, row_id: uuid.UUID, *, allow_busy: bool = False):
     row = await session.get(model, row_id)
     if row is None:
         raise HTTPException(404, "记录不存在")
     await lock_book(session, row.book_id)
-    await ensure_idle(session, row.book_id)
+    if not allow_busy:
+        await ensure_idle(session, row.book_id)
     row = await session.scalar(
         select(model).where(model.id == row_id).with_for_update().execution_options(populate_existing=True)
     )
@@ -196,7 +203,7 @@ async def delete_category(row_id: uuid.UUID, session: AsyncSession = SessionDep)
 
 @router.get("/books/{book_id}/versions", response_model=list[VersionOut])
 async def list_versions(
-    target_type: TargetType,
+    target_type: VersionTargetType,
     target_id: uuid.UUID,
     book: Book = Depends(get_book),
     session: AsyncSession = SessionDep,
@@ -234,6 +241,10 @@ async def _validate_changed_target(session, book_id, target, before, *, category
         # 用同一个公开输入 schema 检查长度、列表结构、状态等，不允许写入无效版本。
         WorldEntryBase.model_validate(values)
         apply_snapshot(target, values)
+    elif isinstance(target, Chapter):
+        if not isinstance(target.title, str) or len(target.title) > 200 or not isinstance(target.content, str):
+            raise ValueError("章节标题和正文必须是文字，标题不能超过 200 字")
+        target.word_count = len("".join(target.content.split()))
     elif isinstance(target, Character):
         CharacterBase.model_validate(snapshot_of(target))
         if before.get("name") != target.name:
@@ -271,8 +282,10 @@ async def _validate_changed_target(session, book_id, target, before, *, category
 
 @router.post("/versions/{version_id}/revert")
 async def revert_version(version_id: uuid.UUID, session: AsyncSession = SessionDep):
-    version = await _editable_row(session, SettingVersion, version_id)
+    version = await _editable_row(session, SettingVersion, version_id, allow_busy=True)
     target = await load_target(session, version.book_id, version.target_type, version.target_id, for_update=True)
+    if isinstance(target, Chapter) and target.status != "final":
+        raise HTTPException(409, "这一章还在写作或重写，定稿后再退回正文版本")
     before = snapshot_of(target)
     previous_source = getattr(target, "source", "ai")
     try:
@@ -326,8 +339,13 @@ def _splice_error(exc: ValueError) -> HTTPException:
 
 
 @router.post("/candidates/{row_id}/choose")
-async def choose_candidate(row_id: uuid.UUID, body: CandidateChoose, session: AsyncSession = SessionDep):
-    candidate = await _editable_row(session, SettingCandidate, row_id)
+async def choose_candidate(
+    row_id: uuid.UUID,
+    body: CandidateChoose,
+    session: AsyncSession = SessionDep,
+    redis: Redis = Depends(get_redis),
+):
+    candidate = await _editable_row(session, SettingCandidate, row_id, allow_busy=True)
     if body.index >= len(candidate.options):
         raise HTTPException(422, "没有这个候选")
     option = candidate.options[body.index]
@@ -367,13 +385,36 @@ async def choose_candidate(row_id: uuid.UUID, body: CandidateChoose, session: As
             before=before,
             previous_source=previous_source,
         )
-        await session.commit()
+        suggestions = await generate_cascade_suggestions(
+            session,
+            candidate.book_id,
+            target,
+            candidate.path,
+            option.get("renamed") or [],
+            one_line=option.get("one_line") or "",
+        )
+        book = await session.get(Book, candidate.book_id)
+        context = await load_context(session, book)
+        # 和直接改一处相同：候选选择、正文快照、建议和群聊消息一起提交。
+        await post_message(
+            session,
+            redis,
+            book_id=candidate.book_id,
+            job_id=None,
+            speaker="lorekeeper",
+            kind="speech",
+            content=f"已把「{context.target_name(target)}」的{context.part_label(target, candidate.path)}换成你选的写法。",
+        )
     except ValueError as exc:
         raise _splice_error(exc) from exc
     except IntegrityError as exc:
         raise HTTPException(409, "候选修改后的名称重复或引用已不存在") from exc
     await session.refresh(target)
-    return {"candidate": CandidateOut.model_validate(candidate), "target": _target_out(target)}
+    return {
+        "candidate": CandidateOut.model_validate(candidate),
+        "target": _target_out(target),
+        "suggestions": [SuggestionOut.model_validate(suggestion) for suggestion in suggestions],
+    }
 
 
 @router.get("/books/{book_id}/suggestions", response_model=list[SuggestionOut])
@@ -426,6 +467,35 @@ async def _apply_suggestion(session: AsyncSession, suggestion: SettingSuggestion
         session.add(target)
         await session.flush()
         target_type = "entry" if is_entry else "character"
+    elif op == "create_category":
+        data = deepcopy(_require(payload, "category", dict))
+        data["style"] = {"卡片": "card", "段落": "paragraph"}.get(data.get("style"), data.get("style"))
+        values = CategoryCreate.model_validate(data).model_dump()
+        session.add(SettingCategory(book_id=suggestion.book_id, key=uuid.uuid4().hex[:20], **values))
+    elif op == "replace_in_chapters":
+        old, new = _require(payload, "old", str), _require(payload, "new", str)
+        numbers = _require(payload, "chapters", list)
+        if not old or old == new or not numbers or any(type(number) is not int or number < 1 for number in numbers):
+            raise HTTPException(422, "前文替换需要旧叫法、新叫法和有效的章号")
+        chapters = list(
+            await session.scalars(
+                select(Chapter)
+                .where(Chapter.book_id == suggestion.book_id, Chapter.index.in_(numbers))
+                .order_by(Chapter.index)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        )
+        if len(chapters) != len(set(numbers)) or any(chapter.status != "final" for chapter in chapters):
+            raise HTTPException(409, "有章节已不在定稿状态，先重新查看前文")
+        if any(old not in chapter.content for chapter in chapters):
+            raise HTTPException(409, "原文已经改过，没法只换这一段")
+        for chapter in chapters:
+            # 正文手改也可能发生在两次建议之间；每次替换前完整存一版，不能漏掉这一稿。
+            await record_version(session, suggestion.book_id, "chapter", chapter, "suggestion", "替换前文前")
+            chapter.content = chapter.content.replace(old, new)
+            chapter.word_count = len("".join(chapter.content.split()))
+            await record_version(session, suggestion.book_id, "chapter", chapter, "suggestion", suggestion.title)
     elif op in {"replace_text", "splice", "set_field"}:
         target_type = _require(payload, "target_type", str)
         target_id = parse_uuid(payload.get("target_id"))
@@ -479,7 +549,7 @@ async def _apply_suggestion(session: AsyncSession, suggestion: SettingSuggestion
 
 @router.post("/suggestions/{row_id}/accept", response_model=SuggestionOut)
 async def accept_suggestion(row_id: uuid.UUID, session: AsyncSession = SessionDep):
-    suggestion = await _editable_row(session, SettingSuggestion, row_id)
+    suggestion = await _editable_row(session, SettingSuggestion, row_id, allow_busy=True)
     try:
         await _apply_suggestion(session, suggestion)
         await session.commit()
@@ -492,7 +562,7 @@ async def accept_suggestion(row_id: uuid.UUID, session: AsyncSession = SessionDe
 
 @router.post("/suggestions/{row_id}/ignore", response_model=SuggestionOut)
 async def ignore_suggestion(row_id: uuid.UUID, session: AsyncSession = SessionDep):
-    suggestion = await _editable_row(session, SettingSuggestion, row_id)
+    suggestion = await _editable_row(session, SettingSuggestion, row_id, allow_busy=True)
     if suggestion.status != "pending":
         raise HTTPException(409, "这条建议已经处理过")
     suggestion.status = "ignored"
@@ -504,7 +574,6 @@ async def ignore_suggestion(row_id: uuid.UUID, session: AsyncSession = SessionDe
 @router.post("/books/{book_id}/suggestions/accept-all")
 async def accept_all_suggestions(book: Book = Depends(get_book), session: AsyncSession = SessionDep):
     await lock_book(session, book.id)
-    await ensure_idle(session, book.id)
     ids = list(
         await session.scalars(
             select(SettingSuggestion.id)

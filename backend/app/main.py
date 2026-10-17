@@ -13,6 +13,7 @@ from app.api import (
     health,
     jobs,
     library,
+    library_ai,
     llm_settings,
     outline_tree,
     prompt_tools,
@@ -67,6 +68,7 @@ def create_app() -> FastAPI:
         prompt_tools,
         story_map,
         library,
+        library_ai,
         outline_tree,
     ):
         application.include_router(module.router, prefix="/api")

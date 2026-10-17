@@ -17,6 +17,10 @@ CATALOG = [
     ("setup_critique", "审开书方案", "开书", "reviewer", "审阅完整开书方案"),
     ("setup_triage", "处理作者意见", "开书", "chief", "收到开书方案修改意见时"),
     ("setup_notes", "处理作者插话", "开书", "chief", "开书进行中处理插话与设置修改"),
+    ("library_rewrite", "改一处", "设定库", "lorekeeper", "作者让 AI 改设定库或大纲里的一处"),
+    ("library_fill_gaps", "补漏", "设定库", "chief", "看设定库还缺什么"),
+    ("library_review", "查一遍", "设定库", "reviewer", "查设定库的矛盾、同根、好看、题材"),
+    ("library_route", "群聊找目标", "设定库", "chief", "作者在群聊里要改设定时找到那一处"),
     ("plan_segment", "定下一段", "规划", "chief", "每一段开写前规划下一段"),
     ("volume_directions", "卷纲方向", "规划", "chief", "卷纲比稿前提出不同方向"),
     ("plan_volume", "拆卷纲", "规划", "chief", "规划每一卷的剧情单元"),
@@ -44,6 +48,17 @@ CATALOG = [
 BY_NAME = {row[0]: row for row in CATALOG}
 
 VARIABLE_LABELS = {
+    "library": "设定库目录",
+    "library_full": "设定库全文",
+    "target_full": "这一条的全文",
+    "related": "相关的条目",
+    "target_label": "要改的地方",
+    "current": "原文",
+    "category_hint": "这一类该写清什么",
+    "mode": "怎么改",
+    "genre_defaults": "题材和常建的条目",
+    "scope": "这次查什么",
+    "note": "作者的话",
     "last_segment": "上一段",
     "length": "篇幅与收束",
     "protagonist": "主角卡",
