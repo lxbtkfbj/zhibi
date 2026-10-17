@@ -93,6 +93,7 @@ async def outline_tree(book: Book = Depends(get_book), session: AsyncSession = S
                     "status": arc_status(own, plan is not None),
                     "locked": node.status == "pinned",
                     "planned": plan is not None,
+                    "end": {"title": node.title, "event": node.event, "kind": node.kind},
                     "volumes": [volume_out(volume) for volume in own],
                 }
             )
@@ -105,6 +106,7 @@ async def outline_tree(book: Book = Depends(get_book), session: AsyncSession = S
                 "status": arc_status(volumes, True),
                 "locked": False,
                 "planned": True,
+                "end": None,
                 "volumes": [volume_out(volume) for volume in volumes],
             }
         )

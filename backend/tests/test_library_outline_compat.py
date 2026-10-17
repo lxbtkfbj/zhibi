@@ -84,12 +84,15 @@ async def test_outline_tree_four_states_legacy_and_read_only(client, sessionmake
     assert data["arcs"][0]["locked"] is True
     assert data["arcs"][0]["title"] == "第1篇"
     assert data["arcs"][-1]["text"] == "事件4"
+    assert data["arcs"][0]["end"] == {"title": "节点1", "event": "事件1", "kind": "milestone"}
+    assert data["arcs"][-1]["end"] == {"title": "节点4", "event": "事件4", "kind": "ending"}
     assert data["ending"]["title"] == "节点4"
     first_unit = data["arcs"][0]["volumes"][0]["units"][0]
     assert (first_unit["summary"], first_unit["locked"], first_unit["status"]) == ("一段话", True, "done")
     assert [c["index"] for c in first_unit["chapters"]] == [1, 2]
     old_data = (await client.get(f"/api/books/{old_id}/outline-tree")).json()
     assert old_data["segmented"] is False and old_data["arcs"][0]["title"] == "全书"
+    assert old_data["arcs"][0]["end"] is None
     assert old_data["arcs"][0]["volumes"][0]["title"] == "旧卷"
     async with sessionmaker() as session:
         now = list(

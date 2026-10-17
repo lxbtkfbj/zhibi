@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useJobActions } from '../../api/hooks'
-import type { AuthorChoice, PieceKey } from '../../api/types'
+import type { AuthorChoice, SetupPiece } from '../../api/types'
 import { Button, ErrorText } from '../../components/ui'
 import { useBookContext } from './context'
 
@@ -29,7 +29,7 @@ export function Decisions({ decisions, name, disabled, loading, error, onRevise 
 }
 
 /** 旧页面保留决定展示入口；退役流程不再提供重新打开或解锁。 */
-export function PieceDecisions({ piece }: { piece: PieceKey }) {
+export function PieceDecisions({ piece }: { piece: SetupPiece }) {
   const { bookId, job } = useBookContext()
   const { pieceAction, setupPending } = useJobActions(bookId)
   const pending = job?.setup_flow === 3 && job.status === 'waiting_author' && job.pending?.kind === 'setup_piece' ? job.pending : null

@@ -20,6 +20,7 @@ import { ConversationList, Sidebar } from './Sidebar'
 import { SetupArtifactPreview } from './SetupArtifactPreview'
 import { useSettingsModal } from '../../lib/settingsModal'
 import { segmentReviewKey } from '../../lib/nextSegmentQuestions'
+import { followOnBookOpen } from '../../lib/bookRoutes'
 
 function StampOverlay({ show }: { show: boolean }) {
   const reduce = useReducedMotion()
@@ -36,11 +37,11 @@ function BookWorkspace({ bookId, book }: { bookId: string; book: BookDetail }) {
   const { data: nodes = [] } = useNodes(bookId)
   const { data: chapters = [] } = useChapters(bookId)
   const [conversation, setConversationState] = useState<Conversation>('group')
-  const [following, setFollowing] = useState(() => !window.location.pathname.endsWith('/settings'))
+  const [following, setFollowing] = useState(() => followOnBookOpen(window.location.pathname, bookId))
   const [focusComposer, setFocusComposer] = useState(0)
   const [composerNode, setComposerNode] = useState<NodeFeedback | null>(null)
   const [composerDrafts, setComposerDrafts] = useState<Record<string, string>>({})
-  const [tab, setTab] = useState<'discussion' | 'manuscript'>('discussion')
+  const [tab, setTab] = useState<'discussion' | 'manuscript'>(() => followOnBookOpen(window.location.pathname, bookId) ? 'discussion' : 'manuscript')
   const [wide, setWide] = useState(() => window.innerWidth >= 1024)
   const [navOpen, setNavOpen] = useState(false)
   const [stamp, setStamp] = useState(false)
@@ -53,7 +54,7 @@ function BookWorkspace({ bookId, book }: { bookId: string; book: BookDetail }) {
   const location = useLocation()
   const reduce = useReducedMotion()
   const automaticPath = useRef<string | null>(null)
-  const previousPath = useRef(location.pathname)
+  const previousPath = useRef(location.pathname + location.search)
   const manuscriptScroll = useRef<HTMLDivElement>(null)
   const job = book.active_job
   const working = job?.status === 'queued' || job?.status === 'running'
@@ -108,13 +109,13 @@ function BookWorkspace({ bookId, book }: { bookId: string; book: BookDetail }) {
     return () => window.removeEventListener('keydown', close)
   }, [navOpen])
   useEffect(() => {
-    if (previousPath.current !== location.pathname) {
-      if (automaticPath.current !== location.pathname) setFollowing(false)
-      previousPath.current = location.pathname
+    if (previousPath.current !== location.pathname + location.search) {
+      if (automaticPath.current !== location.pathname + location.search) setFollowing(false)
+      previousPath.current = location.pathname + location.search
       automaticPath.current = null
       manuscriptScroll.current?.scrollTo({ top: 0 })
     }
-  }, [location.pathname])
+  }, [location.pathname, location.search])
   const targetPath = followTarget?.path
   useEffect(() => {
     if (!following || !targetPath) return
@@ -131,9 +132,9 @@ function BookWorkspace({ bookId, book }: { bookId: string; book: BookDetail }) {
     <div className="flex h-full min-h-0 flex-col" onClickCapture={captureManualLink}>
       <header className="z-20 flex h-16 shrink-0 items-center gap-3 border-b border-divider bg-paper-2 px-4">
         <Link to="/" className="flex shrink-0 items-center gap-1.5 text-sm text-ink-2 hover:text-ink"><Seal size={28} /><ChevronLeft className="size-4" />返回书房</Link>
-        <span className="h-5 w-px shrink-0 bg-line" /><h1 className="max-w-[24%] truncate font-serif text-lg font-bold" title={cleanTitle(book.title)}>{cleanTitle(book.title)}</h1>
+        <span className="h-5 w-px shrink-0 bg-line" /><h1 className="hidden max-w-[24%] truncate font-serif text-lg font-bold sm:block" title={cleanTitle(book.title)}>{cleanTitle(book.title)}</h1>
         <div role="tablist" aria-label="工作台视图" className="flex shrink-0 gap-1 rounded-lg bg-line/50 p-1 lg:hidden">{(['discussion', 'manuscript'] as const).map(value => <button key={value} role="tab" aria-selected={tab === value} onClick={() => setTab(value)} className={clsx('rounded-md px-3 py-1 text-sm', tab === value ? 'bg-card text-ink shadow-sm' : 'text-ink-2')}>{value === 'discussion' ? '讨论' : '稿件'}</button>)}</div>
-        <p className="ml-auto min-w-0 truncate text-xs text-ink-2" title={progress}>{progress}</p>
+        <p className="ml-auto hidden min-w-0 truncate text-xs text-ink-2 md:block" title={progress}>{progress}</p>
         <button type="button" onClick={openSettings} className="flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-2 text-sm text-ink-2 hover:bg-line/50"><Settings className="size-4" />设置</button>
       </header>
       <div className="flex min-h-0 flex-1">

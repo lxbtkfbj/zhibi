@@ -112,13 +112,13 @@ async def test_piece_validation(client, queued, sessionmaker, body, code):
     assert not queued
 
 
-async def test_pitch_pick_uses_one_based_index_custom_title_and_400(client, queued, sessionmaker):
+async def test_pitch_pick_uses_one_based_index_custom_title_and_300(client, queued, sessionmaker):
     bid, jid, _ = await gate(sessionmaker, kind="setup_pitches")
     response = await client.post(
-        f"/api/jobs/{jid}/pitches", json={"action": "pick", "index": 1, "length": 400, "title": "作者自己起的书名"}
+        f"/api/jobs/{jid}/pitches", json={"action": "pick", "index": 1, "length": 300, "title": "作者自己起的书名"}
     )
     assert response.status_code == 200, response.text
-    assert queued[0][1]["index"] == 1 and queued[0][1]["length"] == 400
+    assert queued[0][1]["index"] == 1 and queued[0][1]["length"] == 300
     assert ("书名用《作者自己起的书名》", "answer") in await requirements(sessionmaker, bid)
     assert BOOK_STATUS_WHILE_WAITING["setup_pitches"] == "setting_up"
 

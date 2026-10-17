@@ -247,29 +247,27 @@ async def _next_step(session: AsyncSession, book: Book, state: WriteState) -> di
             return {**out, "step": "plan_volume"}
         if volume.status == "detailed":
             return {**out, "step": "volume_gate"}
-        chapter = (
-            await session.execute(
+        for unit in units:
+            chapter = await session.scalar(
                 select(Chapter)
-                .where(Chapter.volume_id == volume.id, Chapter.status != "final")
+                .where(Chapter.unit_id == unit.id, Chapter.status != "final")
                 .order_by(Chapter.index)
                 .limit(1)
             )
-        ).scalar()
-        if chapter is not None:
-            return {
-                **out,
-                "step": "write",
-                "unit_id": str(chapter.unit_id),
-                "chapter_id": str(chapter.id),
-                "chapter_index": chapter.index,
-                "chapter_title": chapter.title,
-            }
-        for unit in units:
+            if chapter is not None:
+                return {
+                    **out,
+                    "step": "write",
+                    "unit_id": str(unit.id),
+                    "chapter_id": str(chapter.id),
+                    "chapter_index": chapter.index,
+                    "chapter_title": chapter.title,
+                }
             if unit.status != "done":
                 has_chapters = await session.scalar(
                     select(func.count()).select_from(Chapter).where(Chapter.unit_id == unit.id)
                 )
-                if not has_chapters:
+                if not has_chapters or (unit.status == "planned" and has_chapters < unit.chapter_count):
                     return {**out, "step": "plan_chapters", "unit_id": str(unit.id)}
                 unit.status = "done"
             if not unit.recap.strip():
@@ -1092,12 +1090,14 @@ async def plan_chapters_node(state: WriteState, runtime: Runtime[GraphDeps]) -> 
     async with d.sessionmaker() as session:
         unit = await session.get(PlotUnit, uuid.UUID(state["unit_id"]))
         exists = await session.scalar(select(func.count()).select_from(Chapter).where(Chapter.unit_id == unit.id))
-        if exists:
+        if exists and (unit.status != "planned" or exists >= unit.chapter_count):
             return {}  # 上次已经出过章纲（例如提交后、检查点保存前中断）
         volume = await session.get(Volume, unit.volume_id)
         book = await session.get(Book, d.book_id)
-        first = await writing_store.next_chapter_index(session, d.book_id)
-        blocks = await chapter_plan_blocks(session, book, volume, unit, first)
+        first = await writing_store.unit_next_chapter_index(session, d.book_id, unit)
+        blocks = await chapter_plan_blocks(
+            session, book, volume, unit, first, chapter_count=unit.chapter_count - int(exists or 0)
+        )
         blocks["revision"] = ""
         key = pick(book.concept, settings_of(book)["playbook"]).key
         history = list(

@@ -76,6 +76,7 @@ async def test_prompt_metadata_marks_old_overrides_and_preserves_rendering(sessi
 
 
 PROMPT_HASHES = {
+    "setup_notes": "6decc9266e64f6a871b8352e0aaa73db7c9a31b8c0b40149561fa853ea9fd7e0",
     "setup_pitches": "68c32b42c7930ff630d9d33e11d30198afecd89842ce4abec9cbbbce39c05310",
     "setup_story": "cd41168529586828a8acbaa525d0f0855e8332debb890a31d319f8e4ed2bb8e3",
     "library_build_focus": "190c93ea4773ff77ff9815624b3f1ef367e11425ae7f0f4997488b8c69aa29af",

@@ -32,11 +32,11 @@ from app.services.requirements import (
 )
 from app.services.versions import target_type_of
 
-LENGTHS = (50, 100, 200, 400, 500)
+LENGTHS = (50, 100, 200, 300, 500)
 
 
 def length_question(chapter_words: int | None = None) -> dict:
-    """沿用五档结构；400 万字档与本包明确要求的演示验收一致。"""
+    """篇幅五档，推荐第三档；已保存的其他篇幅不受影响。"""
     chapter_words = chapter_words or 3000
     options = []
     for total, label in zip(LENGTHS, ("短篇", "中篇", "长篇", "长篇", "超长篇"), strict=True):

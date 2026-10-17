@@ -6,27 +6,20 @@ import { useBookContext } from './context'
 import { ArtifactBody } from './MeetingFeed'
 import { Locked, PageHeader } from './sections/common'
 import { setupPreviewForPath } from './setupPreview'
-import { ThreeStepSetup } from './ThreeStepSetup'
 
 /** 产出只读预览不冒充数据库实体，且不卸载正式稿件，保留作者尚未提交的输入。 */
 export function SetupArtifactPreview({ children }: { children: ReactNode }) {
   const { bookId, book, job, messages, outline } = useBookContext()
-  const { pathname } = useLocation()
-  const message = setupPreviewForPath(bookId, job, messages, pathname, outline)
+  const { pathname, search } = useLocation()
+  const message = setupPreviewForPath(bookId, job, messages, pathname + search, outline)
   const target = message ? artifactTarget(message, bookId, outline) : null
   const data = message?.payload?.data as { title?: string } | undefined
   const title = message?.payload?.type === 'concept' && data?.title ? data.title : target?.label ?? '开书方案'
 
   if (needsSetupRestart(book, job)) return <section aria-label="旧开书产出（只读）"><p className="mb-4 text-sm leading-relaxed text-ink-2">这是旧流程的产出，只供查看。请在上方点「按新流程重开」。</p><fieldset disabled className="min-w-0 border-0 p-0">{children}</fieldset></section>
 
-  const threeStep = job?.setup_flow === 3 || !!book.concept.pitches?.length
-  if (threeStep) {
-    const suffix = pathname.slice(`/books/${bookId}`.length)
-    const piece = suffix === '/concept' ? 'concept' : suffix === '/world' ? 'settings' : suffix === '/spine' ? 'outline' : null
-    if (piece) return <ThreeStepSetup key={piece} piece={piece} />
-    // 新流程始终展示库里的最新内容，不用第二包的只读快照盖住页面。
-    return children
-  }
+  // 正式三页始终读取最新数据库，旧会议快照不能盖住作者正在编辑的稿件。
+  if (['/concept', '/library', '/outline'].includes(pathname.slice(`/books/${bookId}`.length))) return children
 
   return <>
     <div hidden={!!message}>{children}</div>

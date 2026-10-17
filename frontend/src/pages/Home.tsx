@@ -81,9 +81,9 @@ function Composer({ autoFocus, flat }: { autoFocus?: boolean; flat?: boolean }) 
       )}
       <div className="flex flex-wrap items-center gap-3 border-t border-line/70 px-3 py-3">
         <span className="text-sm text-ink-2">开书方式</span>
-        <Segmented label="开书方式" value={mode} options={[{ value: 'puzzle', label: '逐块确认（推荐）' }, { value: 'oneshot', label: '一口气做完再给我看' }]} onChange={setSelectedMode} />
+        <Segmented label="开书方式" value={mode} options={[{ value: 'puzzle', label: '一步一步看' }, { value: 'oneshot', label: '一口气做完再给我看' }]} onChange={setSelectedMode} />
       </div>
-      {mode === 'oneshot' && <p className="px-4 pb-3 text-xs leading-relaxed text-ink-2">一口气做完再给我看：定调和设定库做完不停，停在大纲给你看</p>}
+      {mode === 'oneshot' && <p className="px-4 pb-3 text-xs leading-relaxed text-ink-2">定调和设定库做完不停，停在大纲给你看</p>}
       <div className="flex flex-wrap items-center gap-2 px-2 pb-1">
         <button
           onClick={() => setShowStyle(!showStyle)}
@@ -222,7 +222,7 @@ export function Home() {
           </Reveal>
           <Reveal delay={0.24}>
             <p className="mt-4 text-center text-[13px] text-ink-3">
-              定调 · 主角 · 世界与人 · 第一段 · 第一卷 —— 随时插话，每块由你确认
+              定调 · 设定库 · 大纲 —— 随时插话，三步都能回头改
             </p>
           </Reveal>
         </div>

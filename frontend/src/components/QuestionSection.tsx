@@ -1,8 +1,8 @@
 import clsx from 'clsx'
 import type { ReactNode } from 'react'
-import type { Pending, PieceKey } from '../api/types'
+import type { Pending } from '../api/types'
 import { useReducedMotion } from '../lib/appearance'
-import { SETUP_QUESTIONS, questionFlags, questionWhen, showLaterPlaceholder, type AnswerWhen } from '../lib/setupQuestions'
+import { questionWhen, showLaterPlaceholder, type AnswerWhen } from '../lib/questionTypes'
 import { LATER_ANSWER } from '../lib/setupPresentation'
 import { NEXT_SEGMENT_QUESTIONS, nextSegmentQuestionFlags } from '../lib/nextSegmentQuestions'
 import './setupQuestions.css'
@@ -13,15 +13,15 @@ export function WhenBadge({ when, direction = false }: { when: AnswerWhen; direc
   </span>
 }
 
-type QuestionPiece = PieceKey | 'next_segment'
+type QuestionPiece = 'next_segment'
 
-const questionsFor = (piece: QuestionPiece) => piece === 'next_segment' ? NEXT_SEGMENT_QUESTIONS : SETUP_QUESTIONS[piece]
+const questionsFor = (_piece: QuestionPiece) => NEXT_SEGMENT_QUESTIONS
 
 export function QuestionSection({ piece, questionKey, pending, children, className }: { piece: QuestionPiece; questionKey: string; pending?: Pending | null; children: ReactNode; className?: string }) {
   const question = questionsFor(piece).find(item => item.key === questionKey)
   if (!question) return null
   const when = questionWhen(question)
-  const flags = piece === 'next_segment' ? nextSegmentQuestionFlags(questionKey, pending) : questionFlags(piece, questionKey, pending)
+  const flags = nextSegmentQuestionFlags(questionKey, pending)
   return <section id={`q-${questionKey}`} tabIndex={-1} aria-labelledby={`q-title-${questionKey}`} className={clsx('setup-question scroll-mt-6 border-b border-line py-6 outline-none first:pt-0 last:border-b-0 focus-visible:ring-2 focus-visible:ring-chief/30', className)}>
     <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2">
       {question.focus && <span className="inline-flex items-center gap-1.5 text-xs text-seal"><span className="size-1.5 rounded-full bg-seal" aria-hidden />重点看</span>}

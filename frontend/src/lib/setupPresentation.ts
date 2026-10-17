@@ -47,14 +47,14 @@ export function worldFields(value: unknown): SetupField[] {
     ].filter(item => item.value).map(item => `${item.label}：${item.value}`).join('\n') })
   }
   return [...result,
-    field(world, '第一段·开篇的小麻烦', 'trouble'), field(world, '第一段·大对手', 'opponent'),
+    field(world, '第一篇·开篇的小麻烦', 'trouble'), field(world, '第一篇·大对手', 'opponent'),
     { label: '后面的地图', value: rows(world.far_maps).map(map => text(map.name) + (text(map.line) ? `（${text(map.line)}）` : '')).filter(Boolean).join(' → ') || '写到再定' },
     field(world, '终极敌人的影子', 'shadow'),
     { label: '核心谜团', value: `${text(world.mystery) ? `谜面：${text(world.mystery)}\n` : ''}谜底：${text(world.mystery_answer) || '写到再定'}` },
   ]
 }
 
-/** 第一段快照可能是模型原始产出，也可能是节点里已整理的段规划。 */
+/** 第一篇快照可能是模型原始产出，也可能是节点里已整理的段规划。 */
 export function segmentFields(value: unknown): SetupField[] {
   const draft = record(value)
   const segment = rows(draft.nodes).map(node => record(node.segment)).find(item => Object.keys(item).length) ?? draft
@@ -62,14 +62,14 @@ export function segmentFields(value: unknown): SetupField[] {
   return [
     field(opening, '第一章场面', 'scene'), field(opening, '前 3 章的压力', 'pressure'), field(opening, '第一个小爽点', 'first_win'),
     field(opening, '金手指露头', 'finger'), field(opening, '第 3 章钩子', 'hook'),
-    field(segment, '这一段的目标', 'goal'), field(segment, '和长线追求的联系', 'goal_link'),
+    field(segment, '这一篇的目标', 'goal'), field(segment, '和长线追求的联系', 'goal_link'),
     { label: '让读者等什么', value: text(segment.wait) || text(record(segment.wait).description) },
-    field(segment, '这一段揭开什么', 'reveal'), field(draft, '核心矛盾', 'core_conflict'),
+    field(segment, '这一篇揭开什么', 'reveal'), field(draft, '核心矛盾', 'core_conflict'),
     field(draft, '主题', 'theme'), field(draft, '主角成长弧线', 'protagonist_arc'),
   ].filter(item => item.value)
 }
 
-/** 定下一段会议卡只展示本轮规划快照，不展开任务 5 的完整确认页。 */
+/** 定下一篇会议卡只展示本轮规划快照，不展开任务 5 的完整确认页。 */
 export function nextSegmentFields(value: unknown): SetupField[] {
   const plan = record(value)
   const end = record(plan.end)

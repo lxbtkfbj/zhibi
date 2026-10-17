@@ -290,6 +290,12 @@ async def revert_version(
     target = await load_target(session, version.book_id, version.target_type, version.target_id, for_update=True)
     if isinstance(target, Chapter) and target.status != "final":
         raise HTTPException(409, "这一章还在写作或重写，定稿后再退回正文版本")
+    structure = None
+    if isinstance(target, (Volume, PlotUnit)) and version.snapshot.get("chapter_count") != target.chapter_count:
+        from app.services import outline_structure
+
+        await ensure_idle(session, version.book_id)
+        structure = await outline_structure.load_structure(session, version.book_id)
     before = snapshot_of(target)
     previous_source = getattr(target, "source", "ai")
     try:
@@ -298,16 +304,27 @@ async def revert_version(
             await _validate_changed_target(session, version.book_id, target, before)
         if isinstance(target, (Character, WorldEntry)):
             target.source = "revert"
-        await record_version(
-            session,
-            version.book_id,
-            version.target_type,
-            target,
-            "revert",
-            f"退回到第 {version.version} 版",
-            before=before,
-            previous_source=previous_source,
-        )
+        if structure is not None:
+            await outline_structure.resize_target(session, structure, target, target.chapter_count)
+            await outline_structure.finish_structure(
+                session,
+                version.book_id,
+                structure,
+                f"退回到第 {version.version} 版",
+                affected={target.id},
+                source="revert",
+            )
+        else:
+            await record_version(
+                session,
+                version.book_id,
+                version.target_type,
+                target,
+                "revert",
+                f"退回到第 {version.version} 版",
+                before=before,
+                previous_source=previous_source,
+            )
         await session.commit()
     except (ValueError, ValidationError) as exc:
         raise HTTPException(422, str(exc)) from exc

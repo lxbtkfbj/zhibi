@@ -17,12 +17,12 @@ export function decisionCopy(pending: Pending | null | undefined, bookId: string
   switch (pending?.kind) {
     case 'segment_review':
       return {
-        eyebrow: '下一步 · 定下一段',
-        title: `待你确认：第 ${pending.number} 段`,
-        hint: '主编已经定好下一段的走向与分卷。想调整的地方在对话框里说；确认后照常拆卷纲。',
-        approve: '确认这一段',
-        placeholder: '说说下一段想怎么改…',
-        links: [[`第 ${pending.number} 段`, `${base}/spine`]],
+        eyebrow: '下一步 · 定下一篇',
+        title: `待你确认：第 ${pending.number} 篇`,
+        hint: '主编已经定好下一篇的走向与分卷。想调整的地方在对话框里说；确认后照常拆卷纲。',
+        approve: '确认这一篇',
+        placeholder: '说说下一篇想怎么改…',
+        links: [[`第 ${pending.number} 篇`, `${base}/spine`]],
         issues: pending.warnings ?? [],
       }
     case 'volume_review': {

@@ -27,13 +27,16 @@ from app.schemas import (
     RewriteRequest,
     ThreadOut,
     ThreadPatch,
+    UnitCreate,
+    UnitOrder,
     UnitOut,
     UnitPatch,
+    VolumeCreate,
     VolumeOut,
     VolumePatch,
     WriteRequest,
 )
-from app.services import jobs, writing_store
+from app.services import jobs, outline_structure, writing_store
 from app.services.library import lock_book
 from app.services.meeting import post_message
 from app.services.versions import record_version, snapshot_of
@@ -129,6 +132,10 @@ async def update_book(
     if body.concept is not None:
         book.concept = {**(book.concept or {}), **body.concept}
         book.title = book.concept.get("title") or book.title
+        if "genre" in body.concept:
+            if not isinstance(book.concept["genre"], str) or len(book.concept["genre"]) > 100:
+                raise HTTPException(422, "类型须为不超过 100 字的文字")
+            book.genre = book.concept["genre"]
     if body.spine is not None:
         if set(body.spine) - {"core_conflict", "theme", "protagonist_arc"}:
             raise HTTPException(422, "主线骨架只保存核心矛盾、主题和主角成长弧；请通过节点接口编辑关键节点")
@@ -193,12 +200,19 @@ async def update_volume(volume_id: uuid.UUID, body: VolumePatch, session: AsyncS
     if volume is None:
         raise HTTPException(404, "卷不存在")
     before = snapshot_of(volume)
+    state = None
+    if body.chapter_count is not None and body.chapter_count != volume.chapter_count:
+        state = await outline_structure.load_structure(session, volume.book_id)
+        await outline_structure.resize_target(session, state, volume, body.chapter_count)
     await validate_node(session, volume.book_id, body.target_node_id)
     for key, value in body.model_dump(exclude_unset=True).items():
         if key == "techniques":
             value = clean_techniques(value)
         setattr(volume, key, value)
-    await record_version(session, volume.book_id, "volume", volume, "author", before=before)
+    if state is not None:
+        await outline_structure.finish_structure(session, volume.book_id, state, "调整卷章数", affected={volume.id})
+    else:
+        await record_version(session, volume.book_id, "volume", volume, "author", before=before)
     await session.commit()
     await session.refresh(volume, attribute_names=["units", "updated_at"])
     return VolumeOut.model_validate(volume)
@@ -217,14 +231,163 @@ async def update_unit(unit_id: uuid.UUID, body: UnitPatch, session: AsyncSession
     if unit is None:
         raise HTTPException(404, "剧情单元不存在")
     before = snapshot_of(unit)
+    state = None
+    if body.chapter_count is not None and body.chapter_count != unit.chapter_count:
+        state = await outline_structure.load_structure(session, unit.book_id)
+        await outline_structure.resize_target(session, state, unit, body.chapter_count)
     for key, value in body.model_dump(exclude_unset=True).items():
         if key == "techniques":
             value = clean_techniques(value)
         setattr(unit, key, value)
-    await record_version(session, unit.book_id, "unit", unit, "author", before=before)
+    if state is not None:
+        await outline_structure.finish_structure(
+            session, unit.book_id, state, "调整单元章数", affected={unit.id, unit.volume_id}
+        )
+    else:
+        await record_version(session, unit.book_id, "unit", unit, "author", before=before)
     await session.commit()
     await session.refresh(unit)
     return UnitOut.model_validate(unit)
+
+
+async def _structure_target(session: AsyncSession, model, row_id: uuid.UUID):
+    row = await session.get(model, row_id)
+    if row is None:
+        raise HTTPException(404, "卷不存在" if model is Volume else "剧情单元不存在")
+    await lock_book(session, row.book_id)
+    await ensure_idle(session, row.book_id)
+    state = await outline_structure.load_structure(session, row.book_id)
+    rows = state.volumes if model is Volume else state.units
+    target = next((item for item in rows if item.id == row_id), None)
+    if target is None:
+        raise HTTPException(404, "记录不存在")
+    return target, state
+
+
+def _insert_after(rows: list, row, after_id: uuid.UUID | None, message: str) -> list:
+    if after_id is None:
+        return [row, *rows]
+    index = next((index for index, item in enumerate(rows) if item.id == after_id), None)
+    if index is None:
+        raise HTTPException(422, message)
+    return [*rows[: index + 1], row, *rows[index + 1 :]]
+
+
+@router.post("/volumes/{volume_id}/units", response_model=UnitOut, status_code=201)
+async def create_unit(volume_id: uuid.UUID, body: UnitCreate, session: AsyncSession = SessionDep) -> UnitOut:
+    volume, state = await _structure_target(session, Volume, volume_id)
+    units = state.own_units(volume.id)
+    if not units:
+        raise HTTPException(409, "这一卷还没拆成单元，不能单独加")
+    unit = PlotUnit(
+        book_id=volume.book_id,
+        volume_id=volume.id,
+        index=max(u.index for u in units) + 1,
+        **body.model_dump(exclude={"after_unit_id"}),
+    )
+    ordered = _insert_after(units, unit, body.after_unit_id, "指定单元不属于这一卷")
+    session.add(unit)
+    await session.flush()
+    state.units.append(unit)
+    await outline_structure.assign_indices(session, ordered, list(range(1, len(ordered) + 1)))
+    volume.chapter_count = sum(u.chapter_count for u in ordered)
+    await outline_structure.finish_structure(session, volume.book_id, state, "新增单元", affected={volume.id})
+    await session.commit()
+    await session.refresh(unit)
+    return UnitOut.model_validate(unit)
+
+
+@router.delete("/units/{unit_id}", status_code=204)
+async def delete_unit(unit_id: uuid.UUID, session: AsyncSession = SessionDep) -> None:
+    unit, state = await _structure_target(session, PlotUnit, unit_id)
+    state.ensure_unwritten(unit, "这个单元已经开写了，不能删")
+    for chapter in state.own_chapters(unit):
+        state.chapters.remove(chapter)
+        await session.delete(chapter)
+    state.units.remove(unit)
+    # 被删行暂移到空闲序号，记录最后一版后再删，避免后面的行重排时撞号。
+    unit.index = -max((u.index for u in state.units), default=0) - 1
+    await session.flush()
+    units = state.own_units(unit.volume_id)
+    await outline_structure.assign_indices(session, units, list(range(1, len(units) + 1)))
+    volume = next(v for v in state.volumes if v.id == unit.volume_id)
+    volume.chapter_count = sum(u.chapter_count for u in units)
+    if not units:
+        volume.status = "planned"
+    await outline_structure.finish_structure(
+        session, unit.book_id, state, "删除单元", affected={unit.id, volume.id}, deleted=[unit]
+    )
+    await session.delete(unit)
+    await session.commit()
+
+
+@router.post("/volumes/{volume_id}/units/order", response_model=list[UnitOut])
+async def order_units(volume_id: uuid.UUID, body: UnitOrder, session: AsyncSession = SessionDep) -> list[UnitOut]:
+    volume, state = await _structure_target(session, Volume, volume_id)
+    units = state.own_units(volume.id)
+    if len(body.ids) != len(units) or set(body.ids) != {u.id for u in units}:
+        raise HTTPException(422, "请完整列出这一卷的单元，每个单元只能出现一次")
+    lookup = {u.id: u for u in units}
+    ordered = [lookup[row_id] for row_id in body.ids]
+    seen_unwritten = False
+    for unit in ordered:
+        has_started = any(outline_structure.started(c) for c in state.own_chapters(unit))
+        if has_started and seen_unwritten:
+            raise HTTPException(409, "已经开写的单元不能挪到没开写的单元后面")
+        seen_unwritten = seen_unwritten or not has_started
+    await outline_structure.assign_indices(session, ordered, list(range(1, len(ordered) + 1)))
+    await outline_structure.finish_structure(session, volume.book_id, state, "调整单元顺序", affected={volume.id})
+    await session.commit()
+    return [UnitOut.model_validate(unit) for unit in ordered]
+
+
+@router.post("/books/{book_id}/volumes", response_model=VolumeOut, status_code=201)
+async def create_volume(
+    body: VolumeCreate, book: Book = Depends(get_book), session: AsyncSession = SessionDep
+) -> VolumeOut:
+    await lock_book(session, book.id)
+    await ensure_idle(session, book.id)
+    await validate_node(session, book.id, body.target_node_id)
+    state = await outline_structure.load_structure(session, book.id)
+    volume = Volume(
+        book_id=book.id,
+        index=max((v.index for v in state.volumes), default=0) + 1,
+        **body.model_dump(exclude={"after_volume_id"}),
+    )
+    ordered = _insert_after(state.volumes, volume, body.after_volume_id, "指定卷不属于这本书")
+    session.add(volume)
+    await session.flush()
+    state.volumes = ordered
+    await outline_structure.assign_indices(session, ordered, list(range(1, len(ordered) + 1)))
+    await outline_structure.finish_structure(session, book.id, state, "新增卷")
+    await session.commit()
+    await session.refresh(volume, attribute_names=["units", "updated_at"])
+    return VolumeOut.model_validate(volume)
+
+
+@router.delete("/volumes/{volume_id}", status_code=204)
+async def delete_volume(volume_id: uuid.UUID, session: AsyncSession = SessionDep) -> None:
+    volume, state = await _structure_target(session, Volume, volume_id)
+    state.ensure_unwritten(volume, "这一卷已经开写了，不能删")
+    units = state.own_units(volume.id)
+    for chapter in state.own_chapters(volume):
+        state.chapters.remove(chapter)
+        await session.delete(chapter)
+    state.volumes.remove(volume)
+    state.units = [u for u in state.units if u.volume_id != volume.id]
+    volume.index = -max((v.index for v in state.volumes), default=0) - 1
+    await session.flush()
+    await outline_structure.assign_indices(session, state.volumes, list(range(1, len(state.volumes) + 1)))
+    await outline_structure.finish_structure(
+        session,
+        volume.book_id,
+        state,
+        "删除卷",
+        affected={volume.id, *(u.id for u in units)},
+        deleted=[volume, *units],
+    )
+    await session.delete(volume)
+    await session.commit()
 
 
 # ---------- 线索 ----------

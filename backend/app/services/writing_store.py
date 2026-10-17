@@ -435,11 +435,38 @@ async def next_chapter_index(session: AsyncSession, book_id: uuid.UUID) -> int:
     return int(last or 0) + 1
 
 
+async def unit_next_chapter_index(session: AsyncSession, book_id: uuid.UUID, unit: PlotUnit) -> int:
+    """新插入的单元要填回预留位置，不能越过后面已经存在的计划章纲。"""
+    own = list(await session.scalars(select(Chapter).where(Chapter.unit_id == unit.id).order_by(Chapter.index)))
+    if own:
+        return own[-1].index + 1
+    volumes = list(await session.scalars(select(Volume).where(Volume.book_id == book_id).order_by(Volume.index)))
+    units = list(await session.scalars(select(PlotUnit).where(PlotUnit.book_id == book_id).order_by(PlotUnit.index)))
+    chapters = list(await session.scalars(select(Chapter).where(Chapter.book_id == book_id)))
+    volume_order = {volume.id: volume.index for volume in volumes}
+    later_ids = {
+        row.id for row in units if (volume_order[row.volume_id], row.index) > (volume_order[unit.volume_id], unit.index)
+    }
+    if not any(chapter.unit_id in later_ids for chapter in chapters):
+        return await next_chapter_index(session, book_id)
+    cursor = max((chapter.index for chapter in chapters if chapter.volume_id is None), default=0) + 1
+    for volume in volumes:
+        own_units = [row for row in units if row.volume_id == volume.id]
+        if not own_units:
+            cursor += volume.chapter_count
+        for row in own_units:
+            if row.id == unit.id:
+                return cursor
+            cursor += row.chapter_count
+    return cursor
+
+
 async def create_chapters(
     session: AsyncSession, book_id: uuid.UUID, unit: PlotUnit, chapters: list[dict[str, Any]]
 ) -> list[Chapter]:
     """把章纲建成章节行（只有章纲、还没有正文），章号接着全书往后排。"""
-    start = await next_chapter_index(session, book_id)
+    start = await unit_next_chapter_index(session, book_id, unit)
+    existing = int(await session.scalar(select(func.count()).select_from(Chapter).where(Chapter.unit_id == unit.id)))
     rows = []
     for offset, plan in enumerate(chapters):
         row = Chapter(
@@ -453,7 +480,7 @@ async def create_chapters(
         )
         session.add(row)
         rows.append(row)
-    unit.chapter_count = len(rows)
+    unit.chapter_count = existing + len(rows)
     unit.status = "outlined"
     await session.flush()
     return rows

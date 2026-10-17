@@ -1,18 +1,14 @@
 import clsx from 'clsx'
-import { BookMarked, BookOpenText, GitBranch, Globe2, LayoutDashboard, Lightbulb, Network, Route, ScrollText, Settings, Users, EyeOff } from 'lucide-react'
+import { BookOpenText, Globe2, LayoutDashboard, Lightbulb, Network, Route, ScrollText, Settings, EyeOff } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Link, NavLink } from 'react-router-dom'
-import { useBible, useChapters, useThreads } from '../../api/hooks'
+import { useBible, useChapters } from '../../api/hooks'
 import type { Conversation } from '../../api/types'
 import { ROLE_META } from '../../lib/roles'
-import { cleanVolumeTitle } from '../../lib/status'
 import { TEAM, teamStatus } from '../../lib/team'
+import { useLibrarySuggestions } from '../../api/library'
 import { useBookContext } from './context'
 import { RoleAvatar } from './MeetingFeed'
-import { PieceStatusIcon } from './PuzzleTracker'
-import { usePuzzleProgress } from './usePuzzleProgress'
-import { PIECE_STATUS_LABELS } from '../../lib/storyMap'
-import { puzzleSidebarActive } from '../../lib/workspace'
 
 function Item({ to, icon, label, count, end, active, onNavigate }: { to: string; icon: ReactNode; label: ReactNode; count?: number; end?: boolean; active?: boolean; onNavigate?: () => void }) {
   const classes = (isActive: boolean) => clsx(
@@ -57,11 +53,10 @@ export function ConversationList({ compact, onSelect }: { compact?: boolean; onS
 }
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
-  const { bookId, book, job, draft, outline, working } = useBookContext()
+  const { bookId, book, job, draft, working } = useBookContext()
   const { data: bible } = useBible(bookId)
-  const { data: threads } = useThreads(bookId)
+  const suggestions = useLibrarySuggestions(bookId)
   const { data: chapters } = useChapters(bookId)
-  const puzzle = usePuzzleProgress()
   const base = `/books/${bookId}`
   const icon = 'size-4'
   const live = working && draft && !draft.done && draft.job_id === job?.id ? draft : null
@@ -73,24 +68,18 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     </section>
     <nav aria-label="书稿目录" className="scroll-thin min-h-0 flex-1 overflow-y-auto px-3 pt-5 pb-6">
       <h2 className="mb-3 px-2.5 text-xs tracking-[0.25em] text-ink-2">书稿</h2>
-      {puzzle.show && <div className="mb-5"><h3 className="mb-2 px-2.5 text-xs tracking-[0.2em] text-ink-2">开书拼图</h3><ol className="space-y-0.5">{puzzle.pieces.map(piece => <li key={piece.key}><Item to={`${base}${piece.path}`} active={puzzleSidebarActive()} icon={<PieceStatusIcon status={piece.status} piece={piece.key} />} label={<span title={`${piece.name} · ${PIECE_STATUS_LABELS[piece.status]}`}>{piece.number} {piece.name}<span className="ml-1 text-xs text-ink-2">{piece.status === 'waiting' ? '待确认' : ''}</span></span>} onNavigate={onNavigate} /></li>)}</ol></div>}
       <div className="space-y-0.5">
         <Item to={base} end icon={<LayoutDashboard className={icon} />} label="概览" onNavigate={onNavigate} />
-        <Item to={`${base}/concept`} icon={<Lightbulb className={icon} />} label="书的概念" onNavigate={onNavigate} />
-        <Item to={`${base}/protagonist`} icon={<Users className={icon} />} label="主角" onNavigate={onNavigate} />
-        <Item to={`${base}/spine`} icon={<Route className={icon} />} label="全书地图" onNavigate={onNavigate} />
-        {job?.status === 'waiting_author' && job.pending?.kind === 'segment_review' && <Item to={`${base}/next-segment`} icon={<Route className={icon} />} label="定下一段 · 待确认" onNavigate={onNavigate} />}
-        <Item to={`${base}/threads`} icon={<GitBranch className={icon} />} label="线索" count={threads?.length || undefined} onNavigate={onNavigate} />
+        <Item to={`${base}/concept`} icon={<Lightbulb className={icon} />} label="定调" onNavigate={onNavigate} />
+        <Item to={`${base}/library`} icon={<Globe2 className={icon} />} label="设定库" count={suggestions.data?.length || undefined} onNavigate={onNavigate} />
+        <Item to={`${base}/outline`} icon={<Route className={icon} />} label="大纲" onNavigate={onNavigate} />
+        {job?.status === 'waiting_author' && job.pending?.kind === 'segment_review' && <Item to={`${base}/next-segment`} icon={<Route className={icon} />} label="定下一篇 · 待确认" onNavigate={onNavigate} />}
       </div>
-      {!!outline?.volumes.length && <Group title="大纲">{outline.volumes.map(v => <Item key={v.id} to={`${base}/volume/${v.index}`} icon={<BookMarked className={icon} />}
-        label={`第 ${v.index} 卷 · ${cleanVolumeTitle(v.title)}`} onNavigate={onNavigate} />)}</Group>}
       <Group title="正文">
         <Item to={`${base}/chapters`} icon={<BookOpenText className={icon} />} label="目录" count={book.chapters_final || undefined} onNavigate={onNavigate} />
         {!!latest && <Item to={`${base}/chapter/${latest}`} icon={<BookOpenText className={icon} />} label={`${live ? '正在写' : '最新'} · 第 ${latest} 章`} onNavigate={onNavigate} />}
       </Group>
       <Group title="设定库">
-        <Item to={`${base}/characters`} icon={<Users className={icon} />} label="人物" count={bible?.characters.length} onNavigate={onNavigate} />
-        <Item to={`${base}/world`} icon={<Globe2 className={icon} />} label="世界与地图" count={bible?.world_entries.length} onNavigate={onNavigate} />
         <Item to={`${base}/relations`} icon={<Network className={icon} />} label="人物关系" count={bible?.relationships.length} onNavigate={onNavigate} />
         <Item to={`${base}/secrets`} icon={<EyeOff className={icon} />} label="信息差" count={bible?.secrets.length} onNavigate={onNavigate} />
         <Item to={`${base}/foreshadowing`} icon={<ScrollText className={icon} />} label="伏笔与期待" count={bible?.foreshadowings.length} onNavigate={onNavigate} />

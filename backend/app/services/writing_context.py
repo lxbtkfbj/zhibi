@@ -606,7 +606,13 @@ async def volume_blocks(
 
 
 async def chapter_plan_blocks(
-    session: AsyncSession, book: Book, volume: Volume, unit: PlotUnit, first_chapter: int
+    session: AsyncSession,
+    book: Book,
+    volume: Volume,
+    unit: PlotUnit,
+    first_chapter: int,
+    *,
+    chapter_count: int | None = None,
 ) -> dict[str, str]:
     """给一个剧情单元出章纲时需要的上下文。"""
     units = list(
@@ -622,7 +628,7 @@ async def chapter_plan_blocks(
     ]
     ledger = await load_ledger(session, book.id)
     refs = [a.get("ref", "") for a in unit.foreshadow_actions or []]
-    count = max(1, unit.chapter_count)
+    count = max(1, unit.chapter_count if chapter_count is None else chapter_count)
     characters = await _characters(session, book.id)
     mentioned = " ".join([*(unit.key_events or []), *(volume.new_characters or [])])
     names = [

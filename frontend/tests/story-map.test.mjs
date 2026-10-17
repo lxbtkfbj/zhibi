@@ -37,7 +37,7 @@ test('missing historical fields and malformed empty payloads never crash', () =>
 })
 
 test('three node statuses have the agreed Chinese labels', () => {
-  assert.deepEqual(NODE_STATUS, { pinned: '铁钉', pencil: '暂定', empty: '留空' })
+  assert.deepEqual(NODE_STATUS, { pinned: '锁住', pencil: '暂定', empty: '留空' })
 })
 
 test('new spine supports AI Chinese kinds, prerequisites, and consequences', () => {
@@ -181,7 +181,7 @@ test('whole-book completion keeps the last volume, reaches every node and has no
   const chapters = [...mapChapters('v1', 6), ...mapChapters('v2', 8, 7), ...mapChapters('v3', 6, 15)]
   const actual = writingPosition(mapNodes, mapVolumes, chapters)
   assert.deepEqual(actual, { volume: 3, doneInVolume: 6, volumeChapters: 6, nextNode: null, chaptersToNode: null, passed: ['opening', 'ascend', 'ending'], ratio: 1 })
-  assert.equal(writingPositionText(actual, mapVolumes, chapters), '全书完结')
+  assert.equal(writingPositionText(actual, mapVolumes, chapters, mapNodes), '全书完结')
 })
 
 test('legacy untargeted volumes show chapter progress without claiming a node or a final segment', () => {
@@ -199,7 +199,7 @@ test('legacy untargeted volumes show chapter progress without claiming a node or
 test('a final untargeted stretch in an otherwise mapped book counts chapters to the ending', () => {
   const volumes = mapVolumes.map(volume => volume.index === 3 ? { ...volume, target_node_id: null } : volume)
   const chapters = [...mapChapters('v1', 6), ...mapChapters('v2', 8, 7), ...mapChapters('v3', 2, 15)]
-  assert.equal(writingPositionText(writingPosition(mapNodes, volumes, chapters), volumes, chapters), '第 3 卷 2/6 章 · 正在写最后一段，离结局还有 4 章')
+  assert.equal(writingPositionText(writingPosition(mapNodes, volumes, chapters), volumes, chapters, mapNodes), '第 3 卷 2/6 章 · 正在写最后一篇，离结局还有 4 章')
 })
 
 test('map cursor interpolates actual finalized chapters between chapter-positioned nodes', () => {

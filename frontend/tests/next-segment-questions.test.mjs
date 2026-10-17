@@ -2,14 +2,14 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { NEXT_SEGMENT_QUESTIONS, nextSegmentQuestionFlags, segmentReviewKey } from '../src/lib/nextSegmentQuestions.ts'
-import { questionWhen } from '../src/lib/setupQuestions.ts'
+import { questionWhen } from '../src/lib/questionTypes.ts'
 
-test('定下一段十四题键、题目、顺序和重点看逐字对应任务 4 第 3.5 节', () => {
+test('定下一篇十四题键、题目、顺序和重点看沿用第二包，仅将段称为篇', () => {
   const task = readFileSync(new URL('../../docs/codex任务/第二包/4-定下一段.md', import.meta.url), 'utf8')
   const table = task.split('### 3.5 ')[1].split('检查（文字逐字照抄）')[0]
   const expected = table.split('\n').filter(line => /^\| [a-z_]+ \|/.test(line)).map(line => {
     const [, key, title, focus] = line.split('|').map(cell => cell.trim())
-    return { key, title, focus: focus === '★' }
+    return { key, title: title.replaceAll('这一段', '这一篇').replaceAll('上一段', '上一篇'), focus: focus === '★' }
   })
   assert.equal(expected.length, 14)
   assert.deepEqual(NEXT_SEGMENT_QUESTIONS.map(({ key, title, focus }) => ({ key, title, focus })), expected)
@@ -17,7 +17,7 @@ test('定下一段十四题键、题目、顺序和重点看逐字对应任务 4
   assert.ok(NEXT_SEGMENT_QUESTIONS.every(question => questionWhen(question) === 'before'))
 })
 
-test('下一段提醒只能出现在对应题，开书、其他状态或未知键不串入', () => {
+test('下一篇提醒只能出现在对应题，开书、其他状态或未知键不串入', () => {
   const pending = { kind: 'segment_review', number: 2, round: 1, flags: { carried: ['E1 还开着。', '', '  '], end: ['还没写之前得先有。'], unknown: ['不要显示'] } }
   assert.deepEqual(nextSegmentQuestionFlags('carried', pending), ['E1 还开着。'])
   assert.deepEqual(nextSegmentQuestionFlags('end', pending), ['还没写之前得先有。'])

@@ -10,7 +10,7 @@ export function automaticPlaybookName(concept: { genre?: unknown; tags?: unknown
 export function requirementSource(source: string): string {
   const names: Record<string, string> = { answer: '动笔前的回答', note: '插话', trial: '试读意见', manual: '手动添加', legacy: '旧记录' }
   if (source.startsWith('volume:')) return `第 ${source.slice(7)} 卷卷纲意见`
-  if (source.startsWith('segment:')) return `第 ${source.slice(8)} 段规划意见`
+  if (source.startsWith('segment:')) return `第 ${source.slice(8)} 篇规划意见`
   if (source.startsWith('private:')) {
     const roles: Record<string, string> = { chief: '主编', lorekeeper: '设定师', writer: '写手', reviewer: '审稿' }
     return `私聊${roles[source.slice(8)] ?? source.slice(8)}`

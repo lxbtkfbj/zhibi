@@ -1,6 +1,6 @@
 import clsx from 'clsx'
 import type { ReactNode } from 'react'
-import type { AnswerWhen } from '../lib/setupQuestions'
+import type { AnswerWhen } from '../lib/questionTypes'
 import { WhenBadge } from './QuestionSection'
 import './setupQuestions.css'
 

@@ -17,14 +17,14 @@ test('世界标题与 format_world 同名，完整保留地图及谜面谜底，
   const map = { name: '青石镇', powers: '镇守', ceiling: '镇守最强', rules: '夜不出门', start: '杂役', gains: '线索' }
   const world = Object.freeze({ surface: '力量公开', power: '修炼', maps: [map], trouble: '催债', opponent: '镇守', far_maps: [{ name: '京城', line: '贵人云集' }, { name: '边关' }], shadow: '暗中的大手', mystery: '妹妹去了哪里', mystery_answer: '北方' })
   const fields = worldFields(world)
-  assert.deepEqual(fields.map(item => item.label), ['世界的表里', '力量规则', '地图「青石镇」', '第一段·开篇的小麻烦', '第一段·大对手', '后面的地图', '终极敌人的影子', '核心谜团'])
+  assert.deepEqual(fields.map(item => item.label), ['世界的表里', '力量规则', '地图「青石镇」', '第一篇·开篇的小麻烦', '第一篇·大对手', '后面的地图', '终极敌人的影子', '核心谜团'])
   assert.equal(fields[2].value, '谁说了算：镇守\n天花板：镇守最强\n特有的规矩：夜不出门\n主角从这里起步：杂役\n能拿到：线索')
   assert.equal(fields[5].value, '京城（贵人云集） → 边关')
   assert.equal(fields[7].value, '谜面：妹妹去了哪里\n谜底：北方')
   assert.equal(worldFields({ first_map: map })[2].value, fields[2].value)
 })
 
-test('第一段快照既能读原始产出也能读节点 segment，旧的空消息不报错', () => {
+test('第一篇快照既能读原始产出也能读节点 segment，旧的空消息不报错', () => {
   const segment = { goal: '通过考核', goal_link: '进入档案库找妹妹', wait: { description: '三个月后考核' }, opening: { scene: '遭到催债', pressure: '交不起钱' }, reveal: '拿到信封' }
   assert.deepEqual(segmentFields(segment), segmentFields({ nodes: [{ kind: 'opening' }, { segment }] }))
   assert.equal(segmentFields({ ...segment, wait: '等考核' }).find(item => item.label === '让读者等什么').value, '等考核')
@@ -47,15 +47,15 @@ test('旧任务只在开书中的等待、失败、已停止状态显示重开�
   assert.equal(LEGACY_SETUP_NOTICE, '这个开书任务是按旧流程开的，开书流程已经更新。请点「按新流程重开」：保留你的点子、作者要求、已选的方向和已确认的定调，其余按新步骤重做。')
 })
 
-test('新书第一段写完但未到结局时不显示全书完结，旧书与真正结局照旧', () => {
+test('新书第一篇写完但未到结局时不显示全书完结，旧书与真正结局照旧', () => {
   const nodes = [{ id: 'opening', kind: 'opening', index: 1 }, { id: 'end', kind: 'milestone', index: 2, segment: { number: 1 } }, { id: 'final', kind: 'ending', index: 3 }]
   const volumes = [{ id: 'v1', index: 1, chapter_count: 1, units: [], status: 'done', target_node_id: 'end', reaches_node: true }]
   const chapters = [{ id: 'c1', index: 1, volume_id: 'v1', status: 'final' }]
   assert.equal(isWritingComplete(volumes, chapters, nodes), false)
   assert.equal(isWritingComplete(volumes, chapters), true)
   assert.equal(isWritingComplete([{ ...volumes[0], target_node_id: 'final' }], chapters, nodes), true)
-  assert.equal(writingPositionText(writingPosition(nodes, volumes, chapters), volumes, chapters, nodes), '第 1 段写完了 · 下一段写到再定')
-  assert.equal(progressText({ chapters_final: 1, status: 'writing', active_job: null }, [], null, null, { nodes, volumes, chapters }), '第 1 段写完了 · 下一段写到再定')
+  assert.equal(writingPositionText(writingPosition(nodes, volumes, chapters), volumes, chapters, nodes), '第 1 篇写完了 · 下一篇写到再定')
+  assert.equal(progressText({ chapters_final: 1, status: 'writing', active_job: null }, [], null, null, { nodes, volumes, chapters }), '第 1 篇写完了 · 下一篇写到再定')
 })
 
 

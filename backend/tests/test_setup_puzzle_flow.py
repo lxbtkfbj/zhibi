@@ -47,7 +47,7 @@ async def new_puzzle(flow, idea="楚风重生，测试自建类别"):
     bid, jid = result["book"]["id"], result["job"]["id"]
     gate = (await flow("GET", f"/jobs/{jid}"))["pending"]
     assert gate["kind"] == "setup_pitches" and gate["flow"] == 3 and len(gate["pitches"]) == 3
-    await flow("POST", f"/jobs/{jid}/pitches", {"action": "pick", "index": 1, "length": 400})
+    await flow("POST", f"/jobs/{jid}/pitches", {"action": "pick", "index": 1, "length": 300})
     return bid, jid
 
 
@@ -76,7 +76,7 @@ async def test_complete_flow_focus_saved_first_and_write_reuses_first_unit(flow,
     monkeypatch.setattr(demo, "respond", respond)
     bid, jid = await new_puzzle(flow)
     concept = (await flow("GET", f"/books/{bid}"))["concept"]
-    assert concept["target_length"] == 400 and concept["story"] and concept["secret_entry_id"]
+    assert concept["target_length"] == 300 and concept["story"] and concept["secret_entry_id"]
     await confirm(flow, jid)
     gate = (await flow("GET", f"/jobs/{jid}"))["pending"]
     assert gate["piece"] == "settings" and gate["summary"].startswith("主编建了 ")
@@ -133,9 +133,9 @@ async def test_redo_exact_previous_latest_round_title_and_requirements(flow, mon
     assert "【作者的意见】\n加入追凶" in captured[2] and "仅第1轮短版" not in captured[2]
     gate = (await flow("GET", f"/jobs/{jid}"))["pending"]
     assert gate["round"] == 3
-    await flow("POST", f"/jobs/{jid}/pitches", {"action": "pick", "index": 1, "title": "作者自己起名", "length": 400})
+    await flow("POST", f"/jobs/{jid}/pitches", {"action": "pick", "index": 1, "title": "作者自己起名", "length": 300})
     concept = (await flow("GET", f"/books/{bid}"))["concept"]
-    assert concept["title"] == "作者自己起名" and concept["target_length"] == 400
+    assert concept["title"] == "作者自己起名" and concept["target_length"] == 300
     requirements = await flow("GET", f"/books/{bid}/requirements")
     assert {"保留经营", "加入追凶"} <= {row["text"] for row in requirements}
 
@@ -276,7 +276,7 @@ async def test_concept_revision_uses_live_title_and_never_revives_old_title_requ
     monkeypatch.setattr(editorial, "draft_story", story)
     created = await flow("POST", "/books", {"idea": "少年重生", "mode": "puzzle"})
     bid, jid = created["book"]["id"], created["job"]["id"]
-    await flow("POST", f"/jobs/{jid}/pitches", {"action": "pick", "index": 1, "title": "最初选名", "length": 400})
+    await flow("POST", f"/jobs/{jid}/pitches", {"action": "pick", "index": 1, "title": "最初选名", "length": 300})
     assert (await flow("GET", f"/books/{bid}"))["concept"]["title"] == "最初选名"
     rows = await flow("GET", f"/books/{bid}/requirements")
     title_row = next(row for row in rows if row["text"] == "书名用《最初选名》")

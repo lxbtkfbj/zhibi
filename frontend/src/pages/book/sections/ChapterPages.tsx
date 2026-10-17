@@ -12,7 +12,7 @@ import { Badge, Button, Card, ErrorText, inputClass, Reveal, Skeleton, TypingDot
 import { cleanVolumeTitle } from '../../../lib/status'
 import { useBookContext } from '../context'
 import { PageHeader } from './common'
-import { ForeshadowChips } from './VolumePage'
+import { ForeshadowChips } from '../../../components/ForeshadowChips'
 import { RevealChips } from '../../../components/WritingLabels'
 import { emotionText } from '../../../lib/writingUi'
 

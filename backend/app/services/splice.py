@@ -72,6 +72,9 @@ def _read(target: Any, field: tuple[str, Any]) -> Any:
         return target.levels[key[0]].get(key[1], "")
     if kind in {"concept", "segment"}:
         container = target.concept if kind == "concept" else target.segment
+        if kind == "segment" and not str((container or {}).get(key) or "").strip():
+            # 第二包的篇没有一段话，页面用终点作为原文；首次编辑只建立篇的文本，不改终点。
+            return target.event if key == "text" else target.title
         default = [] if key == "pitches" else None if key == "secret_entry_id" else ""
         return (container or {}).get(key, default)
     return getattr(target, key)

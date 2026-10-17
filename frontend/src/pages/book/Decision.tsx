@@ -61,28 +61,29 @@ export function DecisionBar() {
   const actSegment = async (action: 'confirm' | 'delegate') => {
     try {
       await segmentReview.submit({ action })
-    } catch { /* 失败保留下一段和作者意见，允许重试。 */ }
+    } catch { /* 失败保留下一篇和作者意见，允许重试。 */ }
   }
   if (needsSetupRestart(book, job) && job) return <div data-testid="restart-setup-bar" className="z-10 max-h-[42vh] shrink-0 overflow-y-auto border-b border-seal/25 bg-paper-2 px-5 py-3">
     <SetupRestartCard />
   </div>
+  if (job?.setup_flow === 3 && pending?.kind === 'setup_piece') return null
   return <><div className="px-5 text-sm text-chief">{confirmSetupAndWrite.isPending && <p role="status" className="py-2">正在确认大纲，开书任务结束后会自动开写…</p>}<ErrorText error={confirmSetupAndWrite.error} /></div><AnimatePresence initial={false}>{waiting && job && target && <motion.div key="decision" data-testid="decision-bar" initial={reduce ? false : { opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: reduce ? 0 : 0.28, ease: 'easeOut' }} className="z-10 max-h-[42vh] shrink-0 overflow-y-auto border-b border-seal/25 bg-paper-2 px-5 py-3">
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <p className="text-sm font-medium text-seal">{nextSegment ? `待你确认：第 ${nextSegment.number} 段${nextSegment.warnings?.[0] ? `（${nextSegment.warnings[0]}）` : ''}` : piece ? `待你确认：${name}${piece.warnings?.[0] ? `（${piece.warnings[0]}）` : ''}` : pending?.kind === 'setup_pitches' ? '待你选择：三个短版' : pending?.kind === 'setup_directions' ? '待你选择：开书方向' : `待你拍板：${target.label}`}</p>
+      <p className="text-sm font-medium text-seal">{nextSegment ? `待你确认：第 ${nextSegment.number} 篇${nextSegment.warnings?.[0] ? `（${nextSegment.warnings[0]}）` : ''}` : piece ? `待你确认：${name}${piece.warnings?.[0] ? `（${piece.warnings[0]}）` : ''}` : pending?.kind === 'setup_pitches' ? '待你选择：三个短版' : pending?.kind === 'setup_directions' ? '待你选择：开书方向' : `待你拍板：${target.label}`}</p>
       <div className="flex flex-wrap items-center gap-2">{piece ? <>
         <Button size="sm" variant="seal" loading={setupPending} disabled={setupPending} onClick={() => void act('confirm')}>{job.setup_flow === 3 ? piece.piece === 'outline' ? '确认，开写' : '确认' : '确认这一块'}</Button>
         <Button size="sm" variant="ghost" disabled={setupPending} onClick={requestFeedback}>提意见</Button>
         {job.setup_flow !== 3 && <Button size="sm" variant="ghost" loading={pieceAction.isPending && pieceAction.variables?.action === 'delegate'} disabled={setupPending} onClick={() => void act('delegate')}>交给编辑部定</Button>}
       </> : nextSegment ? <>
-        <Button size="sm" variant="seal" loading={segmentReview.submitting && segmentReview.action === 'confirm'} disabled={segmentReview.submitting} onClick={() => void actSegment('confirm')}>确认这一段</Button>
+        <Button size="sm" variant="seal" loading={segmentReview.submitting && segmentReview.action === 'confirm'} disabled={segmentReview.submitting} onClick={() => void actSegment('confirm')}>确认这一篇</Button>
         <Button size="sm" variant="ghost" loading={segmentReview.submitting && segmentReview.action === 'delegate'} disabled={segmentReview.submitting} onClick={() => void actSegment('delegate')}>交给编辑部定</Button>
-      </> : pending?.kind === 'setup_directions' || pending?.kind === 'setup_pitches' ? <button className="text-sm text-chief underline underline-offset-4" onClick={() => manualNavigate(`/books/${bookId}`)}>去选择 →</button> : <><ApproveButton job={job} /><Button size="sm" variant="ghost" onClick={requestFeedback}>提意见</Button></>}</div>
+      </> : pending?.kind === 'setup_directions' || pending?.kind === 'setup_pitches' ? <button className="text-sm text-chief underline underline-offset-4" onClick={() => manualNavigate(pending?.kind === 'setup_pitches' ? `/books/${bookId}/concept` : `/books/${bookId}`)}>去选择 →</button> : <><ApproveButton job={job} /><Button size="sm" variant="ghost" onClick={requestFeedback}>提意见</Button></>}</div>
     </div>
     {conflicts.map((conflict, index) => <div key={index} role="alert" className="mt-3 flex items-start gap-2 rounded-lg border border-reviewer/35 bg-reviewer-soft px-3 py-2 text-sm leading-relaxed text-seal-dark"><AlertTriangle className="mt-0.5 size-4 shrink-0" /><p>{conflict}</p></div>)}
     {volumePending?.node_update && <NodeUpdateComparison proposal={volumePending.node_update} />}
     {!!nextSegment?.warnings?.length && <details className="mt-3 border-t border-divider pt-2">
-      <summary className="cursor-pointer text-xs text-ink-2">下一段的提醒（{nextSegment.warnings.length}）</summary>
-      <ul aria-label="下一段的提醒" className="mt-3 space-y-2 text-sm leading-relaxed text-ink-2">{nextSegment.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>
+      <summary className="cursor-pointer text-xs text-ink-2">下一篇的提醒（{nextSegment.warnings.length}）</summary>
+      <ul aria-label="下一篇的提醒" className="mt-3 space-y-2 text-sm leading-relaxed text-ink-2">{nextSegment.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>
     </details>}
     {!!reminders && piece && <details className="mt-3 border-t border-divider pt-2">
       <summary className="cursor-pointer text-xs text-ink-2">提醒与审稿建议（{reminders}）</summary>

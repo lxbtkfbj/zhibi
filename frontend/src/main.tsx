@@ -5,16 +5,15 @@ import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom'
 import { SiteLayout } from './components/Layout'
 import './index.css'
 import { BookLayout } from './pages/book/BookLayout'
-import { CharactersPage, ForeshadowingPage, RelationsPage, WorldPage } from './pages/book/sections/BiblePages'
+import { ForeshadowingPage, RelationsPage } from './pages/book/sections/BiblePages'
 import { ChapterPage, ContentsPage } from './pages/book/sections/ChapterPages'
-import { ProtagonistPage } from './pages/book/sections/ProtagonistPage'
-import { ConceptPage } from './pages/book/sections/ConceptPage'
 import { Overview } from './pages/book/sections/Overview'
-import { SpinePage } from './pages/book/sections/SpinePage'
 import { NextSegmentPage } from './pages/book/sections/NextSegmentPage'
 import { SecretsPage } from './pages/book/sections/SecretsPage'
-import { ThreadsPage } from './pages/book/sections/ThreadsPage'
-import { VolumePage } from './pages/book/sections/VolumePage'
+import { StoryPage } from './pages/book/sections/StoryPage'
+import { LibraryPage } from './pages/book/sections/LibraryPage'
+import { OutlinePage } from './pages/book/sections/OutlinePage'
+import { LegacyBookRoute } from './pages/book/LegacyBookRoute'
 import { Home } from './pages/Home'
 import { BookSettingsPage } from './pages/BookSettingsPage'
 import { AppearanceProvider } from './lib/appearance'
@@ -39,16 +38,18 @@ const router = createBrowserRouter([
     element: <BookLayout />,
     children: [
       { index: true, element: <Overview /> },
-      { path: 'concept', element: <ConceptPage /> },
-      { path: 'protagonist', element: <ProtagonistPage /> },
-      { path: 'spine', element: <SpinePage /> },
+      { path: 'concept', element: <StoryPage /> },
+      { path: 'library', element: <LibraryPage /> },
+      { path: 'outline', element: <OutlinePage /> },
+      { path: 'protagonist', element: <LegacyBookRoute /> },
+      { path: 'spine', element: <LegacyBookRoute /> },
       { path: 'next-segment', element: <NextSegmentPage /> },
-      { path: 'threads', element: <ThreadsPage /> },
+      { path: 'threads', element: <LegacyBookRoute /> },
       { path: 'chapters', element: <ContentsPage /> },
       { path: 'chapter/:index', element: <ChapterPage /> },
-      { path: 'volume/:index', element: <VolumePage /> },
-      { path: 'characters', element: <CharactersPage /> },
-      { path: 'world', element: <WorldPage /> },
+      { path: 'volume/:index', element: <LegacyBookRoute /> },
+      { path: 'characters', element: <LegacyBookRoute /> },
+      { path: 'world', element: <LegacyBookRoute /> },
       { path: 'relations', element: <RelationsPage /> },
       { path: 'foreshadowing', element: <ForeshadowingPage /> },
       { path: 'secrets', element: <SecretsPage /> },

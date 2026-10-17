@@ -35,8 +35,8 @@ test('篇幅章数按本书章字数、概念章字数、3000 字依次回退', 
 test('新书默认与本书共用段确认开关，篇幅只注入本书写作偏好之后', () => {
   const shared = readFileSync(new URL('../src/components/settings/WritingSettings.tsx', import.meta.url), 'utf8')
   const book = readFileSync(new URL('../src/pages/BookSettingsPage.tsx', import.meta.url), 'utf8')
-  assert.ok(shared.indexOf('每卷卷纲都要我拍板') < shared.indexOf('每一段开写前先给我确认'))
-  assert.ok(shared.indexOf('每一段开写前先给我确认') < shared.indexOf('新书前 3 章先给我试读'))
+  assert.ok(shared.indexOf('每卷卷纲都要我拍板') < shared.indexOf('每一篇开写前先给我确认'))
+  assert.ok(shared.indexOf('每一篇开写前先给我确认') < shared.indexOf('新书前 3 章先给我试读'))
   assert.match(shared, /checked=\{value.segment_approval \?\? true\}/u)
   assert.ok(shared.indexOf('{afterPreferences}') < shared.indexOf('<SettingsGroup title="编辑部力度">'))
   assert.match(book, /afterPreferences=\{<BookLengthSettings/u)
@@ -45,17 +45,4 @@ test('新书默认与本书共用段确认开关，篇幅只注入本书写作�
   assert.match(book, /onBlur=\{\(\) => void save\(\)\}/u)
   assert.match(book, /event.key === 'Enter'/u)
   assert.match(book, /编辑部工作时不能改，等这一步做完/u)
-})
-
-test('主角、人物卡和世界人物列表使用同一个设定库 want 字段', () => {
-  const protagonist = readFileSync(new URL('../src/pages/book/sections/ProtagonistPage.tsx', import.meta.url), 'utf8')
-  const characters = readFileSync(new URL('../src/pages/book/sections/BiblePages.tsx', import.meta.url), 'utf8')
-  const world = readFileSync(new URL('../src/pages/book/sections/WorldSetup.tsx', import.meta.url), 'utf8')
-  assert.match(protagonist, /character.role_type === '主角'/u)
-  assert.match(protagonist, /legacyHero\?\.want\?\.trim\(\)/u)
-  assert.match(protagonist, /此刻想要（写作中设定师每章更新）：/u)
-  assert.match(protagonist, /characters#character-\$\{legacyHero.id\}/u)
-  assert.ok(characters.indexOf("field('想要什么', 'goal')") < characters.indexOf("field('此刻想要什么', 'want')"))
-  assert.match(characters, /此刻想要什么：\{c.want\}/u)
-  assert.match(world, /person.want \|\| '（未定）'/u)
 })

@@ -29,12 +29,12 @@ export function useMeeting(bookId: string) {
     })
     source.addEventListener('error', () => setConnected(false))
     source.addEventListener('book', () => {
-      for (const key of [keys.book(bookId), keys.books, keys.nodes(bookId), keys.bible(bookId), keys.outline(bookId), keys.threads(bookId), keys.secrets(bookId), libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), libraryKeys.candidates(bookId)]) {
+      for (const key of [keys.book(bookId), keys.books, keys.nodes(bookId), keys.bible(bookId), keys.outline(bookId), keys.threads(bookId), keys.secrets(bookId), libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), libraryKeys.candidates(bookId), libraryKeys.versions(bookId), ['outline-tree', bookId]]) {
         void qc.invalidateQueries({ queryKey: key })
       }
     })
     source.addEventListener('library', () => {
-      for (const key of [libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), libraryKeys.candidates(bookId), keys.bible(bookId)]) void qc.invalidateQueries({ queryKey: key })
+      for (const key of [libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), libraryKeys.candidates(bookId), libraryKeys.versions(bookId), ['outline-tree', bookId], keys.bible(bookId)]) void qc.invalidateQueries({ queryKey: key })
     })
     source.addEventListener('message', (event) => {
       const message = JSON.parse((event as MessageEvent).data) as MeetingMessage
@@ -44,7 +44,7 @@ export function useMeeting(bookId: string) {
         return { bookId, messages: [...base, message] }
       })
       if (message.kind === 'artifact' && REFRESH_ON.has(message.payload?.type ?? '')) {
-        for (const key of [libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), libraryKeys.candidates(bookId)]) void qc.invalidateQueries({ queryKey: key })
+        for (const key of [libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), libraryKeys.candidates(bookId), libraryKeys.versions(bookId), ['outline-tree', bookId]]) void qc.invalidateQueries({ queryKey: key })
         for (const key of [keys.chapters(bookId), keys.outline(bookId), keys.book(bookId)]) qc.invalidateQueries({ queryKey: key })
         if (['spine', 'segment', 'segment_volumes'].includes(message.payload?.type ?? '')) qc.invalidateQueries({ queryKey: keys.nodes(bookId) })
         if (message.payload?.type === 'chapter_final' || ['lore', 'world', 'segment', 'segment_volumes'].includes(message.payload?.type ?? '')) {
@@ -61,7 +61,7 @@ export function useMeeting(bookId: string) {
       qc.setQueryData<BookDetail>(keys.book(bookId), (old) => (old ? { ...old, active_job: job } : old))
       if (SETTLED.has(job.status)) {
         setDraft({ bookId, draft: null })
-        const all = [keys.book(bookId), keys.outline(bookId), keys.bible(bookId), keys.threads(bookId), keys.nodes(bookId), keys.secrets(bookId), keys.chapters(bookId), keys.usage(bookId), keys.books, libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), libraryKeys.candidates(bookId)]
+        const all = [keys.book(bookId), keys.outline(bookId), keys.bible(bookId), keys.threads(bookId), keys.nodes(bookId), keys.secrets(bookId), keys.chapters(bookId), keys.usage(bookId), keys.books, libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), libraryKeys.candidates(bookId), libraryKeys.versions(bookId), ['outline-tree', bookId]]
         for (const key of all) {
           qc.invalidateQueries({ queryKey: key })
         }

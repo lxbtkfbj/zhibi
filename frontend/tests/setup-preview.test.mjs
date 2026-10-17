@@ -8,17 +8,17 @@ const message = (type, data = {}, overrides = {}) => ({
 })
 
 for (const [type, suffix, data] of [
-  ['protagonist', '/protagonist', { name: '陆远' }],
-  ['world', '/world', { surface: '公开修仙' }],
-  ['segment', '/spine', { nodes: [] }],
-  ['segment_volumes', '/spine', { volumes: [] }],
+  ['protagonist', '/library?view=focus', { name: '陆远' }],
+  ['world', '/library?cat=世界与地图', { surface: '公开修仙' }],
+  ['segment', '/outline?node=first-arc', { nodes: [] }],
+  ['segment_volumes', '/outline?node=first-arc', { volumes: [] }],
   ['concept', '/concept', { title: '书名' }],
   ['directions', '', { directions: [{ name: '方向一' }] }],
-  ['lore', '/characters', { characters: [] }],
-  ['spine', '/spine', { opening: '开篇' }],
-  ['threads', '/threads', { threads: [] }],
-  ['outline', '/spine', { volumes: [] }],
-  ['volume_plan', '/volume/1', { volume: 1, units: [] }],
+  ['lore', '/library?cat=角色卡片', { characters: [] }],
+  ['spine', '/outline?view=map', { opening: '开篇' }],
+  ['threads', '/outline?view=threads', { threads: [] }],
+  ['outline', '/outline?node=first-arc', { volumes: [] }],
+  ['volume_plan', '/outline?node=volume-1', { volume: 1, units: [] }],
 ]) {
   test(`running setup previews ${type} on its manuscript route`, () => {
     const artifact = message(type, data)
@@ -36,10 +36,10 @@ test('preview uses the latest matching artifact, not the latest unrelated output
 test('author questions, review, settled jobs, and writing never replace actual pages', () => {
   const artifact = message('outline', { volumes: [] })
   for (const status of ['waiting_author', 'succeeded', 'failed', 'cancelled']) {
-    assert.equal(setupPreviewForPath('book', { ...job, status }, [artifact], '/books/book/spine'), null)
+    assert.equal(setupPreviewForPath('book', { ...job, status }, [artifact], '/books/book/outline?node=first-arc'), null)
   }
-  assert.equal(setupPreviewForPath('book', { ...job, kind: 'write_book' }, [artifact], '/books/book/spine'), null)
-  assert.equal(setupPreviewForPath('book', null, [artifact], '/books/book/spine'), null)
+  assert.equal(setupPreviewForPath('book', { ...job, kind: 'write_book' }, [artifact], '/books/book/outline?node=first-arc'), null)
+  assert.equal(setupPreviewForPath('book', null, [artifact], '/books/book/outline?node=first-arc'), null)
 })
 
 test('other books, other jobs, empty data, and unrelated routes cannot leak into a preview', () => {
@@ -50,19 +50,20 @@ test('other books, other jobs, empty data, and unrelated routes cannot leak into
     message('concept', {}, { kind: 'speech' }),
   ]
   assert.equal(setupPreviewForPath('book', job, messages, '/books/book/concept'), null)
-  assert.equal(setupPreviewForPath('book', job, [message('concept')], '/books/book/spine'), null)
+  assert.equal(setupPreviewForPath('book', job, [message('concept')], '/books/book/outline?node=first-arc'), null)
 })
 
 test('queued setup can still show its checkpoint output without changing payload objects', () => {
   const artifact = Object.freeze(message('outline', Object.freeze({ volumes: [] })))
-  assert.equal(setupPreviewForPath('book', { ...job, status: 'queued' }, [artifact], '/books/book/spine'), artifact)
+  assert.equal(setupPreviewForPath('book', { ...job, status: 'queued' }, [artifact], '/books/book/outline?node=first-arc'), artifact)
 })
 
-test('spine and outline share the map route while the latest snapshot stays read-only', () => {
+test('map and outline previews stay on their own query-param view without replacing one another', () => {
   const spine = message('spine', { nodes: [{ title: '旧节点' }] })
   const outline = message('outline', { volumes: [{ title: '新分卷' }] }, { id: 2 })
-  assert.equal(setupPreviewForPath('book', job, [spine, outline], '/books/book/spine'), outline)
-  assert.equal(setupPreviewForPath('book', { ...job, status: 'waiting_author', pending: { kind: 'setup_piece', piece: 'segment' } }, [spine, outline], '/books/book/spine'), null)
+  assert.equal(setupPreviewForPath('book', job, [spine, outline], '/books/book/outline?node=first-arc'), outline)
+  assert.equal(setupPreviewForPath('book', job, [spine, outline], '/books/book/outline?view=map'), spine)
+  assert.equal(setupPreviewForPath('book', { ...job, status: 'waiting_author', pending: { kind: 'setup_piece', piece: 'segment' } }, [spine, outline], '/books/book/outline?node=first-arc'), null)
 })
 
 test('choosing or redoing directions leaves overview loading visible instead of replaying old cards', () => {

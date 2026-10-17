@@ -123,10 +123,14 @@ def apply_snapshot(target: Any, snapshot: dict) -> None:
         title = values.get("title")
         if title is not None and not isinstance(title, str):
             raise ValueError("定调中的书名必须是文字")
+        if "genre" in values and (not isinstance(values["genre"], str) or len(values["genre"]) > 100):
+            raise ValueError("定调中的类型须为不超过 100 字的文字")
         target.concept = values
         # 与作者修改定调时相同：首页和导出使用的书名也跟着恢复。
         if title:
             target.title = title
+        if "genre" in values:
+            target.genre = values["genre"]
         return
     if set(values) - set(EDITABLE_FIELDS[target_type]):
         raise ValueError("版本快照包含不可编辑的字段")

@@ -234,6 +234,25 @@ class UnitPatch(BaseModel):
         return value
 
 
+class UnitCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    summary: str = ""
+    chapter_count: int = Field(8, ge=1, le=50)
+    after_unit_id: uuid.UUID | None = None
+
+
+class UnitOrder(BaseModel):
+    ids: list[uuid.UUID]
+
+
+class VolumeCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    summary: str = ""
+    chapter_count: int = Field(60, ge=1, le=1000)
+    target_node_id: uuid.UUID | None = None
+    after_volume_id: uuid.UUID | None = None
+
+
 class VolumeOut(ORM):
     id: uuid.UUID
     index: int
@@ -729,7 +748,7 @@ SetupPiece = Literal["concept", "settings", "outline"]
 class PitchDecision(BaseModel):
     action: Literal["pick", "redo"]
     index: int | None = Field(None, ge=1, le=3)
-    length: Literal[50, 100, 200, 400, 500] | None = None
+    length: Literal[50, 100, 200, 300, 500] | None = None
     title: str | None = Field(None, min_length=1, max_length=200)
     feedback: str = Field("", max_length=20000)
 

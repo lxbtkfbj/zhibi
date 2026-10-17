@@ -22,13 +22,13 @@ function CarriedThreads({ text, ledger }: { text: string; ledger: Foreshadowing[
   }) : <span className="text-ink-3">（未填写）</span>}</p>
 }
 
-/** 全页只展示当前任务的待确认快照，绝不从已保存节点拼凑下一段。 */
+/** 全页只展示当前任务的待确认快照，绝不从已保存节点拼凑下一篇。 */
 export function NextSegmentPage() {
   const { bookId, job, working, manualNavigate, segmentPinEnd, setSegmentPinEnd, segmentReview } = useBookContext()
   const { data: bible } = useBible(bookId)
   const pending = job?.status === 'waiting_author' && job.pending?.kind === 'segment_review' ? job.pending : null
   if (!pending) return <div data-testid="next-segment-empty">
-    <PageHeader eyebrow="定下一段" title={working ? '编辑部正在准备下一步' : '当前没有待确认的下一段'} subtitle={working ? '需要你确认时，下一段的十四道题会显示在这里。已经确认的段在全书地图里。' : '已经确认的段在全书地图里；这里不保留可再次提交的旧稿。'} />
+    <PageHeader eyebrow="定下一篇" title={working ? '编辑部正在准备下一步' : '当前没有待确认的下一篇'} subtitle={working ? '需要你确认时，下一篇的十四道题会显示在这里。已经确认的篇在全书地图里。' : '已经确认的篇在全书地图里；这里不保留可再次提交的旧稿。'} />
     <Button variant="soft" onClick={() => manualNavigate(`/books/${bookId}/spine`)}>去全书地图</Button>
   </div>
 
@@ -39,8 +39,8 @@ export function NextSegmentPage() {
     try { await segmentReview.submit({ action, ...(flips ? { flips } : {}) }) } catch { /* 留下原稿与选择，错误在共享操作区显示。 */ }
   }
   return <article data-testid="next-segment-review" data-segment-number={pending.number}>
-    <PageHeader eyebrow="定下一段" title={`第 ${pending.number} 段：走到「${plan.end.title}」`} subtitle="这一段还没写进书里，确认之后才会保存。想改就换掉下面替你做的决定，或者在群聊里说。" />
-    {plan.finale && <p role="note" className="mb-6 rounded-lg border border-seal/25 bg-seal-soft px-4 py-3 text-sm leading-relaxed text-seal">这是收尾段：开始收线，往结局走。</p>}
+    <PageHeader eyebrow="定下一篇" title={`第 ${pending.number} 篇：走到「${plan.end.title}」`} subtitle="这一篇还没写进书里，确认之后才会保存。想改就换掉下面替你做的决定，或者在群聊里说。" />
+    {plan.finale && <p role="note" className="mb-6 rounded-lg border border-seal/25 bg-seal-soft px-4 py-3 text-sm leading-relaxed text-seal">这是收尾篇：开始收线，往结局走。</p>}
     {!!pending.decisions?.length && <Decisions key={segmentReviewKey(job?.id, pending)} decisions={pending.decisions} name="next-segment" disabled={segmentReview.submitting} loading={segmentReview.submitting && segmentReview.action === 'revise'} error={segmentReview.error} onRevise={flips => void act('revise', flips)} />}
     <FocusQuestions piece="next_segment" />
     {section('carried', <CarriedThreads text={plan.carried} ledger={bible?.foreshadowings ?? []} />)}
@@ -54,7 +54,7 @@ export function NextSegmentPage() {
     {section('people', plan.new_characters?.length ? <div className="space-y-3">{plan.new_characters.map((person, index) => <section key={`${index}-${person.name}`} className="rounded-lg border border-line bg-card p-4">
       <h3 className="mb-3 font-serif font-bold">{person.name}<span className="ml-2 font-sans text-xs font-normal text-ink-2">· {person.role_type}</span></h3>
       <FactTable rows={[{ label: '想要什么', value: value(person.goal) }, { label: '此刻想要', value: value(person.want) }]} />
-    </section>)}</div> : <p className="text-ink-3">这一段没有新增人物。</p>)}
+    </section>)}</div> : <p className="text-ink-3">这一篇没有新增人物。</p>)}
     {section('goal', <FactTable rows={[{ label: '目标', value: value(plan.goal) }, { label: '为什么离长线追求更近', value: value(plan.goal_link) }]} />)}
     {section('wait', <><FactTable rows={[{ label: '期待的一句话', value: value(plan.wait?.description) }, { label: '怎么立', value: value(plan.wait?.plant_plan) }, { label: '怎么兑现', value: value(plan.wait?.payoff_plan) }]} /><p className="text-xs text-ink-2">第 {plan.wait?.plant_volume ?? '待定'} 卷立下 → 第 {plan.wait?.payoff_volume ?? '待定'} 卷兑现</p></>)}
     {section('reveal', <>{value(plan.reveal)}{!!plan.secrets?.length && <div className="space-y-3">{plan.secrets.map((secret, index) => <section key={`${index}-${secret.title}`} className="rounded-lg border border-lore/20 bg-lore-soft/30 p-4"><h3 className="mb-3 font-serif font-bold">{secret.title}</h3><FactTable rows={[{ label: '真相', value: value(secret.truth) }, { label: '知情人', value: secret.knowers?.join('、') || '暂时无人知道' }]} /></section>)}</div>}</>)}
@@ -70,7 +70,7 @@ export function NextSegmentPage() {
     </section>)}</div> : <p className="text-ink-3">还没有分卷。</p>)}
     {section('direction', value(plan.ending?.trim() || '不调'))}
     <footer className="mt-8 border-t border-line pt-5" data-testid="next-segment-actions"><div className="flex flex-wrap gap-3">
-      <Button variant="seal" disabled={segmentReview.submitting} loading={segmentReview.submitting && segmentReview.action === 'confirm'} onClick={() => void act('confirm')}>确认这一段</Button>
+      <Button variant="seal" disabled={segmentReview.submitting} loading={segmentReview.submitting && segmentReview.action === 'confirm'} onClick={() => void act('confirm')}>确认这一篇</Button>
       <Button variant="ghost" disabled={segmentReview.submitting} loading={segmentReview.submitting && segmentReview.action === 'delegate'} onClick={() => void act('delegate')}>交给编辑部定</Button>
     </div><ErrorText error={segmentReview.error} /></footer>
   </article>

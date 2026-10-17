@@ -61,7 +61,7 @@ function BookLengthSettings({ chapterWords }: { chapterWords: number | null }) {
     } catch (cause) { setError(cause) } finally { committing.current = false }
   }
   return <SettingsGroup title="篇幅">
-    <SettingsRow label="全书计划写多长" hint="定下一段时，主编按这个篇幅判断还剩多少、要不要开始收尾；正在写的这一段不变。" status={update.isPending ? '保存中…' : saved ? '已保存' : undefined}
+    <SettingsRow label="全书计划写多长" hint="定下一篇时，主编按这个篇幅判断还剩多少、要不要开始收尾；正在写的这一篇不变。" status={update.isPending ? '保存中…' : saved ? '已保存' : undefined}
       extra={<>
         {working && <p id="book-length-locked" className="text-xs text-ink-2">编辑部工作时不能改，等这一步做完</p>}
         {!!error && <div role="alert"><ErrorText error={error} />{update.isError && <SettingsButton disabled={working || update.isPending} onClick={() => void save()}>重试保存篇幅</SettingsButton>}</div>}

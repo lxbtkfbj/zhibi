@@ -31,7 +31,7 @@ def test_new_graph_has_only_three_steps_and_no_retired_nodes():
     assert state["flow"] == 3 and "ask" not in state
     assert book_setup.route_start(state) == "pitches"
     assert len(book_setup.length_question()["options"]) == 5
-    assert "400 万字" in book_setup.length_question()["options"][3]
+    assert "300 万字" in book_setup.length_question()["options"][3]
 
 
 def test_restart_remembers_only_old_chosen_direction_as_exact_previous():

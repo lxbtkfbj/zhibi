@@ -41,6 +41,7 @@
   --color-author-bubble: #e8dfcc;
   --color-overlay: rgb(0 0 0 / 0.45);
   --color-on-role: #fffdf8;
+  --color-edit-highlight: #f6e3a9;
   --color-on-seal: #f6eadf;
   --color-binding: #e9dcc0;
   --color-cover-ink: #2a2622;
@@ -102,6 +103,7 @@
   --color-reviewer: #d0644b;
   --color-reviewer-soft: #492d25;
   --color-on-role: #211c18;
+  --color-edit-highlight: #655024;
   --color-on-seal: #211c18;
   --color-overlay: rgb(0 0 0 / 0.65);
   --shadow-paper: 0 1px 2px rgb(0 0 0 / 0.18), 0 6px 20px -8px rgb(0 0 0 / 0.35);

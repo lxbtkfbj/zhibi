@@ -18,31 +18,31 @@ export function artifactTarget(message: MeetingMessage, bookId: string, outline?
   const data = record(message.payload?.data)
   const page = (suffix: string, label: string) => ({ path: `${base}${suffix}`, label })
   switch (type) {
-    case 'concept': return page('/concept', '书的概念')
-    case 'pitches': return page('', '三个短版');
-    case 'settings_focus': case 'settings_rest': return page('/world', '设定库');
+    case 'concept': return page('/concept', '定调')
+    case 'pitches': return page('/concept', '三个短版');
+    case 'settings_focus': case 'settings_rest': return page('/library?view=focus', '设定库');
     case 'directions': return page('', '开书方向')
-    case 'protagonist': return page('/protagonist', '主角卡')
-    case 'world': return page('/world', '世界与人')
-    case 'segment': return page('/spine', '第一段')
-    case 'segment_plan': return page('/next-segment', '下一段')
-    case 'segment_volumes': return page(Array.isArray(data.volumes) && (positive(record(data.volumes[0]).index) ?? 1) > 1 ? '/next-segment' : '/spine', '这一段的分卷')
-    case 'lore': return page('/characters', '人物设定')
-    case 'spine': return page('/spine', '关键节点')
-    case 'threads': return page('/threads', '线索')
-    case 'outline': return page('/spine', '填中间')
+    case 'protagonist': return page('/library?view=focus', '设定库 · 重点')
+    case 'world': return page('/library?cat=世界与地图', '设定库')
+    case 'segment': return page('/outline?node=first-arc', '第一篇')
+    case 'segment_plan': return page('/next-segment', '下一篇')
+    case 'segment_volumes': return page(Array.isArray(data.volumes) && (positive(record(data.volumes[0]).index) ?? 1) > 1 ? '/next-segment' : '/outline?node=first-arc', '这一篇的分卷')
+    case 'lore': return page('/library?cat=角色卡片', '人物设定')
+    case 'spine': return page('/outline?view=map', '大纲')
+    case 'threads': return page('/outline?view=threads', '线索')
+    case 'outline': return page('/outline?node=first-arc', '大纲')
     case 'questions': return page('', '动笔前提问')
     case 'critique': return page('', '开书方案')
     case 'volume_plan': case 'volume_directions': case 'volume_pitch': case 'pitch_scores': case 'volume_audit': case 'volume_recap': {
       const n = positive(data.volume ?? data.index)
-      return n ? page(`/volume/${n}`, `第 ${n} 卷卷纲`) : null
+      return n ? page(`/outline?node=volume-${n}`, `第 ${n} 卷卷纲`) : null
     }
     case 'chapter_plan': case 'unit_recap': {
       // Existing messages identify the unit as 第N卷第M单元「标题」, not a database id.
       const named = String(data.unit ?? '')
       const n = positive(data.volume) ?? positive(named.match(/第\s*(\d+)\s*卷/)?.[1])
         ?? outline?.volumes.find(v => v.units.some(u => u.id === data.unit_id || u.id === data.unit || u.title === named))?.index
-      return n ? page(`/volume/${n}`, `第 ${n} 卷卷纲`) : null
+      return n ? page(`/outline?node=volume-${n}`, `第 ${n} 卷卷纲`) : null
     }
     case 'chapter_final': case 'chapter_draft': case 'chapter_polish': case 'chapter_materials': case 'chapter_review': case 'chapter_consistency': {
       const n = positive(data.index ?? data.chapter)
@@ -57,7 +57,7 @@ export function pendingTarget(pending: Pending | null | undefined, bookId: strin
   switch (pending?.kind) {
     case 'setup_questions': return { path: base, label: '动笔前提问' }
     case 'setup_review': return { path: base, label: '开书方案' }
-    case 'setup_pitches': return { path: base, label: '三个短版' };
+    case 'setup_pitches': return { path: `${base}/concept`, label: '三个短版' };
     case 'setup_directions': return { path: base, label: '开书方向' }
     case 'setup_piece': {
       const PIECES = setupPieces(pending.flow)
@@ -65,8 +65,8 @@ export function pendingTarget(pending: Pending | null | undefined, bookId: strin
       const piece = PIECES[index]
       return piece ? { path: `${base}${piece.path}`, label: `第 ${index + 1} 块：${piece.name}` } : null
     }
-    case 'segment_review': return { path: `${base}/next-segment`, label: `第 ${pending.number} 段` }
-    case 'volume_review': return { path: `${base}/volume/${pending.volume}`, label: `第 ${pending.volume} 卷卷纲` }
+    case 'segment_review': return { path: `${base}/next-segment`, label: `第 ${pending.number} 篇` }
+    case 'volume_review': return { path: `${base}/outline?node=volume-${pending.volume}`, label: `第 ${pending.volume} 卷卷纲` }
     case 'trial_read': return { path: `${base}/chapter/1`, label: `前 ${pending.chapters} 章试读` }
     case 'chapter_stuck': return { path: `${base}/chapter/${pending.chapter}`, label: `第 ${pending.chapter} 章` }
     default: return null
@@ -93,7 +93,7 @@ export function currentTarget(bookId: string, job: Job | null, messages: Meeting
   for (const message of [...current].reverse()) {
     if (message.kind !== 'artifact' || !allowed.has(message.payload?.type ?? '')) continue
     const target = job.kind !== 'book_setup' && message.payload?.type === 'segment_volumes'
-      ? { path: `/books/${bookId}/next-segment`, label: '这一段的分卷' }
+      ? { path: `/books/${bookId}/next-segment`, label: '这一篇的分卷' }
       : artifactTarget(message, bookId, outline)
     if (target) return target
   }
@@ -117,8 +117,9 @@ export function progressText(book: BookDetail, messages: MeetingMessage[], draft
   if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_directions') return '等你选择：开书方向'
   if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_piece') return `等你确认：${PIECES.find(piece => piece.key === (job.pending as Extract<Pending, { kind: 'setup_piece' }>).piece)?.name ?? '当前拼图'}`
   const position = writing && writingPosition(writing.nodes, writing.volumes, writing.chapters, book.concept)
-  const complete = !!writing && isWritingComplete(writing.volumes, writing.chapters, writing.nodes)
-  const segmentFinished = !!writing && !complete && isWritingComplete(writing.volumes, writing.chapters)
+  const mapReady = !!writing && (writing.nodes.length > 0 || !writing.volumes.some(volume => volume.target_node_id))
+  const complete = !!writing && mapReady && isWritingComplete(writing.volumes, writing.chapters, writing.nodes)
+  const segmentFinished = !!writing && writing.nodes.some(node => node.segment) && !complete && isWritingComplete(writing.volumes, writing.chapters)
   const waiting = `${job?.pending?.kind === 'setup_questions' ? '等你回答' : job?.pending?.kind === 'segment_review' ? '等你确认' : '等你拍板'}：${target?.label ?? '编辑部的提问'}`
   if (job?.status === 'waiting_author' && position?.volume == null) return waiting
   const working = job?.status === 'queued' || job?.status === 'running'
@@ -128,16 +129,16 @@ export function progressText(book: BookDetail, messages: MeetingMessage[], draft
     const status = lastStatus?.content.replace(/[.…]+$/, '') ?? '主编在准备方案'
     return book.setup_progress?.mode === 'puzzle' && index >= 0 ? `开书 · 第 ${index + 1} 块「${PIECES[index].name}」· ${status}` : `开书中 · ${status}`
   }
-  const volume = position?.volume ?? target?.path.match(/\/volume\/(\d+)$/)?.[1]
+  const volume = position?.volume ?? target?.path?.match(/[?&]node=volume-(\d+)(?:[&#]|$)/)?.[1] ?? target?.path?.match(/\/volume\/(\d+)$/)?.[1]
   let progress = `${volume ? `第 ${volume} 卷 · ` : ''}已定稿 ${book.chapters_final} 章`
   const segmentNumber = writing && position ? writingSegmentNumber(writing.nodes, writing.volumes, position) : null
-  if (segmentNumber != null && position?.volume != null && !complete && !segmentFinished) progress = `第 ${segmentNumber} 段 · 第 ${position.volume} 卷 ${position.doneInVolume}/${position.volumeChapters} 章`
+  if (segmentNumber != null && position?.volume != null && !complete && !segmentFinished) progress = `第 ${segmentNumber} 篇 · 第 ${position.volume} 卷 ${position.doneInVolume}/${position.volumeChapters} 章`
   if (segmentFinished && writing) progress = segmentFinishedText(writing.nodes, writing.volumes)
   if (position?.volume != null && writing && !complete && !segmentFinished) {
     if (position.nextNode) progress += ` · 离「${position.nextNode.title}」还有 ${position.chaptersToNode} 章`
-    else if (writing.volumes.some(item => item.target_node_id)) {
+    else if (mapReady && writing.volumes.some(item => item.target_node_id)) {
       const remaining = Math.max(0, writing.volumes.reduce((sum, item) => sum + plannedVolumeChapters(item), 0) - writing.chapters.filter(item => item.status === 'final').length)
-      progress += ` · 正在写最后一段，离结局还有 ${remaining} 章`
+      progress += ` · 正在写最后一篇，离结局还有 ${remaining} 章`
     }
   }
   if (job?.status === 'waiting_author') return `${progress} · ${waiting}`

@@ -185,8 +185,9 @@ export interface World {
 export interface SegmentPlan {
   title?: string
   text?: string
-  number: number
-  status: 'confirmed' | 'auto'
+  /** 第二包保存的篇号；第三包只有标题和一段话时由节点顺序计算显示编号。 */
+  number?: number
+  status?: 'confirmed' | 'auto'
   planned_at: number
   map: string
   trouble: string

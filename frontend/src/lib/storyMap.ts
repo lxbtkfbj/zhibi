@@ -4,14 +4,14 @@ export const PIECES = [
   { key: 'concept', name: '定调', path: '/concept', number: '①' },
   { key: 'protagonist', name: '主角', path: '/protagonist', number: '②' },
   { key: 'world', name: '世界与人', path: '/world', number: '③' },
-  { key: 'segment', name: '第一段', path: '/spine', number: '④' },
+  { key: 'segment', name: '第一篇', path: '/spine', number: '④' },
   { key: 'first_volume', name: '第一卷', path: '/volume/1', number: '⑤' },
 ] as const satisfies readonly { key: PieceKey; name: string; path: string; number: string }[]
 
 export const THREE_PIECES = [
   { key: 'concept', name: '定调', path: '/concept', number: '①' },
-  { key: 'settings', name: '设定库', path: '/world', number: '②' },
-  { key: 'outline', name: '大纲', path: '/spine', number: '③' },
+  { key: 'settings', name: '设定库', path: '/library?view=focus', number: '②' },
+  { key: 'outline', name: '大纲', path: '/outline?node=first-arc', number: '③' },
 ] as const
 
 export const setupPieces = (flow?: number | null) => flow === 3 ? THREE_PIECES : PIECES
@@ -49,7 +49,7 @@ export interface NodeSegment {
   unassignedVolumes: Volume[]
 }
 
-/** 目标节点是这一段的右端点。旧卷缺少目标时保留在最后一段，并明确标记。 */
+/** 目标节点是这一段的右端点。旧卷缺少目标时保留在最后一篇，并明确标记。 */
 export function segments(nodes: StoryNode[], volumes: Volume[]): NodeSegment[] {
   const ordered = [...nodes].sort((a, b) => a.index - b.index)
   const result: NodeSegment[] = ordered.slice(1).map((to, index) => ({ from: ordered[index], to, volumes: [], chapters: 0, unassigned: false, unassignedVolumes: [] }))
@@ -69,7 +69,7 @@ export function segments(nodes: StoryNode[], volumes: Volume[]): NodeSegment[] {
 }
 
 
-export const NODE_STATUS: Record<StoryNode['status'], string> = { pinned: '铁钉', pencil: '暂定', empty: '留空' }
+export const NODE_STATUS: Record<StoryNode['status'], string> = { pinned: '锁住', pencil: '暂定', empty: '留空' }
 
 /** 已拆单元以单元章数为准，不再沿用总纲的粗略章数。 */
 export function plannedVolumeChapters(volume: Pick<Volume, 'chapter_count' | 'units'>): number {
@@ -89,6 +89,15 @@ export interface SegmentBand {
   auto: boolean
 }
 
+/** 第三包只存篇名和正文；按节点顺序补显示编号，第二包已保存的编号原样保留。 */
+export function segmentNumber(nodes: StoryNode[], nodeId: string | null | undefined): number | null {
+  if (!nodeId || !nodes.some(node => node.segment)) return null
+  const numbered = [...nodes].sort((a, b) => a.index - b.index).filter(node => node.kind !== 'opening' && (node.kind !== 'ending' || node.segment))
+  const index = numbered.findIndex(node => node.id === nodeId)
+  if (index < 0) return null
+  return numbered[index].segment?.number ?? index + 1
+}
+
 /** 只把已经保存的段规划当作计划；旧书仍由 segments() 显示原来的卷带。 */
 export function segmentBands(nodes: StoryNode[], volumes: Volume[], chapters: ChapterBrief[]): SegmentBand[] {
   if (!nodes.some(node => node.segment)) return []
@@ -99,7 +108,7 @@ export function segmentBands(nodes: StoryNode[], volumes: Volume[], chapters: Ch
     const started = chapters.some(chapter => own.some(volume => volume.id === chapter.volume_id) && ['final', 'drafting'].includes(chapter.status))
     const done = own.length > 0 && own.every(volume => volumeWritingComplete(volume, chapters))
     return {
-      number: plan?.number ?? null, from: ordered[ordered.indexOf(to) - 1] ?? null, to, plan,
+      number: segmentNumber(ordered, to.id), from: ordered[ordered.indexOf(to) - 1] ?? null, to, plan,
       volumes: own, chapters: own.reduce((sum, volume) => sum + plannedVolumeChapters(volume), 0),
       status: !plan ? 'later' : done ? 'done' : started ? 'writing' : 'planned', auto: plan?.status === 'auto',
     }
@@ -156,7 +165,8 @@ export function segmentFinishedText(nodes: StoryNode[], volumes: Volume[]): stri
   const last = [...volumes].sort((a, b) => a.index - b.index).at(-1)
   const end = nodes.find(node => node.id === last?.target_node_id)
     ?? [...nodes].sort((a, b) => a.index - b.index).findLast(node => node.segment)
-  return `第 ${end?.segment?.number ?? nodes.filter(node => node.segment).length} 段写完了 · 下一段写到再定`
+  const number = segmentNumber(nodes, end?.id)
+  return `${number == null ? '已规划的篇' : `第 ${number} 篇`}写完了 · 下一篇写到再定`
 }
 
 /** 只使用真实定稿与卷目标计算位置，不把预先生成的章纲算成已写。 */
@@ -196,21 +206,23 @@ export function writingPosition(nodes: StoryNode[], volumes: Volume[], chapters:
 
 export function writingSegmentNumber(nodes: StoryNode[], volumes: Volume[], position: WritingPosition): number | null {
   const current = volumes.find(volume => volume.index === position.volume)
-  return nodes.find(node => node.id === current?.target_node_id)?.segment?.number ?? null
+  return segmentNumber(nodes, current?.target_node_id)
 }
 
 export function writingPositionText(position: WritingPosition, volumes: Volume[], chapters: ChapterBrief[], nodes: StoryNode[] = []): string {
   if (position.volume == null) return ''
   const total = volumes.reduce((sum, volume) => sum + plannedVolumeChapters(volume), 0)
   const done = chapters.filter(chapter => chapter.status === 'final').length
+  // 节点请求可能晚于卷和章节到达；此时不能把当前已规划部分误当作全书末尾。
+  if (!nodes.length && !position.nextNode && volumes.some(volume => volume.target_node_id)) return `第 ${position.volume} 卷 ${position.doneInVolume}/${position.volumeChapters} 章 · 已定稿 ${done} 章`
   if (isWritingComplete(volumes, chapters, nodes)) return '全书完结'
   if (isWritingComplete(volumes, chapters)) return segmentFinishedText(nodes, volumes)
   const segment = writingSegmentNumber(nodes, volumes, position)
-  const current = `${segment == null ? '' : `第 ${segment} 段 · `}第 ${position.volume} 卷 ${position.doneInVolume}/${position.volumeChapters} 章`
+  const current = `${segment == null ? '' : `第 ${segment} 篇 · `}第 ${position.volume} 卷 ${position.doneInVolume}/${position.volumeChapters} 章`
   if (position.nextNode) return `${current} · 离「${position.nextNode.title}」还有 ${position.chaptersToNode ?? 0} 章`
   // 历史卷没有目标节点时只呈现确实知道的章数，不臆测正在接近哪个节点。
   if (!volumes.some(volume => volume.target_node_id)) return `${current} · 全书已定稿 ${done}/${total} 章`
-  return `${current} · 正在写最后一段，离结局还有 ${Math.max(0, total - done)} 章`
+  return `${current} · 正在写最后一篇，离结局还有 ${Math.max(0, total - done)} 章`
 }
 
 /** 未规划的远景在已规划章数与全书篇幅之间均分；这只是地图位置，不算已经走到。 */
