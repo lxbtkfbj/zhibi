@@ -36,10 +36,12 @@ function StatusPill({ book, progress, waiting, working }: { book: BookDetail; pr
   const failed = book.active_job?.status === 'failed'
   const rest = waiting ? progress.replace(/\s*(·\s*)?等你(拍板|确认|回答|选择)：.*$/, '') : progress
   const tone = waiting || failed ? 'wait' : working ? 'busy' : 'idle'
+  // 顶上只放前两段（第几篇、第几卷几章），整句放在鼠标提示里。
+  const short = rest.split(' · ').slice(0, 2).join(' · ')
   return <p title={progress} data-testid="workspace-status" className={clsx('ml-auto hidden min-w-0 items-center gap-2 truncate rounded-full py-1 pr-3 pl-2.5 text-xs md:flex',
     tone === 'wait' ? 'bg-seal-soft text-seal-dark' : tone === 'busy' ? 'bg-chief-soft text-chief' : 'text-ink-2')}>
     <span aria-hidden className={clsx('size-1.5 shrink-0 rounded-full', tone === 'wait' ? 'bg-seal' : tone === 'busy' ? 'bg-chief motion-safe:animate-pulse' : 'bg-ink-3/60')} />
-    <span className="truncate">{waiting ? rest ? `${rest} · 等你处理` : '等你处理' : rest}</span>
+    <span className="truncate">{waiting ? short ? `${short} · 等你处理` : '等你处理' : short}</span>
   </p>
 }
 

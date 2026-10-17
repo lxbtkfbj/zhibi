@@ -132,11 +132,11 @@ function NoteComposer() {
   // 只在需要说明「这时候发的话会怎么处理」时出现。
   const context: { tone: 'wait' | 'info'; text: string } | null = direct || oldSetup ? null
     : legacyArc ? { tone: 'wait', text: '这一篇要先按新写法重出，重出后再提意见' }
-      : pitches ? { tone: 'wait', text: openPitches ? '还没挑方向：想要什么直接说，聊定的方案「按这个来」会直接写进定调和设定；要新方向就说「再来三个」' : '等你挑故事方向：明说要改，主编就重出三个；提问照常回答' }
-        : waiting && job?.pending?.kind === 'setup_directions' ? { tone: 'wait', text: '等你选开书方向：明说要改，主编会重新出方向' }
-          : waiting && target ? { tone: 'wait', text: `等你${job?.pending?.kind === 'setup_piece' || job?.pending?.kind === 'segment_review' ? '确认' : '拍板'}「${target.label}」：明说要改，会当成修改意见；提问照常回答` }
-            : asking ? { tone: 'wait', text: '主编在等你回答动笔前的提问；别的要求也可以先在这里说' }
-              : working && job?.kind === 'book_setup' ? { tone: 'info', text: '编辑部在写：你现在说的修改，会先记下，写完这一步再改' }
+      : pitches ? { tone: 'wait', text: openPitches ? '还没挑方向 · 想换一批就说「再来三个」' : '在挑故事方向 · 说要改，主编会重出三个' }
+        : waiting && job?.pending?.kind === 'setup_directions' ? { tone: 'wait', text: '在选开书方向 · 说要改，主编会重出' }
+          : waiting && target ? { tone: 'wait', text: `等你${job?.pending?.kind === 'setup_piece' || job?.pending?.kind === 'segment_review' ? '确认' : '拍板'}「${target.label}」· 说要改会当成修改意见` }
+            : asking ? { tone: 'wait', text: '主编在等你回答提问' }
+              : working && job?.kind === 'book_setup' ? { tone: 'info', text: '编辑部在写 · 现在说的改动，写完这一步再改' }
                 : null
 
   return (
@@ -173,8 +173,7 @@ function NoteComposer() {
           className="block max-h-52 min-h-[60px] w-full resize-none bg-transparent px-4 pt-3 pb-1 chat-text leading-[1.75] text-ink placeholder:text-ink-3 focus:outline-none"
         />
         <div className="flex items-center gap-2 px-3 pb-2.5">
-          <span className="text-xs text-ink-3">Enter 发送 · Shift + Enter 换行</span>
-          <button type="button" aria-label="发送" onClick={() => void send()} disabled={!text.trim() || tooLong || pending}
+          <button type="button" aria-label="发送" title="发送（Enter）；换行按 Shift + Enter" onClick={() => void send()} disabled={!text.trim() || tooLong || pending}
             className="press ml-auto flex size-[34px] shrink-0 items-center justify-center rounded-full bg-ink text-paper-2 transition-colors hover:bg-ink-2 disabled:cursor-not-allowed disabled:bg-line-2 disabled:text-card">
             {pending ? <Spinner className="size-4" /> : <ArrowUp className="size-[18px]" />}
           </button>

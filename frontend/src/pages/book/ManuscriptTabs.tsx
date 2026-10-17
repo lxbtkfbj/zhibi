@@ -1,7 +1,7 @@
 import clsx from 'clsx'
 import { ArrowRight, BookMarked, BookOpen, Check, Lightbulb, Route } from 'lucide-react'
 import { useLocation } from 'react-router-dom'
-import { useLibrary, useLibrarySuggestions } from '../../api/library'
+import { useLibrarySuggestions } from '../../api/library'
 import type { PieceStatus } from '../../api/types'
 import { pendingTarget } from '../../lib/workspace'
 import { useBookContext } from './context'
@@ -33,12 +33,10 @@ function tabStatus(statuses: PieceStatus[]): PieceStatus | null {
 
 /** 书稿栏顶上的一排标签：导航本身，开书期间兼作三步进度。 */
 export function ManuscriptTabs() {
-  const { bookId, book, job, draft, working, following, followTarget, manualNavigate, resumeFollow } = useBookContext()
+  const { bookId, job, draft, working, following, followTarget, manualNavigate, resumeFollow } = useBookContext()
   const { pathname } = useLocation()
   const progress = usePuzzleProgress()
   const suggestions = useLibrarySuggestions(bookId)
-  const library = useLibrary(bookId)
-  const libraryCount = (library.data?.characters.length ?? 0) + (library.data?.entries.length ?? 0)
   const base = `/books/${bookId}`
   const current = pathname.startsWith(base) ? pathname.slice(base.length) : pathname
   const pendingPath = job?.status === 'waiting_author' ? pendingTarget(job.pending, bookId)?.path.split('?')[0].slice(base.length) : undefined
@@ -60,16 +58,15 @@ export function ManuscriptTabs() {
           {(step === 'waiting' || (pendingHere && step !== 'confirmed')) && <span aria-label="等你处理" className="size-1.5 rounded-full bg-seal" />}
           {step === 'drafting' && <span aria-label="正在写" className="size-1.5 rounded-full bg-chief motion-safe:animate-pulse" />}
           {tab.key === 'text' && live && <span aria-label="正在写" className="size-1.5 rounded-full bg-writer motion-safe:animate-pulse" />}
+          {/* 数字只给要你处理的事：设定的建议条数。总条数、章数在页面里看。 */}
           {!!count && <span title="待处理的建议" className="rounded-full bg-writer-soft px-1.5 text-[11px] leading-[18px] text-writer tabular-nums">{count}</span>}
-          {tab.key === 'library' && !!libraryCount && <span className="text-[13px] font-normal text-ink-3 tabular-nums">{libraryCount}</span>}
-          {tab.key === 'text' && !!book.chapters_final && <span className="text-[13px] font-normal text-ink-3 tabular-nums">{book.chapters_final}</span>}
         </a>
       })}
     </div>
     {followTarget && (following || followTarget.path.split('?')[0] !== pathname) && (following
       ? <span className="hidden shrink-0 items-center gap-1.5 self-center text-[13px] text-ink-3 @xl/manuscript:flex" title="右边会跟着编辑部正在做的切换；自己点开别的页面就停下"><span className="size-1.5 rounded-full bg-chief" />跟随编辑部</span>
       : <button type="button" data-testid="resume-follow" onClick={resumeFollow} title={`回到正在进行的：${followTarget.label}`} className="flex min-w-0 shrink items-center gap-1 self-center rounded-md px-2 py-1 text-[13px] text-chief hover:bg-chief-soft">
-        <span className="truncate">回到正在进行的<span className="hidden @2xl/manuscript:inline">：{followTarget.label}</span></span><ArrowRight className="size-3.5 shrink-0" />
+        <span className="truncate">回到进行中</span><ArrowRight className="size-3.5 shrink-0" />
       </button>)}
   </nav>
 }

@@ -51,7 +51,7 @@ export function decisionCopy(pending: Pending | null | undefined, bookId: string
         eyebrow: '下一步 · 试读',
         title: `前 ${pending.chapters} 章写好了，请你试读`,
         hint: '读一读开头几章：文风、节奏、人物哪里不对就直接说，之后每一章都照你说的写；满意就让编辑部继续。',
-        approve: '满意，继续写',
+        approve: '继续写',
         placeholder: '例如：对话太多，节奏再快一点；主角说话再狠一些',
         links: [['读第 1 章', `${base}/chapter/1`], ['目录', `${base}/chapters`]],
       }
@@ -60,7 +60,7 @@ export function decisionCopy(pending: Pending | null | undefined, bookId: string
         eyebrow: '需要你定夺',
         title: `第${pending.chapter}章《${pending.title}》重写两次仍未通过`,
         hint: '审稿还有意见没解决。先读一读：觉得能用就直接定稿；想让写手再改，就告诉他怎么改。',
-        approve: '就这样定稿',
+        approve: '定稿',
         placeholder: '例如：打斗那段删掉，直接写结果',
         links: [['读这一章', `${base}/chapter/${pending.chapter}`]],
         issues: pending.issues,

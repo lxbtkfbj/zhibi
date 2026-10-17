@@ -178,7 +178,9 @@ export function ActionBar() {
           if (pending.piece === 'first_volume') celebrate()
         } catch { /* 失败保留待确认内容和错误。 */ }
       }
-      const detail = [reminders ? `${reminders} 条提醒` : '', decided ? `主编替你定了 ${decided} 处，页面最上面可以改` : '', !reminders && !decided ? onTarget ? '看完没问题就确认；想改就提意见，或在群聊里直接说' : '先去看看' : ''].filter(Boolean).join(' · ')
+      // 按钮只写「确认」，确认以后去哪一步写在下面这行小字里。
+      const next = flow3 ? pending.piece === 'outline' ? '开写' : pending.piece === 'concept' ? '去建设定' : '去出大纲' : ''
+      const detail = [reminders ? `${reminders} 条提醒` : '', decided ? `主编替你定了 ${decided} 处，页面最上面可以改` : '', !reminders && !decided ? onTarget ? next ? `确认后${next}` : '看完没问题就确认' : '先去看看' : ''].filter(Boolean).join(' · ')
       const panel = reminders ? <ul className="space-y-3">
         {warnings.map((warning, index) => <li key={`warning-${index}`}><span className="mr-2 text-xs text-seal">提醒</span>{warning}</li>)}
         {review.map((issue, index) => <li key={`review-${index}`}><span className="mr-2 text-xs text-chief">审稿</span>{issue.problem}——{issue.suggestion}</li>)}
@@ -189,10 +191,8 @@ export function ActionBar() {
       </ul> : undefined
       return <Bar tone="wait" title={`待你确认：${name}`} onTitle={goTarget} detail={detail} panel={panel} panelLabel="看提醒" error={pieceAction.error ?? confirmSetupAndWrite.error}>
         <Button variant="outline" disabled={setupPending} onClick={requestFeedback}>提意见</Button>
-        {!flow3 && <Button variant="ghost" disabled={setupPending} loading={pieceAction.isPending && pieceAction.variables?.action === 'delegate'} onClick={() => void confirm('delegate')}>交给编辑部定</Button>}
-        <Button variant="seal" disabled={setupPending} loading={setupPending && pieceAction.variables?.action !== 'delegate'} onClick={() => void confirm('confirm')}>
-          {flow3 ? pending.piece === 'outline' ? '确认，开写' : pending.piece === 'concept' ? '确认，去建设定' : '确认，去出大纲' : '确认这一块'}
-        </Button>
+        {!flow3 && <Button variant="ghost" disabled={setupPending} loading={pieceAction.isPending && pieceAction.variables?.action === 'delegate'} title="不用一项项看，交给编辑部定" onClick={() => void confirm('delegate')}>编辑部定</Button>}
+        <Button variant="seal" disabled={setupPending} loading={setupPending && pieceAction.variables?.action !== 'delegate'} title={next ? `确认后${next}` : undefined} onClick={() => void confirm('confirm')}>确认</Button>
       </Bar>
     }
 
@@ -203,10 +203,10 @@ export function ActionBar() {
         detail={pending.flow === 2 ? '这一篇是按旧写法规划的，要按新写法重出一次' : warnings.length ? `${warnings.length} 条提醒` : '确认后照常拆卷纲；想改就提意见'}
         panel={warnings.length ? <ul aria-label="下一篇的提醒" className="space-y-2">{warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul> : undefined} panelLabel="看提醒">
         {pending.flow === 2
-          ? <Button variant="seal" disabled={segmentReview.submitting} loading={segmentReview.submitting} onClick={() => void act('redo')}>按新写法重出</Button>
+          ? <Button variant="seal" disabled={segmentReview.submitting} loading={segmentReview.submitting} title="按新写法重出这一篇" onClick={() => void act('redo')}>重出</Button>
           : <>
             <Button variant="outline" disabled={segmentReview.submitting} onClick={requestFeedback}>提意见</Button>
-            <Button variant="ghost" loading={segmentReview.submitting && segmentReview.action === 'delegate'} disabled={segmentReview.submitting} onClick={() => void act('delegate')}>交给编辑部定</Button>
+            <Button variant="ghost" loading={segmentReview.submitting && segmentReview.action === 'delegate'} disabled={segmentReview.submitting} title="不用一项项看，交给编辑部定" onClick={() => void act('delegate')}>编辑部定</Button>
             <Button variant="seal" loading={segmentReview.submitting && segmentReview.action === 'confirm'} disabled={segmentReview.submitting} onClick={() => void act('confirm')}>确认这一篇</Button>
           </>}
       </Bar>
