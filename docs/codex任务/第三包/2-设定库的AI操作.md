@@ -249,7 +249,7 @@ class LibraryIntent(Lenient):
 
 ### 3.8 大纲 `outline` 和查什么 `scope`
 
-- `outline`：按 `outline-tree` 逐篇写 `第 {N} 篇「{篇名}」：{text 或 event}`，篇下逐卷写 `  第 {N} 卷「{卷名}」：{summary}`；还没有大纲写「（还没有大纲）」。
+- `outline`：按 `outline-tree` 逐篇写 `第 {N} 篇「{篇名}」：{text 或 event}`（篇的一段话空着的，写终点节点的发生什么），篇下逐卷写 `  第 {N} 卷「{卷名}」：{summary}`；终点是结局、还没规划的那一篇（最后一个篇到结局之间还没定的那一段）不写，也不占篇号；最后一行 `结局：{结局节点的发生什么}`（没有结局节点就不写）。还没有大纲写「（还没有大纲）」。
 - `scope`：查整库写「查整个设定库。」；查一条写「只查这一条：{target_label 去掉部分}；需要时对照别的条目。」
 
 ## 4. 接口（`app/api/library_ai.py`）
