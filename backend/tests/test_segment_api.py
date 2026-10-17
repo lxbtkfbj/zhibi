@@ -293,4 +293,4 @@ async def test_live_setting_change_uses_chinese_label(client, story, sessionmake
     assert response.status_code == 200
     async with sessionmaker() as session:
         message = await session.scalar(select(MeetingMessage).where(MeetingMessage.book_id == story["book"]))
-        assert message.content == "作者修改了本书设置：每一段开写前先给我确认：关闭"
+        assert message.content == "作者修改了本书设置：每一篇开写前先给我确认：关闭"

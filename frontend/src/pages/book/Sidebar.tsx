@@ -73,7 +73,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         <Item to={`${base}/concept`} icon={<Lightbulb className={icon} />} label="定调" onNavigate={onNavigate} />
         <Item to={`${base}/library`} icon={<Globe2 className={icon} />} label="设定库" count={suggestions.data?.length || undefined} onNavigate={onNavigate} />
         <Item to={`${base}/outline`} icon={<Route className={icon} />} label="大纲" onNavigate={onNavigate} />
-        {job?.status === 'waiting_author' && job.pending?.kind === 'segment_review' && <Item to={`${base}/next-segment`} icon={<Route className={icon} />} label="定下一篇 · 待确认" onNavigate={onNavigate} />}
+        {job?.status === 'waiting_author' && job.pending?.kind === 'segment_review' && <Item to={`${base}/outline?node=pending`} icon={<Route className={icon} />} label="定下一篇 · 待确认" onNavigate={onNavigate} />}
       </div>
       <Group title="正文">
         <Item to={`${base}/chapters`} icon={<BookOpenText className={icon} />} label="目录" count={book.chapters_final || undefined} onNavigate={onNavigate} />

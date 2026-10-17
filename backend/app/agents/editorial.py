@@ -70,14 +70,14 @@ async def absorb_notes(
     return await llm.structured("chief", s.SetupNotePlan, persona("chief"), user, purpose="开书·处理作者插话")
 
 
-async def plan_segment(llm: LLMRouter, blocks: dict[str, str]) -> s.NextSegmentDraft:
+async def plan_segment(llm: LLMRouter, blocks: dict[str, str]) -> s.NextArcDraft:
     user = render("plan_segment", **blocks)
-    return await llm.structured("chief", s.NextSegmentDraft, persona("chief"), user, purpose="写作·定下一段")
+    return await llm.structured("chief", s.NextArcDraft, persona("chief"), user, purpose="写作·定下一篇")
 
 
 async def split_next_segment(llm: LLMRouter, blocks: dict[str, str]) -> s.SegmentVolumesDraft:
     user = render("split_segment", **blocks)
-    return await llm.structured("chief", s.SegmentVolumesDraft, persona("chief"), user, purpose="写作·下一段分卷")
+    return await llm.structured("chief", s.SegmentVolumesDraft, persona("chief"), user, purpose="写作·下一篇分卷")
 
 
 async def plan_volume(

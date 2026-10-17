@@ -15,6 +15,7 @@ from app.api import (
     library,
     library_ai,
     llm_settings,
+    outline_expand,
     outline_tree,
     prompt_tools,
     story_map,
@@ -70,6 +71,7 @@ def create_app() -> FastAPI:
         library,
         library_ai,
         outline_tree,
+        outline_expand,
     ):
         application.include_router(module.router, prefix="/api")
     return application

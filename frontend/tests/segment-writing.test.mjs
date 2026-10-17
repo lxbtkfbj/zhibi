@@ -6,20 +6,20 @@ import { isWritingComplete, storyMapNodeChapters, storyMapWritingIndex, writingP
 import { artifactTarget, composerRoute, currentTarget, pendingTarget, progressText } from '../src/lib/workspace.ts'
 import { requirementSource } from '../src/lib/writingSettings.ts'
 
-const pending = { kind: 'segment_review', flow: 2, number: 3, round: 1, warnings: ['上一篇的期待仍然开着。', '人物还没写什么时候登场。'], flags: {}, decisions: [], plan: {}, split: { volumes: [] } }
+const pending = { kind: 'segment_review', flow: 3, number: 3, round: 1, warnings: ['上一篇的期待仍然开着。', '人物还没写什么时候登场。'], flags: {}, decisions: [], plan: {}, split: { volumes: [] } }
 const job = { id: 'job', kind: 'write_book', status: 'waiting_author', pending }
 const message = type => ({ id: 1, job_id: 'job', kind: 'artifact', payload: { type, data: {} } })
 
-test('下一篇确认和写作产出跟随独立确认页，开书分卷跟随大纲树的第一篇', () => {
-  assert.deepEqual(pendingTarget(pending, 'book'), { path: '/books/book/next-segment', label: '第 3 篇' })
-  assert.deepEqual(artifactTarget(message('segment_plan'), 'book'), { path: '/books/book/next-segment', label: '下一篇' })
+test('下一篇确认和写作产出跟随大纲待确认节点，开书分卷跟随大纲树的第一篇', () => {
+  assert.deepEqual(pendingTarget(pending, 'book'), { path: '/books/book/outline?node=pending', label: '第 3 篇' })
+  assert.deepEqual(artifactTarget(message('segment_plan'), 'book'), { path: '/books/book/outline?node=pending', label: '下一篇' })
   assert.deepEqual(currentTarget('book', job, [], null), pendingTarget(pending, 'book'))
   for (const type of ['segment_plan', 'segment_volumes']) {
-    assert.equal(currentTarget('book', { ...job, status: 'running', pending: null }, [message(type)], null).path, '/books/book/next-segment')
+    assert.equal(currentTarget('book', { ...job, status: 'running', pending: null }, [message(type)], null).path, '/books/book/outline?node=pending')
   }
   assert.equal(currentTarget('book', { ...job, status: 'running', pending: null }, [{ ...message('segment_plan'), job_id: 'old' }], null), null)
   assert.equal(artifactTarget(message('segment_volumes'), 'book').path, '/books/book/outline?node=first-arc')
-  assert.equal(artifactTarget({ ...message('segment_volumes'), payload: { type: 'segment_volumes', data: { volumes: [{ index: 2 }] } } }, 'book').path, '/books/book/next-segment')
+  assert.equal(artifactTarget({ ...message('segment_volumes'), payload: { type: 'segment_volumes', data: { volumes: [{ index: 2 }] } } }, 'book').path, '/books/book/outline?node=pending')
 })
 
 test('下一篇提意见走专用接口路由，文案、提醒和来源准确', () => {

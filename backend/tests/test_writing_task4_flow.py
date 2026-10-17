@@ -120,7 +120,7 @@ async def test_pinned_proposal_ignored_and_conflict_disclosed(sessionmaker):
     result = await graph.save_volume_node({**state, "volume_draft": draft}, runtime)
     assert result["node_update"] is None
     assert any(
-        "节点冲突：前文和节点的前提不符（主编提议调整铁钉节点，已忽略）" in issue for issue in result["open_issues"]
+        "节点冲突：前文和节点的前提不符（主编提议调整锁住节点，已忽略）" in issue for issue in result["open_issues"]
     )
     async with sessionmaker() as session:
         assert (await session.get(StoryNode, node.id)).title == "旧节点"

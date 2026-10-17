@@ -590,7 +590,7 @@ async def plan_segment(
         select(Job.id).where(Job.book_id == book.id, Job.status.in_(jobs.ACTIVE_STATUSES)).limit(1)
     )
     if current is not None:
-        raise HTTPException(409, "编辑部手上还有没做完的事，先处理完再规划下一段")
+        raise HTTPException(409, "编辑部手上还有没做完的事，先处理完再规划下一篇")
     last = await session.scalar(
         select(StoryNode)
         .where(StoryNode.book_id == book.id, StoryNode.segment.is_not(None))
@@ -598,7 +598,7 @@ async def plan_segment(
         .limit(1)
     )
     if last is None:
-        raise HTTPException(409, "这本书开书时没有分段规划，不需要定下一段")
+        raise HTTPException(409, "这本书开书时没有分篇规划，不需要定下一篇")
     if last.kind == "ending":
         raise HTTPException(409, "全书已经规划到结局了")
     job = jobs.new_write_job(book, "segment", 1)
@@ -606,7 +606,7 @@ async def plan_segment(
     book.status = "writing"
     await session.flush()
     await post_message(
-        session, redis, book_id=book.id, job_id=job.id, speaker="author", kind="speech", content="现在就规划下一段。"
+        session, redis, book_id=book.id, job_id=job.id, speaker="author", kind="speech", content="现在就规划下一篇。"
     )
     await session.refresh(job)
     jobs.enqueue(job.id)

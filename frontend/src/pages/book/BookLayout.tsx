@@ -1,4 +1,5 @@
 import { useReducedMotion } from '../../lib/appearance'
+import { useIsMutating } from '@tanstack/react-query'
 import clsx from 'clsx'
 import { BookOpenText, ChevronLeft, Settings, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
@@ -19,7 +20,7 @@ import { PuzzleTracker } from './PuzzleTracker'
 import { ConversationList, Sidebar } from './Sidebar'
 import { SetupArtifactPreview } from './SetupArtifactPreview'
 import { useSettingsModal } from '../../lib/settingsModal'
-import { segmentReviewKey } from '../../lib/nextSegmentQuestions'
+import { segmentReviewKey } from '../../lib/outlineWriting'
 import { followOnBookOpen } from '../../lib/bookRoutes'
 
 function StampOverlay({ show }: { show: boolean }) {
@@ -57,7 +58,8 @@ function BookWorkspace({ bookId, book }: { bookId: string; book: BookDetail }) {
   const previousPath = useRef(location.pathname + location.search)
   const manuscriptScroll = useRef<HTMLDivElement>(null)
   const job = book.active_job
-  const working = job?.status === 'queued' || job?.status === 'running'
+  const expanding = useIsMutating({ mutationKey: ['outline-expand', bookId] }) > 0
+  const working = expanding || job?.status === 'queued' || job?.status === 'running'
   const asking = job?.status === 'waiting_author' && job.pending?.kind === 'setup_questions'
   const waiting = job?.status === 'waiting_author' && !asking
   const segmentKey = segmentReviewKey(job?.id, job?.status === 'waiting_author' ? job.pending : null)
@@ -71,7 +73,7 @@ function BookWorkspace({ bookId, book }: { bookId: string; book: BookDetail }) {
       if (!job || !segmentKey || segmentPending || segmentLock.current) return false
       segmentLock.current = true
       try {
-        await segment.mutateAsync({ jobId: job.id, ...body, ...(body.action !== 'revise' ? { pin_end: segmentPinEnd } : {}) })
+        await segment.mutateAsync({ jobId: job.id, ...body, ...(['confirm', 'delegate'].includes(body.action) ? { pin_end: segmentPinEnd } : {}) })
         setSegmentPin({ key: '', selected: false })
         return true
       } finally { segmentLock.current = false }
@@ -127,7 +129,7 @@ function BookWorkspace({ bookId, book }: { bookId: string; book: BookDetail }) {
     if ((href?.startsWith(`/books/${bookId}`) || href?.startsWith('#')) && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.button === 0) { setFollowing(false); setTab('manuscript') }
   }
   const ctx: BookContextValue = { bookId, book, job, messages, connected, draft, working, waiting, asking, outline, conversation, setConversation, unread, following, followTarget, manualNavigate, resumeFollow, focusComposer, requestFeedback, requestNodeFeedback, composerNode, setComposerNode, composerDrafts, setComposerDrafts, celebrate, segmentPinEnd, setSegmentPinEnd, segmentReview }
-  const progress = progressText(book, messages, draft, followTarget, { nodes, volumes: outline?.volumes ?? [], chapters })
+  const progress = expanding ? '展开大纲 · 主编正在展开这一个' : progressText(book, messages, draft, followTarget, { nodes, volumes: outline?.volumes ?? [], chapters })
   return <BookContext.Provider value={ctx}>
     <div className="flex h-full min-h-0 flex-col" onClickCapture={captureManualLink}>
       <header className="z-20 flex h-16 shrink-0 items-center gap-3 border-b border-divider bg-paper-2 px-4">

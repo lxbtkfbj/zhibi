@@ -11,6 +11,7 @@ from app.config import get_settings
 from app.graphs.write_book import _next_step
 from app.main import create_app
 from app.models import Book, Chapter, PlotUnit, SettingVersion, StoryNode, Volume
+from app.services.arc_store import fill_units
 from app.services.splice import read_path, splice
 from app.services.writing_store import create_chapters, unit_next_chapter_index
 
@@ -237,6 +238,9 @@ async def test_inserted_first_unit_is_planned_before_existing_later_chapters(cli
     new_id = uuid.UUID(response.json()["id"])
     async with sessionmaker() as session:
         book = await session.get(Book, book.id)
+        decision = await _next_step(session, book, {})
+        assert decision["step"] == "fill_volume"
+        await fill_units(session, book.id, await session.get(Volume, volumes[0].id), [], [])
         decision = await _next_step(session, book, {})
         assert decision["step"] == "plan_chapters" and decision["unit_id"] == str(new_id)
         unit = await session.get(PlotUnit, new_id)

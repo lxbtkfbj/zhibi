@@ -19,104 +19,79 @@ def _idea(user: str) -> str:
     return match.group(1).strip()[:60] if match else "一个落魄少年意外得到上古传承"
 
 
-def _next_segment(user: str = "") -> s.NextSegmentDraft:
-    """下一段演示：只读篇幅栏判断收尾，不把模板中的条件句误当成触发。"""
+def _next_segment(user: str = "") -> s.NextArcDraft:
+    """按实际篇幅栏选终点；仅旧书的明确提示允许推底牌。"""
     length = _section(user, "篇幅").split("\n\n", 1)[0]
-    last_one = "只够一段" in length
-    finale = last_one or "只够两段左右" in length
-    spine = _section(user, "全书方向：关键节点")
-    ending = re.search(r"节点 (\d+)「([^」]+)」· 结局", spine)
-    number = int(_match(r"第 (\d+) 段", _section(user, "上一段")) or 1) + 1
-    current = _section(user, "当前的下一段")
+    ending = re.search(r"节点 (\d+)「([^」]+)」· 结局", _section(user, "大纲"))
+    following = re.search(r"节点 (\d+)「天风国篇」", _section(user, "大纲"))
+    number = int(_match(r"第 (\d+) 篇", _section(user, "上一篇")) or 1) + 1
+    known = _section(user, "人物当前状态")
+    newcomer = "叶清瑶" if "叶清瑶" not in known else f"青云执事{number}"
+    text = (
+        "楚风带着家族大比的名额进入天风国，想在青云宗大比前找齐修复丹田的灵药，并查出前世背叛者留下的线索。"
+        "青云宗长老一派要夺走轮回镜，先借外门考核封掉他的药材渠道，还让柳如烟当众质疑他的资格。"
+        "楚风不急着暴露全部实力，先凭帝尊眼界辨出废丹里的药性，与负责药园的叶清瑶结盟，以丹道换取修炼资源。"
+        "读者等着他在宗门大比上击败被长老扶持的天才，让轻视楚家的人亲口认输。"
+        "收尾时他以同境反杀和药园账册翻盘，发现长老身上的禁制与前世帝骨上的痕迹相同；镜灵只认出这道印记，不说完整来历。"
+        "楚风从被宗门拒之门外的少年，走到能向核心长老讨一个公道的弟子，追求也从护住家人推进到追查前世之死。"
+    )
     feedback = _section(user, "修改要求")
-    goal = _match(r"(?:这一段的目标|目标)[：:]([^\n]+)", current) or "在寒潮封路前追回旧村契约原本，救出被扣押的证人。"
-    changed_goal = _match(r"(?:目标)?改成[：: ]*[「]?([^」\n。]+)", feedback)
-    if changed_goal:
-        goal = changed_goal
-    known = _match(r"【人物当前状态】\n(.*?)(?=【还开着的期待和伏笔】|\Z)", user)
-    newcomer = "顾霜" if "顾霜" not in known else f"寒原信使{number}"
-    plan = s.NextSegmentDraft(
-        carried="、".join(dict.fromkeys(re.findall(r"[FE]\d+", _section(user, "还开着的期待和伏笔"))))
-        + "：把旧案的证据与约定带进寒原追查，在这一段终点兑现。",
-        pursuit="追查父母旧案的方向不变，在寒原终点由找出真相升级为救出证人并阻止新的寿元交易。",
-        finger_next="青灯解锁比对契约残痕的能力，但每次仍消耗一天寿元，必须亲近原件才能使用。",
-        answers="旧村兽潮是寿元契约制造的掩护，宗门高层用村民寿元维持长明灯。" if finale else "",
-        map="北境寒原",
-        new_map=s.MapDraft(
-            name="北境寒原",
-            powers="守关军掌路引，商盟管补给，旧村遗民暗中互助。",
-            ceiling="守关统领筑基后期，比陆远强一整个阶段。",
-            rules="寒潮前最后一批商队过关必须交验契约。",
-            start="陆远没有路引，只能随商队入关。",
-            gains="旧村契约原本与幸存证人。",
+    changed = _match(r"一段话改成[：: ]*([^\n]+)", feedback)
+    if changed:
+        text = changed
+    plan = s.NextArcDraft(
+        title="天风国篇" if number == 2 else f"青云追查篇{number}",
+        text=text,
+        end=s.EndNodeDraft(
+            ref=int(ending[1]) if "只够一篇" in length and ending else int(following[1]) if following else 0,
+            title=ending[2] if "只够一篇" in length and ending else "青云宗大比",
+            event="楚风在青云宗大比当众击败长老扶持的天才，公开药园账册，夺回被扣的灵药和名额，逼迫长老承认禁制的来历。",
         ),
-        power="筑基中后期可隔空封住路口，但持续施术必须消耗灵石。",
-        trouble="守关军扣住路引，逼陆远交出青灯换过关资格。",
-        opponent="守关统领想销毁旧村契约，陆远的搜证触及他的交易；他掌握关卡和补给，先截走证人，再用假路引诱陆远进入封山禁地。",
+        fill_entries=[
+            s.FillEntry(
+                name="天风国",
+                content="天风国由皇室与青云宗分掌权力。宗门大比决定修炼资源的归属，楚风从外门新人起步，能在药园找到修复丹田的药，也会碰到前世旧敌留下的暗线。",
+            )
+        ],
+        new_entries=[
+            s.EntryDraft(
+                category="势力划分",
+                name="青云宗",
+                status="现在要定",
+                one_line="掌握天风国修炼名额的宗门。",
+                content="宗门由长老会掌管，药园与内门争夺修炼资源，长老一派借大比把持名额。",
+            )
+        ],
         new_characters=[
-            s.CharacterDraft(
+            s.CharacterCardDraft(
                 name=newcomer,
-                role_type="配角",
-                gender="女",
-                age="二十岁",
-                personality="冷静谨慎却愿意替弱者冒险，说话短句直问、不说空话。",
-                background="替旧村遗民递信的寒原向导",
-                goal="救回被扣押的亲人",
-                want="趁寒潮前带证人过关",
+                role_type="班底",
+                status="现在要定",
+                one_line="负责药园的年轻丹师，愿意以灵药换真相。",
+                background="青云宗药园弟子。",
+                personality="谨慎却护短，说话直接。",
+                goal="查清药园账目并护住同门",
+                abilities="识药与炼丹",
             )
         ],
-        relationships=[
-            s.RelationshipDraft(
-                source="陆远",
-                target=newcomer,
-                kind="互相试探的同盟",
-                description="各握一半契约证据，必须互相信任才能救人。",
-            )
-        ],
-        goal=goal,
-        goal_link="契约与证人能把父母的死因指向真正的买主。",
-        wait=s.ExpectationDraft(
-            description="陆远要带着证人与契约穿过封锁",
-            plant_plan="统领当众封关并限定交证期限",
-            payoff_plan="不只救出证人，还让关内百姓看清交易真相",
-            plant_volume=1,
-            payoff_volume=2,
-        ),
-        reveal="旧村兽潮与宗门寿元契约相连；幕后买主为何必须持续点燃长明灯？",
-        secrets=[
-            s.SecretDraft(
-                title=f"寒原契约{number}",
-                truth="原契约藏在守关军的补给封条里",
-                knowers=[newcomer],
-                reader_knows="不知道",
-                reveal_plan="向导以旧封条引陆远找到证据",
-            )
-        ],
-        end=s.StoryNodeDraft(
-            ref=int(ending[1]) if last_one and ending else 0,
-            kind="结局" if last_one else "节点",
-            volume=number,
-            title=ending[2] if last_one and ending else f"寒原追查{number if number > 2 else ''}",
-            event="陆远公开契约救出证人，让寿元买卖的真相无法再被掩盖。",
-            prerequisite="契约原本到手，证人脱险，同伴愿意共同出面。",
-            consequence="交易链条被切断，陆远与同伴能够重建家园。" if last_one else "幕后买主暴露，追查可以更进一步。",
-        ),
+        secret="青灯里的残火来自被寿元交易夺走的人，灯主是当年逃过交易的守约者。"
+        if "【这本书还没有底牌】" in user
+        else "",
         decisions=[
             s.AuthorChoice(
-                topic="救人与取证",
-                chosen="先救证人再公开契约",
-                alternatives=["先公开契约逼对手放人"],
-                why="让主角先守住在乎的人",
+                topic="宗门大比",
+                chosen="先炼丹取证再上擂台",
+                alternatives=["先上擂台逼长老交账"],
+                why="先让对手赢一次，翻盘才有分量",
             )
         ],
-        remark="先接住上一段留下的线头，再让寒原的选择推动主角的追求。",
+        remark="先接住上一篇的线索，让天风国的宗门大比成为下一篇的高潮。",
     )
-    choice = _match(r"把「救人与取证」改成「([^」]+)」", feedback)
+    choice = _match(r"把「宗门大比」改成「([^」]+)」", feedback)
     if choice:
         plan.decisions[0].chosen = choice
-        plan.goal = "先公开契约逼对手放人，再护送证人穿过封锁。"
-    if "测试段提醒" in user and not current:
-        plan.pursuit = ""
+    if "测试篇提醒" in user and not feedback:
+        plan.text = "楚风进入青云宗。"
     return plan
 
 
@@ -138,7 +113,7 @@ def _segment_volumes(user: str = "") -> s.SegmentVolumesDraft:
                 chapter_count=31 if i == 1 else 30,
                 target_node=2,
                 reaches_node=i == 2,
-                editor_note="卷末为这一段的终点再铺一层条件。",
+                editor_note="卷末为这一篇的终点再铺一层条件。",
                 techniques=known[3:5],
             )
             for i in (1, 2)
@@ -183,7 +158,7 @@ def _segment_volumes(user: str = "") -> s.SegmentVolumesDraft:
                 character=name,
                 node=1 if name in {"陆远", "老瞎子"} else 2,
                 kind="登场",
-                note="在第一段与主角的目标发生关联",
+                note="在第一篇与主角的目标发生关联",
             )
             for name in ["陆远", "老瞎子", "苏晚晴", "赵乾", "宗主厉沧海", "周长老"]
         ],
@@ -192,42 +167,82 @@ def _segment_volumes(user: str = "") -> s.SegmentVolumesDraft:
                 topic="前期节奏",
                 chosen="先查药碗再考核",
                 alternatives=["查案与考核交叉"],
-                why="两卷走完第一段，不排远处的卷",
+                why="两卷走完第一篇，不排远处的卷",
             )
         ],
-        remark="第一段分两卷，31 章加 30 章，每卷都走向外门考核。",
+        remark="第一篇分两卷，31 章加 30 章，每卷都走向外门考核。",
     )
-    start = int(_match(r"卷号从第 (\d+) 卷开始", user) or 1)
-    short = "测试短段" in user or "测试收尾" in user
-    if short:
+    fixed = re.findall(r"^第 (\d+) 卷「([^」]+)」约 (\d+) 章[^：]*：(.*)$", _section(user, "这一篇已经分好的卷"), re.M)
+    start = int(fixed[0][0]) if fixed else int(_match(r"卷号从第 (\d+) 卷开始", user) or 1)
+    short = any(mark in user for mark in ("测试短段", "测试短篇", "测试收尾"))
+    if fixed:
+        result.volumes = [result.volumes[i % len(result.volumes)].model_copy(deep=True) for i in range(len(fixed))]
+        result.decisions = []
+    elif short:
         result.volumes = result.volumes[:1]
         result.volumes[0].chapter_count = 6
-        result.remark = "这一段分一卷六章，两个单元各三章，卷末走到这一段终点。"
-    end_index = 2
-    if start > 1:
-        segment = _section(user, "这一段")
-        proposed = _match(r"节点 (\d+)「[^」]+」[^\n]*发生：陆远公开契约救出证人", segment)
-        planned = [int(x) for x in re.findall(r"节点 (\d+)[^\n]*\n(?:  [^\n]*\n)*  这是第 \d+ 段的终点", segment)]
-        end_index = int(proposed) if proposed else max(planned, default=1) + 1
-        result.remark = f"从第 {start} 卷接着分卷，先取证再救人，走到这一段的终点。"
+    end_index = int(_match(r"终点：节点 (\d+)", user) or 2)
     for i, volume in enumerate(result.volumes):
         volume.index = start + i
         volume.target_node = end_index
         volume.reaches_node = i == len(result.volumes) - 1
         if start > 1:
-            volume.title = "寒原取证" if i == 0 else "封关救人"
-            volume.stage = "北境寒原"
+            volume.title = "药园取证" if i == 0 else "青云大比"
+            volume.stage = "天风国青云宗"
+            volume.summary = "楚风以炼丹换取资源，联合药园弟子查清账目，在宗门大比上击败长老扶持的天才。"
+        if fixed:
+            volume.index, volume.title, volume.chapter_count, volume.summary = (
+                int(fixed[i][0]),
+                fixed[i][1],
+                int(fixed[i][2]),
+                fixed[i][3],
+            )
     for thread in result.threads:
-        thread.beats = thread.beats[: len(result.volumes)]
-        for i, beat in enumerate(thread.beats):
-            beat.volume = start + i
-    if start > 1:
-        # 人物卡自带【姓名】，不能用通用 _section 截断整个人物列表。
-        people = _match(r"【世界与人】\n(.*?)(?=【这一段】|\Z)", user)
-        result.anchors = [
-            s.NodeAnchorDraft(character=name, node=end_index, kind="登场", note="寒原路口为主角引路")
-            for name in dict.fromkeys(re.findall(r"【([^】]+)】(?:配角|女主|男主|反派|主角)", people))
+        thread.beats = [
+            s.ThreadBeat(volume=start + i, beat=thread.beats[i % len(thread.beats)].beat)
+            for i in range(len(result.volumes))
         ]
+    names = re.findall(r"角色卡片 · ([^\n]+)", user)
+    if not names:
+        names = re.findall(r"^【([^】]+)】", _section(user, "人物当前状态"), re.M)
+    if names:
+        result.anchors = [
+            s.NodeAnchorDraft(character=name, node=end_index, kind="登场", note="在这一篇与主角的目标发生关联")
+            for name in dict.fromkeys(names)
+        ]
+    result.wait = s.ExpectationDraft(
+        description="主角要在大比上击败对手并公开证据",
+        plant_plan="对手当众放话，主角立下应战约定",
+        payoff_plan="不只赢下比试，也让幕后操纵名额的人付出代价",
+        plant_volume=start,
+        payoff_volume=result.volumes[-1].index,
+        node=end_index,
+    )
+    past = re.search(r"往事与秘密 · ([^\n]+)", user)
+    entry = past[1] if past and past[1] != "底牌" else ("前世之死" if "前世之死" in user else "")
+    existing = _section(user, "信息差")
+    result.secrets = [
+        s.ArcSecretDraft(
+            title=f"大比暗线{start}",
+            truth="药园账册藏着被篡改的名额，主角能用它反制对手。",
+            knowers=[names[0]] if names else [],
+            reader_knows="部分",
+            reveal_plan="在终点公开账册",
+            node=end_index,
+            entry=entry,
+        ),
+        s.ArcSecretDraft(
+            title=f"旧敌印记{start}",
+            truth="对手身上的禁制与旧案证据上的印记相同，来历仍未查明。",
+            knowers=[],
+            reader_knows="不知道",
+            reveal_plan="大比交锋时显出印记",
+            node=end_index,
+        ),
+    ]
+    result.secrets = [secret for secret in result.secrets if secret.title not in existing]
+    result.remark = f"从第 {start} 卷接着分卷，排好这一篇的线索、人物出场、读者期待和信息差。"
+
     if "测试提醒" in user:
         result.volumes[0].want = ""
     return result
@@ -451,22 +466,22 @@ def _base_volume_plan(user: str) -> s.VolumePlanDraft:
                 climax=climax,
                 outcome=outcome,
                 key_events=["起因", "试探", "冲突升级", "高潮", "收尾与钩子"],
-                thread_beats=[s.ThreadStep(thread="主线：青灯与寿元", beat=f"第{volume}卷第{i + 1}段推进")],
+                thread_beats=[s.ThreadStep(thread="主线：青灯与寿元", beat=f"第{volume}卷第{i + 1}单元推进")],
                 tropes=[trope],
                 resolution=resolution,
             )
         )
     remark = (
-        f"第{volume}卷按「{direction}」拆成 {n} 段，前面蓄势，最后一段是全卷最大的高潮。"
+        f"第{volume}卷按「{direction}」拆成 {n} 个单元，前面蓄势，最后一个单元是全卷最大的高潮。"
         if direction
-        else f"第{volume}卷我拆成 {n} 段，前面蓄势，最后一段是全卷最大的高潮。"
+        else f"第{volume}卷我拆成 {n} 个单元，前面蓄势，最后一个单元是全卷最大的高潮。"
     )
     if revising:
         units = _revise_units(user, units)
         remark = f"第{volume}卷按意见改好了：给对手补了后手，重复的套路换掉了，漏排的伏笔也排进去了。"
         if "融合建议" in _section(user, "修改要求"):
             units[1].key_events.insert(1, "苏晚晴暗中提醒陆远小心长老")
-            remark = f"第{volume}卷以选中的方案为底，把另一份方案里苏晚晴暗中提醒的戏融进了第二段。"
+            remark = f"第{volume}卷以选中的方案为底，把另一份方案里苏晚晴暗中提醒的戏融进了第二个单元。"
     return s.VolumePlanDraft(
         units=units,
         new_foreshadowings=[
@@ -486,16 +501,24 @@ def _base_volume_plan(user: str) -> s.VolumePlanDraft:
 def _volume_plan(user: str) -> s.VolumePlanDraft:
     plan = _base_volume_plan(user)
     volume = int(_match(r"请为第 (\d+) 卷写「卷纲」", user) or 1)
-    if "测试短段" in user or "测试收尾" in user:
+    if any(mark in user for mark in ("测试短段", "测试短篇", "测试收尾")):
         plan.units = plan.units[:2]
         for unit in plan.units:
             unit.chapter_count = 3
         plan.new_foreshadowings = [f for f in plan.new_foreshadowings if f.plant_unit <= 2]
         for item in plan.new_foreshadowings:
             item.payoff_unit = min(item.payoff_unit, 2)
-        plan.remark = f"第{volume}卷两个单元各三章，共六章，卷末完成这一段的高潮。"
+        plan.remark = f"第{volume}卷两个单元各三章，共六章，卷末完成这一篇的高潮。"
+    fixed = re.findall(r"^单元 (\d+)「([^」]+)」(\d+) 章[^：]*：(.*)$", _section(user, "这一卷已经拆好的单元"), re.M)
+    if fixed:
+        plan.units = [plan.units[i % len(plan.units)].model_copy(deep=True) for i in range(len(fixed))]
+        for unit, (index, title, count, summary) in zip(plan.units, fixed, strict=True):
+            unit.index, unit.title, unit.chapter_count, unit.summary = int(index), title, int(count), summary
+        plan.new_foreshadowings = [item for item in plan.new_foreshadowings if item.plant_unit <= len(fixed)]
+        for item in plan.new_foreshadowings:
+            item.payoff_unit = min(item.payoff_unit, len(fixed))
     plan.want = (
-        "拿到报名资格与药碗证据，为外门考核翻盘铺路" if volume == 1 else "完成本卷取证与反击，为这一段终点创造条件"
+        "拿到报名资格与药碗证据，为外门考核翻盘铺路" if volume == 1 else "完成本卷取证与反击，为这一篇终点创造条件"
     )
     plan.pressure = "陆远遭栽赃并被取消报名资格" if volume == 1 else "盟友被迫退场，主角必须独自守住证据"
     known = [name for name, _ in terms()]
@@ -503,6 +526,9 @@ def _volume_plan(user: str) -> s.VolumePlanDraft:
     secrets = re.findall(r"^- (S\d+)「", user, re.M)
     valid_refs = set(re.findall(r"^- ([FE]\d+)［", _section(user, "伏笔与期待台账") or user, re.M))
     for i, unit in enumerate(plan.units):
+        unit.summary = (
+            unit.summary or f"{unit.goal}；{unit.conflict}。主角以本事应对：{unit.climax}。最后{unit.outcome}。"
+        )
         # 模板示例编号不是台账编号；新伏笔由程序分配后补排，避免 F1 与新书 E1 混用。
         unit.foreshadow_actions = [action for action in unit.foreshadow_actions if action.ref in valid_refs]
         unit.loop = "发现寿元异常，冒险搜证，以信息差翻盘，追回父母旧案的一条线索。"
@@ -612,7 +638,7 @@ def _audit() -> s.VolumeAudit:
 
 def _chapter_plan(user: str) -> s.ChapterPlanDraft:
     count = int(_match(r"这个单元共 (\d+) 章", user) or 5)
-    unit_title = _match(r"【本单元】\n单元\d+「(.+?)」", user) or "这一段"
+    unit_title = _match(r"【本单元】\n单元\d+「(.+?)」", user) or "这一篇"
     unit = _section(user, "本单元")
     actions = re.findall(r"(埋下|提醒|回收)([FE]\d+)", unit)
     reveals = [
@@ -691,6 +717,15 @@ def _digest(user: str) -> s.ChapterDigest:
             s.SecretUpdate(ref=ref, learned_by=[] if to in ("读者", "众人") else [to], public=to == "众人", how=how)
             for ref, to, how in reveals
         ],
+        new_entries=[
+            s.ChapterEntry(
+                category="世界与地图",
+                name=f"坊市{int(_match(r'第 (\d+) 章', user) or 1)}号药铺",
+                one_line="能买到修炼药材的常用铺子。",
+                content="铺子掌柜熟悉药材渠道，之后还会与主角交易。",
+            )
+        ],
+        conflicts=["设定库里钱用灵石，正文的坊市却写了金币。"] if "测试冲突" in user else [],
         remark=f"《{title}》的变化记好了：陆远的状态更新了一条。",
     )
 
@@ -701,7 +736,7 @@ def _match(pattern: str, text: str) -> str:
 
 
 def _section(text: str, name: str) -> str:
-    """取出提示词里【name…】这一段的内容。"""
+    """取出提示词里【name…】这一篇的内容。"""
     found = re.search(rf"【{name}[^】]*】\n(.*?)(?=\n【|\Z)", text, re.S)
     return found.group(1) if found else ""
 
@@ -862,7 +897,7 @@ async def respond(schema: type[BaseModel], system: str, user: str) -> BaseModel:
         s.LibraryRest: lambda: demo_setup.rest(user),
         s.OutlineDraft: lambda: demo_setup.outline(user),
         s.SetupNotePlan: lambda: s.SetupNotePlan(remark="收到，后面的内容会照你的要求来写。"),
-        s.NextSegmentDraft: lambda: _next_segment(user),
+        s.NextArcDraft: lambda: _next_segment(user),
         s.SegmentVolumesDraft: lambda: _segment_volumes(user),
         s.VolumePlanDraft: lambda: _volume_plan(user),
         s.VolumeDirections: lambda: _directions(user),
@@ -938,6 +973,9 @@ def _chapter_text(user: str) -> str:
     items = [({"立下": "埋下", "兑现": "回收"}.get(act, act), ref, desc) for act, ref, desc in items]
     author = _match(r"- \[作者\] ([^\n]+)", _section(user, "修改要求"))
     head = [f"（演示模式{'·重写稿' if rewrite else ''}）{title}。" + ("（重写稿）" if rewrite else "")]
+    head.append(f"他记下了坊市{index}号药铺的门牌，往后补药仍要来这里。")
+    if "测试冲突" in user:
+        head.append("坊市掌柜说这里用金币结账。（测试冲突）")
     if author:
         head.append(f"（按作者的意见改：{author}）")
     head += [f"{scene}。{FILLER[i % len(FILLER)]}" for i, scene in enumerate(scenes)]

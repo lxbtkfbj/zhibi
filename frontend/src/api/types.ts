@@ -88,8 +88,22 @@ export interface NextSegmentPlan {
   nodes_view?: { index: number; title: string }[]
 }
 
+export interface NextArcPlan {
+  title: string
+  text: string
+  end: { ref: number; title: string; event: string; adopted?: boolean; status?: StoryNode['status'] }
+  fill_entries: { name: string; content: string }[]
+  new_entries: { name: string; category?: string; one_line?: string; content?: string }[]
+  new_characters: { name: string; role_type?: string; one_line?: string }[]
+  secret?: string
+  ending_change?: string
+  finale?: boolean
+}
+
 export interface NextSegmentSplit {
-  volumes: { index: number; title: string; chapter_count: number; want: string; goal: string; antagonist: string }[]
+  wait?: { description: string } | null
+  secrets?: { title: string; truth?: string; knowers?: string[] }[]
+  volumes: { index: number; title: string; chapter_count: number; summary?: string; want: string; goal: string; antagonist: string }[]
   anchors?: { node: number; character: string; kind: string; note?: string }[]
   threads?: { name: string; beats: { volume: number; beat: string }[] }[]
 }
@@ -105,11 +119,13 @@ export type Pending =
   | { kind: 'setup_pitches'; flow: 3; round: number; benchmark: string; pitches: BookPitch[]; recommended: number; length: InterviewQuestion & { chapter_words?: number } }
   | { kind: 'setup_piece'; flow?: number; flags?: Record<string, string[]>; review?: { question: string; problem: string; suggestion: string }[]; piece: SetupPiece; summary?: string; round: number; warnings?: string[]; decisions?: AuthorChoice[]; suggestions?: SetupSuggestion[]; unlock_requests?: { target: SetupTarget; reason: string }[]; candidates?: { node_id: string; nodes: NodeCandidate[] } | null }
   | { kind: 'segment_review'; flow: 2; number: number; round: number; plan: NextSegmentPlan; split: NextSegmentSplit; warnings: string[]; flags: Record<string, string[]>; decisions: AuthorChoice[] }
+  | { kind: 'segment_review'; flow: 3; number: number; round: number; plan: NextArcPlan; split: NextSegmentSplit; warnings: string[]; decisions: AuthorChoice[] }
+  | { kind: 'chapters_review'; volume: number; unit_id: string; unit_title: string; first: number; last: number }
   | { kind: 'volume_review'; volume: number; title: string; issues?: string[]; node_update?: NodeUpdateProposal | null; node_conflict?: string }
   | { kind: 'trial_read'; chapters: number }
   | { kind: 'chapter_stuck'; chapter: number; title: string; issues: string[] }
 
-export type DecisionKind = 'setup_review' | 'segment_review' | 'volume_review' | 'trial_read' | 'chapter_stuck'
+export type DecisionKind = 'setup_review' | 'segment_review' | 'volume_review' | 'chapters_review' | 'trial_read' | 'chapter_stuck'
 
 export interface Job {
   id: string

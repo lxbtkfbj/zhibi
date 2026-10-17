@@ -62,6 +62,7 @@ VOLUME_FIELDS = (
 UNIT_FIELDS = (
     "index",
     "title",
+    "summary",
     "chapter_count",
     "goal",
     "conflict",

@@ -37,10 +37,10 @@ def test_spine_snapshot_all_states_and_legacy():
     ]
     assert format_spine({"core_conflict": "借寿", "theme": "代价", "protagonist_arc": "放下", "nodes": nodes}) == (
         "核心矛盾：借寿\n主题：代价\n主角成长弧：放下\n关键节点：\n"
-        "节点 1「开篇」· 开篇［暂定｜约第 1 卷］发生：捡到青灯\n  之后变成：看见寿命\n"
-        "节点 2「回幻妖界」［铁钉｜约第 2 卷］发生：回乡\n  之前得先有：取得钥匙\n  之后变成：旧敌现身\n"
+        "节点 1「开篇」· 开篇［没锁｜约第 1 卷］发生：捡到青灯\n  之后变成：看见寿命\n"
+        "节点 2「回幻妖界」［已锁｜约第 2 卷］发生：回乡\n  之前得先有：取得钥匙\n  之后变成：旧敌现身\n"
         "节点 3「（留空）」［留空｜约第 4 卷］这里还没定\n"
-        "节点 4「结局」· 结局［暂定］发生：还灯"
+        "节点 4「结局」· 结局［没锁］发生：还灯"
     )
     legacy = {
         "opening": "捡灯",
@@ -48,7 +48,7 @@ def test_spine_snapshot_all_states_and_legacy():
         "ending": "还灯",
     }
     text = format_spine(legacy)
-    assert "节点 1「开篇」" in text and "节点 2「飞升」［暂定｜约第 3 卷］发生：上界" in text
+    assert "节点 1「开篇」" in text and "节点 2「飞升」［没锁｜约第 3 卷］发生：上界" in text
     assert "之后变成：换地图" in text and "节点 3「结局」· 结局" in text
     assert "nodes" not in legacy
     assert format_spine({}) == "（暂无）"

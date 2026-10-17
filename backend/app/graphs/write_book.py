@@ -1,8 +1,8 @@
 """写书主循环：分层滚动规划，从第一卷一直写到完本。
 
 每一轮先看「下一步该做什么」（数据库为准，断点续跑、换任务都能接上）：
-- 已规划的卷都写完但还没到结局 → 定下一段、分卷 → 作者确认（或按设置自动通过）后接拆卷纲；
-  作者也可以提前单独规划下一段，确认后停下，不开始写章。
+- 已规划的卷都写完但还没到结局 → 定下一篇、分卷 → 作者确认（或按设置自动通过）后接拆卷纲；
+  作者也可以提前单独规划下一篇，确认后停下，不开始写章。
 - 当前这一卷还只有总纲卡片 → 拆卷纲：主编先想 2-3 个不同方向，每个方向并行各拆一份完整卷纲 →
   审稿按爽点、线索交织、反派智商、新意打分比稿，选出最好的一份（必要时主编把别的方案的长处融进来）→
   审稿做专项审稿（反派是否降智、爽点节奏、伏笔排期、套路重复、期待感，排期与节奏底线由程序检查）→
@@ -36,26 +36,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents import editorial
 from app.agents.context import (
     foreshadow_code,
-    format_character,
     format_direction,
     format_next_segment,
     format_pitches,
     format_revision,
-    format_segment_info,
-    format_spine,
     format_threads,
     format_volumes_part,
-    format_world,
 )
 from app.agents.planning import attach_new_foreshadowings, expectation_issues, fit_chapter_counts, schedule_issues
 from app.agents.playbook import Playbook, pick, repetition_issues
 from app.agents.rhythm import check_chapter_plan, overdue_expectations
-from app.agents.setup_puzzle import clean_reveals, normalize_volumes
+from app.agents.setup_puzzle import clean_reveals
 from app.book_settings import settings_of, strictness_text
 from app.graphs.deps import GraphDeps
 from app.llm.router import LLMError
 from app.models import Book, Chapter, MeetingMessage, PlotUnit, StoryNode, Volume
-from app.services import setup_store, writing_store
+from app.services import arc_store, setup_store, writing_store
+from app.services.enrichment import arc_text, normalize_split, pending_library
+from app.services.library_context import load_context
 from app.services.notes import note_thread
 from app.services.requirements import active_notes, add_requirement, deleted_texts, ingest_notes
 from app.services.segment_planning import normalize_next_segment, segment_checks
@@ -98,7 +96,7 @@ RECAP_STEPS = ("recap_unit", "recap_volume")
 
 
 class WriteState(TypedDict, total=False):
-    # count：写够 target 章；volume：写完当前这一卷；book：一直写到完本；segment：只定下一段
+    # count：写够 target 章；volume：写完当前这一卷；book：一直写到完本；segment：只定下一篇
     until: str
     target: int
     # 这一轮已经定稿的章数
@@ -139,7 +137,7 @@ class WriteState(TypedDict, total=False):
     volume_fix: str
     open_issues: list[str]
     node_update: dict | None
-    # 下一段只存检查点，拍板后才一次写入书库；旧检查点无需补造这些字段。
+    # 下一篇只存检查点，拍板后才一次写入书库；旧检查点无需补造这些字段。
     segment_plan: dict
     segment_split: dict
     segment_number: int
@@ -149,6 +147,8 @@ class WriteState(TypedDict, total=False):
     segment_done: bool
     # 本段是否自动通过在进拍板点前落检查点；等待期间改设置不能吞掉已提交的意见。
     segment_automatic: bool
+    chapters_revision: str
+    chapters_pending: bool
 
 
 def initial_state(params: dict) -> WriteState:
@@ -185,7 +185,7 @@ async def decide(session: AsyncSession, book_id: uuid.UUID, state: WriteState) -
         if state.get("segment_done"):
             volumes = (state.get("segment_split") or {}).get("volumes") or []
             first = volumes[0].get("index", 1) if volumes else 1
-            return {"step": "done", "reason": f"下一段定好了，开写时从第{first}卷接着写。"}
+            return {"step": "done", "reason": f"下一篇定好了，开写时从第 {first} 卷接着写。"}
         last = await _last_segment(session, book.id)
         if last is not None and last.kind == "ending":
             return {"step": "done", "reason": "全书已经规划到结局了。"}
@@ -243,10 +243,22 @@ async def _next_step(session: AsyncSession, book: Book, state: WriteState) -> di
             .scalars()
             .all()
         )
-        if volume.status == "planned" or not units:
+        endpoint = await session.get(StoryNode, volume.target_node_id) if volume.target_node_id else None
+        if (
+            endpoint is not None
+            and endpoint.segment is not None
+            and "split" not in endpoint.segment
+            and "number" not in endpoint.segment
+        ):
+            return {**out, "step": "fill_segment"}
+        if not units:
             return {**out, "step": "plan_volume"}
         if volume.status == "detailed":
             return {**out, "step": "volume_gate"}
+        if any(unit.status != "done" and not unit.key_events for unit in units):
+            return {**out, "step": "fill_volume"}
+        if volume.status == "planned":
+            volume.status = "approved"
         for unit in units:
             chapter = await session.scalar(
                 select(Chapter)
@@ -281,7 +293,7 @@ async def _next_step(session: AsyncSession, book: Book, state: WriteState) -> di
             start = state["start_volume"]
             return {
                 "step": "done",
-                "reason": f"第{start}卷写完了。下一段还没定，下次开写时主编先来定下一段。",
+                "reason": f"第 {start} 卷写完了。下一篇还没定，下次开写时主编先来定下一篇。",
             }
         return {"step": "plan_segment"}
     book.status = "completed"
@@ -329,7 +341,7 @@ def route_step(state: WriteState) -> str:
 
 
 async def plan_segment_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
-    """先只生成检查点里的下一段；不提前改节点、人物或卷卡片。"""
+    """先只生成检查点里的下一篇；不提前改节点、人物或卷卡片。"""
     d = runtime.context
     await d.check_cancel()
     async with d.sessionmaker() as session:
@@ -340,15 +352,13 @@ async def plan_segment_node(state: WriteState, runtime: Runtime[GraphDeps]) -> d
     number = lengths["segments"] + 1
     feedback = state.get("segment_feedback", "")
     blocks["revision"] = (
-        format_revision("当前的下一段", format_next_segment(state.get("segment_plan") or {}), feedback)
+        format_revision("当前的下一篇", format_next_segment(state.get("segment_plan") or {}), feedback)
         if feedback
         else ""
     )
     await d.emit.status(
         "chief",
-        f"主编正在按你的意见修改第 {number} 段…"
-        if feedback
-        else f"主编正在定下一段（第 {number} 段）：上一段的线头、主角的追求、下一张地图…",
+        f"主编正在按你的意见修改第 {number} 篇…" if feedback else f"主编正在定下一篇（第 {number} 篇）…",
     )
     result = await editorial.plan_segment(d.llm, blocks)
     plan, notes = normalize_next_segment(
@@ -356,7 +366,7 @@ async def plan_segment_node(state: WriteState, runtime: Runtime[GraphDeps]) -> d
     )
     await d.emit.artifact(
         "chief",
-        f"第 {number} 段：走到「{plan.get('end', {}).get('title', '')}」",
+        f"第 {number} 篇：走到「{plan.get('end', {}).get('title', '')}」",
         {"type": "segment_plan", "data": plan},
     )
     if result.remark:
@@ -366,32 +376,6 @@ async def plan_segment_node(state: WriteState, runtime: Runtime[GraphDeps]) -> d
         "segment_number": number,
         "segment_round": state.get("segment_round", 1),
         "segment_notes": notes,
-    }
-
-
-def _segment_info(plan: dict, number: int, planned_at: int) -> dict:
-    info = {
-        key: plan.get(key, "")
-        for key in (
-            "map",
-            "trouble",
-            "opponent",
-            "goal",
-            "goal_link",
-            "reveal",
-            "carried",
-            "pursuit",
-            "finger_next",
-            "answers",
-            "finale",
-        )
-    }
-    return {
-        **info,
-        "number": number,
-        "planned_at": planned_at,
-        "opening": None,
-        "wait": (plan.get("wait") or {}).get("description", ""),
     }
 
 
@@ -406,54 +390,38 @@ async def split_segment_node(state: WriteState, runtime: Runtime[GraphDeps]) -> 
         blocks = await segment_blocks(session, book)
         setup = await setup_store.load_setup(session, d.book_id)
         playbook = pick(book.concept, settings_of(book)["playbook"])
-        world, spine = deepcopy(book.world or {}), deepcopy(book.spine or {})
-    first = lengths["next_volume"]
-    if plan.get("new_characters"):
-        blocks["world"] += "\n\n新登场的人物：\n" + "\n\n".join(
-            format_character(character) for character in plan["new_characters"]
-        )
-    if plan.get("new_map"):
-        blocks["world"] += "\n\n" + format_world({"maps": [plan["new_map"]]})
-    blocks.update(
-        segment=format_spine({**spine, "nodes": plan["nodes_view"]}, world)
-        + "\n\n这一段的规划：\n"
-        + format_segment_info(_segment_info(plan, number, lengths["final_chapters"]), world),
-        threads=format_threads(setup["volumes"]["threads"], volume=first),
-        playbook=playbook.text("outline"),
-        volume_hint=lengths["volume_hint"],
-        revision=(
-            format_revision(
+        ctx = await load_context(session, book)
+        extra = pending_library(ctx, plan)
+        if extra:
+            blocks["world"] += "\n\n" + extra
+        blocks.update(
+            segment=arc_text(book.spine or {}, book.world or {}, plan, number),
+            threads=format_threads(setup["volumes"]["threads"], volume=lengths["next_volume"]),
+            playbook=playbook.text("outline"),
+            volume_hint=lengths["volume_hint"],
+            fixed="",
+            revision=format_revision(
                 "当前的分卷与线索", format_volumes_part(state.get("segment_split") or {}), state["segment_feedback"]
             )
             if state.get("segment_feedback")
-            else ""
-        ),
-    )
-    await d.emit.status("chief", f"主编正在给第 {number} 段分卷、排线索…")
+            else "",
+        )
+    await d.emit.status("chief", f"主编正在给第 {number} 篇分卷、排线索…")
     result = await editorial.split_next_segment(d.llm, blocks)
-    part, normalized, notes = normalize_volumes(
+    part, view, notes = normalize_split(
         result.model_dump(),
-        {"nodes": plan["nodes_view"], "expectations": [plan["wait"]]},
+        plan,
         [*setup["world"]["characters"], *(plan.get("new_characters") or [])],
-        start=first,
-        end_index=plan["end_index"],
+        lengths["next_volume"],
     )
-    plan["nodes_view"] = normalized["nodes"]
-    plan["wait"] = normalized["expectations"][0]
-    plan["end"] = {**plan["end"], "volume": normalized["nodes"][plan["end_index"] - 1].get("volume")}
+    plan["nodes_view"] = view
     count = sum(volume.get("chapter_count", 0) for volume in part["volumes"])
     if lengths["planned_total"] > 0 and count > lengths["remaining"]:
         notes.append(
-            {"question": "volumes", "text": f"这一段约 {count} 章，超过了剩下的约 {lengths['remaining']} 章。"}
+            {"question": "volumes", "text": f"这一篇约 {count} 章，超过了剩下的约 {lengths['remaining']} 章。"}
         )
-    appeared = {anchor["character"] for anchor in part["anchors"] if anchor.get("kind") == "登场"}
-    for character in plan.get("new_characters") or []:
-        if character["name"] not in appeared:
-            notes.append({"question": "cast", "text": f"「{character['name']}」还没写什么时候登场。"})
     await d.emit.artifact(
-        "chief",
-        f"第 {number} 段分 {len(part['volumes'])} 卷，约 {count} 章",
-        {"type": "segment_volumes", "data": part},
+        "chief", f"第 {number} 篇分 {len(part['volumes'])} 卷，约 {count} 章", {"type": "segment_volumes", "data": part}
     )
     if result.remark:
         await d.emit.say("chief", result.remark)
@@ -473,7 +441,7 @@ async def split_segment_node(state: WriteState, runtime: Runtime[GraphDeps]) -> 
 async def segment_gate_node(
     state: WriteState, runtime: Runtime[GraphDeps]
 ) -> Command[Literal["plan_segment", "dispatch"]]:
-    # interrupt 前只有读操作；恢复时会从头重跑，不得提前写入下一段。
+    # interrupt 前只有读操作；恢复时会从头重跑，不得提前写入下一篇。
     d = runtime.context
     plan, split = deepcopy(state.get("segment_plan") or {}), state.get("segment_split") or {}
     number = state.get("segment_number", 2)
@@ -482,7 +450,7 @@ async def segment_gate_node(
         nodes = await setup_store.load_nodes(session, d.book_id)
         ledger = await setup_store.load_ledger(session, d.book_id)
         warnings, flags = segment_checks(plan, split, book.world or {}, ledger, nodes, state.get("segment_notes"))
-        automatic = state.get("segment_automatic", not settings_of(book)["segment_approval"])
+        automatic = "text" in plan and state.get("segment_automatic", not settings_of(book)["segment_approval"])
     adopt = plan.get("adopt") or {}
     current = next((node for node in nodes if node.get("id") == adopt.get("node_id")), None)
     plan["end"] = {
@@ -496,7 +464,7 @@ async def segment_gate_node(
         else interrupt(
             {
                 "kind": "segment_review",
-                "flow": 2,
+                "flow": 3 if "text" in plan else 2,
                 "number": number,
                 "round": state.get("segment_round", 1),
                 "plan": plan,
@@ -507,6 +475,18 @@ async def segment_gate_node(
             }
         )
     )
+    if decision.get("action") == "redo":
+        return Command(
+            goto="plan_segment",
+            update={
+                "segment_plan": {},
+                "segment_split": {},
+                "segment_feedback": "",
+                "segment_notes": [],
+                "segment_round": 1,
+                "segment_automatic": False,
+            },
+        )
     feedback = str(decision.get("feedback") or "").strip()
     flips = decision.get("flips") or []
     async with d.sessionmaker() as session:
@@ -528,7 +508,7 @@ async def segment_gate_node(
                 },
             )
         book = await session.get(Book, d.book_id)
-        stats = await writing_store.save_segment(
+        stats = await writing_store.save_arc(
             session,
             book,
             state["segment_plan"],
@@ -539,16 +519,20 @@ async def segment_gate_node(
         )
         await session.commit()
     end_title, first = stats["end_title"], stats["first_volume"]
+    text = f"第 {number} 篇「{plan.get('title', '')}」定下来了：分 {stats['volumes']} 卷，新建了 {stats['new_entries']} 条设定、{stats['new_characters']} 个人物，写全了 {stats['filled_entries']} 条以后再说的设定。"
+    if stats.get("secret"):
+        text += f"这本书原来没有底牌，我推了一句：{stats['secret']}，你看看要不要改。"
+    await d.emit.say("chief", text)
     if automatic:
         text = (
-            f"第 {number} 段按设置自动通过：走到「{end_title}」，共 {stats['volumes']} 卷、约 {stats['chapters']} 章。"
-            "全书地图上已经标出来了，节点是暂定的，随时可以改。"
+            f"第 {number} 篇按设置自动通过：走到「{end_title}」，共 {stats['volumes']} 卷、约 {stats['chapters']} 章。"
+            "大纲上已经标出来了，终点没锁，随时可以改。"
         )
     else:
         following = (
             f"开写时先拆第 {first} 卷卷纲。" if state.get("until") == "segment" else f"接下来拆第 {first} 卷卷纲。"
         )
-        text = f"第 {number} 段定好了：走到「{end_title}」，共 {stats['volumes']} 卷、约 {stats['chapters']} 章。{following}"
+        text = f"第 {number} 篇定好了：走到「{end_title}」，共 {stats['volumes']} 卷、约 {stats['chapters']} 章。{following}"
     if stats.get("preserved_end"):
         text += "终点节点在等待期间被你改过，保留了你的版本。"
     await d.emit.say("system", text, kind="decision")
@@ -561,6 +545,142 @@ async def segment_gate_node(
             "segment_notes": [],
         },
     )
+
+
+async def fill_segment_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
+    d = runtime.context
+    await d.check_cancel()
+    async with d.sessionmaker() as session:
+        book = await session.get(Book, d.book_id)
+        volume = await session.get(Volume, uuid.UUID(state["volume_id"]))
+        endpoint = await session.get(StoryNode, volume.target_node_id)
+        if endpoint is None or endpoint.segment is None or "split" in endpoint.segment or "number" in endpoint.segment:
+            return {}
+        nodes = await setup_store.load_nodes(session, d.book_id)
+        number = [node["id"] for node in nodes if node.get("segment") is not None].index(str(endpoint.id)) + 1
+        end_index = next(i for i, node in enumerate(nodes, 1) if node["id"] == str(endpoint.id))
+        plan = {
+            **endpoint.segment,
+            "end": {"title": endpoint.title, "event": endpoint.event},
+            "end_index": end_index,
+            "nodes_view": nodes,
+        }
+        volumes = list(
+            await session.scalars(select(Volume).where(Volume.target_node_id == endpoint.id).order_by(Volume.index))
+        )
+        blocks = await segment_blocks(session, book)
+        setup = await setup_store.load_setup(session, d.book_id)
+        fixed = "【这一篇已经分好的卷】\n" + "\n".join(
+            f"第 {row.index} 卷「{row.title}」约 {row.chapter_count} 章"
+            + ("（已锁）" if row.locked else "")
+            + f"：{row.summary}"
+            for row in volumes
+        )
+        blocks.update(
+            segment=arc_text(book.spine or {}, book.world or {}, plan, number),
+            threads=format_threads(setup["volumes"]["threads"], volume=volumes[0].index),
+            playbook=pick(book.concept, settings_of(book)["playbook"]).text("outline"),
+            volume_hint="这一篇的卷已经分好了，卷号照【这一篇已经分好的卷】。",
+            fixed=fixed,
+            revision="",
+        )
+        endpoint_id = endpoint.id
+    result = await editorial.split_next_segment(d.llm, blocks)
+    data = result.model_dump()
+    matching_count = min(len(volumes), len(data.get("volumes") or []))
+    data["volumes"] = [
+        {**card, "index": row.index, "chapter_count": row.chapter_count}
+        for row, card in zip(volumes, data.get("volumes") or [], strict=False)
+    ]
+    # 对不上的卷保留原内容，但仍为线索、期待的卷号范围提供完整骨架。
+    data["volumes"] += [
+        {"index": row.index, "title": row.title, "summary": row.summary, "chapter_count": row.chapter_count}
+        for row in volumes[len(data["volumes"]) :]
+    ]
+    split, _, _ = normalize_split(data, plan, setup["world"]["characters"], volumes[0].index)
+    async with d.sessionmaker() as session:
+        stats = await arc_store.fill_arc(
+            session, await session.get(Book, d.book_id), endpoint_id, split, nodes, matching_count=matching_count
+        )
+        await session.commit()
+    if not stats.get("already_saved"):
+        await d.emit.say(
+            "chief",
+            f"开写前，我把第 {number} 篇的线索、人物出场、读者在等的事和信息差排好了：{stats['threads']} 条线，{stats['new_secrets']} 条信息差。",
+        )
+        await d.emit.artifact("chief", f"第 {number} 篇分卷与线索", {"type": "segment_volumes", "data": split})
+    return {}
+
+
+async def fill_volume_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
+    d = runtime.context
+    await d.check_cancel()
+    async with d.sessionmaker() as session:
+        book = await session.get(Book, d.book_id)
+        volume = await session.get(Volume, uuid.UUID(state["volume_id"]))
+        units = list(
+            await session.scalars(select(PlotUnit).where(PlotUnit.volume_id == volume.id).order_by(PlotUnit.index))
+        )
+        eligible = {row.index for row in units if row.status != "done" and not row.key_events}
+        if not eligible:
+            return {}
+        chapter_units = set(await session.scalars(select(Chapter.unit_id).where(Chapter.volume_id == volume.id)))
+        fixed = "【这一卷已经拆好的单元】\n" + "\n".join(
+            f"单元 {row.index}「{row.title}」{row.chapter_count} 章"
+            + ("（已出章纲）" if row.id in chapter_units else "")
+            + ("（已锁）" if row.locked else "")
+            + f"：{row.summary}"
+            for row in units
+        )
+        blocks = await volume_blocks(session, book, volume)
+        blocks.update(
+            chapter_count=str(sum(row.chapter_count for row in units)), unit_hint=str(len(units)), fixed=fixed
+        )
+        index = volume.index
+    result = await editorial.plan_volume(d.llm, blocks, {}, "", purpose="写作·补齐卷纲")
+    plan = result.model_dump()
+    async with d.sessionmaker() as session:
+        volume = await session.get(Volume, uuid.UUID(state["volume_id"]))
+        ledger = await setup_store.load_ledger(session, d.book_id)
+        fresh = setup_store.assign_seqs(
+            [
+                *(
+                    {**item, "kind": "伏笔"}
+                    for item in plan.get("new_foreshadowings") or []
+                    if item.get("plant_unit") in eligible
+                ),
+                *(
+                    {"span": "中", **item, "kind": "期待"}
+                    for item in plan.get("new_expectations") or []
+                    if item.get("plant_unit") in eligible
+                ),
+            ],
+            ledger,
+        )
+        plans = clean_reveals(plan.get("units") or [], await setup_store.load_secrets(session, d.book_id))
+        plans, fresh = attach_new_foreshadowings(plans, fresh, index)
+        stats = await arc_store.fill_units(
+            session, d.book_id, volume, plans, fresh, want=plan.get("want", ""), pressure=plan.get("pressure", "")
+        )
+        await session.commit()
+    await d.emit.say(
+        "chief",
+        f"开写前，我把第 {index} 卷各单元的细节补上了：新埋伏笔 {stats['foreshadowings']} 条，新立期待 {stats['expectations']} 条。",
+    )
+    await d.emit.artifact(
+        "chief",
+        f"第 {index} 卷单元细节",
+        {
+            "type": "volume_plan",
+            "data": {
+                "volume": index,
+                "units": plans,
+                "new_foreshadowings": [row for row in fresh if row["kind"] == "伏笔"],
+                "new_expectations": [row for row in fresh if row["kind"] == "期待"],
+            },
+        },
+    )
+    return {}
 
 
 async def _volume_context(d: GraphDeps, volume_id: str) -> tuple[Volume, Playbook, dict[str, Any]]:
@@ -896,7 +1016,7 @@ async def _node_proposal(
         return None, conflict
     node = await session.get(StoryNode, volume.target_node_id) if volume.target_node_id else None
     if node is not None and node.status == "pinned":
-        return None, conflict + "（主编提议调整铁钉节点，已忽略）"
+        return None, conflict + "（主编提议调整锁住节点，已忽略）"
     snapshot = plan.get("_target_snapshot") or {}
     if (
         node is None
@@ -914,7 +1034,7 @@ async def _node_proposal(
 
 
 async def _apply_node_proposal(session: AsyncSession, book_id: uuid.UUID, volume: Volume, proposal: dict) -> str:
-    """批准时再次加锁核对作者当前版本，绝不将等待期间的手改、钉死或换目标覆盖掉。"""
+    """批准时再次加锁核对作者当前版本，绝不将等待期间的手改、锁住或换目标覆盖掉。"""
     try:
         node_id = uuid.UUID(proposal.get("node_id", ""))
     except (ValueError, TypeError, AttributeError):
@@ -935,7 +1055,7 @@ async def _apply_node_proposal(session: AsyncSession, book_id: uuid.UUID, volume
         setattr(node, key, proposed[key])
     node.origin = "ai"
     node.updated_by_volume = volume.index
-    return f"暂定节点「{node.title}」按这一卷的写法调整了"
+    return f"没锁节点「{node.title}」按这一卷的写法调整了"
 
 
 async def save_volume_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
@@ -948,7 +1068,9 @@ async def save_volume_node(state: WriteState, runtime: Runtime[GraphDeps]) -> di
         volume = await session.get(Volume, uuid.UUID(state["volume_id"]))
         index = volume.index
         ledger = await setup_store.load_ledger(session, d.book_id)
-        units = fit_chapter_counts(plan.get("units") or [], volume.chapter_count)
+        units = fit_chapter_counts(
+            (plan.get("units") or [])[: max(1, volume.chapter_count)], volume.chapter_count, minimum=1
+        )
         units = clean_reveals(units, await setup_store.load_secrets(session, d.book_id))
         fresh = setup_store.assign_seqs(
             [
@@ -1085,20 +1207,36 @@ def _chapter_plan_issues(
 
 
 async def plan_chapters_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
+    return await prepare_unit_chapters(state, runtime)
+
+
+def _revisable_chapters(rows: list[Chapter]) -> list[Chapter]:
+    """旧单元增补尾部时，只重出尚未开写的计划章，不碰已有定稿。"""
+    pending = [row for row in rows if row.status != "final"]
+    if any(row.status != "planned" or row.content for row in pending):
+        raise ValueError("这个单元已经开写了，不能重出章纲")
+    return pending
+
+
+async def prepare_unit_chapters(state: WriteState, runtime: Runtime[GraphDeps], *, persist=True) -> dict:
     d = runtime.context
     await d.check_cancel()
+    replacing = bool(state.get("chapters_revision"))
     async with d.sessionmaker() as session:
         unit = await session.get(PlotUnit, uuid.UUID(state["unit_id"]))
-        exists = await session.scalar(select(func.count()).select_from(Chapter).where(Chapter.unit_id == unit.id))
-        if exists and (unit.status != "planned" or exists >= unit.chapter_count):
-            return {}  # 上次已经出过章纲（例如提交后、检查点保存前中断）
+        existing = list(
+            await session.scalars(select(Chapter).where(Chapter.unit_id == unit.id).order_by(Chapter.index))
+        )
+        exists = len(existing)
+        replaced = _revisable_chapters(existing) if replacing else []
+        if not replacing and exists and (unit.status != "planned" or exists >= unit.chapter_count):
+            return {"chapters_pending": True}  # 提交后检查点前中断，仍应进入同一拍板点
         volume = await session.get(Volume, unit.volume_id)
         book = await session.get(Book, d.book_id)
-        first = await writing_store.unit_next_chapter_index(session, d.book_id, unit)
-        blocks = await chapter_plan_blocks(
-            session, book, volume, unit, first, chapter_count=unit.chapter_count - int(exists or 0)
-        )
-        blocks["revision"] = ""
+        first = replaced[0].index if replaced else await writing_store.unit_next_chapter_index(session, d.book_id, unit)
+        expected = unit.chapter_count - exists + len(replaced)
+        blocks = await chapter_plan_blocks(session, book, volume, unit, first, chapter_count=expected)
+        blocks["revision"] = state.get("chapters_revision", "")
         key = pick(book.concept, settings_of(book)["playbook"]).key
         history = list(
             (
@@ -1118,9 +1256,9 @@ async def plan_chapters_node(state: WriteState, runtime: Runtime[GraphDeps]) -> 
     for attempt in range(2):
         result = await editorial.plan_chapters(d.llm, blocks)
         plans = [c.model_dump() for c in result.chapters if c.title.strip() or c.goal.strip()]
-        if not plans:
-            raise LLMError("主编没有给出章纲")
         issues = _chapter_plan_issues(plans, first, key, prior, ledger, secrets)
+        if len(plans) != expected:
+            issues.insert(0, f"这一单元需要出 {expected} 章章纲，现在是 {len(plans)} 章；必须照作者已定的章数重出。")
         if not issues or attempt:
             break
         blocks["revision"] = format_revision(
@@ -1130,8 +1268,17 @@ async def plan_chapters_node(state: WriteState, runtime: Runtime[GraphDeps]) -> 
         )
         await d.emit.status("chief", f"{label}章纲有 {len(issues)} 处问题，主编按检查结果重出一次…")
         await d.check_cancel()
+    if len(plans) != expected:
+        raise LLMError(f"章纲数量不符：需要 {expected} 章，主编给了 {len(plans)} 章。原章数和章纲已保留，请重试。")
+    if not persist:
+        return {"plans": plans, "issues": issues, "remark": result.remark, "label": label}
     async with d.sessionmaker() as session:
         unit = await session.get(PlotUnit, uuid.UUID(state["unit_id"]))
+        if replacing:
+            existing = list(await session.scalars(select(Chapter).where(Chapter.unit_id == unit.id)))
+            for row in _revisable_chapters(existing):
+                await session.delete(row)
+            await session.flush()
         unit.plan_issues = issues
         rows = await writing_store.create_chapters(session, d.book_id, unit, plans)
         await session.commit()
@@ -1154,6 +1301,71 @@ async def plan_chapters_node(state: WriteState, runtime: Runtime[GraphDeps]) -> 
         f"{label}章纲：第{listing[0]['index']}-{listing[-1]['index']}章",
         {"type": "chapter_plan", "data": {"unit": label, "chapters": listing}},
     )
+    return {"chapters_pending": True, "chapters_revision": ""}
+
+
+async def route_chapters_planned(state: WriteState, runtime: Runtime[GraphDeps]) -> str:
+    return (
+        "chapters_gate"
+        if state.get("chapters_pending") and (await live_settings(runtime.context)).get("chapters_approval", False)
+        else "dispatch"
+    )
+
+
+async def chapters_gate_node(
+    state: WriteState, runtime: Runtime[GraphDeps]
+) -> Command[Literal["plan_chapters", "revise_chapters", "dispatch"]]:
+    d = runtime.context
+    async with d.sessionmaker() as session:
+        unit = await session.get(PlotUnit, uuid.UUID(state["unit_id"]))
+        if unit is None:
+            raise ValueError("这个单元已被删除，请回到大纲重新选择")
+        volume = await session.get(Volume, unit.volume_id)
+        chapters = list(
+            await session.scalars(select(Chapter).where(Chapter.unit_id == unit.id).order_by(Chapter.index))
+        )
+        planned = _revisable_chapters(chapters)
+        if not planned:
+            return Command(goto="dispatch" if chapters else "plan_chapters", update={"chapters_pending": False})
+        pending = {
+            "kind": "chapters_review",
+            "volume": volume.index,
+            "unit_id": str(unit.id),
+            "unit_title": unit.title,
+            "first": planned[0].index,
+            "last": planned[-1].index,
+        }
+    decision = interrupt(pending)
+    if decision.get("action") == "approve":
+        return Command(goto="dispatch", update={"chapters_pending": False})
+    feedback = str(decision.get("feedback") or "").strip()
+    async with d.sessionmaker() as session:
+        unit = await session.get(PlotUnit, uuid.UUID(state["unit_id"]))
+        chapters = list(
+            await session.scalars(select(Chapter).where(Chapter.unit_id == unit.id).order_by(Chapter.index))
+        )
+        chapters = _revisable_chapters(chapters)
+        current = "\n\n".join(
+            f"第 {row.index} 章《{row.title}》\n{format_chapter_outline(row.outline)}" for row in chapters
+        )
+        if not decision.get("requirement_saved"):
+            await _requirement(session, d.book_id, feedback, f"unit:{unit.id}")
+        await session.commit()
+    return Command(
+        goto="revise_chapters",
+        update={"chapters_pending": False, "chapters_revision": format_revision("当前章纲", current, feedback)},
+    )
+
+
+async def revise_chapters_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
+    """意见已落检查点；先保留原章纲，生成成功后再在一个事务里替换。"""
+    d = runtime.context
+    async with d.sessionmaker() as session:
+        unit = await session.get(PlotUnit, uuid.UUID(state["unit_id"]))
+        if unit is None:
+            raise ValueError("这个单元已被删除，请回到大纲重新选择")
+        chapters = list(await session.scalars(select(Chapter).where(Chapter.unit_id == unit.id)))
+        _revisable_chapters(chapters)
     return {}
 
 
@@ -1189,7 +1401,7 @@ def word_count(text: str) -> int:
 
 
 def split_ending(text: str, size: int = 150) -> tuple[str, str]:
-    """把正文分成「结尾之前」和「结尾」：从最后往前取 1-3 段，凑够 size 字左右；只有一段时按句子切。"""
+    """把正文分成「结尾之前」和「结尾」：从最后往前取 1-3 个自然段，凑够 size 字左右；只有一段时按句子切。"""
     paragraphs = [p.strip() for p in text.split("\n") if p.strip()]
     if len(paragraphs) >= 2:
         tail: list[str] = []
@@ -1546,8 +1758,9 @@ async def finalize_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
         chapter = await session.get(Chapter, uuid.UUID(state["chapter_id"]))
         changes = await writing_store.apply_digest(session, d.book_id, chapter, digest)
         await session.commit()
-    if digest.remark:
-        await d.emit.say("lorekeeper", digest.remark)
+    remark = digest.remark + (f"记了 {changes['new_entries']} 条新设定" if changes.get("new_entries") else "")
+    if remark:
+        await d.emit.say("lorekeeper", remark)
     await d.emit.artifact(
         "lorekeeper",
         f"第{index}章《{title}》定稿，{words} 字",
@@ -1768,6 +1981,8 @@ def build_write_graph() -> StateGraph:
     graph.add_node("plan_segment", plan_segment_node)
     graph.add_node("split_segment", split_segment_node)
     graph.add_node("segment_gate", segment_gate_node)
+    graph.add_node("fill_segment", fill_segment_node)
+    graph.add_node("fill_volume", fill_volume_node)
     graph.add_node("plan_volume", plan_volume_node)
     graph.add_node("draft_pitch", draft_pitch_node)
     graph.add_node("judge_pitches", judge_pitches_node)
@@ -1777,6 +1992,8 @@ def build_write_graph() -> StateGraph:
     graph.add_node("save_volume", save_volume_node)
     graph.add_node("volume_gate", volume_gate_node)
     graph.add_node("plan_chapters", plan_chapters_node)
+    graph.add_node("chapters_gate", chapters_gate_node)
+    graph.add_node("revise_chapters", revise_chapters_node)
     graph.add_node("recap_unit", recap_unit_node)
     graph.add_node("recap_volume", recap_volume_node)
     graph.add_node("trial_gate", trial_gate_node)
@@ -1788,6 +2005,8 @@ def build_write_graph() -> StateGraph:
         route_step,
         {
             "plan_segment": "plan_segment",
+            "fill_segment": "fill_segment",
+            "fill_volume": "fill_volume",
             "plan_volume": "plan_volume",
             "volume_gate": "volume_gate",
             "plan_chapters": "plan_chapters",
@@ -1800,7 +2019,17 @@ def build_write_graph() -> StateGraph:
     )
     graph.add_edge("plan_segment", "split_segment")
     graph.add_edge("split_segment", "segment_gate")
-    for source in ("save_volume", "plan_chapters", "finalize", "trial_gate", "recap_unit", "recap_volume"):
+    graph.add_conditional_edges("plan_chapters", route_chapters_planned, ["chapters_gate", "dispatch"])
+    graph.add_edge("revise_chapters", "plan_chapters")
+    for source in (
+        "save_volume",
+        "fill_segment",
+        "fill_volume",
+        "finalize",
+        "trial_gate",
+        "recap_unit",
+        "recap_volume",
+    ):
         graph.add_edge(source, "dispatch")
     # 拆卷纲：想方向 → 各方向并行起草 → 比稿 →（融合）→ 专项审稿 →（自动改一轮）→ 存库 → 回到 dispatch 等拍板
     graph.add_conditional_edges("plan_volume", route_planned, ["draft_pitch", "revise_volume"])

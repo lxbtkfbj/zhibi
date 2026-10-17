@@ -10,7 +10,7 @@ test('卷纲拍板同时保留节点冲突与调整提醒，不重复后端已�
   assert.equal(copy.issues.length, 2)
   assert.match(copy.issues[0], /节点冲突/)
   assert.match(copy.issues[1], /节点调整：.*旧目标.*新目标.*批准卷纲后应用/)
-  assert.match(copy.hint, /暂定节点提议会随批准应用/)
+  assert.match(copy.hint, /没锁的节点提议会随批准应用/)
   assert.equal(decisionCopy({ ...pending, issues: ['节点调整：已经列出'], node_update: proposal }, 'book').issues.length, 1)
 })
 

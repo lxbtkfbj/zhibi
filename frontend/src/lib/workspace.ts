@@ -25,8 +25,8 @@ export function artifactTarget(message: MeetingMessage, bookId: string, outline?
     case 'protagonist': return page('/library?view=focus', '设定库 · 重点')
     case 'world': return page('/library?cat=世界与地图', '设定库')
     case 'segment': return page('/outline?node=first-arc', '第一篇')
-    case 'segment_plan': return page('/next-segment', '下一篇')
-    case 'segment_volumes': return page(Array.isArray(data.volumes) && (positive(record(data.volumes[0]).index) ?? 1) > 1 ? '/next-segment' : '/outline?node=first-arc', '这一篇的分卷')
+    case 'segment_plan': return page('/outline?node=pending', '下一篇')
+    case 'segment_volumes': return page(Array.isArray(data.volumes) && (positive(record(data.volumes[0]).index) ?? 1) > 1 ? '/outline?node=pending' : '/outline?node=first-arc', '这一篇的分卷')
     case 'lore': return page('/library?cat=角色卡片', '人物设定')
     case 'spine': return page('/outline?view=map', '大纲')
     case 'threads': return page('/outline?view=threads', '线索')
@@ -65,7 +65,8 @@ export function pendingTarget(pending: Pending | null | undefined, bookId: strin
       const piece = PIECES[index]
       return piece ? { path: `${base}${piece.path}`, label: `第 ${index + 1} 块：${piece.name}` } : null
     }
-    case 'segment_review': return { path: `${base}/next-segment`, label: `第 ${pending.number} 篇` }
+    case 'segment_review': return { path: `${base}/outline?node=pending`, label: `第 ${pending.number} 篇` }
+    case 'chapters_review': return { path: `${base}/outline?node=unit-${pending.unit_id}`, label: `「${pending.unit_title}」的章纲` }
     case 'volume_review': return { path: `${base}/outline?node=volume-${pending.volume}`, label: `第 ${pending.volume} 卷卷纲` }
     case 'trial_read': return { path: `${base}/chapter/1`, label: `前 ${pending.chapters} 章试读` }
     case 'chapter_stuck': return { path: `${base}/chapter/${pending.chapter}`, label: `第 ${pending.chapter} 章` }
@@ -93,7 +94,7 @@ export function currentTarget(bookId: string, job: Job | null, messages: Meeting
   for (const message of [...current].reverse()) {
     if (message.kind !== 'artifact' || !allowed.has(message.payload?.type ?? '')) continue
     const target = job.kind !== 'book_setup' && message.payload?.type === 'segment_volumes'
-      ? { path: `/books/${bookId}/next-segment`, label: '这一篇的分卷' }
+      ? { path: `/books/${bookId}/outline?node=pending`, label: '这一篇的分卷' }
       : artifactTarget(message, bookId, outline)
     if (target) return target
   }
@@ -124,6 +125,7 @@ export function progressText(book: BookDetail, messages: MeetingMessage[], draft
   if (job?.status === 'waiting_author' && position?.volume == null) return waiting
   const working = job?.status === 'queued' || job?.status === 'running'
   const lastStatus = [...messages].reverse().find(m => m.job_id === job?.id && m.kind === 'status')
+  if (working && job.kind === 'outline_expand') return `展开大纲 · ${lastStatus?.content.replace(/[.…]+$/, '') ?? '主编正在展开这一个'}`
   if (working && job.kind === 'book_setup') {
     const index = PIECES.findIndex(piece => piece.key === book.setup_progress?.current)
     const status = lastStatus?.content.replace(/[.…]+$/, '') ?? '主编在准备方案'
@@ -171,7 +173,7 @@ export function composerRoute(job: Job | null, text: string, selected: NodeFeedb
   if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_piece') return { kind: 'piece' as const, action: 'revise' as const, piece: job.pending.piece, ...(job.pending.piece === 'segment' && retainedNodeFeedback(text, selected) ? { node_id: selected!.nodeId } : {}) }
   if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_pitches') return { kind: 'pitches' as const, action: 'redo' as const }
   if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_directions') return { kind: 'directions' as const, action: 'redo' as const }
-  if (job?.status === 'waiting_author' && job.pending?.kind === 'segment_review') return { kind: 'segment' as const, action: 'revise' as const }
+  if (job?.status === 'waiting_author' && job.pending?.kind === 'segment_review') return job.pending.flow === 2 ? { kind: 'blocked' as const } : { kind: 'segment' as const, action: 'revise' as const }
   if (job?.status === 'waiting_author' && job.pending?.kind !== 'setup_questions') return { kind: 'decision' as const, action: 'revise' as const }
   return { kind: 'note' as const }
 }

@@ -69,10 +69,11 @@ export function segmentFields(value: unknown): SetupField[] {
   ].filter(item => item.value)
 }
 
-/** 定下一篇会议卡只展示本轮规划快照，不展开任务 5 的完整确认页。 */
+/** 定下一篇会议卡只展示本轮规划快照；确认在大纲树里完成。 */
 export function nextSegmentFields(value: unknown): SetupField[] {
   const plan = record(value)
   const end = record(plan.end)
+  if (typeof plan.text === 'string') return [field(plan, '篇名', 'title'), field(plan, '一段话', 'text'), { label: '终点', value: [text(end.title), text(end.event)].filter(Boolean).join('：') }].filter(item => item.value)
   return [
     { label: '终点', value: [text(end.title), text(end.event)].filter(Boolean).join('：') },
     field(plan, '地图', 'map'), field(plan, '目标', 'goal'), field(plan, '主角的追求', 'pursuit'),

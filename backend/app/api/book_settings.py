@@ -97,7 +97,8 @@ LABELS = {
     "review_strictness": "审稿松紧",
     "volume_audit": "卷纲专项审稿",
     "volume_approval": "每卷卷纲拍板",
-    "segment_approval": "每一段开写前先给我确认",
+    "chapters_approval": "每个单元的章纲都给我看",
+    "segment_approval": "每一篇开写前先给我确认",
     "trial_read": "前 3 章试读",
 }
 VALUES = {

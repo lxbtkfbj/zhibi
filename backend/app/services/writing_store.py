@@ -25,6 +25,8 @@ from app.models import (
     StoryThread,
     Volume,
 )
+from app.services.arc_store import save_arc as save_arc
+from app.services.digest_library import add_digest_library, first_sentence, revert_digest_library
 from app.services.segment_planning import END_CONTENT
 from app.services.setup_store import (
     CHARACTER_FIELDS,
@@ -86,11 +88,11 @@ async def save_segment(
         }
     cards = deepcopy(split.get("volumes") or [])
     if not cards:
-        raise ValueError("这一段还没有分卷。")
+        raise ValueError("这一篇还没有分卷。")
     current_last = int(await session.scalar(select(func.max(Volume.index)).where(Volume.book_id == book.id)) or 0)
     first, last = current_last + 1, current_last + len(cards)
     if [card.get("index") for card in cards] != list(range(first, last + 1)):
-        raise ValueError("等待确认期间卷号发生了变化，请重新规划下一段。")
+        raise ValueError("等待确认期间卷号发生了变化，请重新规划下一篇。")
     final_count = int(
         await session.scalar(
             select(func.count(Chapter.id)).where(Chapter.book_id == book.id, Chapter.status == "final")
@@ -467,6 +469,8 @@ async def create_chapters(
     """把章纲建成章节行（只有章纲、还没有正文），章号接着全书往后排。"""
     start = await unit_next_chapter_index(session, book_id, unit)
     existing = int(await session.scalar(select(func.count()).select_from(Chapter).where(Chapter.unit_id == unit.id)))
+    if existing + len(chapters) > unit.chapter_count:
+        raise ValueError("章纲数量超过作者已定的章数，原章数和章纲已保留")
     rows = []
     for offset, plan in enumerate(chapters):
         row = Chapter(
@@ -480,7 +484,6 @@ async def create_chapters(
         )
         session.add(row)
         rows.append(row)
-    unit.chapter_count = existing + len(rows)
     unit.status = "outlined"
     await session.flush()
     return rows
@@ -502,6 +505,8 @@ async def apply_digest(
         "secrets": [],
         "created_secrets": [],
         "created_secret_snapshots": {},
+        "created_entries": [],
+        "created_suggestions": [],
     }
     characters = {
         c.name: c
@@ -537,7 +542,7 @@ async def apply_digest(
             updated += 1
     for person in digest.new_characters:
         name = person.name.strip()
-        if not name or name in characters:
+        if not name or name in characters or any(name in (row.aliases or []) for row in characters.values()):
             continue
         row = Character(
             book_id=book_id,
@@ -546,6 +551,9 @@ async def apply_digest(
             background=person.background,
             personality=person.personality,
             first_appearance_chapter=chapter.index,
+            source="writing",
+            status="one",
+            one_line=first_sentence(person.background),
         )
         session.add(row)
         characters[name] = row
@@ -633,6 +641,7 @@ async def apply_digest(
         log["created_secrets"].append(seq)
         log["created_secret_snapshots"][str(seq)] = _secret_snapshot(row)
 
+    log["created_entries"], log["created_suggestions"] = await add_digest_library(session, book_id, chapter, digest)
     chapter.summary = digest.summary.strip()
     chapter.bible_changes = log
     chapter.status = "final"
@@ -653,6 +662,8 @@ async def apply_digest(
         "foreshadowings": moved,
         "secrets_updated": len(log["secrets"]),
         "secrets_created": len(log["created_secrets"]),
+        "new_entries": len(log["created_entries"]),
+        "conflicts": len(log["created_suggestions"]),
     }
 
 
@@ -675,8 +686,27 @@ async def revert_chapter(session: AsyncSession, book_id: uuid.UUID, chapter: Cha
     后面没有定稿的章节时才删掉（后面的章节可能已经写到这个人）。
     """
     log = chapter.bible_changes or {}
-    out = {"characters": 0, "removed": 0, "foreshadowings": 0, "secrets": 0, "removed_secrets": 0}
-    if not any(log.get(k) for k in ("characters", "created", "foreshadowings", "secrets", "created_secrets")):
+    out = {
+        "characters": 0,
+        "removed": 0,
+        "foreshadowings": 0,
+        "secrets": 0,
+        "removed_secrets": 0,
+        "removed_entries": 0,
+        "removed_suggestions": 0,
+    }
+    if not any(
+        log.get(k)
+        for k in (
+            "characters",
+            "created",
+            "foreshadowings",
+            "secrets",
+            "created_secrets",
+            "created_entries",
+            "created_suggestions",
+        )
+    ):
         chapter.bible_changes = {}
         return out
     later = await later_finals(session, book_id, chapter.index)
@@ -751,6 +781,7 @@ async def revert_chapter(session: AsyncSession, book_id: uuid.UUID, chapter: Cha
         ):
             await session.delete(row)
             out["removed_secrets"] += 1
+    out.update(await revert_digest_library(session, book_id, chapter, later))
     chapter.bible_changes = {}
     await session.flush()
     return out

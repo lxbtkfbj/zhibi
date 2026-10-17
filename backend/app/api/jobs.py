@@ -40,6 +40,7 @@ router = APIRouter(tags=["jobs"])
 APPROVE_TEXT = {
     "setup_review": "批准，就按这个方案来。",
     "volume_review": "批准这一卷的卷纲，开写。",
+    "chapters_review": "这个单元的章纲看过了，开写。",
     "trial_read": "前几章看过了，继续写。",
     "chapter_stuck": "这一章就按现在的版本定稿。",
 }
@@ -76,7 +77,9 @@ async def get_job(job_id: uuid.UUID, session: AsyncSession = SessionDep) -> JobO
 async def decide(
     job_id: uuid.UUID, body: Decision, session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)
 ) -> JobOut:
-    job = await _job(session, job_id)
+    job = await session.scalar(select(Job).where(Job.id == job_id).with_for_update())
+    if job is None:
+        raise HTTPException(404, "任务不存在")
     kind = jobs.pending_kind(job)
     if jobs.is_legacy_setup(job):
         raise HTTPException(409, jobs.LEGACY_SETUP_MESSAGE)
@@ -91,16 +94,13 @@ async def decide(
             if kind == "trial_read"
             else f"volume:{(job.pending or {}).get('volume')}"
             if kind == "volume_review"
+            else f"unit:{(job.pending or {}).get('unit_id')}"
+            if kind == "chapters_review"
             else "note"
         )
         await add_requirement(session, job.book_id, feedback, source)
     content = APPROVE_TEXT[kind] if body.action == "approve" else feedback
-    await post_message(
-        session, redis, book_id=job.book_id, job_id=job.id, speaker="author", kind="decision", content=content
-    )
-    out = await _set_status(session, redis, job, "queued")
-    jobs.enqueue(job.id, {"action": body.action, "feedback": feedback, "requirement_saved": True})
-    return out
+    return await _queue_setup_response(session, redis, job, content, {"action": body.action, "feedback": feedback})
 
 
 async def _setup_gate(session: AsyncSession, job_id: uuid.UUID, kind: str) -> Job:
@@ -184,7 +184,14 @@ async def decide_segment(
     if job is None:
         raise HTTPException(404, "任务不存在")
     if jobs.pending_kind(job) != "segment_review":
-        raise HTTPException(409, "当前没有等待你确认的下一段")
+        raise HTTPException(409, "当前没有等待你确认的下一篇")
+    pending = job.pending or {}
+    if pending.get("flow") == 2:
+        if body.action != "redo":
+            raise HTTPException(422, "这一篇要先按新写法重出")
+        return await _queue_setup_response(session, redis, job, "按新写法重出这一篇", {"action": "redo"})
+    if body.action == "redo":
+        raise HTTPException(422, "只有旧写法的篇需要重出")
     feedback = (body.feedback or "").strip()
     if body.action == "revise" and not (feedback or body.flips):
         raise HTTPException(422, "请写下修改意见或选择要改的决定")
@@ -197,9 +204,9 @@ async def decide_segment(
     if body.action == "confirm":
         volumes = (pending.get("split") or {}).get("volumes") or []
         first = volumes[0].get("index", 1) if volumes else 1
-        content = f"确认第 {number} 段，开拆第 {first} 卷。" + ("终点钉死。" if body.pin_end else "")
+        content = f"确认第 {number} 篇，开拆第 {first} 卷。" + ("终点锁住。" if body.pin_end else "")
     elif body.action == "delegate":
-        content = f"第 {number} 段交给编辑部定。"
+        content = f"第 {number} 篇交给编辑部定。"
     else:
         content = feedback or "\n".join(f"「{flip.topic}」改成：{flip.choice}" for flip in body.flips)
     return await _queue_setup_response(
@@ -424,6 +431,8 @@ async def resume(job_id: uuid.UUID, session: AsyncSession = SessionDep, redis: R
     job = await session.scalar(select(Job).where(Job.id == job_id).with_for_update())
     if job is None:
         raise HTTPException(404, "任务不存在")
+    if job.kind == "outline_expand":
+        raise HTTPException(409, "请回到大纲，在对应的卷或单元上重新点「展开这一个」")
     if job.status not in ("failed", "cancelled"):
         raise HTTPException(409, "只有失败或已停止的任务可以继续")
     # 与手动规划、开写和重写共用书锁，旧失败任务不能从恢复入口绕过同书单任务约束。

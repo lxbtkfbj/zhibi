@@ -174,7 +174,7 @@ def format_world(world: dict) -> str:
         )
         if item.get("name") or details:
             lines.append(f"地图「{item.get('name', '')}」：{details}")
-    for label, key in (("第一段·开篇的小麻烦", "trouble"), ("第一段·大对手", "opponent")):
+    for label, key in (("第一篇·开篇的小麻烦", "trouble"), ("第一篇·大对手", "opponent")):
         if world.get(key):
             lines.append(f"{label}：{world[key]}")
     far_maps = " → ".join(
@@ -206,7 +206,7 @@ def format_world(world: dict) -> str:
 
 
 def _segment_value(segment: dict, key: str, world: dict | None) -> str:
-    """第一段的地图和对手优先用段内值，留空时回读世界卡。"""
+    """第一篇的地图和对手优先用段内值，留空时回读世界卡。"""
     value = segment.get(key)
     if not value and segment.get("number") == 1 and world:
         if key == "map":
@@ -221,19 +221,19 @@ def format_segment_info(segment: dict, world: dict | None = None) -> str:
     """段的规划：保留作者确认方式及规划时的写作进度。"""
     number, planned_at = segment.get("number"), segment.get("planned_at")
     if number == 1 and planned_at == 0:
-        lines = ["第 1 段（开书时规划）"]
+        lines = ["第 1 篇（开书时规划）"]
     else:
         approval = "按设置自动通过" if segment.get("status") == "auto" else "作者确认"
-        lines = [f"第 {number} 段（写到第 {planned_at} 章时规划，{approval}）"]
+        lines = [f"第 {number} 篇（写到第 {planned_at} 章时规划，{approval}）"]
     for label, key in (
         ("地图", "map"),
         ("开篇的小麻烦", "trouble"),
         ("大对手", "opponent"),
-        ("这一段的目标", "goal"),
+        ("这一篇的目标", "goal"),
         ("为什么离长线追求更近", "goal_link"),
         ("读者在等", "wait"),
-        ("这一段揭开什么", "reveal"),
-        ("上一段留下的线头", "carried"),
+        ("这一篇揭开什么", "reveal"),
+        ("上一篇留下的线头", "carried"),
         ("主角的追求", "pursuit"),
         ("金手指下一阶段", "finger_next"),
         ("定下的谜底", "answers"),
@@ -242,7 +242,7 @@ def format_segment_info(segment: dict, world: dict | None = None) -> str:
         if value:
             lines.append(f"{label}：{value}")
     if segment.get("finale"):
-        lines.append("这是收尾段：开始收线，揭开核心谜团，往结局方向走。")
+        lines.append("这是收尾篇：开始收线，揭开底牌，往结局方向走。")
     return "\n".join(lines)
 
 
@@ -342,11 +342,12 @@ def format_spine(spine: dict[str, Any], world: dict | None = None) -> str:
     story_nodes = spine.get("nodes") or []
     last_planned = max((i for i, node in enumerate(story_nodes, 1) if node.get("segment") is not None), default=0)
     nodes = []
+    number = 0
     for i, n in enumerate(story_nodes, start=1):
-        status = {"pinned": "铁钉", "pencil": "暂定", "empty": "留空"}.get(n.get("status", "pencil"), "暂定")
+        status = {"pinned": "已锁", "pencil": "没锁", "empty": "留空"}.get(n.get("status", "pencil"), "没锁")
         label = {"opening": "· 开篇", "ending": "· 结局"}.get(n.get("kind"), "")
         volume = f"｜约第 {n['volume']} 卷" if n.get("volume") else ""
-        pending = "｜这一段写到再定" if last_planned and i > last_planned and n.get("kind") != "opening" else ""
+        pending = "｜这一篇写到再定" if last_planned and i > last_planned and n.get("kind") != "opening" else ""
         title = n.get("title") or ("（留空）" if n.get("status") == "empty" else "")
         event = "这里还没定" if n.get("status") == "empty" else f"发生：{n.get('event', '')}"
         nodes.append(f"节点 {i}「{title}」{label}［{status}{volume}{pending}］{event}")
@@ -354,42 +355,50 @@ def format_spine(spine: dict[str, Any], world: dict | None = None) -> str:
             if n.get(key):
                 nodes.append(f"  {name}：{n[key]}")
         if n.get("segment") is not None:
+            number += 1
             segment = n["segment"]
+            if segment.get("text"):
+                nodes.append(
+                    f"  这是第 {number} 篇「{segment.get('title') or n.get('title', '')}」的终点：{segment['text']}"
+                )
+                continue
             details = "；".join(
                 f"{label}：{value}"
                 for label, key in (("目标", "goal"), ("读者在等", "wait"), ("揭开", "reveal"), ("地图", "map"))
                 if (value := _segment_value(segment, key, world))
             )
-            nodes.append(f"  这是第 {segment.get('number')} 段的终点" + (f"：{details}" if details else ""))
+            nodes.append(f"  这是第 {number} 篇的终点" + (f"：{details}" if details else ""))
     return "\n".join(
         [
-            f"核心矛盾：{spine.get('core_conflict', '')}",
-            f"主题：{spine.get('theme', '')}",
-            f"主角成长弧：{spine.get('protagonist_arc', '')}",
+            *[
+                f"{label}：{spine[key]}"
+                for label, key in (("核心矛盾", "core_conflict"), ("主题", "theme"), ("主角成长弧", "protagonist_arc"))
+                if spine.get(key)
+            ],
             "关键节点：\n" + ("\n".join(nodes) or "（暂无）"),
         ]
     )
 
 
 def format_segment_part(segment: dict, world: dict | None = None) -> str:
-    """第一段的完整当前版本，修改时也要带上开篇五项。"""
+    """第一篇的完整当前版本，修改时也要带上开篇五项。"""
     if not segment:
         return "（暂无）"
     blocks = [format_spine(segment, world)]
     nodes = segment.get("nodes") or []
     info = (nodes[1].get("segment") or {}) if len(nodes) > 1 else {}
     if info:
-        blocks.append("这一段的规划：\n" + format_segment_info(info, world))
+        blocks.append("这一篇的规划：\n" + format_segment_info(info, world))
     opening = format_opening(info.get("opening"))
     if opening:
         blocks.append("开篇：\n" + opening.split("\n", 1)[1])
     blocks.append("信息差：\n" + format_secrets(segment.get("secrets") or []))
-    blocks.append("这一段的长线期待：\n" + format_ledger(segment.get("expectations") or []))
+    blocks.append("这一篇的长线期待：\n" + format_ledger(segment.get("expectations") or []))
     return "\n\n".join(blocks)
 
 
 def format_volumes_part(volumes: dict) -> str:
-    """这一段的分卷、线索和按节点分组的人物出场。"""
+    """这一篇的分卷、线索和按节点分组的人物出场。"""
     if not volumes:
         return "（暂无）"
     anchors: dict[int, list[str]] = {}
@@ -413,17 +422,55 @@ def format_volumes_part(volumes: dict) -> str:
                 )
                 or "（暂无）"
             ),
+            *(
+                [f"读者在等：{volumes['wait']['description']}"]
+                if (volumes.get("wait") or {}).get("description")
+                else []
+            ),
+            *(["信息差：\n" + format_secrets(volumes["secrets"])] if volumes.get("secrets") else []),
         ]
     )
 
 
 def format_next_segment(plan: dict) -> str:
-    """修改下一段时带回作者正在确认的整份走向，不带旧轮意见。"""
+    """修改下一篇时带回作者正在确认的整份走向，不带旧轮意见。"""
     if not plan:
         return "（暂无）"
+    if "text" in plan:
+        lines = [f"{label}：{plan[key]}" for label, key in (("篇名", "title"), ("一段话", "text")) if plan.get(key)]
+        end = plan.get("end") or {}
+        if end.get("title") or end.get("event"):
+            ref = end.get("ref") or 0
+            use = f"用已有的节点 {ref}" if ref else "新起一个节点"
+            lines.append(f"终点：{end.get('title', '')}——{end.get('event', '')}（{use}）")
+        if plan.get("fill_entries"):
+            lines.append(
+                "写全的设定："
+                + "；".join(f"{entry.get('name', '')}：{entry.get('content', '')}" for entry in plan["fill_entries"])
+            )
+        if plan.get("new_entries"):
+            lines.append(
+                "新设定："
+                + "；".join(
+                    f"[{entry.get('category', '')}] {entry.get('name', '')}：{entry.get('one_line', '')}"
+                    for entry in plan["new_entries"]
+                )
+            )
+        if plan.get("new_characters"):
+            lines.append(
+                "新人物："
+                + "；".join(
+                    f"{person.get('name', '')}（{person.get('role_type', '')}）：{person.get('one_line', '')}"
+                    for person in plan["new_characters"]
+                )
+            )
+        for label, key in (("推的底牌", "secret"), ("结局调整", "ending_change")):
+            if plan.get(key):
+                lines.append(f"{label}：{plan[key]}")
+        return "\n".join(lines)
     lines = []
     for label, key in (
-        ("上一段留下的线头", "carried"),
+        ("上一篇留下的线头", "carried"),
         ("主角的追求", "pursuit"),
         ("金手指下一阶段", "finger_next"),
         ("定下的谜底", "answers"),
@@ -458,14 +505,14 @@ def format_next_segment(plan: dict) -> str:
             )
         )
     if plan.get("goal") or plan.get("goal_link"):
-        lines.append(f"这一段的目标：{plan.get('goal', '')}（为什么离长线追求更近：{plan.get('goal_link', '')}）")
+        lines.append(f"这一篇的目标：{plan.get('goal', '')}（为什么离长线追求更近：{plan.get('goal_link', '')}）")
     wait = plan.get("wait") or {}
     if wait:
         lines.append(
             f"读者在等：{wait.get('description', '')}（立下：{wait.get('plant_plan', '')}；兑现：{wait.get('payoff_plan', '')}）"
         )
     if plan.get("reveal"):
-        lines.append(f"这一段揭开什么：{plan['reveal']}")
+        lines.append(f"这一篇揭开什么：{plan['reveal']}")
     if plan.get("secrets"):
         lines.append(
             "新的信息差："
@@ -581,7 +628,7 @@ def format_outline(outline: dict[str, Any]) -> str:
 def format_unit(u: dict[str, Any]) -> str:
     lines = [
         f"单元{u.get('index')}「{u.get('title')}」约 {u.get('chapter_count')} 章",
-        *([f"一段话：{u['summary']}"] if u.get("summary") else []),
+        *([f"这一单元：{u['summary']}"] if u.get("summary") else []),
         f"目标：{u.get('goal', '')}",
         f"冲突：{u.get('conflict', '')}",
         f"高潮：{u.get('climax', '')}",
@@ -652,7 +699,7 @@ def format_target_node(volume: dict[str, Any], nodes: list[dict[str, Any]]) -> s
     if not isinstance(target, int) or not 1 <= target <= len(nodes):
         return "（本卷没有标走向的节点，按本卷卡片规划）"
     node = nodes[target - 1]
-    status = {"pinned": "铁钉", "pencil": "暂定", "empty": "留空"}.get(node.get("status", "pencil"), "暂定")
+    status = {"pinned": "已锁", "pencil": "没锁", "empty": "留空"}.get(node.get("status", "pencil"), "没锁")
     arrival = (
         "本卷就要写到它，作为卷末高潮"
         if volume.get("reaches_node")

@@ -33,6 +33,8 @@ import type {
   WriteUntil,
 } from './types'
 
+const decisionRequests = new Map<string, Promise<Job>>()
+
 export const keys = {
   books: ['books'] as const,
   book: (id: string) => ['book', id] as const,
@@ -266,6 +268,8 @@ export function useJobActions(bookId: string) {
   const segmentPending = useIsMutating({ mutationKey: segmentKey }) > 0
   const setupKey = ['setup-decision', bookId]
   const setupPending = useIsMutating({ mutationKey: setupKey }) > 0
+  const decisionKey = ['writing-decision', bookId]
+  const decisionPending = useIsMutating({ mutationKey: decisionKey }) > 0
   const setJob = (job: Job) =>
     qc.setQueryData<BookDetail>(keys.book(bookId), (old) => (old ? { ...old, active_job: job } : old))
   const pitches = useMutation({
@@ -293,7 +297,7 @@ export function useJobActions(bookId: string) {
     onSuccess: setJob,
   })
   return {
-    pitches, directions, chooseDirection, redoDirections, piece, pieceAction: piece, segmentPending, setupPending,
+    pitches, directions, chooseDirection, redoDirections, piece, pieceAction: piece, segmentPending, setupPending, decisionPending,
     confirmSetupAndWrite: useMutation({
       mutationKey: setupKey,
       mutationFn: async ({ jobId, book, action }: { jobId: string; book: BookDetail; action: 'confirm' | 'delegate' }) => {
@@ -308,13 +312,19 @@ export function useJobActions(bookId: string) {
     }),
     segment: useMutation({
       mutationKey: segmentKey,
-      mutationFn: ({ jobId, ...body }: { jobId: string; action: 'confirm' | 'delegate' | 'revise'; feedback?: string; flips?: { topic: string; choice: string }[]; pin_end?: boolean }) =>
+      mutationFn: ({ jobId, ...body }: { jobId: string; action: 'confirm' | 'delegate' | 'revise' | 'redo'; feedback?: string; flips?: { topic: string; choice: string }[]; pin_end?: boolean }) =>
         post<Job>(`/jobs/${jobId}/segment`, body),
       onSuccess: setJob,
     }),
     decide: useMutation({
-      mutationFn: ({ jobId, action, feedback }: { jobId: string; action: 'approve' | 'revise'; feedback?: string }) =>
-        post<Job>(`/jobs/${jobId}/decision`, { action, feedback: feedback ?? '' }),
+      mutationKey: decisionKey,
+      mutationFn: ({ jobId, action, feedback }: { jobId: string; action: 'approve' | 'revise'; feedback?: string }) => {
+        const active = decisionRequests.get(jobId)
+        if (active) return Promise.reject(new Error('正在提交决定，请等这一步完成'))
+        const request = post<Job>(`/jobs/${jobId}/decision`, { action, feedback: feedback ?? '' }).finally(() => decisionRequests.delete(jobId))
+        decisionRequests.set(jobId, request)
+        return request
+      },
       onSuccess: setJob,
     }),
     write: useMutation({

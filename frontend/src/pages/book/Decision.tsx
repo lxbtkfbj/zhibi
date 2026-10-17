@@ -18,9 +18,9 @@ const NODE_COMPARISON_FIELDS = [
   ['title', '名称'], ['event', '发生什么'], ['prerequisite', '之前得先有'], ['consequence', '之后变成'],
 ] as const
 
-function NodeUpdateComparison({ proposal }: { proposal: NodeUpdateProposal }) {
-  return <section aria-label="暂定节点调整提议" className="mt-3 border-t border-divider pt-3" data-testid="node-update-comparison">
-    <p className="text-sm font-medium text-chief">这一卷建议调整暂定节点「{proposal.current.title}」</p>
+export function NodeUpdateComparison({ proposal }: { proposal: NodeUpdateProposal }) {
+  return <section aria-label="没锁的节点调整提议" className="mt-3 border-t border-divider pt-3" data-testid="node-update-comparison">
+    <p className="text-sm font-medium text-chief">这一卷建议调整没锁的节点「{proposal.current.title}」</p>
     <p className="mt-1 text-xs text-ink-2">批准卷纲会同时应用这个调整；下划线标出改动。</p>
     <div className="mt-3 space-y-3">{NODE_COMPARISON_FIELDS.map(([key, label]) => {
       const diff = changedText(proposal.current[key] ?? '', proposal.proposed[key] ?? '')
@@ -58,7 +58,7 @@ export function DecisionBar() {
       if (piece.piece === 'first_volume') celebrate()
     } catch { /* 失败保留待确认内容。 */ }
   }
-  const actSegment = async (action: 'confirm' | 'delegate') => {
+  const actSegment = async (action: 'confirm' | 'delegate' | 'redo') => {
     try {
       await segmentReview.submit({ action })
     } catch { /* 失败保留下一篇和作者意见，允许重试。 */ }
@@ -74,7 +74,7 @@ export function DecisionBar() {
         <Button size="sm" variant="seal" loading={setupPending} disabled={setupPending} onClick={() => void act('confirm')}>{job.setup_flow === 3 ? piece.piece === 'outline' ? '确认，开写' : '确认' : '确认这一块'}</Button>
         <Button size="sm" variant="ghost" disabled={setupPending} onClick={requestFeedback}>提意见</Button>
         {job.setup_flow !== 3 && <Button size="sm" variant="ghost" loading={pieceAction.isPending && pieceAction.variables?.action === 'delegate'} disabled={setupPending} onClick={() => void act('delegate')}>交给编辑部定</Button>}
-      </> : nextSegment ? <>
+      </> : nextSegment?.flow === 2 ? <Button size="sm" variant="seal" disabled={segmentReview.submitting} loading={segmentReview.submitting} onClick={() => void actSegment('redo')}>按新写法重出</Button> : nextSegment ? <>
         <Button size="sm" variant="seal" loading={segmentReview.submitting && segmentReview.action === 'confirm'} disabled={segmentReview.submitting} onClick={() => void actSegment('confirm')}>确认这一篇</Button>
         <Button size="sm" variant="ghost" loading={segmentReview.submitting && segmentReview.action === 'delegate'} disabled={segmentReview.submitting} onClick={() => void actSegment('delegate')}>交给编辑部定</Button>
       </> : pending?.kind === 'setup_directions' || pending?.kind === 'setup_pitches' ? <button className="text-sm text-chief underline underline-offset-4" onClick={() => manualNavigate(pending?.kind === 'setup_pitches' ? `/books/${bookId}/concept` : `/books/${bookId}`)}>去选择 →</button> : <><ApproveButton job={job} /><Button size="sm" variant="ghost" onClick={requestFeedback}>提意见</Button></>}</div>
@@ -103,17 +103,18 @@ export function DecisionBar() {
 /** 只有盖章按钮：编辑部面板里修改意见直接在底部输入框里说。 */
 export function ApproveButton({ job }: { job: Job }) {
   const { bookId, celebrate } = useBookContext()
-  const { decide } = useJobActions(bookId)
+  const { decide, decisionPending } = useJobActions(bookId)
   const copy = decisionCopy(job.pending, bookId)
   const approve = async () => {
     try {
+      if (decisionPending) return
       await decide.mutateAsync({ jobId: job.id, action: 'approve' })
       celebrate()
     } catch { /* ErrorText retains the failure; never stamp an unsuccessful approval. */ }
   }
   return (
     <div>
-      <Button variant="seal" onClick={approve} loading={decide.isPending && decide.variables?.action === 'approve'}>
+      <Button variant="seal" onClick={approve} disabled={decisionPending} loading={decide.isPending && decide.variables?.action === 'approve'}>
         <Stamp className="size-4" />
         {copy.approve}
       </Button>
@@ -272,6 +273,7 @@ export function InterviewForm({ job, questions }: { job: Job; questions: Intervi
 export function RunningControls({ job }: { job: Job }) {
   const { bookId } = useBookContext()
   const { cancel } = useJobActions(bookId)
+  if (job.kind === 'outline_expand') return <p role="status" className="text-sm text-chief">主编正在展开大纲，请稍等…</p>
   return (
     <div className="flex items-center justify-between gap-3">
       <span className="flex items-center gap-2 text-sm text-chief">
@@ -289,6 +291,7 @@ export function RunningControls({ job }: { job: Job }) {
 export function ResumeControls({ job }: { job: Job }) {
   const { bookId, book } = useBookContext()
   const { resume } = useJobActions(bookId)
+  if (job.kind === 'outline_expand') return <p className="text-sm text-seal">展开没有完成：{job.error || '请回到大纲，重新点「展开这一个」。'}</p>
   if (needsSetupRestart(book, job)) return <p className="text-sm leading-relaxed text-seal">这个旧开书任务不能从旧步骤继续。请到稿件顶部点「按新流程重开」。</p>
   return (
     <div className="space-y-2">

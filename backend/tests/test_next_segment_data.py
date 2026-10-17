@@ -1,4 +1,4 @@
-"""下一段的纯整理、事务保存、篇幅上下文及逐章 want 撤销。"""
+"""下一篇的纯整理、事务保存、篇幅上下文及逐章 want 撤销。"""
 
 from copy import deepcopy
 
@@ -36,7 +36,7 @@ from app.services.writing_store import apply_digest, revert_chapter, save_segmen
 
 def draft(ref=0):
     return {
-        "carried": "E3 带进这一段，查案时一并兑现。",
+        "carried": "E3 带进这一篇，查案时一并兑现。",
         "pursuit": "由洗清罪名升级为找出幕后主使。",
         "finger_next": "能读出三日前留下的记忆。",
         "answers": "幕后主使是掌门。",
@@ -117,7 +117,7 @@ def split_draft(start=2):
 
 async def story(session):
     book = Book(
-        title="下一段",
+        title="下一篇",
         status="writing",
         concept={"target_length": 5.4},
         protagonist={"escalation": "先洗冤", "finger_later": "有限读取"},
@@ -244,7 +244,7 @@ def test_normalize_only_adopts_immediately_following_or_ending(ref, adopt, index
     assert plan["wait"]["node"] == index and plan["wait"]["kind"] == "期待" and plan["wait"]["span"] == "长"
     assert [person["name"] for person in plan["secrets"][0]["knowers"]] == ["苏晚晴"]
     assert any(item["question"] == "people" for item in notes)
-    assert any(item["text"] == "篇幅只够一段了，这一段的终点应该是结局。" for item in notes) is (ref != 5)
+    assert any(item["text"] == "篇幅只够一篇了，这一篇的终点应该是结局。" for item in notes) is (ref != 5)
     if adopt:
         assert plan["adopt"]["node_id"] == str(ref)
     elif ref:
@@ -262,12 +262,12 @@ def test_checks_use_exact_expectation_codes_and_required_messages():
         [{"kind": "ending", "status": "pinned"}],
         [{"question": "end", "text": "整理说明"}],
     )
-    assert flags["carried"] == ["E3「洗冤」还开着，这一段没说怎么处理。"]
+    assert flags["carried"] == ["E3「洗冤」还开着，这一篇没说怎么处理。"]
     assert "快写完了，核心谜团还没定谜底。" in warnings
     assert "换到了新地图「北境寒原」，但还没写这张地图的详情。" in warnings
-    assert flags["direction"] == ["结局是铁钉，新的结局方向没有采用。"]
+    assert flags["direction"] == ["结局是锁住，新的结局方向没有采用。"]
     assert flags["end"] == ["整理说明"]
-    assert flags["volumes"] == ["这一段还没有分卷。"]
+    assert flags["volumes"] == ["这一篇还没有分卷。"]
     plan["carried"] = "接续 E3。"
     warnings, _ = segment_checks(
         plan, {}, {"mystery_answer": "已有答案"}, [{"seq": 3, "kind": "期待", "status": "planted"}], []
@@ -279,7 +279,7 @@ def test_format_next_segment_exact_order_and_current_full_content():
     plan, _ = normalize_next_segment(draft(), [{"segment": {"number": 1}}], [{"name": "林岚"}])
     text = format_next_segment(plan)
     labels = [
-        "上一段留下的线头",
+        "上一篇留下的线头",
         "主角的追求",
         "金手指下一阶段",
         "定下的谜底",
@@ -289,9 +289,9 @@ def test_format_next_segment_exact_order_and_current_full_content():
         "开头的小麻烦",
         "大对手",
         "新登场的人物",
-        "这一段的目标",
+        "这一篇的目标",
         "读者在等",
-        "这一段揭开什么",
+        "这一篇揭开什么",
         "新的信息差",
         "终点：节点",
         "结局方向",
@@ -304,10 +304,10 @@ def test_format_next_segment_exact_order_and_current_full_content():
 @pytest.mark.parametrize(
     "length,total,suffix",
     [
-        (0, 0, "按正常的一段来规划。"),
-        (30, 100, "篇幅还宽裕，按正常的一段来规划。"),
-        (5.4, 18, "只够两段左右"),
-        (3.6, 12, "只够一段了"),
+        (0, 0, "按正常的一篇来规划。"),
+        (30, 100, "篇幅还宽裕，按正常的一篇来规划。"),
+        (5.4, 18, "只够两篇左右"),
+        (3.6, 12, "只够一篇了"),
     ],
 )
 async def test_lengths_count_units_use_book_words_and_exact_length_modes(sessionmaker, length, total, suffix):
@@ -321,7 +321,7 @@ async def test_lengths_count_units_use_book_words_and_exact_length_modes(session
         assert suffix in lengths["text"]
         assert lengths["volume_hint"].startswith("卷号从第 2 卷开始（前面已经规划了 1 卷、约 6 章）。")
         if not length:
-            assert lengths["text"] == "这本书没有定全书篇幅。\n按正常的一段来规划。"
+            assert lengths["text"] == "这本书没有定全书篇幅。\n按正常的一篇来规划。"
             assert "全书计划" not in lengths["volume_hint"]
 
 
@@ -329,7 +329,7 @@ async def test_segment_context_and_opening_only_first_unit(sessionmaker):
     async with sessionmaker() as session:
         book, _, volume, units, _ = await story(session)
         blocks = await segment_blocks(session, book)
-        assert "终点：节点 2「离开青山镇」：拿到线索\n这一段写了第 1-1 卷。" in blocks["last_segment"]
+        assert "终点：节点 2「离开青山镇」：拿到线索\n这一篇写了第 1-1 卷。" in blocks["last_segment"]
         assert "此刻想要：拿到考核资格" in blocks["characters"]
         assert "E3" in blocks["ledger"] and "S7" in blocks["secrets"]
         assert blocks["revision"] == ""

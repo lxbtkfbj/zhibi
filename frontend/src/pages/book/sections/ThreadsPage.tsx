@@ -55,11 +55,7 @@ export function ThreadsPage() {
       <PageHeader
         eyebrow="线索"
         title={book.status === 'setting_up' ? '主编还没做线索规划' : '这本书还没有线索'}
-        subtitle={
-          book.status === 'setting_up'
-            ? '定完主线骨架后，主编会把这本书拆成几条线：主线、感情线、反派线、谜团线、成长线，再标出每条线在哪一卷走到哪一步。'
-            : '这本书开书时还没有「线索规划」这一步。拍板时可以提意见：「补上线索规划」。'
-        }
+        subtitle="开写时主编会排好这一篇的线索"
       />
     )
   }

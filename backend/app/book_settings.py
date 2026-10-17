@@ -23,7 +23,8 @@ class BookSettings(BaseModel):
     review_strictness: Literal["lenient", "standard", "strict"] = "standard"
     volume_audit: bool = True
     volume_approval: bool = True
-    # 每一段开写前先给我确认；不参与力度预设和提示词规矩
+    chapters_approval: bool = False
+    # 每一篇开写前先给我确认；不参与力度预设和提示词规矩
     segment_approval: bool = True
     trial_read: bool = True
 

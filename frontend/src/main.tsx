@@ -8,7 +8,6 @@ import { BookLayout } from './pages/book/BookLayout'
 import { ForeshadowingPage, RelationsPage } from './pages/book/sections/BiblePages'
 import { ChapterPage, ContentsPage } from './pages/book/sections/ChapterPages'
 import { Overview } from './pages/book/sections/Overview'
-import { NextSegmentPage } from './pages/book/sections/NextSegmentPage'
 import { SecretsPage } from './pages/book/sections/SecretsPage'
 import { StoryPage } from './pages/book/sections/StoryPage'
 import { LibraryPage } from './pages/book/sections/LibraryPage'
@@ -43,7 +42,7 @@ const router = createBrowserRouter([
       { path: 'outline', element: <OutlinePage /> },
       { path: 'protagonist', element: <LegacyBookRoute /> },
       { path: 'spine', element: <LegacyBookRoute /> },
-      { path: 'next-segment', element: <NextSegmentPage /> },
+      { path: 'next-segment', element: <LegacyBookRoute /> },
       { path: 'threads', element: <LegacyBookRoute /> },
       { path: 'chapters', element: <ContentsPage /> },
       { path: 'chapter/:index', element: <ChapterPage /> },

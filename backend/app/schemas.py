@@ -773,7 +773,7 @@ class PieceDecision(BaseModel):
 
 
 class SegmentDecision(BaseModel):
-    action: Literal["confirm", "delegate", "revise"]
+    action: Literal["confirm", "delegate", "revise", "redo"]
     feedback: str | None = Field("", max_length=20000)
     flips: list[ChoiceFlip] = Field(default_factory=list, max_length=6)
     pin_end: bool = False

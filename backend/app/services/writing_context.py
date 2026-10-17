@@ -7,6 +7,7 @@
 
 import re
 import uuid
+from dataclasses import replace
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
@@ -22,7 +23,6 @@ from app.agents.context import (
     format_concept,
     format_ledger,
     format_opening,
-    format_protagonist,
     format_requirements,
     format_reveals,
     format_secrets,
@@ -33,7 +33,6 @@ from app.agents.context import (
     format_threads,
     format_unit,
     format_volume_card,
-    format_world,
     format_world_entry,
     planned_chapters,
 )
@@ -42,7 +41,8 @@ from app.agents.planning import ref_seq, relevant_ledger, secret_seq, unit_hint
 from app.agents.playbook import pick, usage_text
 from app.agents.rhythm import rhythm_text
 from app.book_settings import settings_of
-from app.models import Book, Chapter, Character, PlotUnit, Volume, WorldEntry
+from app.models import Book, Chapter, Character, PlotUnit, Secret, Volume, WorldEntry
+from app.services.library_context import LibraryContext, load_context
 from app.services.requirements import list_requirements
 from app.services.setup_store import load_ledger, load_nodes, load_secrets, load_threads, unit_dict, volume_dict
 
@@ -63,6 +63,79 @@ MAX_RECALL = 5
 CATALOG_CHARACTERS = 80
 # 设定条目少于这个数时全部给写手，多了才挑
 ALL_WORLD_UNDER = 12
+
+
+def is_bottom_card(row: WorldEntry | Character, book: Book | None = None) -> bool:
+    """底牌标签与定调的引用均视为保密标记，避免标签误删后从引用旁路进入写手上下文。"""
+    secret_id = (book.concept or {}).get("secret_entry_id") if book else None
+    return "底牌" in (row.tags or []) or bool(secret_id and str(row.id) == str(secret_id))
+
+
+def public_library(context: LibraryContext) -> LibraryContext:
+    return replace(
+        context,
+        characters=[row for row in context.characters if not is_bottom_card(row, context.book)],
+        entries=[row for row in context.entries if not is_bottom_card(row, context.book)],
+    )
+
+
+async def public_secrets(session: AsyncSession, secrets: list[dict], context: LibraryContext) -> list[dict]:
+    """底牌对应的信息差也不能绕过条目过滤；普通信息差及为底牌埋的伏笔照旧给写手。"""
+    hidden_ids = {row.secret_id for row in context.entries if is_bottom_card(row, context.book) and row.secret_id}
+    if not hidden_ids:
+        return secrets
+    hidden = set(
+        await session.scalars(select(Secret.seq).where(Secret.book_id == context.book.id, Secret.id.in_(hidden_ids)))
+    )
+    return [secret for secret in secrets if secret.get("seq") not in hidden]
+
+
+def planning_library(context: LibraryContext) -> tuple[str, str]:
+    """统一复用设定库目录与全文格式，不再回读迁移前的主角卡或世界卡。"""
+    protagonists = [row for row in context.characters if row.role_type == "主角"]
+    picked: list[Character | WorldEntry] = list(protagonists)
+    picked.extend(row for row in context.targets if "金手指" in (row.tags or []) and row not in picked)
+    secret_id = (context.book.concept or {}).get("secret_entry_id")
+    secret = next((row for row in context.entries if secret_id and str(row.id) == str(secret_id)), None)
+    secrets = [secret] if secret else [row for row in context.entries if "底牌" in (row.tags or [])]
+    picked.extend(row for row in secrets if row not in picked)
+    main = ([] if protagonists else ["（设定库里还没有主角的角色卡片）"]) + [
+        context.entry_full_text(row) for row in picked
+    ]
+    world = context.library
+    must = [
+        row for row in context.targets if isinstance(row, WorldEntry) and row.status == "must" and row not in picked
+    ]
+    if must:
+        world += "\n\n现在要定的条目：\n" + "\n\n".join(context.entry_full_text(row) for row in must)
+    return "\n\n".join(main), world or "（暂无）"
+
+
+def segment_text(segment: dict, number: int, world: dict | None = None, title: str = "") -> str:
+    parts = []
+    if segment.get("text"):
+        parts.append(f"第 {number} 篇「{segment.get('title') or title}」：{segment['text']}")
+        if segment.get("finale"):
+            parts.append("这是收尾篇：开始收线，揭开底牌，往结局方向走。")
+    legacy = (
+        "map",
+        "trouble",
+        "opponent",
+        "goal",
+        "goal_link",
+        "wait",
+        "reveal",
+        "carried",
+        "pursuit",
+        "finger_next",
+        "answers",
+    )
+    if not parts or any(segment.get(key) for key in legacy):
+        info = {**segment, "number": number}
+        if parts:
+            info["finale"] = False
+        parts.append(format_segment_info(info, world))
+    return "\n".join(parts)
 
 
 def format_chapter_outline(outline: dict[str, Any]) -> str:
@@ -232,8 +305,9 @@ async def _world(session: AsyncSession, book_id: uuid.UUID) -> list[WorldEntry]:
     )
 
 
-def world_text(rows: list[WorldEntry], mention: str, picked: list[str] | None = None) -> str:
+def selected_world(rows: list[WorldEntry], mention: str, picked: list[str] | None = None) -> list[WorldEntry]:
     """相关设定：条目不多时全给；多了只给力量体系、规则，以及设定师挑的（没挑过就按名字出现在章纲里来找）。"""
+    rows = [row for row in rows if not is_bottom_card(row)]
     if len(rows) > ALL_WORLD_UNDER:
         wanted = set(picked or [])
         rows = [
@@ -242,15 +316,32 @@ def world_text(rows: list[WorldEntry], mention: str, picked: list[str] | None = 
             if w.category in ("力量体系", "规则", "等级体系", "特殊规则")
             or (w.name in wanted if picked else w.name in mention)
         ]
+    return rows
+
+
+def world_text(rows: list[WorldEntry], mention: str, picked: list[str] | None = None) -> str:
     return (
         "\n".join(
             format_world_entry(
-                {key: getattr(w, key) for key in ("category", "name", "content", "style", "levels", "fields")}
+                {
+                    **{key: getattr(w, key) for key in ("category", "name", "style", "levels", "fields")},
+                    "content": w.content or w.one_line,
+                }
             )
-            for w in rows
+            for w in selected_world(rows, mention, picked)
         )
         or "（暂无）"
     )
+
+
+def writer_world(context: LibraryContext, mention: str, picked: list[str] | None = None) -> str:
+    rows = [row for row in public_library(context).targets if isinstance(row, WorldEntry)]
+    selected = selected_world(rows, mention, picked)
+    text = world_text(rows, mention, picked)
+    conventions = [row for row in rows if row.status == "one" and row.source != "writing" and row not in selected][:30]
+    if conventions:
+        text += "\n\n这本书的惯例：\n" + "\n".join(f"- {row.name}：{row.one_line}" for row in conventions)
+    return text
 
 
 def ledger_for_refs(ledger: list[dict[str, Any]], refs: list[str], volume: int) -> list[dict[str, Any]]:
@@ -423,12 +514,18 @@ async def material_blocks(session: AsyncSession, book: Book, chapter: Chapter) -
     unit = await session.get(PlotUnit, chapter.unit_id) if chapter.unit_id else None
     volume = await session.get(Volume, chapter.volume_id) if chapter.volume_id else None
     outline = chapter.outline or {}
-    characters = await _characters(session, book.id)
+    library = await load_context(session, book)
+    visible = public_library(library)
+    characters = visible.characters
     names = _canonical_names(list(outline.get("characters") or []), characters)
-    hidden_secrets = [secret for secret in await load_secrets(session, book.id) if secret.get("status") == "hidden"]
+    hidden_secrets = [
+        secret
+        for secret in await public_secrets(session, await load_secrets(session, book.id), library)
+        if secret.get("status") == "hidden"
+    ]
     hidden_secrets.sort(key=lambda secret: not _secret_involves(secret, names))
     roster = sorted(characters, key=lambda c: c.role_type == "龙套")[:CATALOG_CHARACTERS]
-    world = await _world(session, book.id)
+    world = [row for row in visible.targets if isinstance(row, WorldEntry)]
     ledger = await load_ledger(session, book.id)
     refs = [a.get("ref", "") for a in outline.get("foreshadow_actions") or []]
     related = ledger_for_refs(ledger, refs, volume.index if volume else 1)
@@ -455,7 +552,10 @@ async def material_blocks(session: AsyncSession, book: Book, chapter: Chapter) -
             recent=3,
         ),
         "roster": "\n".join(format_character_state(_char_dict(c)) for c in roster) or "（暂无）",
-        "world_catalog": "\n".join(f"- [{w.category}] {w.name}：{w.content[:40]}" for w in world) or "（暂无）",
+        "world_catalog": "\n".join(
+            f"- [{visible.category(w)['name']}] {w.name}：{w.one_line or w.content[:40]}" for w in world
+        )
+        or "（暂无）",
         "chapter_catalog": "\n".join(
             f"第{r.index}章《{r.title}》：{r.summary[:CATALOG_SUMMARY]}" for r in reversed(catalog)
         )
@@ -466,11 +566,16 @@ async def material_blocks(session: AsyncSession, book: Book, chapter: Chapter) -
 
 
 def clean_materials(
-    materials: dict[str, Any], characters: list[Character], world: list[WorldEntry], before: int
+    materials: dict[str, Any],
+    characters: list[Character],
+    world: list[WorldEntry],
+    before: int,
+    book: Book | None = None,
 ) -> dict:
     """只保留设定库里真有的人物、条目和已经写过的章节。"""
+    characters = [row for row in characters if not is_bottom_card(row, book)]
     names = {c.name for c in characters} | {a for c in characters for a in c.aliases or []}
-    entries = {w.name for w in world}
+    entries = {w.name for w in world if not is_bottom_card(w, book)}
     return {
         "characters": list(dict.fromkeys(n.strip() for n in materials.get("characters", []) if n.strip() in names)),
         "world": list(dict.fromkeys(n.strip() for n in materials.get("world", []) if n.strip() in entries)),
@@ -480,7 +585,13 @@ def clean_materials(
 
 
 async def pick_materials(session: AsyncSession, book_id: uuid.UUID, before: int, raw: dict[str, Any]) -> dict:
-    return clean_materials(raw, await _characters(session, book_id), await _world(session, book_id), before)
+    return clean_materials(
+        raw,
+        await _characters(session, book_id),
+        await _world(session, book_id),
+        before,
+        await session.get(Book, book_id),
+    )
 
 
 async def _recall(session: AsyncSession, book_id: uuid.UUID, indexes: list[int]) -> str:
@@ -575,14 +686,16 @@ async def volume_blocks(
         return True, float("inf"), secret["seq"]
 
     hidden_secrets.sort(key=reveal_distance)
-    protagonist = next((_char_dict(character) for character in characters if character.role_type == "主角"), None)
+    library = await load_context(session, book)
+    protagonist, world = planning_library(library)
+    number = sum(node.get("segment") is not None for node in nodes[: nodes.index(target) + 1]) if target else 0
     return {
-        "segment": format_segment_info(segment, book.world)
+        "segment": segment_text(segment, number, book.world, target.get("title", ""))
         if segment
-        else "（这本书开书时还没有分段规划，按本卷卡片和走向的节点规划）",
-        "protagonist": format_protagonist(
-            book.protagonist or {}, protagonist, hook=(book.concept or {}).get("protagonist_hook", "")
-        ),
+        else "（这本书开书时还没有分篇规划，按本卷卡片和走向的节点规划）",
+        "protagonist": protagonist,
+        "world": world,
+        "fixed": "",
         "opening": format_opening(segment["opening"]) if volume.index == 1 and segment.get("opening") else "",
         "volume_index": str(volume.index),
         "concept": format_concept({**(book.concept or {}), "chapter_words": chapter_words(book)}),
@@ -629,7 +742,8 @@ async def chapter_plan_blocks(
     ledger = await load_ledger(session, book.id)
     refs = [a.get("ref", "") for a in unit.foreshadow_actions or []]
     count = max(1, unit.chapter_count if chapter_count is None else chapter_count)
-    characters = await _characters(session, book.id)
+    library = await load_context(session, book)
+    characters = public_library(library).characters
     mentioned = " ".join([*(unit.key_events or []), *(volume.new_characters or [])])
     names = [
         c.name
@@ -643,7 +757,7 @@ async def chapter_plan_blocks(
     reveal_seqs = {secret_seq(reveal.get("ref", "")) for reveal in unit.reveals or []}
     secrets = [
         secret
-        for secret in await load_secrets(session, book.id, nodes)
+        for secret in await public_secrets(session, await load_secrets(session, book.id, nodes), library)
         if secret.get("status") == "hidden"
         and (
             any(knower.get("name") in names for knower in secret.get("knowers") or [])
@@ -699,9 +813,12 @@ async def chapter_blocks(session: AsyncSession, book: Book, chapter: Chapter) ->
             select(Chapter.content).where(Chapter.book_id == book.id, Chapter.index == chapter.index - 1)
         )
     ).scalar()
-    characters = await _characters(session, book.id)
+    library = await load_context(session, book)
+    visible = public_library(library)
+    characters = visible.characters
+    materials = clean_materials(materials, library.characters, library.entries, chapter.index, book)
     names = _canonical_names([*(outline.get("characters") or []), *materials.get("characters", [])], characters)
-    secrets = await load_secrets(session, book.id)
+    secrets = await public_secrets(session, await load_secrets(session, book.id), library)
     mention = " ".join([str(outline), unit.title if unit else ""])
     ledger = await load_ledger(session, book.id)
     actions = outline.get("foreshadow_actions") or []
@@ -713,7 +830,8 @@ async def chapter_blocks(session: AsyncSession, book: Book, chapter: Chapter) ->
         "outline": format_chapter_outline(outline),
         "unit": format_unit(unit_dict(unit)) if unit else "（暂无）",
         "characters": character_profiles(characters, names),
-        "world": world_text(await _world(session, book.id), mention, materials.get("world") if materials else None),
+        "world": writer_world(library, mention, materials.get("world") if materials else None),
+        "library": visible.library,
         "recent": await recent_summaries(session, book.id, chapter.index, count=3),
         "story_so_far": await story_so_far(
             session,
@@ -773,17 +891,17 @@ async def segment_lengths(session: AsyncSession, book: Book) -> dict[str, Any]:
     length = (book.concept or {}).get("target_length") or 0
     if planned_total:
         first_line = (
-            f"全书计划约 {length} 万字、约 {planned_total} 章；已经规划了 {segments} 段、{len(volumes)} 卷、"
-            f"约 {planned_so_far} 章（已定稿 {final_chapters} 章），还剩约 {remaining} 章；前面每段平均约 {avg} 章。"
+            f"全书计划约 {length} 万字、约 {planned_total} 章；已经规划了 {segments} 篇、{len(volumes)} 卷、"
+            f"约 {planned_so_far} 章（已定稿 {final_chapters} 章），还剩约 {remaining} 章；前面每篇平均约 {avg} 章。"
         )
         if last_one:
-            second_line = "剩下的篇幅只够一段了：这一段就是最后一段，终点就是结局。"
+            second_line = "剩下的篇幅只够一篇了：这一篇就是最后一篇，终点就是结局。"
         elif finale:
-            second_line = "剩下的篇幅只够两段左右：这一段是收尾段——开始收线，揭开核心谜团的谜底，逼近终极敌人，往结局方向走，不要再开大的新坑。"
+            second_line = "剩下的篇幅只够两篇左右：这一篇是收尾篇——开始收线，揭开底牌，逼近终极敌人，往结局方向走，不要再开大的新坑。"
         else:
-            second_line = "篇幅还宽裕，按正常的一段来规划。"
+            second_line = "篇幅还宽裕，按正常的一篇来规划。"
     else:
-        first_line, second_line = "这本书没有定全书篇幅。", "按正常的一段来规划。"
+        first_line, second_line = "这本书没有定全书篇幅。", "按正常的一篇来规划。"
     volume_hint = f"卷号从第 {next_volume} 卷开始（前面已经规划了 {len(volumes)} 卷、约 {planned_so_far} 章）。"
     if planned_total:
         volume_hint += f"全书计划约 {length} 万字、约 {planned_total} 章，还剩约 {remaining} 章。"
@@ -808,7 +926,8 @@ async def segment_blocks(session: AsyncSession, book: Book) -> dict[str, str]:
     nodes = await load_nodes(session, book.id)
     last_index = max((i for i, node in enumerate(nodes, 1) if node.get("segment") is not None), default=0)
     last = nodes[last_index - 1] if last_index else {}
-    last_text = format_segment_info(last["segment"], book.world) if last else "（暂无）"
+    number = sum(node.get("segment") is not None for node in nodes)
+    last_text = segment_text(last["segment"], number, book.world, last.get("title", "")) if last else "（暂无）"
     if last:
         volume_indices = list(
             (
@@ -821,22 +940,24 @@ async def segment_blocks(session: AsyncSession, book: Book) -> dict[str, str]:
         )
         last_text += f"\n终点：节点 {last_index}「{last.get('title', '')}」：{last.get('event', '')}"
         if volume_indices:
-            last_text += f"\n这一段写了第 {min(volume_indices)}-{max(volume_indices)} 卷。"
+            last_text += f"\n这一篇写了第 {min(volume_indices)}-{max(volume_indices)} 卷。"
     characters = await _characters(session, book.id)
-    protagonist = next((_char_dict(person) for person in characters if person.role_type == "主角"), None)
+    library = await load_context(session, book)
+    protagonist, world = planning_library(library)
     lengths = await segment_lengths(session, book)
     next_chapter = int(await session.scalar(select(func.max(Chapter.index)).where(Chapter.book_id == book.id)) or 0) + 1
-    world = {
-        key: value
-        for key, value in (book.world or {}).items()
-        if key not in {"characters", "relationships", "world_entries"}
-    }
+    no_secret = (
+        not (book.concept or {}).get("story")
+        and not (book.concept or {}).get("secret_entry_id")
+        and not any("底牌" in (row.tags or []) for row in library.entries)
+    )
     return {
         "concept": format_concept({**(book.concept or {}), "chapter_words": chapter_words(book)}),
-        "protagonist": format_protagonist(
-            book.protagonist or {}, protagonist, hook=(book.concept or {}).get("protagonist_hook", "")
-        ),
-        "world": format_world(world),
+        "protagonist": protagonist,
+        "world": world,
+        "no_secret": "【这本书还没有底牌】\n请从已经写出来的金手指、谜团里推一两句底牌，写在 secret 里，让作者确认。"
+        if no_secret
+        else "",
         "spine": format_spine({**(book.spine or {}), "nodes": nodes}, book.world),
         "last_segment": last_text,
         "story_so_far": await story_so_far(session, book, lengths["next_volume"], before_chapter=next_chapter),

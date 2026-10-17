@@ -63,7 +63,7 @@ async def test_writing_volume_blocks_target_secret_order_and_limit(sessionmaker)
         )
         await session.flush()
         blocks = await volume_blocks(session, book, volume)
-        assert "节点 2「飞升」［铁钉］——本卷就要写到它" in blocks["target_node"]
+        assert "节点 2「飞升」［已锁］——本卷就要写到它" in blocks["target_node"]
         assert "再下一个节点：节点 3「归家」" in blocks["target_node"]
         assert "【术语表】可用的技巧名称：" in blocks["glossary"]
         assert blocks["secrets"].startswith("- S2「近处秘密」")

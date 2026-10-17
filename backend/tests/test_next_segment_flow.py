@@ -1,4 +1,4 @@
-"""第二包任务四：下一段的真实图暂停、恢复、修改和旧检查点兼容。"""
+"""第二包任务四：下一篇的真实图暂停、恢复、修改和旧检查点兼容。"""
 
 import uuid
 
@@ -111,7 +111,7 @@ async def test_segment_boundary_trigger_priority(sessionmaker, state, step):
         assert result["step"] == step
         assert (await session.get(Book, book_id)).status == "writing"
         if state.get("start_volume"):
-            assert result["reason"] == "第1卷写完了。下一段还没定，下次开写时主编先来定下一段。"
+            assert result["reason"] == "第 1 卷写完了。下一篇还没定，下次开写时主编先来定下一篇。"
 
 
 @pytest.mark.parametrize(("ending", "segmented"), [(False, False), (True, True)])
@@ -156,7 +156,7 @@ async def test_manual_is_before_trial_and_stops_after_confirm(sessionmaker):
         assert book.status == "writing" and not book.trial_read_done
         messages = list(await session.scalars(select(MeetingMessage.content).where(MeetingMessage.job_id == job_id)))
         assert any("开写时先拆第 2 卷卷纲。" in message for message in messages)
-        assert any("下一段定好了，开写时从第2卷接着写。" in message for message in messages)
+        assert any("下一篇定好了，开写时从第 2 卷接着写。" in message for message in messages)
 
 
 async def test_revision_repeats_both_steps_with_current_version_and_flips(sessionmaker, monkeypatch):
@@ -164,7 +164,7 @@ async def test_revision_repeats_both_steps_with_current_version_and_flips(sessio
     original = demo.respond
 
     async def capture(schema, system, user):
-        if schema.__name__ in {"NextSegmentDraft", "SegmentVolumesDraft"}:
+        if schema.__name__ in {"NextArcDraft", "SegmentVolumesDraft"}:
             prompts.append((schema.__name__, user))
         return await original(schema, system, user)
 
@@ -174,30 +174,30 @@ async def test_revision_repeats_both_steps_with_current_version_and_flips(sessio
     await execute_job(job_id)
     first = await get_job(sessionmaker, job_id)
     assert first.status == "waiting_author", first.error
-    # 等待期间改开关只影响下一段，不能把本段已提交的修改意见当成自动确认。
+    # 等待期间改开关只影响下一篇，不能把本段已提交的修改意见当成自动确认。
     async with sessionmaker() as session:
         book = await session.get(Book, book_id)
         book.settings = {**book.settings, "segment_approval": False}
         await session.commit()
     await execute_job(
-        job_id, {"action": "revise", "feedback": "这一段不要赶路", "flips": [{"topic": "目标", "choice": "先救出证人"}]}
+        job_id, {"action": "revise", "feedback": "这一篇不要赶路", "flips": [{"topic": "目标", "choice": "先救出证人"}]}
     )
     revised = await get_job(sessionmaker, job_id)
     assert revised.status == "waiting_author", revised.error
     assert revised.pending["round"] == 2
     assert len(prompts) == 4
-    assert "当前的下一段" in prompts[2][1] and "当前的分卷与线索" in prompts[3][1]
+    assert "当前的下一篇" in prompts[2][1] and "当前的分卷与线索" in prompts[3][1]
     for _, prompt in prompts[2:]:
-        assert "这一段不要赶路" in prompt and "把「目标」改成「先救出证人」" in prompt
+        assert "这一篇不要赶路" in prompt and "把「目标」改成「先救出证人」" in prompt
     async with sessionmaker() as session:
         requirements = {
             (row.text, row.source)
             for row in await session.scalars(select(AuthorRequirement).where(AuthorRequirement.book_id == book_id))
         }
-        assert requirements == {("这一段不要赶路", "segment:2"), ("「目标」改成：先救出证人", "answer")}
+        assert requirements == {("这一篇不要赶路", "segment:2"), ("「目标」改成：先救出证人", "answer")}
     await execute_job(job_id, {"action": "delegate"})
     assert (await get_job(sessionmaker, job_id)).status == "succeeded"
-    # 下一段则采用新设置，自动通过且手动规划任务仍然不开始写正文。
+    # 下一篇则采用新设置，自动通过且手动规划任务仍然不开始写正文。
     next_job = await job_for(sessionmaker, book_id)
     await execute_job(next_job)
     finished = await get_job(sessionmaker, next_job)
@@ -228,7 +228,7 @@ async def test_writing_enters_next_volume_gate_after_segment(sessionmaker, autom
         )
         assert endpoint.segment["status"] == ("auto" if automatic else "confirmed")
         purposes = list(await session.scalars(select(LlmCall.purpose).where(LlmCall.job_id == job_id)))
-        assert "写作·定下一段" in purposes and "写作·下一段分卷" in purposes
+        assert "写作·定下一篇" in purposes and "写作·下一篇分卷" in purposes
         if automatic:
             messages = list(
                 await session.scalars(
@@ -238,5 +238,5 @@ async def test_writing_enters_next_volume_gate_after_segment(sessionmaker, autom
                 )
             )
             assert any(
-                "第 2 段按设置自动通过" in message and "节点是暂定的，随时可以改。" in message for message in messages
+                "第 2 篇按设置自动通过" in message and "终点没锁，随时可以改。" in message for message in messages
             )

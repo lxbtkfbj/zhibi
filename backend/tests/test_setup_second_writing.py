@@ -66,8 +66,8 @@ async def test_volume_prompt_all_variables_render_for_new_and_old_books(sessionm
             volume.index = 2
             assert (await volume_blocks(session, book, volume))["opening"] == ""
         else:
-            assert blocks["segment"] == "（这本书开书时还没有分段规划，按本卷卡片和走向的节点规划）"
-            assert "旧书主角钩子" in blocks["protagonist"]
+            assert blocks["segment"] == "（这本书开书时还没有分篇规划，按本卷卡片和走向的节点规划）"
+            assert "旧书主角钩子" not in blocks["protagonist"] and "角色卡片 · 林岚" in blocks["protagonist"]
             assert blocks["opening"] == ""
             assert "下一卷：无（这是最后一卷）" in blocks["neighbors"]
 

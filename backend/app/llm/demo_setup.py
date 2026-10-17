@@ -42,7 +42,9 @@ def pitches(user: str) -> s.PitchSet:
 
 def concept(user: str) -> s.StoryConcept:
     return s.StoryConcept(
-        story=STORY + ("另外记录厉鬼的规律（测试自建类别）。" if "测试自建类别" in user else ""),
+        story=STORY
+        + ("测试冲突：坊市的货币需要核对。" if "测试冲突" in user else "")
+        + ("另外记录厉鬼的规律（测试自建类别）。" if "测试自建类别" in user else ""),
         secret=SECRET,
         title="逆世帝尊",
         alt_titles=["轮回镜主", "重踏九天"],

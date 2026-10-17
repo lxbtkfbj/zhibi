@@ -61,6 +61,7 @@ def new_rewrite_job(book: Book, chapter: Chapter, feedback: str) -> Job:
 DECISION_KINDS = (
     "setup_review",
     "volume_review",
+    "chapters_review",
     "trial_read",
     "chapter_stuck",
     "setup_pitches",

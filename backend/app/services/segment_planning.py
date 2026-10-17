@@ -1,4 +1,4 @@
-"""写作中定下一段的确定性整理和提醒；确认前不修改数据库。"""
+"""写作中定下一篇的确定性整理和提醒；确认前不修改数据库。"""
 
 import re
 from copy import deepcopy
@@ -48,18 +48,21 @@ def normalize_next_segment(
     at_ending = adopted and ref == ending
     plan["finale"] = bool(lengths.get("finale") or lengths.get("last_one") or at_ending)
     if lengths.get("last_one") and not at_ending:
-        notes.append({"question": "end", "text": "篇幅只够一段了，这一段的终点应该是结局。"})
-    names = {str(person.get("name", "")).strip() for person in characters}
+        notes.append({"question": "end", "text": "篇幅只够一篇了，这一篇的终点应该是结局。"})
+    names = {
+        name for person in characters for name in [str(person.get("name", "")).strip(), *(person.get("aliases") or [])]
+    }
     new_characters = []
     for character in plan.get("new_characters") or []:
         name = str(character.get("name", "")).strip()
         if not name:
             continue
-        if name in names:
+        identities = {name, *(character.get("aliases") or [])} - {"", None}
+        if identities & names:
             notes.append({"question": "people", "text": f"「{name}」已经在人物表里，没有重复添加。"})
             continue
         new_characters.append({**character, "name": name})
-        names.add(name)
+        names.update(identities)
     plan["new_characters"] = new_characters
     plan["relationships"] = [
         relation
@@ -95,39 +98,65 @@ def segment_checks(
 
     for note in notes or []:
         add(note["question"], note["text"])
-    missing("carried", "carried", "还没写上一段留下的线头怎么处理。")
+    if "text" in plan:
+        count = len(str(plan.get("text") or "").strip())
+        if not 150 <= count <= 500:
+            add("text", f"这一篇的一段话要 200-400 字，现在是 {count} 字。")
+        if not all(str((plan.get("end") or {}).get(key) or "").strip() for key in ("title", "event")):
+            add("end", "这一篇的终点还没写。")
+        ending = next((node for node in nodes if node.get("kind") == "ending"), {})
+        if ending.get("status") == "pinned" and plan.get("ending_change"):
+            add("direction", "结局锁住了，新的结局方向没有采用。")
+        cards = split.get("volumes") or []
+        if not cards:
+            add("volumes", "这一篇还没有分卷。")
+        elif len(cards) > 3:
+            add("volumes", f"这一篇分了 {len(cards)} 卷，通常一到三卷；远处的卷写到再定。")
+        for card in cards:
+            if not str(card.get("summary") or "").strip():
+                add("volumes", f"第 {card.get('index')} 卷还没写一段话。")
+            if not card.get("chapter_count"):
+                add("volumes", f"第 {card.get('index')} 卷还没写预计章数。")
+        if not split.get("wait"):
+            add("wait", "还没写这一篇让读者等什么。")
+        appeared = {item.get("character") for item in split.get("anchors") or [] if item.get("kind") == "登场"}
+        for person in plan.get("new_characters") or []:
+            if person["name"] not in appeared:
+                add("cast", f"「{person['name']}」还没写什么时候登场。")
+        return [text for texts in flags.values() for text in texts], flags
+    missing("carried", "carried", "还没写上一篇留下的线头怎么处理。")
     mentioned = set(re.findall(r"(?<![A-Za-z0-9])E\d+(?!\d)", str(plan.get("carried") or ""), re.I))
     mentioned = {ref.upper() for ref in mentioned}
     for item in ledger:
         if item.get("kind") == "期待" and item.get("status") == "planted" and foreshadow_code(item) not in mentioned:
-            add("carried", f"{foreshadow_code(item)}「{item.get('description', '')}」还开着，这一段没说怎么处理。")
-    missing("pursuit", "pursuit", "还没写主角的追求这一段怎么变。")
+            add("carried", f"{foreshadow_code(item)}「{item.get('description', '')}」还开着，这一篇没说怎么处理。")
+    missing("pursuit", "pursuit", "还没写主角的追求这一篇怎么变。")
     missing("finger_next", "finger_next", "还没写金手指下一阶段。")
     if plan.get("finale") and not world.get("mystery_answer") and not plan.get("answers"):
         add("answers", "快写完了，核心谜团还没定谜底。")
-    missing("map", "map", "还没写这一段在哪张地图。")
+    missing("map", "map", "还没写这一篇在哪张地图。")
     if plan.get("map") and plan["map"] not in {item.get("name") for item in world.get("maps") or []}:
         new_map = plan.get("new_map") or {}
         if new_map.get("name") != plan["map"]:
             add("map", f"换到了新地图「{plan['map']}」，但还没写这张地图的详情。")
     missing("trouble", "opponents", "还没写开头压着主角的小麻烦。")
-    missing("opponent", "opponents", "还没写这一段的大对手。")
-    missing("goal", "goal", "还没写这一段的目标。")
-    missing("goal_link", "goal", "还没写做成这一段的目标为什么离长线追求更近。")
+    missing("opponent", "opponents", "还没写这一篇的大对手。")
+    missing("goal", "goal", "还没写这一篇的目标。")
+    missing("goal_link", "goal", "还没写做成这一篇的目标为什么离长线追求更近。")
     if not (plan.get("wait") or {}).get("description"):
-        add("wait", "还没写这一段让读者等什么。")
-    missing("reveal", "reveal", "还没写这一段揭开什么。")
+        add("wait", "还没写这一篇让读者等什么。")
+    missing("reveal", "reveal", "还没写这一篇揭开什么。")
     for field, label in (("prerequisite", "之前得先有"), ("consequence", "之后变成")):
         if not (plan.get("end") or {}).get(field):
-            add("end", f"这一段的终点还没写「{label}」。")
+            add("end", f"这一篇的终点还没写「{label}」。")
     ending = next((node for node in nodes if node.get("kind") == "ending"), {})
     if ending.get("status") == "pinned" and plan.get("ending"):
-        add("direction", "结局是铁钉，新的结局方向没有采用。")
+        add("direction", "结局是锁住，新的结局方向没有采用。")
     cards = split.get("volumes") or []
     if not cards:
-        add("volumes", "这一段还没有分卷。")
+        add("volumes", "这一篇还没有分卷。")
     elif len(cards) > 3:
-        add("volumes", f"这一段分了 {len(cards)} 卷，通常一到三卷；远处的卷写到再定。")
+        add("volumes", f"这一篇分了 {len(cards)} 卷，通常一到三卷；远处的卷写到再定。")
     for card in cards:
         if not card.get("chapter_count"):
             add("volumes", f"第 {card.get('index')} 卷还没写预计章数。")

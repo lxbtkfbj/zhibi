@@ -30,19 +30,20 @@ const QUICK_PHRASES = {
 /** 每个会话保留自己的草稿；切稿件路由不会重挂载这块区域。 */
 function NoteComposer() {
   const { job, working, waiting, asking, bookId, book, conversation, focusComposer, composerNode, setComposerNode, composerDrafts: drafts, setComposerDrafts: setDrafts, segmentReview } = useBookContext()
-  const { note, decide, directions, pitches, piece, setupPending } = useJobActions(bookId)
+  const { note, decide, directions, pitches, piece, setupPending, decisionPending } = useJobActions(bookId)
   const [sent, setSent] = useState<{ conversation: string; message: string } | null>(null)
   const ref = useRef<HTMLTextAreaElement>(null)
   const sending = useRef(false)
   const text = drafts[conversation] ?? ''
   const direct = conversation !== 'group'
   const oldSetup = job?.kind === 'book_setup' && job.setup_flow !== 3
-  const blocked = oldSetup && !direct
-  const revising = waiting && !oldSetup
+  const legacyArc = job?.status === 'waiting_author' && job.pending?.kind === 'segment_review' && job.pending.flow === 2
+  const blocked = (oldSetup && !direct) || legacyArc
+  const revising = waiting && !oldSetup && !legacyArc
   const feedbackPrefix = direct ? `（给${ROLE_META[conversation].name}）` : ''
   const inputLimit = waiting ? 5000 - feedbackPrefix.length : 5000
   const tooLong = text.trim().length > inputLimit
-  const pending = setupPending || note.isPending || decide.isPending || directions.isPending || pitches.isPending || piece.isPending || segmentReview.submitting
+  const pending = setupPending || decisionPending || note.isPending || decide.isPending || directions.isPending || pitches.isPending || piece.isPending || segmentReview.submitting
   const error = note.error ?? decide.error ?? directions.error ?? pitches.error ?? piece.error ?? segmentReview.error
   const idle = !working && !waiting && !asking
   const resumable = job?.status === 'failed' || job?.status === 'cancelled'
@@ -106,7 +107,7 @@ function NoteComposer() {
     } finally { sending.current = false }
   }
 
-  const placeholder = blocked ? '这本书要先按新流程重开，重开后再提意见' : direct
+  const placeholder = legacyArc ? '这一篇要先按新写法重出，重出后再提意见' : blocked ? '这本书要先按新流程重开，重开后再提意见' : direct
     ? `发消息给${ROLE_META[conversation].name}…`
     : waiting && job?.pending?.kind === 'setup_piece' ? '说说这一块想怎么改…' : waiting
       ? job?.pending?.kind === 'setup_pitches'

@@ -308,8 +308,8 @@ export function ArtifactBody({ message }: { message: MeetingMessage }) {
   if (type === 'segment') return <div className="space-y-4"><SetupFields fields={segmentFields(data)} /><ArtifactBody message={{ ...message, payload: { type: 'spine', data } }} /></div>
   if (type === 'segment_plan') return <SetupFields fields={nextSegmentFields(data)} />
   if (type === 'segment_volumes') {
-    const draft = data && typeof data === 'object' ? data as { threads?: StoryThread[] } : {}
-    return <div className="space-y-4"><ArtifactBody message={{ ...message, payload: { type: 'outline', data } }} />{!!draft.threads?.length && <ArtifactBody message={{ ...message, payload: { type: 'threads', data } }} />}<ArtifactBody message={{ ...message, payload: { type: 'lore', data } }} /></div>
+    const draft = data && typeof data === 'object' ? data as { threads?: StoryThread[]; wait?: { description?: string } | null } : {}
+    return <div className="space-y-4">{draft.wait?.description && <p className="whitespace-pre-wrap"><span className="mr-2 text-xs text-chief">读者在等</span>{draft.wait.description}</p>}<ArtifactBody message={{ ...message, payload: { type: 'outline', data } }} />{!!draft.threads?.length && <ArtifactBody message={{ ...message, payload: { type: 'threads', data } }} />}<ArtifactBody message={{ ...message, payload: { type: 'lore', data } }} /></div>
   }
   if (type === 'spine') {
     const nodes = spineArtifactNodes(data)

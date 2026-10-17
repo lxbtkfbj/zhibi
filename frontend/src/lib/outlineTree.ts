@@ -13,6 +13,7 @@ export interface OutlineArc {
 }
 export interface OutlineTree { arcs: OutlineArc[]; ending: { node_id: string; title: string; event: string } | null; segmented: boolean }
 export type OutlineItem =
+  | { key: string; kind: 'pending'; name: string; status: string; locked: boolean; pending: import('./outlineWriting').PendingArc; children: OutlineItem[] }
   | { key: string; kind: 'book'; name: string; status: string; locked: false; children: OutlineItem[] }
   | { key: string; kind: 'segment'; name: string; status: string; locked: boolean; arc: OutlineArc; children: OutlineItem[] }
   | { key: string; kind: 'volume'; name: string; status: string; locked: boolean; arc: OutlineArc; volume: OutlineVolume; children: OutlineItem[] }
@@ -22,7 +23,7 @@ export type OutlineItem =
 
 export const isLaterEnding = (arc: OutlineArc) => !arc.planned && arc.end?.kind === 'ending'
 export const arcText = (arc: OutlineArc) => isLaterEnding(arc) ? '' : (arc.text ?? '').trim() ? arc.text : (arc.planned ? arc.end?.event ?? '' : '')
-export const outlineStatusText = (status: string) => ({ done: '已写完', final: '已写完', writing: '正在写', drafting: '正在写', later: '写到再定' })[status] ?? '已规划'
+export const outlineStatusText = (status: string) => ({ pending: '待你确认', done: '已写完', final: '已写完', writing: '正在写', drafting: '正在写', later: '写到再定' })[status] ?? '已规划'
 export const unitStarted = (unit: OutlineUnit) => unit.chapters.some(chapter => ['final', 'drafting'].includes(chapter.status))
 export const volumeStarted = (volume: OutlineVolume) => volume.units.some(unitStarted) || ['writing', 'done'].includes(volume.status)
 export const arcStarted = (arc: OutlineArc) => arc.volumes.some(volumeStarted)

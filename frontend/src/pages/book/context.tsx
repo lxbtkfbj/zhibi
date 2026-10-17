@@ -42,7 +42,7 @@ export interface BookContextValue {
 }
 
 export interface SegmentDecisionInput {
-  action: 'confirm' | 'delegate' | 'revise'
+  action: 'confirm' | 'delegate' | 'revise' | 'redo'
   feedback?: string
   flips?: { topic: string; choice: string }[]
 }

@@ -56,7 +56,8 @@ export function WritingSettings({ value, onChange, statuses = {}, currentPlayboo
         <Segmented label="力度" value={value.effort_preset} options={[{ value: 'quick', label: '省时' }, { value: 'balanced', label: '均衡' }, { value: 'premium', label: '精品' }, { value: 'custom', label: '自定义', custom: true }]} onChange={effort_preset => onChange({ effort_preset, ...(effort_preset === 'custom' ? {} : EFFORT_PRESETS[effort_preset]) })} />
       </SettingsRow>
       <SettingsRow label="每卷卷纲都要我拍板" status={statuses.volume_approval}><Toggle label="每卷卷纲都要我拍板" checked={value.volume_approval} onChange={volume_approval => onChange({ volume_approval })} /></SettingsRow>
-      <SettingsRow label="每一篇开写前先给我确认" hint="关掉后，主编定好下一篇就直接往下写，群聊里会告诉你；大纲地图上会标出新规划的篇，节点是暂定的，之后仍然可以改。" status={statuses.segment_approval}><Toggle label="每一篇开写前先给我确认" checked={value.segment_approval ?? true} onChange={segment_approval => onChange({ segment_approval })} /></SettingsRow>
+      <SettingsRow label="每个单元的章纲都给我看" hint="打开后，主编出完一个单元的章纲先停下来给你看，确认了再写。" status={statuses.chapters_approval}><Toggle label="每个单元的章纲都给我看" checked={value.chapters_approval ?? false} onChange={chapters_approval => onChange({ chapters_approval })} /></SettingsRow>
+      <SettingsRow label="每一篇开写前先给我确认" hint="关掉后，主编定好下一篇就直接往下写，群聊里会告诉你；大纲里会标出新规划的篇，终点没锁，之后仍然可以改。" status={statuses.segment_approval}><Toggle label="每一篇开写前先给我确认" checked={value.segment_approval ?? true} onChange={segment_approval => onChange({ segment_approval })} /></SettingsRow>
       <SettingsRow label="新书前 3 章先给我试读" status={statuses.trial_read}><Toggle label="新书前 3 章先给我试读" checked={value.trial_read} onChange={trial_read => onChange({ trial_read })} /></SettingsRow>
     </SettingsGroup>
   </>
