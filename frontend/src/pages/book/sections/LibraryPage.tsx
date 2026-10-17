@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { ArrowLeft, BookMarked, Check, ChevronDown, ChevronRight, EyeOff, Flag, Gem, Globe2, Layers, LockKeyhole, MoreHorizontal, Plus, ScrollText, Search, Sparkles, Tags, Trash2, UnlockKeyhole, Users, X } from 'lucide-react'
+import { ArrowLeft, Check, ChevronDown, ChevronRight, EyeOff, Flag, Gem, Globe2, Layers, LockKeyhole, MoreHorizontal, Plus, ScrollText, Search, Sparkles, Tags, Trash2, UnlockKeyhole, Users, X } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -21,6 +21,17 @@ import { CategoryModal } from './LibraryCategoryModal'
 // 界面照 docs/界面规矩.md：按钮两到四个字、一块一个主按钮、空着的项不占地方、分组靠留白。
 
 const CATEGORY_ICON: Record<string, typeof Users> = { 角色卡片: Users, 等级体系: Layers, 世界与地图: Globe2, 势力划分: Flag, 物品与功法: Gem, 往事与秘密: EyeOff, 特殊规则: ScrollText }
+/** 空页面上每类的一句话。类别自带的 hint 是写给 AI 的长说明，这里只要一眼看懂；不分题材。 */
+const CATEGORY_BLURB: Record<string, string> = {
+  角色卡片: '有名有姓、会再出场的人',
+  等级体系: '分高低的一串等级：境界、等级、官阶',
+  世界与地图: '什么时代，有哪些地方',
+  势力划分: '宗门、家族、国家、公司，谁和谁是敌是友',
+  物品与功法: '法宝、道具、功法、技能',
+  往事与秘密: '过去的事和藏着的真相',
+  特殊规则: '这个世界独有的机制和代价',
+}
+const blurbOf = (category: LibraryCategory) => CATEGORY_BLURB[category.key] ?? category.hint.split(/[：；。]/)[0]?.slice(0, 24) ?? ''
 /** 角色卡上方一行的小项，其余长的一项一行。 */
 const CHARACTER_SHORT = ['name', 'aliases', 'role_type', 'gender', 'age']
 const MAIN_ROLES = ['主角', '女主', '男主']
@@ -525,16 +536,38 @@ function LibraryList({ bookId, data, config, rows, ghosts, suggested, selectedId
   </aside>
 }
 
-/** 一条设定都没有：一个图标、一句话、一两个按钮。 */
-function EmptyLibrary({ story, settingUp, categories, filling, busy, onFill, onCreate }: { story: boolean; settingUp: boolean; categories: LibraryCategory[]; filling: boolean; busy: boolean; onFill: () => void; onCreate: (key: string) => void }) {
-  return <div className="flex flex-col items-center px-6 pt-16 pb-16 text-center">
-    <span className="flex size-14 items-center justify-center rounded-2xl bg-card shadow-[var(--shadow-paper)] ring-1 ring-line"><BookMarked className="size-6 text-ink-2" /></span>
-    <h2 className="mt-5 font-serif text-xl font-bold text-ink">还没有设定</h2>
-    <p className="mt-2 max-w-sm text-sm leading-relaxed text-ink-2">{settingUp ? '编辑部正在写，写好会出现在这里。' : story ? '自己先写几条，或者让 AI 补全。' : '挑完故事方向，编辑部会一口气建好；也可以自己先写。'}</p>
-    <div className="mt-6 flex items-center gap-2">
-      <NewMenu categories={categories} onPick={onCreate} align="center" size="md" />
-      {story && <Button variant="outline" loading={filling} disabled={busy} onClick={onFill}><Sparkles className="size-4 text-chief" />补全</Button>}
+/**
+ * 一条设定都没有：不是孤零零一个图标，而是一张「设定目录」——几类各占一行，说清这里放什么，
+ * 点哪一类就从哪一类自己写。最上面一句话说清这些什么时候、由谁写好；平时编辑部写，作者改。
+ */
+function EmptyLibrary({ story, settingUp, categories, filling, busy, onFill, onCreate, onNewCategory }: {
+  story: boolean; settingUp: boolean; categories: LibraryCategory[]; filling: boolean; busy: boolean
+  onFill: () => void; onCreate: (key: string) => void; onNewCategory: () => void
+}) {
+  const idle = story && !settingUp
+  // 和页头「设定」左边对齐，不居中：一页只留一条对齐线。
+  return <div className={clsx(sheet, 'ml-0 bg-card shadow-[var(--shadow-paper)] ring-1 ring-line')}>
+    <div className="flex flex-wrap items-start gap-x-6 gap-y-4">
+      <div className="min-w-0 flex-1">
+        <h2 className="flex items-center gap-2.5 font-serif text-[22px] leading-tight font-bold text-ink">{settingUp && <Spinner className="size-4 text-chief" />}{settingUp ? '编辑部正在写设定' : '还没有设定'}</h2>
+        <p className="mt-2 text-[14px] leading-relaxed text-ink-2">{settingUp ? '写好一条，这里就多一条。想先自己写也行，点下面任意一类。' : idle ? '可以让编辑部照着定调补全，也可以点下面任意一类自己写。' : '方向定下来以后，编辑部会按下面几类一口气建好。想先写也行，点任意一类。'}</p>
+      </div>
+      {idle && <Button variant="primary" loading={filling} disabled={busy} title="让编辑部照着定调把设定补全" onClick={onFill}>{!filling && <Sparkles className="size-4" />}补全</Button>}
     </div>
+    <ul aria-label="设定分这几类" className="mt-7 divide-y divide-line/70 border-y border-line/70">
+      {categories.map(category => {
+        const Icon = CATEGORY_ICON[category.key] ?? Tags
+        return <li key={category.key}>
+          <button type="button" onClick={() => onCreate(category.key)} title={`自己写一条${category.name}`} className="group flex w-full items-center gap-4 rounded-lg px-2 py-3 text-left transition-colors hover:bg-subtle/70">
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-subtle text-ink-2 ring-1 ring-line"><Icon className="size-[18px]" /></span>
+            <span className="w-24 shrink-0 text-[15px] font-semibold text-ink">{category.name}</span>
+            <span className="min-w-0 flex-1 truncate text-[14px] text-ink-3">{blurbOf(category)}</span>
+            <span className="flex shrink-0 items-center gap-1 text-[13px] text-ink-2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"><Plus className="size-4" />写一条</span>
+          </button>
+        </li>
+      })}
+    </ul>
+    <button type="button" onClick={onNewCategory} className={clsx(quietButton, 'mt-3 -ml-2')}><Plus className="size-4" />新类别</button>
   </div>
 }
 
@@ -592,7 +625,7 @@ export function LibraryPage() {
       </div> : undefined} />
     <ErrorText error={config.error ?? library.error ?? suggestions.error ?? actions.inspect.error} />
     {(config.isLoading || library.isLoading) && <div className="grid gap-6 @4xl/manuscript:grid-cols-[250px_minmax(0,1fr)]"><Skeleton className="h-96" /><Skeleton className="h-96" /></div>}
-    {empty && <EmptyLibrary story={!!book.concept.story} settingUp={settingUp} categories={data.categories} filling={filling} busy={busy} onFill={fillGaps} onCreate={startCreate} />}
+    {empty && <EmptyLibrary story={!!book.concept.story?.trim()} settingUp={settingUp} categories={data.categories} filling={filling} busy={busy} onFill={fillGaps} onCreate={startCreate} onNewCategory={() => setCategoryEditor('new')} />}
     {data && config.data && !empty && <div className="grid items-start gap-6 @4xl/manuscript:grid-cols-[250px_minmax(0,1fr)] @6xl/manuscript:gap-10">
       <div className={clsx(explicit && creating === null && 'max-[1023px]:hidden @4xl/manuscript:block')}>
         <LibraryList bookId={bookId} data={data} config={config.data} rows={rows} ghosts={ghosts} suggested={suggested} selectedId={shownGhost ? undefined : selected?.id} ghostId={shownGhost?.id} search={search} setSearch={setSearch}
