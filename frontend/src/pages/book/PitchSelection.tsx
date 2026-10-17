@@ -1,15 +1,33 @@
 import clsx from 'clsx'
-import { Check, MessageSquareText } from 'lucide-react'
+import { Check, Lightbulb, MessageSquareText, PenLine } from 'lucide-react'
 import { useState } from 'react'
-import { useJobActions } from '../../api/hooks'
+import { useJobActions, useUpdateBook } from '../../api/hooks'
 import type { Job, Pending } from '../../api/types'
-import { Button } from '../../components/ui'
+import { Button, ErrorText, inputClass } from '../../components/ui'
 import { useBookContext } from './context'
 import { PageHeader } from './sections/common'
 
+/** 不挑方向也行：自己写定调，或者方案照办写进来的定调，点底部「补齐开书稿」接着写。 */
+function OwnStory({ bookId, story }: { bookId: string; story: string }) {
+  const update = useUpdateBook(bookId)
+  const [draft, setDraft] = useState<string | null>(null)
+  const save = async () => { if (draft === null) return; try { await update.mutateAsync({ concept: { story: draft.trim() } }); setDraft(null) } catch { /* 保留草稿 */ } }
+  return <section aria-label="你自己的定调" className={clsx('rounded-2xl border bg-card p-5 shadow-[var(--shadow-paper)]', story ? 'mb-7 border-ink/25' : 'mt-6 border-line')}>
+    <h2 className="flex flex-wrap items-center gap-2 text-[15px] font-semibold"><Lightbulb className="size-4" />{story ? '已经有定调了' : '或者，不挑方向，用你自己的定调'}
+      <span className="text-[13px] font-normal text-ink-3">{story ? '点底部「补齐开书稿」，编辑部照着它把设定和大纲写完，这段话一个字不改' : '写好后点底部「补齐开书稿」；群聊里聊定的方案照办后，也会写到这里'}</span>
+      {draft === null && <Button className="ml-auto" size="sm" variant="outline" onClick={() => setDraft(story)}><PenLine className="size-3.5" />{story ? '改一改' : '自己写'}</Button>}
+    </h2>
+    {draft !== null ? <div className="mt-3"><textarea autoFocus aria-label="定调的一段话" rows={8} value={draft} onChange={event => setDraft(event.target.value)} placeholder="一段话说清这本书：主角是谁、想要什么、爽在哪里、大致怎么走" className={clsx(inputClass, 'font-serif text-[16px] leading-loose')} />
+      <div className="mt-3 flex gap-2"><Button variant="primary" size="sm" loading={update.isPending} disabled={!draft.trim()} onClick={() => void save()}>保存定调</Button><Button variant="ghost" size="sm" onClick={() => setDraft(null)}>取消</Button></div><ErrorText error={update.error} /></div>
+      : story ? <p className="mt-3 font-serif text-[16px] leading-loose whitespace-pre-wrap text-ink">{story}</p> : null}
+  </section>
+}
+
 /** 选故事方向：页面里只管点选，提交在书稿底部的操作条里。 */
 export function PitchSelection({ job, pending }: { job: Job; pending: Extract<Pending, { kind: 'setup_pitches' }> }) {
-  const { pitchChoice, setPitchChoice, requestFeedback } = useBookContext()
+  const { book, pitchChoice, setPitchChoice, requestFeedback } = useBookContext()
+  const open = (pending as { open?: boolean }).open === true
+  const story = book.concept.story?.trim() ?? ''
   const { setupPending } = useJobActions(job.book_id)
   const key = `${job.id}-${pending.round}`
   const current = pitchChoice?.key === key ? pitchChoice : null
@@ -22,7 +40,8 @@ export function PitchSelection({ job, pending }: { job: Job; pending: Extract<Pe
     choose(index, title)
   }
   return <section aria-label="选择故事方向" className="mx-auto max-w-[1500px]">
-    <PageHeader eyebrow="书稿 · 定调" title="挑一个故事方向" subtitle="点一下卡片就选中，书名可以在卡片里挑，也可以自己写；选好后点底部的「用这个方向」，主编会把它展开成定调。" />
+    <PageHeader eyebrow="书稿 · 定调" title="挑一个故事方向" subtitle="点一下卡片就选中，书名可以在卡片里挑，也可以自己写；选好后点底部的「用这个方向」，编辑部一口气写出定调、设定和大纲。" />
+    {open && story && <OwnStory bookId={job.book_id} story={book.concept.story ?? ''} />}
     {pending.benchmark && <section aria-label="主编对对标作品的理解" className="mb-6 rounded-xl border border-line bg-subtle px-4 py-3">
       <p className="text-xs text-ink-3">主编理解的对标作品</p>
       <p className="mt-1 text-sm leading-relaxed whitespace-pre-wrap text-ink">{pending.benchmark}</p>
@@ -63,5 +82,6 @@ export function PitchSelection({ job, pending }: { job: Job; pending: Extract<Pe
       <Button size="sm" variant="outline" onClick={requestFeedback}>在群聊里说</Button>
     </div>
     {busy && <p role="status" className="mt-4 text-[13px] text-chief">主编正在处理你的选择…</p>}
+    {open && !story && <OwnStory bookId={job.book_id} story="" />}
   </section>
 }
