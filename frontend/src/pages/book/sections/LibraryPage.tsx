@@ -193,13 +193,13 @@ function CharacterBody({ bookId, row, config, adding, setAdding }: { bookId: str
   return <>
     <div className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
       <label className="flex items-center gap-2 text-ink-3">定位<select aria-label="定位" value={row.role_type ?? ''} onChange={event => void save({ role_type: event.target.value }).catch(() => undefined)} className={clsx('rounded-md border-0 px-2 py-1 text-[13px] font-medium', ROLE_TONE[row.role_type ?? ''] ?? 'bg-subtle text-ink-2 ring-1 ring-line')}>{roles.map(role => <option key={role}>{role}</option>)}</select></label>
-      <span className="flex items-center gap-2 text-ink-3">性别<InlineText multiline={false} value={row.gender ?? ''} placeholder="—" onSave={gender => save({ gender })} className="w-20 text-ink" /></span>
-      <span className="flex items-center gap-2 text-ink-3">年龄<InlineText multiline={false} value={row.age ?? ''} placeholder="—" onSave={age => save({ age })} className="w-24 text-ink" /></span>
-      <span className="flex min-w-48 flex-1 items-center gap-2 text-ink-3">也叫<InlineText multiline={false} value={(row.aliases ?? []).join('、')} placeholder="别名，用顿号隔开" onSave={text => save({ aliases: text.split(/[、,，]/).map(item => item.trim()).filter(Boolean) })} className="min-w-0 flex-1 text-ink" /></span>
+      <span className="flex items-center gap-2 text-ink-3">性别<InlineText multiline={false} value={row.gender ?? ''} label="性别" placeholder="—" onSave={gender => save({ gender })} className="w-20 text-ink" /></span>
+      <span className="flex items-center gap-2 text-ink-3">年龄<InlineText multiline={false} value={row.age ?? ''} label="年龄" placeholder="—" onSave={age => save({ age })} className="w-24 text-ink" /></span>
+      <span className="flex min-w-48 flex-1 items-center gap-2 text-ink-3">也叫<InlineText multiline={false} value={(row.aliases ?? []).join('、')} label="也叫" placeholder="别名，用顿号隔开" onSave={text => save({ aliases: text.split(/[、,，]/).map(item => item.trim()).filter(Boolean) })} className="min-w-0 flex-1 text-ink" /></span>
     </div>
     <dl className="rounded-2xl border border-line bg-card px-5 py-1.5 shadow-[var(--shadow-paper)] @2xl/manuscript:px-7">
       {shown.map(field => <FieldRow key={field.column} label={field.name}>
-        <InlineText value={value(field.column)} autoEdit={adding === field.column} onDone={() => setAdding(null)} onSave={text => save({ [field.column]: text } as LibraryItemPatch)} ai={aiFor(bookId, row, field.column, field.name)} />
+        <InlineText value={value(field.column)} autoEdit={adding === field.column} onDone={text => { if (!text) setAdding(null) }} onSave={text => save({ [field.column]: text } as LibraryItemPatch)} ai={aiFor(bookId, row, field.column, field.name)} />
       </FieldRow>)}
       {!shown.length && <p className="py-5 text-sm text-ink-3">这张卡还是空的。点下面任意一项开始写，或者点上面「把空着的都写上」。</p>}
     </dl>
@@ -216,7 +216,7 @@ function ParagraphBody({ bookId, row, library, adding, setAdding }: { bookId: st
     <div className="rounded-2xl border border-line bg-card px-5 py-5 shadow-[var(--shadow-paper)] @2xl/manuscript:px-7">
       {shown.map(item => <div key={item.path} className={clsx(item.path === 'one_line' && shown.length > 1 && 'mb-4 border-b border-line/70 pb-4')}>
         <p className="mb-1.5 text-[13px] text-ink-3">{item.label}</p>
-        <InlineText value={String(row[item.path] ?? '')} autoEdit={adding === item.path} onDone={() => setAdding(null)} onSave={text => save({ [item.path]: text })} ai={aiFor(bookId, row, item.path, item.label)} className={item.path === 'content' ? 'text-[15px] leading-[1.9]' : 'text-[16px] font-medium'} />
+        <InlineText value={String(row[item.path] ?? '')} autoEdit={adding === item.path} onDone={text => { if (!text) setAdding(null) }} onSave={text => save({ [item.path]: text })} ai={aiFor(bookId, row, item.path, item.label)} className={item.path === 'content' ? 'text-[15px] leading-[1.9]' : 'text-[16px] font-medium'} />
       </div>)}
       {!shown.length && <p className="text-sm text-ink-3">还是空的。点下面开始写，或者点上面「把空着的都写上」。</p>}
     </div>
@@ -236,7 +236,7 @@ function CardBody({ bookId, row, library, adding, setAdding }: { bookId: string;
   return <>
     <div className="mb-4"><InlineText value={row.one_line} placeholder="一句话说清这是什么" onSave={one_line => save({ one_line })} ai={aiFor(bookId, row, 'one_line', '一句话')} className="text-[16px] font-medium" /></div>
     <dl className="rounded-2xl border border-line bg-card px-5 py-1.5 shadow-[var(--shadow-paper)] @2xl/manuscript:px-7">
-      {shown.map(name => <FieldRow key={name} label={name}><InlineText value={valueOf(name)} autoEdit={adding === `fields.${name}`} onDone={() => setAdding(null)} onSave={text => saveField(name, text)} ai={aiFor(bookId, row, `fields.${name}`, name)} /></FieldRow>)}
+      {shown.map(name => <FieldRow key={name} label={name}><InlineText value={valueOf(name)} autoEdit={adding === `fields.${name}`} onDone={text => { if (!text) setAdding(null) }} onSave={text => saveField(name, text)} ai={aiFor(bookId, row, `fields.${name}`, name)} /></FieldRow>)}
       {!shown.length && <p className="py-5 text-sm text-ink-3">还是空的。点下面任意一项开始写。</p>}
     </dl>
     <MoreFields items={missing.map(name => ({ path: `fields.${name}`, label: name }))} onPick={setAdding} />
@@ -483,7 +483,7 @@ export function LibraryPage() {
   return <section data-testid="library-page">
     <SetupGate piece="settings" />
     <PageHeader eyebrow="书稿 · 设定" title="设定"
-      subtitle={data ? total ? `共 ${total} 条${settingUp ? ' · 编辑部还在写' : ''}。点左边一条就在中间打开，哪里要改直接点哪里。` : '人物、世界、等级、势力、物品、往事与秘密、特殊规则，都放在这里。' : undefined}
+      subtitle={data ? total ? `共 ${total} 条${settingUp ? ' · 编辑部还在写' : ''}。点左边一条就在中间打开，哪里要改直接点哪里，改完点别处就存好了。` : '人物、世界、等级、势力、物品、往事与秘密、特殊规则，都放在这里。' : undefined}
       action={<>
         <Button size="sm" variant="outline" disabled={actions.inspect.isPending} onClick={() => actions.inspect.mutate({ mode: 'fill-gaps' })}><Sparkles className="size-3.5" />让 AI 补上缺的</Button>
         <Button size="sm" variant="outline" disabled={actions.inspect.isPending || !total} onClick={() => actions.inspect.mutate({ mode: 'review' })}>全部查一遍</Button>

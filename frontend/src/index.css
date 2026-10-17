@@ -264,9 +264,17 @@ body {
 #manuscript-pane a {
   -webkit-tap-highlight-color: transparent;
 }
-:focus-visible {
-  outline: 2px solid var(--color-seal);
-  outline-offset: 3px;
+/* 用键盘切换时的焦点框。放进 base 层，组件里写的 outline-none 才盖得过它；
+   打字的框有光标和自己的边框，不再套一圈红框。 */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--color-seal);
+    outline-offset: 3px;
+  }
+  textarea:focus-visible,
+  input:not([type="checkbox"], [type="radio"], [type="range"]):focus-visible {
+    outline: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

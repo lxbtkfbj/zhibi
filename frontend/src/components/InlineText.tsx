@@ -1,6 +1,6 @@
 import clsx from 'clsx'
 import { Check, LockKeyhole, Sparkles, Undo2, X } from 'lucide-react'
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { useChooseLibraryCandidate, useRewrite, type LibraryCandidate, type RewriteMode, type TargetType } from '../api/library'
 import { Spinner } from './ui'
 
@@ -22,23 +22,34 @@ const MODES: { key: string; label: string; mode: RewriteMode; instruction?: (lab
   { key: 'options', label: '给我几个写法', mode: 'options' },
 ]
 
-/** 点了就在原处改，点别处自动保存；旁边的 ✨ 让 AI 直接改这一处，改完标黄、可撤销。 */
-export function InlineText({ value, onSave, placeholder = '点这里写', multiline = true, className, inputClassName, ai, disabled, autoEdit, onDone }: {
+/** Chrome、Edge 能让输入框按内容自己长高；别的浏览器用脚本量。 */
+const FITS_CONTENT = typeof CSS !== 'undefined' && CSS.supports('field-sizing', 'content')
+const fit = (element: HTMLTextAreaElement) => { element.style.height = 'auto'; element.style.height = `${element.scrollHeight}px` }
+
+/**
+ * 字本身就是输入框：点哪里光标落在哪里，改完点别处自动保存。
+ * 不换框、不加提示行，点进去页面一点不动。旁边的 ✨ 让 AI 直接改这一处，改完标黄、可撤销。
+ */
+export function InlineText({ value, onSave, placeholder = '点这里写', label, multiline = true, className, ai, disabled, autoEdit, onDone }: {
   value: string
   onSave: (value: string) => Promise<unknown>
   placeholder?: string
+  /** 读屏用的名字；不给就用 AI 那一项的名字或占位字。 */
+  label?: string
   multiline?: boolean
   className?: string
-  inputClassName?: string
   ai?: InlineAi
   disabled?: boolean
-  /** 刚从「还可以写」点进来：直接进入编辑。 */
+  /** 刚从「还可以写」点进来：直接把光标放进去。 */
   autoEdit?: boolean
-  onDone?: () => void
+  /** 离开输入框时（保存完或按了 Esc）告诉外面最后是什么字。 */
+  onDone?: (text: string) => void
 }) {
-  const [draft, setDraft] = useState<string | null>(autoEdit ? value : null)
+  // 光标在框里时的文字；离开就保存并清掉。
+  const [draft, setDraft] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  // 保存时先显示新文字，不等刷新；刷新回来的值不同或失败时再收回。
+  const [saved, setSaved] = useState(false)
+  // 保存时先显示新文字，不等刷新；刷新回来就用刷新的值。
   const [optimistic, setOptimistic] = useState<{ text: string; base: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [menu, setMenu] = useState(false)
@@ -47,16 +58,35 @@ export function InlineText({ value, onSave, placeholder = '点这里写', multil
   const [candidate, setCandidate] = useState<LibraryCandidate | null>(null)
   const rewrite = useRewrite(ai?.bookId ?? '')
   const choose = useChooseLibraryCandidate(ai?.bookId ?? '')
-  const ref = useRef<HTMLTextAreaElement & HTMLInputElement>(null)
+  const field = useRef<HTMLTextAreaElement & HTMLInputElement>(null)
   const box = useRef<HTMLDivElement>(null)
+  const cancelled = useRef(false)
+  const timer = useRef(0)
   const busy = rewrite.isPending || choose.isPending
+  if (optimistic && optimistic.base !== value) setOptimistic(null)
+  const shown = optimistic?.text ?? value
+  const text = draft ?? shown
+  const empty = !text.trim()
 
+  useLayoutEffect(() => { if (multiline && !FITS_CONTENT && field.current) fit(field.current) }, [text, multiline, disabled])
   useEffect(() => {
-    const element = ref.current
-    if (draft === null || !element || !multiline) return
-    element.style.height = 'auto'
-    element.style.height = `${element.scrollHeight + 2}px`
-  }, [draft, multiline])
+    const element = field.current
+    if (!multiline || FITS_CONTENT || !element) return
+    // 聊天栏拖宽拖窄时，换行变了要重新量高度；放到下一帧，免得量的时候又触发自己。
+    let width = element.clientWidth
+    let frame = 0
+    const observer = new ResizeObserver(() => {
+      if (element.clientWidth === width) return
+      width = element.clientWidth
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => fit(element))
+    })
+    observer.observe(element)
+    void document.fonts?.ready.then(() => fit(element))
+    return () => { observer.disconnect(); cancelAnimationFrame(frame) }
+  }, [multiline, disabled])
+  useEffect(() => { if (autoEdit) field.current?.focus() }, [autoEdit])
+  useEffect(() => () => window.clearTimeout(timer.current), [])
   useEffect(() => {
     if (!menu) return
     const close = (event: PointerEvent) => { if (!box.current?.contains(event.target as Node)) { setMenu(false); setAsking(null) } }
@@ -64,17 +94,30 @@ export function InlineText({ value, onSave, placeholder = '点这里写', multil
     return () => window.removeEventListener('pointerdown', close)
   }, [menu])
 
-  const start = () => { if (disabled || busy) return; setError(null); setDraft(value); requestAnimationFrame(() => { ref.current?.focus(); const end = ref.current?.value.length ?? 0; ref.current?.setSelectionRange(end, end) }) }
   const commit = async () => {
     if (draft === null) return
     const next = draft.trim()
-    if (next === value.trim()) { setDraft(null); onDone?.(); return }
-    setSaving(true); setError(null); setOptimistic({ text: next, base: value }); setDraft(null)
-    try { await onSave(next); setChanged(null); onDone?.() } catch (cause) { setOptimistic(null); setDraft(next); setError(`没保存上：${cause instanceof Error ? cause.message : String(cause)}`) } finally { setSaving(false) }
+    setDraft(null)
+    if (next === value.trim()) { onDone?.(next); return }
+    setSaving(true); setError(null); setOptimistic({ text: next, base: value })
+    try {
+      await onSave(next)
+      setChanged(null); setSaved(true)
+      window.clearTimeout(timer.current)
+      timer.current = window.setTimeout(() => setSaved(false), 1600)
+      onDone?.(next)
+    } catch (cause) {
+      setOptimistic(null); setDraft(next); setError(`没保存上：${cause instanceof Error ? cause.message : String(cause)}`)
+    } finally { setSaving(false) }
   }
-  const keys = (event: KeyboardEvent) => {
-    if (event.key === 'Escape') { event.preventDefault(); setDraft(null); setError(null); onDone?.() }
-    else if (event.key === 'Enter' && (!multiline || event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing) { event.preventDefault(); void commit() }
+  const leave = () => {
+    if (!cancelled.current) { void commit(); return }
+    cancelled.current = false; setDraft(null); setError(null); onDone?.(value.trim())
+  }
+  const keys = (event: KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>) => {
+    if (event.nativeEvent.isComposing) return
+    if (event.key === 'Escape') { event.preventDefault(); cancelled.current = true; event.currentTarget.blur() }
+    else if (event.key === 'Enter' && (!multiline || event.ctrlKey || event.metaKey)) { event.preventDefault(); event.currentTarget.blur() }
   }
   const run = async (mode: RewriteMode, instruction?: string) => {
     if (!ai) return
@@ -93,30 +136,33 @@ export function InlineText({ value, onSave, placeholder = '点这里写', multil
     if (!changed) return
     try { await onSave(changed.before); setChanged(null) } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
   }
-  const shown = optimistic && optimistic.base === value ? optimistic.text : value
-  const empty = !shown.trim()
+
+  // 平时就是一段字；鼠标移上去淡淡一层底色，点进去多一圈细边。只用底色和阴影，不占地方。
+  const look = clsx('-mx-2 -my-1 min-w-0 flex-1 rounded-lg px-2 py-1 break-words outline-none placeholder:text-ink-3',
+    changed && 'bg-[var(--color-edit-highlight)]/60')
+  const editable = 'transition-[background-color,box-shadow] duration-150 hover:bg-subtle focus:bg-page focus:shadow-[0_0_0_1px_var(--color-line-2)]'
+  const props = {
+    value: text, placeholder, spellCheck: false, 'aria-label': label ?? ai?.label ?? placeholder,
+    onFocus: () => { setDraft(current => current ?? shown); setSaved(false) },
+    onChange: (event: { target: { value: string } }) => setDraft(event.target.value),
+    onBlur: leave, onKeyDown: keys,
+  }
 
   return <div ref={box} className={clsx('group/inline relative min-w-0', className)}>
-    {draft !== null ? <div>
-      {multiline
-        ? <textarea ref={ref} value={draft} onChange={event => setDraft(event.target.value)} onBlur={() => void commit()} onKeyDown={keys} rows={2} placeholder={placeholder}
-          className={clsx('-mx-2 -my-1 block w-[calc(100%+1rem)] resize-none rounded-lg border border-ink-3/50 bg-card px-2 py-1 leading-[1.8] text-ink shadow-[0_0_0_3px_rgb(0_0_0/0.03)] outline-none placeholder:text-ink-3', inputClassName)} />
-        : <input ref={ref} value={draft} onChange={event => setDraft(event.target.value)} onBlur={() => void commit()} onKeyDown={keys} placeholder={placeholder}
-          className={clsx('-mx-2 -my-1 block w-[calc(100%+1rem)] rounded-lg border border-ink-3/50 bg-card px-2 py-1 text-ink outline-none placeholder:text-ink-3', inputClassName)} />}
-      <p className="mt-1.5 flex items-center gap-2 text-xs text-ink-3">{saving ? <><Spinner className="size-3" />正在保存…</> : <>点别处自动保存{multiline ? ' · Ctrl+Enter 保存' : ' · Enter 保存'} · Esc 不改了</>}</p>
-    </div>
-      : <div className="flex items-start gap-1">
-        <button type="button" disabled={disabled} onClick={start} title={disabled ? undefined : '点一下就能改'}
-          className={clsx('-mx-2 -my-1 min-w-0 flex-1 rounded-lg px-2 py-1 text-left break-words whitespace-pre-wrap transition-colors', !disabled && 'hover:bg-subtle', changed && 'bg-[var(--color-edit-highlight)]/60', empty ? 'text-ink-3' : 'text-ink')}>
-          {empty ? placeholder : shown}{saving && <Spinner className="ml-2 inline size-3 align-middle text-ink-3" />}
+    <div className="flex items-start gap-1">
+      {disabled
+        ? <p className={clsx(look, 'whitespace-pre-wrap', empty && 'text-ink-3')}>{empty ? placeholder : text}</p>
+        : multiline
+          ? <textarea ref={field} rows={1} {...props} className={clsx(look, editable, 'resize-none overflow-hidden [field-sizing:content]')} />
+          : <input ref={field} {...props} className={clsx(look, editable, 'text-ellipsis')} />}
+      {ai && !disabled && <span className={clsx('shrink-0 transition-opacity', menu || busy || saving || saved ? 'opacity-100' : 'opacity-0 group-focus-within/inline:opacity-100 group-hover/inline:opacity-100')}>
+        <button type="button" aria-label={`让 AI 改「${ai.label}」`} title={ai.locked ? '锁住了，AI 不会改；要改先解锁' : saved ? '已保存' : `让 AI 改「${ai.label}」`} disabled={ai.locked || busy} onClick={() => setMenu(value => !value)}
+          className="flex size-7 items-center justify-center rounded-lg text-chief hover:bg-chief-soft disabled:text-ink-3 disabled:hover:bg-transparent">
+          {busy || saving ? <Spinner className={clsx('size-3.5', saving && !busy && 'text-ink-3')} /> : saved ? <Check className="size-4 text-lore" /> : ai.locked ? <LockKeyhole className="size-3.5" /> : <Sparkles className="size-4" />}
         </button>
-        {ai && !disabled && <span className={clsx('shrink-0 transition-opacity', menu || busy ? 'opacity-100' : 'opacity-0 group-hover/inline:opacity-100 focus-within:opacity-100')}>
-          <button type="button" aria-label={`让 AI 改「${ai.label}」`} title={ai.locked ? '锁住了，AI 不会改；要改先解锁' : `让 AI 改「${ai.label}」`} disabled={ai.locked || busy} onClick={() => setMenu(value => !value)}
-            className="flex size-7 items-center justify-center rounded-lg text-chief hover:bg-chief-soft disabled:text-ink-3 disabled:hover:bg-transparent">
-            {busy ? <Spinner className="size-3.5" /> : ai.locked ? <LockKeyhole className="size-3.5" /> : <Sparkles className="size-4" />}
-          </button>
-        </span>}
-      </div>}
+      </span>}
+    </div>
+    <span role="status" className="sr-only">{saving ? '正在保存' : saved ? '已保存' : ''}</span>
     {menu && ai && <div role="menu" className="absolute top-8 right-0 z-30 w-56 rounded-xl border border-line bg-card p-1.5 shadow-[var(--shadow-lift)]">
       {MODES.filter(item => (empty ? !item.filled : !item.empty)).map(item => <button key={item.key} type="button" role="menuitem" onClick={() => void run(item.mode, item.instruction?.(ai.label))} className="flex w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-subtle">{item.label}</button>)}
       {asking === null
@@ -127,7 +173,7 @@ export function InlineText({ value, onSave, placeholder = '点这里写', multil
         </form>}
     </div>}
     {busy && <p role="status" className="mt-1 text-xs text-chief">AI 正在写…</p>}
-    {changed && draft === null && <p className="mt-1 flex items-center gap-2 text-xs text-ink-3"><Check className="size-3.5 text-lore" />AI 改好了<button type="button" onClick={() => void undo()} className="flex items-center gap-0.5 text-chief hover:underline"><Undo2 className="size-3" />撤销</button><button type="button" onClick={() => setChanged(null)} className="hover:text-ink">知道了</button></p>}
+    {changed && <p className="mt-1 flex items-center gap-2 text-xs text-ink-3"><Check className="size-3.5 text-lore" />AI 改好了<button type="button" onClick={() => void undo()} className="flex items-center gap-0.5 text-chief hover:underline"><Undo2 className="size-3" />撤销</button><button type="button" onClick={() => setChanged(null)} className="hover:text-ink">知道了</button></p>}
     {candidate && <div className="mt-2 space-y-2 rounded-xl border border-chief/25 bg-chief-soft/30 p-3">
       <p className="flex items-center text-xs text-ink-2">几个写法，挑一个就换上<button type="button" aria-label="不要了" onClick={() => setCandidate(null)} className="ml-auto rounded p-0.5 hover:text-ink"><X className="size-3.5" /></button></p>
       {candidate.options.map((option, index) => <div key={index} className="rounded-lg border border-line bg-card p-2.5 text-sm">
