@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -9,10 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import SessionDep, get_book, get_redis
 from app.book_settings import BookSettings, compile_rules, default_settings, merge_settings, settings_of
-from app.models import AppSetting, AuthorRequirement, Book, Job
+from app.models import AppSetting, AuthorRequirement, Book, Chapter, Job, MeetingMessage
 from app.services import jobs
 from app.services.meeting import post_message
-from app.services.requirements import add_requirement, list_requirements, suppress_legacy_text
+from app.services.requirements import add_requirement, requirement_states, set_scope, suppress_legacy_text
 
 router = APIRouter(tags=["settings"])
 
@@ -23,6 +24,9 @@ class SettingsOut(BaseModel):
 
 
 class RequirementIn(BaseModel):
+    scope: Literal["always", "next_chapter", "this_volume", "next_volume"] = "always"
+    message_id: int | None = None
+    source: str = Field(default="manual", pattern=r"^(manual|chat:(chief|lorekeeper|writer|reviewer))$")
     text: str = Field(min_length=1, max_length=20000)
 
     @field_validator("text")
@@ -33,12 +37,30 @@ class RequirementIn(BaseModel):
         return text.strip()
 
 
+class RequirementPatch(BaseModel):
+    text: str | None = Field(default=None, min_length=1, max_length=20000)
+    scope: Literal["always", "next_chapter", "this_volume", "next_volume"] | None = None
+
+    @field_validator("text")
+    @classmethod
+    def not_blank(cls, text):
+        if text is not None and not text.strip():
+            raise ValueError("要求不能为空")
+        return text.strip() if text is not None else None
+
+
 class RequirementOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
     book_id: uuid.UUID
     text: str
     source: str
+    scope: str
+    chapter_index: int | None
+    volume_index: int | None
+    active: bool
+    label: str
+    message_id: int | None
     created_at: datetime
     updated_at: datetime
 
@@ -179,15 +201,49 @@ async def patch_settings(
 
 @router.get("/books/{book_id}/requirements", response_model=list[RequirementOut])
 async def get_requirements(book: Book = Depends(get_book), session: AsyncSession = SessionDep):
-    return await list_requirements(session, book.id)
+    return await requirement_outputs(session, book.id)
 
 
 @router.post("/books/{book_id}/requirements", response_model=RequirementOut, status_code=201)
-async def post_requirement(body: RequirementIn, book: Book = Depends(get_book), session: AsyncSession = SessionDep):
-    row = await add_requirement(session, book.id, body.text, "manual")
+async def post_requirement(
+    body: RequirementIn,
+    book: Book = Depends(get_book),
+    session: AsyncSession = SessionDep,
+    redis: Redis = Depends(get_redis),
+):
+    message = await session.get(MeetingMessage, body.message_id) if body.message_id else None
+    if body.message_id and (
+        message is None
+        or message.book_id != book.id
+        or message.speaker != "author"
+        or (message.payload or {}).get("thread")
+    ):
+        raise HTTPException(422, "请选择这本书的群聊消息")
+    row = await add_requirement(session, book.id, body.text, body.source, body.scope, body.message_id)
+    if message:
+        message.payload = {
+            **(message.payload or {}),
+            "requirement_saved": True,
+            "outcome": {"kind": "requirement", "requirement_id": str(row.id)},
+        }
     await session.commit()
-    await session.refresh(row)
-    return row
+    out = next(item for item in await requirement_outputs(session, book.id) if item["id"] == row.id)
+    if body.source.startswith("chat:"):
+        await post_message(
+            session,
+            redis,
+            book_id=book.id,
+            job_id=None,
+            speaker="system",
+            kind="decision",
+            content=f"已记成要求：「{row.text}」（{out['label']}）",
+            payload={"thread": body.source.split(":", 1)[1]},
+        )
+    if message:
+        from app.services.meeting import message_dict, publish
+
+        await publish(redis, book.id, "message_update", message_dict(message))
+    return out
 
 
 async def requirement(session: AsyncSession, requirement_id: uuid.UUID) -> AuthorRequirement:
@@ -198,24 +254,26 @@ async def requirement(session: AsyncSession, requirement_id: uuid.UUID) -> Autho
 
 
 @router.patch("/requirements/{requirement_id}", response_model=RequirementOut)
-async def patch_requirement(requirement_id: uuid.UUID, body: RequirementIn, session: AsyncSession = SessionDep):
+async def patch_requirement(requirement_id: uuid.UUID, body: RequirementPatch, session: AsyncSession = SessionDep):
     row = await requirement(session, requirement_id)
+    text = body.text if body.text is not None else row.text
     await session.execute(select(Book.id).where(Book.id == row.book_id).with_for_update())
     duplicate = await session.scalar(
         select(AuthorRequirement.id).where(
             AuthorRequirement.book_id == row.book_id,
-            AuthorRequirement.text == body.text,
+            AuthorRequirement.text == text,
             AuthorRequirement.id != row.id,
         )
     )
     if duplicate:
         raise HTTPException(409, "这条要求已经存在")
-    if row.text != body.text:
+    if row.text != text:
         await suppress_legacy_text(session, row.book_id, row.text)
-    row.text = body.text
+    row.text = text
+    if body.scope is not None:
+        await set_scope(session, row, body.scope)
     await session.commit()
-    await session.refresh(row)
-    return row
+    return next(item for item in await requirement_outputs(session, row.book_id) if item["id"] == row.id)
 
 
 @router.delete("/requirements/{requirement_id}", status_code=204)
@@ -224,3 +282,125 @@ async def delete_requirement(requirement_id: uuid.UUID, session: AsyncSession = 
     await suppress_legacy_text(session, row.book_id, row.text)
     await session.delete(row)
     await session.commit()
+
+
+async def requirement_outputs(session, book_id):
+    return [
+        {
+            **{
+                key: getattr(item["row"], key)
+                for key in (
+                    "id",
+                    "book_id",
+                    "text",
+                    "source",
+                    "scope",
+                    "chapter_index",
+                    "volume_index",
+                    "message_id",
+                    "created_at",
+                    "updated_at",
+                )
+            },
+            "active": item["active"],
+            "label": item["label"],
+        }
+        for item in await requirement_states(session, book_id)
+    ]
+
+
+def source_label(source):
+    from app.services.meeting import SPEAKER_NAMES
+
+    if source.startswith("private:"):
+        return "私聊" + SPEAKER_NAMES.get(source[8:], source[8:])
+    if source.startswith("chat:"):
+        return "和" + SPEAKER_NAMES.get(source[5:], source[5:]) + "聊天时记下"
+    prefix, _, value = source.partition(":")
+    return {
+        "note": "群聊",
+        "answer": "开书时的回答",
+        "volume": f"第 {value} 卷卷纲的意见",
+        "segment": f"定下第 {value} 篇时的意见",
+        "unit": "单元章纲的意见",
+        "trial": "试读意见",
+        "manual": "手动添加",
+    }.get(prefix, "其他")
+
+
+@router.post("/books/{book_id}/requirements/tidy")
+async def tidy_requirements(book: Book = Depends(get_book), session: AsyncSession = SessionDep):
+    from app.agents.schemas import RequirementsTidy
+    from app.services.chat import model
+    from app.services.chat_context import progress_of
+    from app.services.library_context import load_context
+
+    book_id = book.id
+    ctx = await load_context(session, book)
+    items = [item for item in await requirement_outputs(session, book_id) if item["active"]]
+    chapters = list(await session.scalars(select(Chapter).where(Chapter.book_id == book_id).order_by(Chapter.index)))
+    job = await jobs.active_job(session, book_id)
+    values = dict(
+        concept=ctx.concept,
+        progress=await progress_of(session, ctx, chapters, job),
+        requirements="\n".join(
+            f"{i}. {item['text']}（{item['label']}；来自{source_label(item['source'])}）"
+            for i, item in enumerate(items, 1)
+        )
+        or "（没有）",
+    )
+    await session.commit()
+    try:
+        result = await model(book_id, "chief", RequirementsTidy, "requirements_tidy", **values)
+    except Exception as exc:
+        raise HTTPException(502, f"模型出错了：{exc}") from exc
+    by_index = {item.index: item for item in result.items}
+    return {
+        "items": [
+            {
+                "id": item["id"],
+                "text": item["text"],
+                "action": by_index[i].action if i in by_index else "保留",
+                "reason": by_index[i].reason if i in by_index else "主编没有建议改这一条",
+                "rewrite": by_index[i].rewrite if i in by_index else "",
+            }
+            for i, item in enumerate(items, 1)
+        ]
+    }
+
+
+class RequirementRewrite(BaseModel):
+    id: uuid.UUID
+    text: str = Field(min_length=1, max_length=20000)
+
+
+class RequirementsApply(BaseModel):
+    delete: list[uuid.UUID] = Field(default_factory=list)
+    rewrite: list[RequirementRewrite] = Field(default_factory=list)
+
+
+@router.post("/books/{book_id}/requirements/apply", response_model=list[RequirementOut])
+async def apply_requirements(
+    body: RequirementsApply, book: Book = Depends(get_book), session: AsyncSession = SessionDep
+):
+    await session.execute(select(Book.id).where(Book.id == book.id).with_for_update())
+    ids = {*body.delete, *(r.id for r in body.rewrite)}
+    rows = {
+        r.id: r for r in await session.scalars(select(AuthorRequirement).where(AuthorRequirement.book_id == book.id))
+    }
+    if not ids.issubset(rows):
+        raise HTTPException(409, "要求清单已经变了，重新整理一下")
+    if set(body.delete) & {r.id for r in body.rewrite}:
+        raise HTTPException(422, "不能同时删掉和改写同一条")
+    future = [r.text.strip() for r in body.rewrite]
+    kept = {r.text for r in rows.values() if r.id not in ids}
+    if any(not text for text in future) or len(set(future)) != len(future) or set(future) & kept:
+        raise HTTPException(409, "改写后的要求为空或重复")
+    for id in body.delete:
+        await suppress_legacy_text(session, book.id, rows[id].text)
+        await session.delete(rows[id])
+    for item in body.rewrite:
+        await suppress_legacy_text(session, book.id, rows[item.id].text)
+        rows[item.id].text = item.text.strip()
+    await session.commit()
+    return await requirement_outputs(session, book.id)

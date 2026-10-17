@@ -207,9 +207,12 @@ async def test_note_sources_and_deleted_pending_note(client, sessionmaker, recip
     book_id, job_id = await fixture_book(sessionmaker)
     await client.post(f"/api/books/{book_id}/notes", json={"content": "只属于当前清单", "to": recipient})
     rows = (await client.get(f"/api/books/{book_id}/requirements")).json()
-    assert rows[0]["text"] == "只属于当前清单"
-    assert rows[0]["source"] == (f"private:{recipient}" if recipient else "note")
-    await client.delete(f"/api/requirements/{rows[0]['id']}")
+    if recipient:
+        assert rows == []  # 任务6：私聊永远不再自动记要求。
+    else:
+        assert rows[0]["text"] == "只属于当前清单"
+        assert rows[0]["source"] == "note"
+        await client.delete(f"/api/requirements/{rows[0]['id']}")
     result = await intake_node({"queue": ["concept"]}, runtime(sessionmaker, book_id, job_id))
     assert not result.get("notes")
 

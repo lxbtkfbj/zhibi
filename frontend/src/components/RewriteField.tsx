@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { BookContext } from '../pages/book/context'
+import { useContext, useEffect, useRef, useState } from 'react'
 import { useChooseLibraryCandidate, useRewrite, useTargetCandidates, useTargetVersions, useRevertVersion, useLibraryConfig, useLibrary } from '../api/library'
 import type { TargetType, RewriteMode } from '../api/library'
 import { appliedSelectionText, selectedTextRange, storySentences } from '../lib/textSelection'
@@ -7,10 +8,11 @@ import { compareHistory } from '../lib/historyDisplay'
 
 export interface RewriteFieldProps {
   bookId: string; targetType: TargetType; targetId: string; path: string; value: string
-  locked?: boolean; disabled?: boolean; label?: string; emptyText?: string; className?: string; optionsOnly?: boolean
+  quoteWhere?: string | ((selectionPath: string) => string); locked?: boolean; disabled?: boolean; label?: string; emptyText?: string; className?: string; optionsOnly?: boolean
 }
 
-export function RewriteField({ bookId, targetType, targetId, path, value, locked, disabled, label, emptyText = '（空）', className, optionsOnly }: RewriteFieldProps) {
+export function RewriteField({ bookId, targetType, targetId, path, value, locked, disabled, label, emptyText = '（空）', className, optionsOnly, quoteWhere }: RewriteFieldProps) {
+  const chat = useContext(BookContext)
   const rewrite = useRewrite(bookId)
   const choose = useChooseLibraryCandidate(bookId)
   const candidates = useTargetCandidates(bookId, targetType, targetId)
@@ -66,7 +68,8 @@ export function RewriteField({ bookId, targetType, targetId, path, value, locked
   return <section data-rewrite-path={path} className={`group/rewrite relative min-w-0 space-y-2 ${className ?? ''}`}>
     <div className="flex flex-wrap items-center justify-between gap-2">{label && <h3 className="text-sm text-ink-2">{label}</h3>}<Button className={!optionsOnly && (targetType === 'character' || /^(fields|levels)\./.test(path)) ? '[@media(hover:hover)]:opacity-0 group-hover/rewrite:opacity-100 group-focus-within/rewrite:opacity-100' : undefined} variant="ghost" size="sm" disabled={busy || disabled} onClick={() => optionsOnly ? void run('options', path) : open(path)}>{optionsOnly ? '给我几个写法' : '改这一项'}</Button></div>
     <div ref={root} data-selectable-text className="whitespace-pre-wrap break-words text-[15px] leading-loose select-text">{content()}</div>
-    {selected && !disabled && <div className="sticky bottom-2 z-10 w-fit rounded-lg border border-line bg-card shadow-md"><Button size="sm" variant="soft" disabled={busy} onPointerDown={event => event.preventDefault()} onClick={() => open(activePath)}>改这一句</Button></div>}
+    {selected && <div className="sticky bottom-2 z-10 flex w-fit flex-wrap rounded-lg border border-line bg-card shadow-md">{!disabled && <Button size="sm" variant="soft" disabled={busy} onPointerDown={event => event.preventDefault()} onClick={() => open(activePath)}>改这一句</Button>}{chat && <Button size="sm" variant="ghost" onPointerDown={event => event.preventDefault()} onClick={() => { chat.askChief({ text: Array.from(value).slice(selected.start, selected.end).join(''), where: (typeof quoteWhere === 'function' ? quoteWhere(activePath) : quoteWhere) ?? (targetType === 'concept' ? '定调' : `大纲 · ${label ?? ''}`) }); window.getSelection()?.removeAllRanges(); setSelected(null) }}>问问主编</Button>}</div>}
+
     {menu && <div role="menu" aria-label="选择修改方式" className="flex flex-wrap gap-2 rounded-xl border border-line bg-card p-3 shadow-sm">{([['options', '给我几个写法'], ['instruction', '照我的意思改'], ['expand', '写细一点'], ['shorten', '精简一点']] as const).map(([mode, title]) => <Button key={mode} size="sm" variant="ghost" disabled={busy} onClick={() => { if (mode === 'instruction') { setInstructionPath(menu); setInstruction(''); setMenu(null) } else void run(mode, menu) }}>{title}</Button>)}</div>}
     {instruction !== null && <form className="space-y-2 rounded-lg border border-line p-3" onSubmit={event => { event.preventDefault(); if (instruction.trim()) void run('instruction', instructionPath, instruction.trim()) }}><label className="text-sm">照我的意思改<textarea autoFocus aria-label="修改意见" value={instruction} onChange={event => setInstruction(event.target.value)} className={`${inputClass} mt-2`} /></label><div className="flex gap-2"><Button type="submit" size="sm" disabled={!instruction.trim() || busy}>照这个改</Button><Button size="sm" variant="ghost" disabled={busy} onClick={() => setInstruction(null)}>取消</Button></div></form>}
     {busy && <p role="status" className="text-sm text-chief">主编正在想……</p>}

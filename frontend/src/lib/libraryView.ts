@@ -55,6 +55,7 @@ export function parentChoices(items: LibraryItem[], item: LibraryItem): LibraryI
   return items.filter(row => row.category === item.category && !excluded.has(row.id))
 }
 export function suggestionAction(suggestion: LibrarySuggestion): string {
+  if (suggestion.kind === 'chat') return '现在改'
   const operation = suggestion.payload.op
   if (operation === 'create_entry' || operation === 'create_character' || operation === 'create_category') return '建'
   if (suggestion.kind === 'gap' || suggestion.kind === 'fill_gap' || suggestion.kind === 'fill_gaps') return '补'

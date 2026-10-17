@@ -43,7 +43,7 @@ from app.agents.rhythm import rhythm_text
 from app.book_settings import settings_of
 from app.models import Book, Chapter, Character, PlotUnit, Secret, Volume, WorldEntry
 from app.services.library_context import LibraryContext, load_context
-from app.services.requirements import list_requirements
+from app.services.requirements import active_requirements, requirement_text
 from app.services.setup_store import load_ledger, load_nodes, load_secrets, load_threads, unit_dict, volume_dict
 
 RECENT_CHAPTERS = 5
@@ -354,8 +354,8 @@ def ledger_for_refs(ledger: list[dict[str, Any]], refs: list[str], volume: int) 
 
 
 async def requirements_of(book: Book, session: AsyncSession) -> str:
-    rows = await list_requirements(session, book.id)
-    return format_requirements([row.text for row in rows], [], settings_of(book))
+    rows = await active_requirements(session, book.id)
+    return format_requirements([requirement_text(row) for row in rows], [], settings_of(book))
 
 
 # ---------- 伏笔回收：摘出当初埋下那一章的原文 ----------

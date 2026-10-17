@@ -5,7 +5,7 @@ import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from redis.asyncio import Redis
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,7 +16,7 @@ from app.api.deps import SessionDep, get_book, get_redis
 from app.api.library_ai import RewriteIn, call_model, rewrite_target, say
 from app.db import get_sessionmaker
 from app.graphs.deps import cancel_key
-from app.models import Book, Job, LlmCall, MeetingMessage
+from app.models import Book, Job, LlmCall, MeetingMessage, SettingSuggestion, SettingVersion
 from app.schemas import (
     Answers,
     Decision,
@@ -29,9 +29,11 @@ from app.schemas import (
     UsageOut,
 )
 from app.services import jobs, setup_store
+from app.services.chat import reply_background
+from app.services.chat_context import ROLES, dialogue, dialogue_text, thread_of
 from app.services.library_context import load_context
 from app.services.meeting import job_dict, message_dict, post_message, publish, stream_key
-from app.services.requirements import add_requirement, note_source
+from app.services.requirements import SCOPE_INPUTS, add_requirement
 from app.services.usage import sum_known, token_sum
 from app.services.versions import target_type_of
 
@@ -276,45 +278,48 @@ async def answer(
 
 @router.post("/books/{book_id}/notes", response_model=MeetingMessageOut, status_code=201)
 async def add_note(
-    body: NoteIn, book: Book = Depends(get_book), session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)
+    body: NoteIn,
+    background_tasks: BackgroundTasks,
+    book: Book = Depends(get_book),
+    session: AsyncSession = SessionDep,
+    redis: Redis = Depends(get_redis),
 ) -> MeetingMessageOut:
-    """工作中由流程消费插话；空闲或不读插话的任务中，直接记为下次开工的要求。"""
-    # 路由判定不能只看最近几条任务：较早的 waiting_author 仍属于不空闲。
-    job = await _active_note_job(session, book.id)
-    if job is None:
-        job = await jobs.active_job(session, book.id)
-    legacy_private = job is not None and jobs.is_legacy_setup(job) and body.to is not None
-    if job is not None and jobs.pending_kind(job) in jobs.DECISION_KINDS and not legacy_private:
-        raise HTTPException(409, "等你拍板时请直接提意见")
-    content = body.content.strip()
+    content, book_id = body.content.strip(), book.id
     if not content:
         raise HTTPException(422, "请写下你的话")
-    if job is None or job.status not in jobs.ACTIVE_STATUSES:
-        job = None
-        book_id = book.id
-        ctx = await load_context(session, book)
-        library = ctx.library
-        await session.rollback()
-        intent = await call_model(book_id, "chief", LibraryIntent, "library_route", library=library, note=content)
-        book = await session.get(Book, book_id)
-        # 路由耗时期间可能开工；此时不再把插话当作空闲编辑，回到原要求／拍板规则。
-        job = await _active_note_job(session, book_id)
-        legacy_private = job is not None and jobs.is_legacy_setup(job) and body.to is not None
-        if job is not None and jobs.pending_kind(job) in jobs.DECISION_KINDS and not legacy_private:
-            raise HTTPException(409, "等你拍板时请直接提意见")
-        if job is None and intent.kind == "改设定":
-            ctx = await load_context(session, book)
-            target = ctx.find_target(intent.target_name)
-            rewrite_body = None
-            if target is not None:
-                rewrite_body = RewriteIn(
-                    target_type=target_type_of(target),
-                    target_id=target.id,
-                    path=ctx.route_path(target, intent.part, intent.quote),
-                    mode="options" if intent.mode == "给几个写法" else "instruction",
-                    instruction=intent.instruction,
-                )
-            data = await post_message(
+    payload = {
+        "requirement_saved": True,
+        **({"thread": body.to} if body.to else {}),
+        **({"quote": body.quote.model_dump()} if body.quote else {}),
+    }
+    # 私聊必须在任何作业状态之前分流，永远不进入分类、要求或重写路径。
+    if body.to:
+        payload.update(outcome={"kind": "chat"}, chat_role=body.to)
+        data = await post_message(
+            session,
+            redis,
+            book_id=book_id,
+            job_id=None,
+            speaker="author",
+            kind="note",
+            content=content,
+            payload=payload,
+        )
+        background_tasks.add_task(reply_background, book_id, body.to, redis)
+        return MeetingMessageOut(**data)
+    ctx = await load_context(session, book)
+    state = await thread_of(session, book_id, "group")
+    recent = dialogue_text((await dialogue(session, book_id, "group", state.reset_after))[-6:])
+    library = ctx.library
+    await session.commit()
+    try:
+        intent = await call_model(
+            book_id, "chief", LibraryIntent, "library_route", library=library, recent=recent, note=content
+        )
+    except HTTPException as exc:
+        if exc.status_code == 502:
+            # 分类失败不能当修改意见；保留作者的话但绝不写要求或唤醒作业。
+            await post_message(
                 session,
                 redis,
                 book_id=book_id,
@@ -322,44 +327,125 @@ async def add_note(
                 speaker="author",
                 kind="note",
                 content=content,
-                payload={
-                    "library_operation": True,
-                    "requirement_saved": True,
-                    **({"thread": body.to} if body.to else {}),
-                },
+                payload={**payload, "outcome": {"kind": "chat"}, "classification_failed": True},
             )
-            if rewrite_body is None:
-                reply = f"没找到「{intent.target_name}」这一条。去设定库点那一处改，或者告诉我它在哪一类。"
-            else:
-                await rewrite_target(session, redis, book, rewrite_body)
-                reply = intent.reply
-            await say(session, redis, book_id, "chief", reply)
-            return MeetingMessageOut(**data)
-    payload = {"requirement_saved": True, **({"thread": body.to} if body.to else {})}
-    deferred = (
-        job is not None
-        and not legacy_private
-        and job.kind in ("book_setup", "write_book")
-        and (job.status in jobs.BUSY_STATUSES or jobs.pending_kind(job) == "setup_questions")
-    )
-    # 不让失败任务以后恢复时再消费一遍已经立即记下的插话。
-    job_id = job.id if deferred else None
-    # Persist immediately, including deferred notes. Graph checkpoints never own the ledger.
-    await add_requirement(session, book.id, content, note_source(payload))
-    data = await post_message(
-        session, redis, book_id=book.id, job_id=job_id, speaker="author", kind="note", content=content, payload=payload
-    )
-    if not deferred:
-        await post_message(
+        raise
+    # 分类期间状态可能改变。重新取当前状态，不能按发问前的状态修改。
+    session.expire_all()
+    book = await session.get(Book, book_id)
+    job = await _active_note_job(session, book_id)
+    if intent.kind != "提问闲聊" and job and job.status == "waiting_author":
+        raise HTTPException(409, {"code": "use_feedback", "message": "等你拍板时请直接提意见"})
+    if intent.kind == "提问闲聊":
+        payload.update(outcome={"kind": "chat"}, chat_role=ROLES[intent.who])
+        data = await post_message(
             session,
             redis,
-            book_id=book.id,
+            book_id=book_id,
             job_id=None,
-            speaker=body.to or "chief",
-            kind="speech",
-            content="记下了，下次开工就照办。",
+            speaker="author",
+            kind="note",
+            content=content,
             payload=payload,
         )
+        background_tasks.add_task(reply_background, book_id, "group", redis)
+        return MeetingMessageOut(**data)
+    working = job is not None and job.status in jobs.BUSY_STATUSES
+    if intent.kind == "改设定" and working and job.kind in {"write_book", "rewrite_chapter"}:
+        title = content[:40] + ("……" if len(content) > 40 else "")
+        suggestion = SettingSuggestion(
+            book_id=book_id,
+            kind="chat",
+            title=f"群聊里说的：{title}（编辑部当时在写，没改）",
+            payload={"op": "note", "content": content},
+        )
+        session.add(suggestion)
+        await session.flush()
+        payload["outcome"] = {"kind": "later", "suggestion_id": str(suggestion.id)}
+        reply = "编辑部正在写，这一处等写完再改。我放进待处理的建议了，写完点「现在改」。"
+        data = await post_message(
+            session,
+            redis,
+            book_id=book_id,
+            job_id=None,
+            speaker="author",
+            kind="note",
+            content=content,
+            payload=payload,
+        )
+    elif intent.kind == "写作要求" or working:
+        row = await add_requirement(session, book_id, intent.requirement or content, "note", SCOPE_INPUTS[intent.scope])
+        payload["outcome"] = {"kind": "to_job" if working else "requirement", "requirement_id": str(row.id)}
+        data = await post_message(
+            session,
+            redis,
+            book_id=book_id,
+            job_id=job.id if working else None,
+            speaker="author",
+            kind="note",
+            content=content,
+            payload=payload,
+        )
+        row.message_id = data["id"]
+        await session.commit()
+        reply = intent.reply or "记下了。"
+    else:
+        ctx = await load_context(session, book)
+        target = ctx.find_target(intent.target_name)
+        payload["library_operation"] = True
+        payload["outcome"] = {"kind": "not_found", "target_name": intent.target_name}
+        if target is not None:
+            body_rewrite = RewriteIn(
+                target_type=target_type_of(target),
+                target_id=target.id,
+                path=ctx.route_path(target, intent.part, intent.quote),
+                mode="options" if intent.mode == "给几个写法" else "instruction",
+                instruction=intent.instruction or content,
+            )
+            outcome = {
+                "kind": "edit",
+                "target_type": body_rewrite.target_type,
+                "target_id": str(target.id),
+                "target_label": ctx.target_label(target, body_rewrite.path),
+                "mode": body_rewrite.mode,
+            }
+        data = await post_message(
+            session,
+            redis,
+            book_id=book_id,
+            job_id=None,
+            speaker="author",
+            kind="note",
+            content=content,
+            payload=payload,
+        )
+        if target is None:
+            reply = f"没找到「{intent.target_name}」这一条。去设定库点那一处改，或者告诉我它在哪一类。"
+        else:
+            result = await rewrite_target(session, redis, book, body_rewrite, require_idle=True)
+            if body_rewrite.mode == "options":
+                outcome["candidate_id"] = str(result["candidate"].id)
+            else:
+                versions = list(
+                    await session.scalars(
+                        select(SettingVersion)
+                        .where(
+                            SettingVersion.target_type == body_rewrite.target_type,
+                            SettingVersion.target_id == body_rewrite.target_id,
+                        )
+                        .order_by(SettingVersion.version.desc())
+                        .limit(2)
+                    )
+                )
+                outcome["revert_version_id"] = str(versions[1].id)
+            message = await session.get(MeetingMessage, data["id"])
+            message.payload = {**payload, "outcome": outcome}
+            await session.commit()
+            data = message_dict(message)
+            await publish(redis, book_id, "message_update", data)
+            reply = intent.reply or "改好了，去看看。"
+    if reply:
+        await say(session, redis, book_id, "chief", reply)
     return MeetingMessageOut(**data)
 
 

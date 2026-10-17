@@ -1,3 +1,5 @@
+import { RequirementDialog, ScopeSelect } from '../components/RequirementDialog'
+import type { RequirementScope } from '../lib/chat'
 import { useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
@@ -14,27 +16,33 @@ function RequirementItem({ item }: { item: AuthorRequirement }) {
   const qc = useQueryClient()
   const [editing, setEditing] = useState(false)
   const [text, setText] = useState(item.text)
-  const update = useMutation({ mutationFn: () => patch<AuthorRequirement>(`/requirements/${item.id}`, { text }), onSuccess: () => { setEditing(false); void qc.invalidateQueries({ queryKey: settingsKeys.requirements(item.book_id) }) } })
+  const [scope, setScope] = useState<RequirementScope | null>(null)
+  const update = useMutation({ mutationFn: () => patch<AuthorRequirement>(`/requirements/${item.id}`, { text, ...(scope ? { scope } : {}) }), onSuccess: () => { setEditing(false); void qc.invalidateQueries({ queryKey: settingsKeys.requirements(item.book_id) }) } })
   const remove = useMutation({ mutationFn: () => del(`/requirements/${item.id}`), onSuccess: () => qc.invalidateQueries({ queryKey: settingsKeys.requirements(item.book_id) }) })
   const date = new Date(item.created_at)
   const formatted = Number.isNaN(date.getTime()) ? item.created_at : date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-  return <SettingsRow label={item.text} hint={`${requirementSource(item.source)} · ${formatted}`} extra={<>
-    {editing && <div className="space-y-2"><textarea className="settings-textarea" aria-label="修改作者要求" value={text} onChange={event => setText(event.target.value)} /><div className="flex justify-end gap-2"><SettingsButton disabled={update.isPending} onClick={() => setEditing(false)}>取消</SettingsButton><SettingsButton primary disabled={update.isPending || !text.trim()} onClick={() => update.mutate()}>{update.isPending ? '保存中…' : '保存'}</SettingsButton></div></div>}
+  return <SettingsRow className={!item.active && !editing ? 'opacity-50' : undefined} label={item.text} hint={`${item.label} · ${requirementSource(item.source)} · ${formatted}`} extra={<>
+    {editing && <div className="space-y-2"><textarea className="settings-textarea" aria-label="修改作者要求" value={text} onChange={event => setText(event.target.value)} /><ScopeSelect value={scope ?? (item.scope === 'chapter' ? 'next_chapter' : item.scope === 'volume' ? 'this_volume' : 'always')} onChange={setScope} /><div className="flex justify-end gap-2"><SettingsButton disabled={update.isPending} onClick={() => setEditing(false)}>取消</SettingsButton><SettingsButton primary disabled={update.isPending || !text.trim()} onClick={() => update.mutate()}>{update.isPending ? '保存中…' : '保存'}</SettingsButton></div></div>}
     <ErrorText error={update.error || remove.error} />
-  </>}><SettingsButton disabled={remove.isPending} onClick={() => { setText(item.text); setEditing(true) }}>修改</SettingsButton><SettingsButton danger disabled={remove.isPending} onClick={() => { if (confirm('删除这条作者要求？删除后，下一步起编辑部将不再收到它。')) remove.mutate() }}>删除</SettingsButton></SettingsRow>
+  </>}><SettingsButton disabled={remove.isPending} onClick={() => { setText(item.text); setScope(null); setEditing(true) }}>修改</SettingsButton><SettingsButton danger disabled={remove.isPending} onClick={() => { if (confirm('删除这条作者要求？删除后，下一步起编辑部将不再收到它。')) remove.mutate() }}>删除</SettingsButton></SettingsRow>
 }
 
+interface TidyItem { id: string; text: string; action: string; reason: string; rewrite: string }
 function RequirementsList({ bookId }: { bookId: string }) {
   const qc = useQueryClient()
   const query = useAuthorRequirements(bookId)
   const [adding, setAdding] = useState(false)
-  const [text, setText] = useState('')
-  const create = useMutation({ mutationFn: () => post<AuthorRequirement>(`/books/${bookId}/requirements`, { text }), onSuccess: () => { setText(''); setAdding(false); void qc.invalidateQueries({ queryKey: settingsKeys.requirements(bookId) }) } })
-  return <SettingsGroup title="作者要求清单 · 一直有效，过时的自己删" action={<SettingsButton onClick={() => setAdding(true)}>＋ 添加</SettingsButton>}>
-    {adding && <SettingsRow label="手动添加" extra={<div className="space-y-2"><textarea className="settings-textarea" aria-label="新增作者要求" placeholder="写下需要一直遵守的要求" autoFocus value={text} onChange={event => setText(event.target.value)} /><div className="flex justify-end gap-2"><SettingsButton disabled={create.isPending} onClick={() => setAdding(false)}>取消</SettingsButton><SettingsButton primary disabled={create.isPending || !text.trim()} onClick={() => create.mutate()}>{create.isPending ? '保存中…' : '添加'}</SettingsButton></div><ErrorText error={create.error} /></div>} />}
+  const [tidyItems, setTidyItems] = useState<TidyItem[] | null>(null)
+  const [selected, setSelected] = useState<string[]>([])
+  const tidy = useMutation({ mutationFn: () => post<{ items: TidyItem[] }>(`/books/${bookId}/requirements/tidy`), onSuccess: response => { const items = response.items.filter(item => item.action !== '保留'); setTidyItems(items); setSelected(items.map(item => item.id)) } })
+  const apply = useMutation({ mutationFn: () => post(`/books/${bookId}/requirements/apply`, { delete: tidyItems?.filter(item => selected.includes(item.id) && item.action === '删掉').map(item => item.id), rewrite: tidyItems?.filter(item => selected.includes(item.id) && item.action === '改写').map(item => ({ id: item.id, text: item.rewrite })) }), onSuccess: () => { setTidyItems(null); void qc.invalidateQueries({ queryKey: settingsKeys.requirements(bookId) }) } })
+  return <SettingsGroup title="作者要求清单" action={<div className="flex gap-2"><SettingsButton disabled={tidy.isPending} onClick={() => tidy.mutate()}>{tidy.isPending ? '主编正在看…' : '整理一下'}</SettingsButton><SettingsButton onClick={() => setAdding(true)}>＋ 添加</SettingsButton></div>}>
+    {adding && <RequirementDialog initial="" onClose={() => setAdding(false)} onSave={async (text, scope) => { await post(`/books/${bookId}/requirements`, { text, scope }); await qc.invalidateQueries({ queryKey: settingsKeys.requirements(bookId) }) }} />}
+    {tidyItems && <SettingsRow label="主编的整理建议" extra={<div className="space-y-3">{tidyItems.length === 0 ? <p className="text-sm text-ink-2">看过了，没有要整理的。</p> : tidyItems.map(item => <label key={item.id} className="flex gap-2 rounded-lg border border-line p-3"><input type="checkbox" checked={selected.includes(item.id)} onChange={event => setSelected(previous => event.target.checked ? [...previous, item.id] : previous.filter(id => id !== item.id))} /><span className="text-sm leading-7"><span className="block">{item.text}</span><span className="block text-chief">{item.action === '删掉' ? '删掉' : `改写成「${item.rewrite}」`}</span><span className="text-xs text-ink-2">{item.reason}</span></span></label>)}<div className="flex justify-end gap-2"><SettingsButton disabled={apply.isPending} onClick={() => setTidyItems(null)}>算了</SettingsButton>{tidyItems.length > 0 && <SettingsButton primary disabled={apply.isPending} onClick={() => apply.mutate()}>照勾的改</SettingsButton>}</div><ErrorText error={apply.error} /></div>} />}
+    {!!tidy.error && <SettingsRow label={<ErrorText error={tidy.error} />} />}
     {query.isLoading && <SettingsRow label={<Spinner />} />}
     {query.error && <SettingsRow label={<ErrorText error={query.error} />} />}
-    {!query.isLoading && query.data?.length === 0 && <SettingsRow label="还没有作者要求" hint="动笔前的回答、插话、私聊、试读和卷纲意见会记录在这里。" />}
+    {!query.isLoading && query.data?.length === 0 && <SettingsRow label="还没有作者要求" hint="群聊里交代的要求、明确记下的聊天结论和拍板意见会记录在这里。" />}
     {query.data?.map(item => <RequirementItem key={item.id} item={item} />)}
   </SettingsGroup>
 }

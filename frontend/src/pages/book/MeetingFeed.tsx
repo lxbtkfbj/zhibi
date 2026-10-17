@@ -1,3 +1,4 @@
+import { ChatOutcome, ConclusionActions } from './ChatActions'
 import { nextSegmentFields, protagonistFields, segmentFields, worldFields, type SetupField } from '../../lib/setupPresentation'
 import { useReducedMotion } from '../../lib/appearance'
 import clsx from 'clsx'
@@ -651,7 +652,7 @@ function GroupTag() {
   return <span className="rounded-sm border border-divider px-1 text-xs text-ink-2">群聊</span>
 }
 
-function MessageRow({ message, fromGroup }: { message: MeetingMessage; fromGroup?: boolean }) {
+function MessageRow({ message, fromGroup, latestPrivate }: { message: MeetingMessage; fromGroup?: boolean; latestPrivate?: boolean }) {
   const meta = ROLE_META[message.speaker] ?? ROLE_META.system
   const author = message.speaker === 'author'
   if (message.kind === 'error') {
@@ -680,6 +681,8 @@ function MessageRow({ message, fromGroup }: { message: MeetingMessage; fromGroup
         )}>
           {message.kind === 'artifact' ? <ArtifactCard message={message} /> : author ? message.content : <Speech message={message} />}
         </div>
+        {author && !fromGroup && <ChatOutcome message={message} />}
+        {latestPrivate && message.payload?.thread && <ConclusionActions thread={message.payload.thread} />}
       </div>
     </div>
   )
@@ -761,6 +764,7 @@ export function MeetingFeed({
   const stick = useRef(true)
   const reduce = useReducedMotion()
   const entries = visibleEntries(messages, conversation, showGroup)
+  const latestPrivate = conversation !== 'group' ? messages.filter(m => m.payload?.thread === conversation && m.speaker === conversation && m.kind === 'speech').at(-1)?.id : undefined
   const showWriting = conversation === 'group' || (conversation === 'writer' && showGroup)
   const writing = working && draft && !draft.done && showWriting ? draft : null
   const lastEntry = entries.at(-1)
@@ -791,7 +795,7 @@ export function MeetingFeed({
       {entries.length === 0 && !writing && (
         <div className="px-4 py-12 text-center">
           <p className="font-serif text-lg text-ink-2">{conversation === 'group' ? '编辑部，等你开口' : `和${ROLE_META[conversation].name}说说你的想法`}</p>
-          <p className="mt-2 text-sm leading-relaxed text-ink-2">{conversation === 'group' ? '讨论和产出会留在这里，书稿在右边展开。' : '点名插话会记入作者要求，并由编辑部在工作时处理。'}</p>
+          <p className="mt-2 text-sm leading-relaxed text-ink-2">{conversation === 'group' ? '讨论和产出会留在这里，书稿在右边展开。' : '这里只商量，聊出结论后由你决定要不要落实。'}</p>
         </div>
       )}
       {entries.map((entry, index) => (
@@ -809,7 +813,7 @@ export function MeetingFeed({
             </button>
           ) : entry.statuses ? (
             <StatusGroup messages={entry.statuses} live={liveStatus && index === entries.length - 1} fromGroup={entry.fromGroup} />
-          ) : <MessageRow message={entry.message} fromGroup={entry.fromGroup} />}
+          ) : <MessageRow message={entry.message} fromGroup={entry.fromGroup} latestPrivate={entry.message.id === latestPrivate} />}
         </motion.div>
       ))}
       {writing && <LiveDraftRow draft={writing} fromGroup={conversation !== 'group'} />}

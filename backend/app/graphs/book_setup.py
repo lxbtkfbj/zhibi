@@ -24,11 +24,12 @@ from app.services.meeting import publish
 from app.services.notes import note_prompt, note_thread
 from app.services.requirements import (
     active_notes,
+    active_requirements,
     add_requirement,
     deleted_texts,
     import_legacy_checkpoint,
     ingest_notes,
-    list_requirements,
+    requirement_text,
 )
 from app.services.versions import target_type_of
 
@@ -130,12 +131,12 @@ async def live_state(state: SetupState, d: GraphDeps, *, refresh: bool = False) 
         await session.commit()
         book = await session.get(Book, d.book_id)
         settings = settings_of(book) if book else {}
-        rows = await list_requirements(session, d.book_id)
+        rows = await active_requirements(session, d.book_id)
         deleted = await deleted_texts(session, d.book_id)
         saved = _saved_state(await setup_store.load_new_setup(session, d.book_id)) if book else {}
     if state.get("dirty_concept") and not refresh:
         saved.pop("concept", None)
-    current = {**state, **saved, "settings": settings, "live_requirements": [row.text for row in rows]}
+    current = {**state, **saved, "settings": settings, "live_requirements": [requirement_text(row) for row in rows]}
     instructions = dict(state.get("instructions") or {})
     for target, sources in (state.get("instruction_sources") or {}).items():
         if any(source in deleted for source in sources):
@@ -324,15 +325,19 @@ async def _review(d: GraphDeps, scope: str, kind: str = "review") -> None:
 
 async def _library_feedback(d: GraphDeps, feedback: str) -> None:
     from app.api.library_ai import RewriteIn, rewrite_target
+    from app.services.chat_context import dialogue, dialogue_text, thread_of
 
     async with d.sessionmaker() as session:
         ctx = await load_context(session, await session.get(Book, d.book_id))
         library = ctx.library
+        thread = await thread_of(session, d.book_id, "group")
+        recent = dialogue_text((await dialogue(session, d.book_id, "group", thread.reset_after))[-6:])
+        await session.commit()
     result = await d.llm.structured(
         "chief",
         schemas.LibraryIntent,
         editorial.persona("chief"),
-        render("library_route", library=library, note=feedback),
+        render("library_route", library=library, recent=recent, note=feedback),
         purpose="library_route",
     )
     if result.kind == "改设定":
@@ -350,7 +355,8 @@ async def _library_feedback(d: GraphDeps, feedback: str) -> None:
                 )
                 await rewrite_target(session, d.redis, book, body)
                 await session.commit()
-                await d.emit.say("chief", result.reply)
+                if result.reply:
+                    await d.emit.say("chief", result.reply)
                 return
     await _review(d, f"按作者的意见查一遍：{feedback}")
 

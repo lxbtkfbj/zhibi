@@ -1,0 +1,47 @@
+import type { LibraryConfig, LibraryItem } from '../api/library'
+import type { AuthorRequirement } from '../api/settings'
+import type { ChatOutcome } from '../api/types'
+
+export const REQUIREMENT_SCOPES = [['always', '一直有效'], ['next_chapter', '只管下一章'], ['this_volume', '只管这一卷'], ['next_volume', '只管下一卷']] as const
+export type RequirementScope = typeof REQUIREMENT_SCOPES[number][0]
+export interface ChatQuote { text: string; where: string }
+export interface ChatTyping { thread: string; speaker: string; on: boolean; at: number }
+
+export function isFeedbackConflict(error: unknown, direct: boolean) {
+  return !direct && typeof error === 'object' && error !== null && 'status' in error && error.status === 409 && 'code' in error && error.code === 'use_feedback'
+}
+
+export async function sendChatFirst<T>(sendNote: () => Promise<T>, sendFeedback: () => Promise<void>, direct: boolean) {
+  try { return await sendNote() } catch (error) {
+    if (!isFeedbackConflict(error, direct)) throw error
+    await sendFeedback()
+  }
+}
+
+export function typingVisible(value: ChatTyping, thread: string, now: number) { return value.thread === thread && value.on && now - value.at < 120000 }
+
+export function outcomeCopy(outcome: ChatOutcome, requirement?: AuthorRequirement) {
+  if (outcome.kind === 'requirement' || outcome.kind === 'to_job') {
+    if (!requirement) return { text: '已撤销', actions: [] }
+    return { text: outcome.kind === 'to_job' ? '已交给编辑部：做完手头这一步就照办' : `已记成要求：「${requirement.text}」（${requirement.label}）`, actions: outcome.kind === 'to_job' ? ['撤销'] : ['撤销', '改一下'] }
+  }
+  if (outcome.kind === 'chat') return { text: '只是聊天，没有记', actions: ['其实要记下'] }
+  if (outcome.kind === 'later') return { text: '编辑部写完再改：在待处理的建议里', actions: ['去看看'] }
+  if (outcome.kind === 'edit') return { text: `${outcome.mode === 'options' ? '给了三个写法' : '已改'}：${outcome.target_label}`, actions: outcome.mode === 'options' ? ['去选一个'] : ['去看看', '撤销'] }
+  return { text: '', actions: [] }
+}
+
+/** 与设定库的中文部分名一致，角色字段名来自后端配置，不把数据库路径展示给作者。 */
+export function libraryQuoteWhere(item: LibraryItem, path: string, config: LibraryConfig) {
+  const selected = path.includes('@')
+  path = path.split('@')[0]
+  let part = path
+  const level = /^levels\.(\d+)\.(name|text)$/.exec(path)
+  if (level) part = `第 ${Number(level[1]) + 1} 级「${item.levels?.[Number(level[1])]?.name ?? ''}」的${level[2] === 'name' ? '名称' : '介绍'}`
+  else if (path.startsWith('fields.')) part = path.slice(7)
+  else if (path === 'name') part = '名称'
+  else if (path === 'one_line') part = '一句话'
+  else if (path === 'content') part = item.style === 'ladder' ? '总说明' : '一段话'
+  else part = config.character_category.fields.find(field => field.column === path)?.name ?? (path === 'aliases' ? '别名' : path)
+  return `设定库 · ${item.name} · ${part}${selected ? '里选中的一句' : ''}`
+}

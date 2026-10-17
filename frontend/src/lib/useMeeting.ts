@@ -1,6 +1,8 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { keys } from '../api/hooks'
+import { settingsKeys } from '../api/settings'
+import type { ChatTyping } from './chat'
 import { libraryKeys } from '../api/library'
 import type { BookDetail, Job, LiveDraft, MeetingMessage } from '../api/types'
 
@@ -18,6 +20,7 @@ export function useMeeting(bookId: string) {
   const [connected, setConnected] = useState(false)
   // 写手正在写的正文：每条推送都带着这一章到目前为止的全文，中途打开页面也能接上
   const [draft, setDraft] = useState<{ bookId: string; draft: LiveDraft | null }>({ bookId, draft: null })
+  const [typing, setTyping] = useState<Record<string, ChatTyping>>({})
   const qc = useQueryClient()
 
   useEffect(() => {
@@ -43,6 +46,7 @@ export function useMeeting(bookId: string) {
         if (base.length && base[base.length - 1].id >= message.id) return prev
         return { bookId, messages: [...base, message] }
       })
+      void qc.invalidateQueries({ queryKey: settingsKeys.requirements(bookId) })
       if (message.kind === 'artifact' && REFRESH_ON.has(message.payload?.type ?? '')) {
         for (const key of [libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), libraryKeys.candidates(bookId), libraryKeys.versions(bookId), ['outline-tree', bookId]]) void qc.invalidateQueries({ queryKey: key })
         for (const key of [keys.chapters(bookId), keys.outline(bookId), keys.book(bookId)]) qc.invalidateQueries({ queryKey: key })
@@ -52,6 +56,15 @@ export function useMeeting(bookId: string) {
         }
         if (['threads', 'segment_volumes'].includes(message.payload?.type ?? '')) qc.invalidateQueries({ queryKey: keys.threads(bookId) })
       }
+    })
+    source.addEventListener('message_update', event => {
+      const message = JSON.parse((event as MessageEvent).data) as MeetingMessage
+      setState(prev => prev.bookId === bookId ? { bookId, messages: prev.messages.map(m => m.id === message.id ? message : m) } : prev)
+      void qc.invalidateQueries({ queryKey: settingsKeys.requirements(bookId) })
+    })
+    source.addEventListener('chat_typing', event => {
+      const value = JSON.parse((event as MessageEvent).data) as ChatTyping
+      setTyping(prev => ({ ...prev, [value.thread]: { ...value, at: Date.now() } }))
     })
     source.addEventListener('draft', (event) => {
       setDraft({ bookId, draft: JSON.parse((event as MessageEvent).data) as LiveDraft })
@@ -73,6 +86,7 @@ export function useMeeting(bookId: string) {
   return {
     messages: state.bookId === bookId ? state.messages : [],
     connected,
+    typing,
     draft: draft.bookId === bookId ? draft.draft : null,
   }
 }

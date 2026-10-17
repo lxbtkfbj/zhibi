@@ -14,18 +14,18 @@ from app import library_config as config
 from app.agents import schemas as s
 from app.agents.context import format_requirements
 from app.agents.editorial import persona
-from app.api.deps import SessionDep, get_book, get_redis
+from app.api.deps import SessionDep, ensure_idle, get_book, get_redis
 from app.api.library import _splice_error, _validate_changed_target
 from app.db import get_sessionmaker
 from app.library_schemas import CandidateOut, SuggestionOut
 from app.llm.router import LLMRouter
-from app.models import Book, Character, SettingCandidate, SettingSuggestion, WorldEntry
+from app.models import Book, Character, Job, SettingCandidate, SettingSuggestion, WorldEntry
 from app.prompts import render
 from app.services.library import ensure_unlocked, load_target, lock_book
 from app.services.library_cascade import generate_cascade_suggestions, iter_text_paths
 from app.services.library_context import load_context, rewrite_mode
 from app.services.meeting import post_message
-from app.services.requirements import list_requirements
+from app.services.requirements import active_requirements, requirement_text
 from app.services.splice import read_path, splice
 from app.services.versions import record_version, snapshot_of, target_type_of
 
@@ -74,7 +74,7 @@ async def say(session, redis, book_id, speaker, content):
     )
 
 
-async def rewrite_target(session, redis, book, body: RewriteIn):
+async def rewrite_target(session, redis, book, body: RewriteIn, *, require_idle=False):
     if body.mode == "instruction" and not body.instruction.strip():
         raise HTTPException(422, "先写一句你想怎么改")
     book_id = book.id
@@ -108,6 +108,11 @@ async def rewrite_target(session, redis, book, body: RewriteIn):
         **values,
     )
     await lock_book(session, book_id)
+    if require_idle:
+        await ensure_idle(session, book_id)
+        if await session.scalar(select(Job.id).where(Job.book_id == book_id, Job.status == "waiting_author").limit(1)):
+            # 作者消息已保存；不要返回 use_feedback，避免前端把同一句再交一次。
+            raise HTTPException(409, "编辑部状态变了，请刷新后再改")
     target = await load_target(session, book_id, body.target_type, body.target_id, for_update=True)
     _unlocked(target)
     if body.mode == "options":
@@ -184,12 +189,12 @@ async def fill_gaps(
 ):
     book_id = book.id
     ctx = await load_context(session, book)
-    requirements = await list_requirements(session, book_id)
+    requirements = await active_requirements(session, book_id)
     values = dict(
         concept=ctx.concept,
         library=ctx.library,
         genre_defaults=ctx.genre_defaults,
-        requirements=format_requirements([row.text for row in requirements], [], book.settings),
+        requirements=format_requirements([requirement_text(row) for row in requirements], [], book.settings),
     )
     await session.rollback()
     result = await call_model(book_id, "chief", s.GapReport, "library_fill_gaps", **values)

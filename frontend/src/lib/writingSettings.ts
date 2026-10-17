@@ -12,6 +12,7 @@ export function requirementSource(source: string): string {
   if (source.startsWith('volume:')) return `第 ${source.slice(7)} 卷卷纲意见`
   if (source.startsWith('unit:')) return '单元章纲意见'
   if (source.startsWith('segment:')) return `第 ${source.slice(8)} 篇规划意见`
+  if (source.startsWith('chat:')) return `和${({ chief: '主编', lorekeeper: '设定师', writer: '写手', reviewer: '审稿' } as Record<string, string>)[source.slice(5)] ?? source.slice(5)}聊天时记下`
   if (source.startsWith('private:')) {
     const roles: Record<string, string> = { chief: '主编', lorekeeper: '设定师', writer: '写手', reviewer: '审稿' }
     return `私聊${roles[source.slice(8)] ?? source.slice(8)}`

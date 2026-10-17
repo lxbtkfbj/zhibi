@@ -5,8 +5,8 @@ export function SettingsGroup({ title, action, children }: { title: string; acti
   return <section className="settings-group"><div className="settings-group-heading"><h3>{title}</h3>{action}</div><div className="settings-list">{children}</div></section>
 }
 
-export function SettingsRow({ label, hint, children, extra, status }: { label: ReactNode; hint?: ReactNode; children?: ReactNode; extra?: ReactNode; status?: string }) {
-  return <div className="settings-row"><div className="settings-row-main"><div className="settings-row-copy"><div className="settings-row-label">{label}{status && <span className="settings-save-status" role="status">{status}</span>}</div>{hint && <div className="settings-row-hint">{hint}</div>}</div>{children && <div className="settings-row-control">{children}</div>}</div>{extra && <div className="settings-row-extra">{extra}</div>}</div>
+export function SettingsRow({ label, hint, children, extra, status, className = '' }: { className?: string; label: ReactNode; hint?: ReactNode; children?: ReactNode; extra?: ReactNode; status?: string }) {
+  return <div className={`settings-row ${className}`}><div className="settings-row-main"><div className="settings-row-copy"><div className="settings-row-label">{label}{status && <span className="settings-save-status" role="status">{status}</span>}</div>{hint && <div className="settings-row-hint">{hint}</div>}</div>{children && <div className="settings-row-control">{children}</div>}</div>{extra && <div className="settings-row-extra">{extra}</div>}</div>
 }
 
 export function Segmented<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: readonly { value: T; label: string; custom?: boolean }[]; onChange: (value: T) => void }) {

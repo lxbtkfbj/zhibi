@@ -628,20 +628,34 @@ class LibraryReview(Lenient):
 
 
 class LibraryIntent(Lenient):
-    kind: Literal["改设定", "其他"] = Field(
-        description="作者这句话是不是要改设定库里的某一处；是写作要求、提问或闲聊的选「其他」"
+    kind: Literal["改设定", "写作要求", "提问闲聊"] = Field(
+        description="这句话是哪一种：要改设定库里的某一处选「改设定」；要编辑部以后规划、写作时照着做的选「写作要求」；提问、商量、出主意、闲聊选「提问闲聊」；拿不准时选「提问闲聊」"
     )
-    target_name: str = Field(default="", description="要改哪一条：条目或角色卡片的名称，照设定库目录里的写法")
+    target_name: str = Field(
+        default="", description="改设定时才写：要改哪一条，条目或角色卡片的名称，照设定库目录里的写法"
+    )
     part: str = Field(
-        default="", description="改这一条的哪一处：卡片的字段名、等级的级名、「名称」「一句话」「一段话」"
+        default="", description="改设定时才写：改这一条的哪一处：卡片的字段名、等级的级名、「名称」「一句话」「一段话」"
     )
-    quote: str = Field(default="", description="只改其中一句时，把那一句从原文里照抄出来；否则留空")
+    quote: str = Field(default="", description="改设定、只改其中一句时，把那一句从原文里照抄出来；否则留空")
     mode: Literal["给几个写法", "照作者的意思改"] = Field(
         default="给几个写法",
-        description="作者只说了不满意、没说怎么改的，选给几个写法；说清了怎么改的，选照作者的意思改",
+        description="改设定时才写：作者只说了不满意、没说怎么改的，选给几个写法；说清了怎么改的，选照作者的意思改",
     )
-    instruction: str = Field(default="", description="作者想怎么改，用作者的话概括一句")
-    reply: str = Field(description="主编在群聊里回作者的一句话")
+    instruction: str = Field(default="", description="改设定时才写：作者想怎么改，用作者的话概括一句")
+    requirement: str = Field(
+        default="",
+        description="写作要求时才写：写成一句清楚的要求，说清做什么、不写理由，「这样」「那个」换成具体内容，60 字以内",
+    )
+    scope: Literal["一直有效", "只管下一章", "只管这一卷", "只管下一卷"] = Field(
+        default="一直有效",
+        description="写作要求时才写：作者说了「下一章」「这一卷」「下一卷」的照选，没说的选一直有效",
+    )
+    who: Literal["主编", "设定师", "写手", "审稿"] = Field(
+        default="主编",
+        description="提问闲聊时才写：谁来回答最合适：问设定、前后对不对、谁知道什么找设定师；问怎么写、文风找写手；要挑毛病找审稿；其余找主编",
+    )
+    reply: str = Field(default="", description="改设定、写作要求时，主编在群聊里回作者的一句话；提问闲聊留空")
 
 
 class Pitch(Lenient):
@@ -867,3 +881,35 @@ class NextArcDraft(Lenient):
     ending_change: str = Field(default="", description="结局方向要调的，写新的一句；结局锁住时不能改；不调就留空")
     decisions: list[AuthorChoice] = decisions_field()
     remark: str = remark_field("这一篇为什么这样走、终点为什么选在这里")
+
+
+class ChatReply(Lenient):
+    reply: str = Field(
+        description="回作者的话：先直接回答，再说理由；用这本书里的人物、设定、章节说话；出主意时给两三个有实质差别的方向并说推荐哪个；一般三到八句，作者要细节才写长"
+    )
+
+
+class ChatSummary(Lenient):
+    summary: str = Field(
+        description="之前聊过什么，300 字以内：聊过的话题；作者的想法和倾向；已经定下、记成要求或改了设定的结论；还没定的问题"
+    )
+
+
+class ChatConclusion(Lenient):
+    found: bool = Field(description="这段对话里有没有作者认可、可以落实的结论；只是问答、没有结论填 false")
+    text: str = Field(default="", description="要落实的那一句；没有结论留空")
+    scope: Literal["一直有效", "只管下一章", "只管这一卷", "只管下一卷"] = Field(
+        default="一直有效",
+        description="只在记成要求时才看：作者说了只管下一章、这一卷、下一卷的照选，没说的选一直有效",
+    )
+
+
+class TidyItem(Lenient):
+    index: int = Field(ge=1, description="要求的序号，照清单")
+    action: Literal["保留", "删掉", "改写"] = Field(description="这一条怎么处理")
+    reason: str = Field(description="为什么，一句白话，给作者看")
+    rewrite: str = Field(default="", description="只有改写才写：改好的一句要求")
+
+
+class RequirementsTidy(Lenient):
+    items: list[TidyItem] = Field(description="清单里每一条都给一个判断，按序号排")

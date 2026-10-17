@@ -294,7 +294,7 @@ async def test_worker_reads_raw_old_checkpoint_or_gracefully_starts_without_it(
 
 
 @pytest.mark.parametrize("status", ["waiting_author", "failed", "cancelled", "running"])
-async def test_legacy_private_note_records_requirement_without_resuming_old_graph(client, sessionmaker, queued, status):
+async def test_legacy_private_note_only_chats_without_resuming_old_graph(client, sessionmaker, queued, status):
     bid, jid = await old_job(sessionmaker, status=status)
     response = await client.post(f"/api/books/{bid}/notes", json={"content": "保留妹妹的记忆", "to": "lorekeeper"})
     assert response.status_code == 201, response.text
@@ -305,17 +305,20 @@ async def test_legacy_private_note_records_requirement_without_resuming_old_grap
         requirements = list(
             (await session.scalars(select(AuthorRequirement).where(AuthorRequirement.book_id == bid))).all()
         )
-        assert any(row.text == "保留妹妹的记忆" and row.source == "private:lorekeeper" for row in requirements)
+        assert all(row.text != "保留妹妹的记忆" for row in requirements)
         reply = await session.scalar(
             select(MeetingMessage).where(MeetingMessage.book_id == bid).order_by(MeetingMessage.id.desc())
         )
-        assert reply.speaker == "lorekeeper" and reply.content == "记下了，下次开工就照办。"
+        assert reply.speaker == "lorekeeper" and "（演示）设定师回答：" in reply.content
+        assert reply.job_id is None and reply.payload["reply_to"] == [response.json()["id"]]
     assert queued == []
     if status == "waiting_author":
         assert (await client.post(f"/api/books/{bid}/notes", json={"content": "不能绕过重开"})).status_code == 409
 
 
-async def test_new_setup_waiting_private_note_still_requires_piece_action(client, sessionmaker):
+async def test_new_setup_waiting_private_note_only_chats(client, sessionmaker):
     bid, _ = await old_job(sessionmaker, flow=3)
     response = await client.post(f"/api/books/{bid}/notes", json={"content": "按原流程提意见", "to": "chief"})
-    assert response.status_code == 409
+    assert response.status_code == 201
+    assert response.json()["payload"]["outcome"] == {"kind": "chat"}
+    assert response.json()["job_id"] is None

@@ -474,6 +474,8 @@ def _require(payload: dict, name: str, expected: type):
 
 
 async def _apply_suggestion(session: AsyncSession, suggestion: SettingSuggestion):
+    if suggestion.kind == "chat":
+        raise ValueError("群聊里说的建议要等编辑部空闲后点「现在改」")
     if suggestion.status != "pending":
         raise HTTPException(409, "这条建议已经处理过")
     payload = suggestion.payload

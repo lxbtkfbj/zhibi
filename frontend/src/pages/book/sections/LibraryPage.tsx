@@ -1,3 +1,6 @@
+import { libraryQuoteWhere } from '../../../lib/chat'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { post } from '../../../api/client'
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import clsx from 'clsx'
@@ -60,6 +63,9 @@ function EditItemModal({ bookId, item, category, library, config, onClose, addLe
 
 function SuggestionInbox({ bookId, suggestions, library, onJump, compact = false }: { bookId: string; suggestions: LibrarySuggestion[]; library?: LibrarySnapshot; onJump: (suggestion: LibrarySuggestion) => void; compact?: boolean }) {
   const { resolve, acceptAll } = useLibrarySuggestionActions(bookId)
+  const { working, waiting, asking } = useBookContext()
+  const qc = useQueryClient()
+  const runChat = useMutation({ mutationFn: (id: string) => post(`/suggestions/${id}/run-chat`), onSuccess: () => qc.invalidateQueries({ queryKey: ['library-suggestions', bookId] }) })
   const [error, setError] = useState<unknown>(null)
   const [skipped, setSkipped] = useState<{ title: string; reason: string }[]>([])
   const [written, setWritten] = useState<string | null>(null)
@@ -70,6 +76,7 @@ function SuggestionInbox({ bookId, suggestions, library, onJump, compact = false
   const accept = (suggestion: LibrarySuggestion) => {
     setError(null)
     if (locked(suggestion)) { setError(new Error('已锁：AI 不能改这一处，先解锁')); return }
+    if (suggestion.kind === 'chat') { runChat.mutate(suggestion.id, { onSuccess: () => { void qc.invalidateQueries() } }); return }
     if (suggestion.kind === 'written') { setWritten(suggestion.id); return }
     resolve.mutate({ id: suggestion.id, action: 'accept' })
   }
@@ -77,7 +84,7 @@ function SuggestionInbox({ bookId, suggestions, library, onJump, compact = false
     if (suggestions.some(item => item.kind === 'written') && !window.confirm('建议中有前文替换。全部接受会把列出的正文旧叫法也一起换掉；你可以先逐条展开查看。确认全部接受？')) return
     try { const result = await acceptAll.mutateAsync(); setSkipped(result.skipped.map(item => ({ title: suggestions.find(row => row.id === item.id)?.title ?? '这条建议', reason: item.reason }))) } catch { /* 显示接口错误 */ }
   }
-  const list = <div className="mt-3 space-y-3">{suggestions.map(suggestion => <div key={suggestion.id} className="rounded-xl border border-line bg-card p-3"><div className="flex flex-wrap items-start justify-between gap-2"><button type="button" className="min-w-0 flex-1 text-left text-sm leading-relaxed hover:text-chief" onClick={() => onJump(suggestion)}>{title(suggestion)}{locked(suggestion) && <span className="text-seal">（已锁）</span>}</button><div className="flex gap-1"><Button size="sm" variant="ghost" disabled={resolve.isPending || acceptAll.isPending} onClick={() => accept(suggestion)}>{suggestionAction(suggestion)}</Button><Button size="sm" variant="ghost" disabled={resolve.isPending || acceptAll.isPending} onClick={() => resolve.mutate({ id: suggestion.id, action: 'ignore' })}>{suggestion.kind === 'written' ? '只管以后' : '不用'}</Button></div></div>{suggestion.kind === 'written' && <details className="mt-2 text-xs text-ink-2" open={written === suggestion.id || undefined}><summary className="cursor-pointer">查看前文出现的位置</summary><div className="mt-2 space-y-2">{Array.isArray(suggestion.payload.matches) && (suggestion.payload.matches as { chapter: number; count: number; contexts: string[] }[]).map(match => <div key={match.chapter}><p className="font-medium">第 {match.chapter} 章 · {match.count} 处</p>{match.contexts.map((context, index) => <p key={index} className="mt-1 rounded bg-paper-2 p-2 leading-relaxed">…{context}…</p>)}</div>)}{written === suggestion.id && <Button size="sm" variant="danger" disabled={resolve.isPending} onClick={() => resolve.mutate({ id: suggestion.id, action: 'accept' })}>确认，替换上面的前文</Button>}</div></details>}</div>)}<ErrorText error={error ?? resolve.error ?? acceptAll.error} /></div>
+  const list = <div className="mt-3 space-y-3">{suggestions.map(suggestion => <div key={suggestion.id} className="rounded-xl border border-line bg-card p-3"><div className="flex flex-wrap items-start justify-between gap-2"><button type="button" className="min-w-0 flex-1 text-left text-sm leading-relaxed hover:text-chief" onClick={() => onJump(suggestion)}>{suggestion.kind === 'chat' && <span className="mr-2 rounded bg-chief-soft px-1.5 py-0.5 text-xs text-chief">群聊里说的</span>}{title(suggestion)}{locked(suggestion) && <span className="text-seal">（已锁）</span>}</button><div className="flex gap-1"><Button size="sm" variant="ghost" disabled={resolve.isPending || acceptAll.isPending || runChat.isPending || (suggestion.kind === 'chat' && (working || waiting || asking))} onClick={() => accept(suggestion)}>{suggestionAction(suggestion)}</Button><Button size="sm" variant="ghost" disabled={resolve.isPending || acceptAll.isPending} onClick={() => resolve.mutate({ id: suggestion.id, action: 'ignore' })}>{suggestion.kind === 'written' ? '只管以后' : '不用'}</Button></div></div>{suggestion.kind === 'written' && <details className="mt-2 text-xs text-ink-2" open={written === suggestion.id || undefined}><summary className="cursor-pointer">查看前文出现的位置</summary><div className="mt-2 space-y-2">{Array.isArray(suggestion.payload.matches) && (suggestion.payload.matches as { chapter: number; count: number; contexts: string[] }[]).map(match => <div key={match.chapter}><p className="font-medium">第 {match.chapter} 章 · {match.count} 处</p>{match.contexts.map((context, index) => <p key={index} className="mt-1 rounded bg-paper-2 p-2 leading-relaxed">…{context}…</p>)}</div>)}{written === suggestion.id && <Button size="sm" variant="danger" disabled={resolve.isPending} onClick={() => resolve.mutate({ id: suggestion.id, action: 'accept' })}>确认，替换上面的前文</Button>}</div></details>}</div>)}<ErrorText error={error ?? runChat.error ?? resolve.error ?? acceptAll.error} /></div>
   return <section aria-label={compact ? '这一条的建议' : '待处理的建议'} className={clsx(panel, 'p-4')}>
     {compact ? <><h3 className="text-sm font-medium">这一条的建议</h3>{list}</> : <><div className="flex flex-wrap items-center justify-between gap-2"><h2 className="font-serif font-bold">待处理的建议 {suggestions.length}</h2><Button size="sm" disabled={resolve.isPending} loading={acceptAll.isPending} onClick={() => void acceptEvery()}>全部接受</Button></div><details className="mt-2"><summary className="cursor-pointer text-sm text-chief">展开建议</summary>{list}</details></>}
     {!compact && <ErrorText error={acceptAll.error} />}
@@ -100,7 +107,7 @@ function LibraryDetail({ bookId, item, library, config, suggestions, onDeleted, 
   const fieldNames = category?.fields ?? (item.fields ?? []).map(field => field.name)
   const change = (body: LibraryItemPatch) => { setLocalError(null); update.mutate({ type: item.targetType, id: item.id, body }) }
   const addTag = (value: string) => { if (value.trim() && !item.tags.includes(value.trim())) change({ tags: [...item.tags, value.trim()] }); setTag('') }
-  const field = (path: string, value: string, label?: string, emptyText?: string) => <RewriteField bookId={bookId} targetType={item.targetType} targetId={item.id} path={path} value={value} label={label} emptyText={emptyText} locked={item.locked} />
+  const field = (path: string, value: string, label?: string, emptyText?: string) => <RewriteField bookId={bookId} targetType={item.targetType} targetId={item.id} path={path} value={value} quoteWhere={selectionPath => libraryQuoteWhere(item, selectionPath, config)} label={label} emptyText={emptyText} locked={item.locked} />
   const fill = () => {
     if (item.locked) { setLocalError(new Error('已锁：AI 不能改这一处，先解锁')); return }
     const path = item.targetType === 'character' ? config.character_category.fields.find(row => row.column !== 'name' && row.column !== 'aliases' && row.column !== 'role_type')?.column ?? 'background' : style === 'card' && fieldNames[0] ? `fields.${fieldNames[0]}` : 'content'

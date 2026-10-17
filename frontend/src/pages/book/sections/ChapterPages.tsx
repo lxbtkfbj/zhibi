@@ -1,3 +1,4 @@
+import { AskChiefSelection } from '../../../components/AskChiefSelection'
 import { useReducedMotion } from '../../../lib/appearance'
 import clsx from 'clsx'
 import { ChevronLeft, ChevronRight, Download, MoreHorizontal, PenLine, RotateCcw, X } from 'lucide-react'
@@ -356,7 +357,7 @@ function ChapterContent({ n }: { n: number }) {
             </div>
             <ErrorText error={update.error} />
           </div>
-        ) : chapter.content ? <Reveal><article><Paragraphs text={chapter.content} /></article></Reveal> : (
+        ) : chapter.content ? <Reveal><AskChiefSelection where={`第 ${chapter.index} 章`}><article><Paragraphs text={chapter.content} /></article></AskChiefSelection></Reveal> : (
           <div className="py-12 text-center"><p className="font-serif text-lg text-ink-2">这一章还没写</p><p className="mt-2 text-sm leading-relaxed text-ink-2">章纲已经出好。写手动笔时，正文会在这里实时展开。</p></div>
         )}
         <nav className="mt-12 flex items-center justify-between border-t border-line pt-6 text-sm text-ink-2" aria-label="章节翻页">

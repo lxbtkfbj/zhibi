@@ -1,3 +1,4 @@
+import type { ChatQuote } from '../../lib/chat'
 import { useReducedMotion } from '../../lib/appearance'
 import { useIsMutating } from '@tanstack/react-query'
 import clsx from 'clsx'
@@ -33,7 +34,7 @@ function StampOverlay({ show }: { show: boolean }) {
 
 function BookWorkspace({ bookId, book }: { bookId: string; book: BookDetail }) {
   const { openSettings } = useSettingsModal()
-  const { messages, connected, draft } = useMeeting(bookId)
+  const { messages, connected, draft, typing: chatTyping } = useMeeting(bookId)
   const { data: outline } = useOutline(bookId)
   const { data: nodes = [] } = useNodes(bookId)
   const { data: chapters = [] } = useChapters(bookId)
@@ -41,6 +42,7 @@ function BookWorkspace({ bookId, book }: { bookId: string; book: BookDetail }) {
   const [following, setFollowing] = useState(() => followOnBookOpen(window.location.pathname, bookId))
   const [focusComposer, setFocusComposer] = useState(0)
   const [composerNode, setComposerNode] = useState<NodeFeedback | null>(null)
+  const [chatQuotes, setChatQuotes] = useState<Record<string, ChatQuote | null>>({})
   const [composerDrafts, setComposerDrafts] = useState<Record<string, string>>({})
   const [tab, setTab] = useState<'discussion' | 'manuscript'>(() => followOnBookOpen(window.location.pathname, bookId) ? 'discussion' : 'manuscript')
   const [wide, setWide] = useState(() => window.innerWidth >= 1024)
@@ -82,6 +84,7 @@ function BookWorkspace({ bookId, book }: { bookId: string; book: BookDetail }) {
   const followTarget = useMemo(() => currentTarget(bookId, job, messages, draft, outline), [bookId, job, messages, draft, outline])
   const unread = useConversationReads(bookId, messages, conversation, wide || tab === 'discussion')
   const setConversation = useCallback((next: Conversation) => { setConversationState(next); setTab('discussion') }, [])
+  const askChief = (quote: ChatQuote) => { setChatQuotes(previous => ({ ...previous, chief: quote })); setConversation('chief'); setFocusComposer(n => n + 1) }
   const manualNavigate = useCallback((path: string) => { setFollowing(false); setTab('manuscript'); void navigate(path) }, [navigate])
   const resumeFollow = useCallback(() => { setFollowing(true); setTab('manuscript') }, [])
   const requestFeedback = useCallback(() => { setConversation('group'); setFocusComposer(n => n + 1) }, [setConversation])
@@ -128,7 +131,7 @@ function BookWorkspace({ bookId, book }: { bookId: string; book: BookDetail }) {
     const href = (event.target as Element).closest('a[href]')?.getAttribute('href')
     if ((href?.startsWith(`/books/${bookId}`) || href?.startsWith('#')) && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.button === 0) { setFollowing(false); setTab('manuscript') }
   }
-  const ctx: BookContextValue = { bookId, book, job, messages, connected, draft, working, waiting, asking, outline, conversation, setConversation, unread, following, followTarget, manualNavigate, resumeFollow, focusComposer, requestFeedback, requestNodeFeedback, composerNode, setComposerNode, composerDrafts, setComposerDrafts, celebrate, segmentPinEnd, setSegmentPinEnd, segmentReview }
+  const ctx: BookContextValue = { bookId, book, job, messages, connected, chatTyping, chatQuotes, setChatQuotes, askChief, draft, working, waiting, asking, outline, conversation, setConversation, unread, following, followTarget, manualNavigate, resumeFollow, focusComposer, requestFeedback, requestNodeFeedback, composerNode, setComposerNode, composerDrafts, setComposerDrafts, celebrate, segmentPinEnd, setSegmentPinEnd, segmentReview }
   const progress = expanding ? '展开大纲 · 主编正在展开这一个' : progressText(book, messages, draft, followTarget, { nodes, volumes: outline?.volumes ?? [], chapters })
   return <BookContext.Provider value={ctx}>
     <div className="flex h-full min-h-0 flex-col" onClickCapture={captureManualLink}>

@@ -1,9 +1,11 @@
 export class ApiError extends Error {
   status: number
+  code?: string
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code?: string) {
     super(message)
     this.status = status
+    this.code = code
   }
 }
 
@@ -11,6 +13,7 @@ function detailMessage(body: unknown, status: number): string {
   if (body && typeof body === 'object' && 'detail' in body) {
     const detail = (body as { detail: unknown }).detail
     if (typeof detail === 'string') return detail
+    if (detail && typeof detail === 'object' && 'message' in detail) return String(detail.message)
     if (Array.isArray(detail) && detail.length) {
       const first = detail[0] as { msg?: string; loc?: unknown[] }
       return `参数不正确：${first.loc?.slice(1).join('.') ?? ''} ${first.msg ?? ''}`.trim()
@@ -28,7 +31,7 @@ export async function api<T>(path: string, init?: RequestInit & { json?: unknown
   })
   if (response.status === 204) return undefined as T
   const body = await response.json().catch(() => null)
-  if (!response.ok) throw new ApiError(response.status, detailMessage(body, response.status))
+  if (!response.ok) throw new ApiError(response.status, detailMessage(body, response.status), body?.detail?.code)
   return body as T
 }
 

@@ -1,14 +1,18 @@
+import { post } from '../../api/client'
+import type { MeetingMessage } from '../../api/types'
+import { sendChatFirst, typingVisible } from '../../lib/chat'
+import { ROLE_META as ROLES } from '../../lib/roles'
 import { useReducedMotion } from '../../lib/appearance'
 import clsx from 'clsx'
 import { ArrowRight, SendHorizontal } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
-import { useJobActions } from '../../api/hooks'
+import { useGroupFeedback } from './useGroupFeedback'
 import { Button, ErrorText } from '../../components/ui'
 import { decisionCopy } from '../../lib/decision'
 import { ROLE_META } from '../../lib/roles'
 import { teamStatus } from '../../lib/team'
-import { composerRoute, pendingTarget, retainedNodeFeedback } from '../../lib/workspace'
+import { pendingTarget, retainedNodeFeedback } from '../../lib/workspace'
 import { useBookContext } from './context'
 import { ResumeControls, RunningControls, WritingControls } from './Decision'
 import { MeetingFeed, RoleAvatar } from './MeetingFeed'
@@ -21,30 +25,29 @@ const DUTIES = {
 } as const
 
 const QUICK_PHRASES = {
-  chief: ['调整故事方向', '改一下大纲', '这段节奏再快一点'],
-  lorekeeper: ['改人物', '补设定', '查矛盾'],
-  writer: ['这章节奏快一点', '对话少一点', '多一点细节'],
-  reviewer: ['检查人物动机', '看看节奏', '检查前后矛盾'],
+  chief: ['为什么这样安排？', '帮我想想这里怎么更爽', '后面打算怎么走？'],
+  lorekeeper: ['主角现在什么境界？', '这个设定前后对得上吗？', '谁知道主角的秘密？'],
+  writer: ['这种场面怎么写更爽？', '示范一下这种写法', '文风哪里还能改？'],
+  reviewer: ['最近一章哪里不好看？', '这个设定有漏洞吗？', '节奏拖不拖？'],
 } as const
 
 /** 每个会话保留自己的草稿；切稿件路由不会重挂载这块区域。 */
 function NoteComposer() {
-  const { job, working, waiting, asking, bookId, book, conversation, focusComposer, composerNode, setComposerNode, composerDrafts: drafts, setComposerDrafts: setDrafts, segmentReview } = useBookContext()
-  const { note, decide, directions, pitches, piece, setupPending, decisionPending } = useJobActions(bookId)
-  const [sent, setSent] = useState<{ conversation: string; message: string } | null>(null)
+  const { job, working, waiting, asking, bookId, book, conversation, focusComposer, composerNode, setComposerNode, composerDrafts: drafts, setComposerDrafts: setDrafts, segmentReview, chatQuotes, setChatQuotes } = useBookContext()
+  const feedback = useGroupFeedback()
+  const [sendError, setSendError] = useState<unknown>(null)
+  const [sendingNote, setSendingNote] = useState(false)
   const ref = useRef<HTMLTextAreaElement>(null)
   const sending = useRef(false)
   const text = drafts[conversation] ?? ''
   const direct = conversation !== 'group'
   const oldSetup = job?.kind === 'book_setup' && job.setup_flow !== 3
   const legacyArc = job?.status === 'waiting_author' && job.pending?.kind === 'segment_review' && job.pending.flow === 2
-  const blocked = (oldSetup && !direct) || legacyArc
-  const revising = waiting && !oldSetup && !legacyArc
-  const feedbackPrefix = direct ? `（给${ROLE_META[conversation].name}）` : ''
-  const inputLimit = waiting ? 5000 - feedbackPrefix.length : 5000
+  const revising = !direct && waiting && !oldSetup && !legacyArc
+  const inputLimit = 5000
   const tooLong = text.trim().length > inputLimit
-  const pending = setupPending || decisionPending || note.isPending || decide.isPending || directions.isPending || pitches.isPending || piece.isPending || segmentReview.submitting
-  const error = note.error ?? decide.error ?? directions.error ?? pitches.error ?? piece.error ?? segmentReview.error
+  const pending = sendingNote || segmentReview.submitting
+  const error = sendError
   const idle = !working && !waiting && !asking
   const resumable = job?.status === 'failed' || job?.status === 'cancelled'
 
@@ -59,11 +62,7 @@ function NoteComposer() {
     if (focusComposer > 0) ref.current?.focus()
   }, [focusComposer])
 
-  useEffect(() => {
-    if (!sent) return
-    const timer = setTimeout(() => setSent(null), 6000)
-    return () => clearTimeout(timer)
-  }, [sent])
+
 
   const setText = (value: string) => {
     setDrafts((previous) => ({ ...previous, [conversation]: value }))
@@ -71,44 +70,24 @@ function NoteComposer() {
   }
   const send = async () => {
     const content = text.trim()
-    if (!content || pending || sending.current || tooLong || blocked) return
+    if (!content || pending || sending.current || tooLong) return
     sending.current = true
     const sentConversation = conversation
     try {
-      const route = composerRoute(job, text, conversation === 'group' ? composerNode : null, direct)
-      if (route.kind === 'blocked') return
-      if (route.kind === 'pitches' && job) {
-        await pitches.mutateAsync({ jobId: job.id, action: 'redo', feedback: `${feedbackPrefix}${content}` })
-      } else if (route.kind === 'directions' && job) {
-        await directions.mutateAsync({ jobId: job.id, action: 'redo', feedback: `${feedbackPrefix}${content}` })
-      } else if (route.kind === 'piece' && job) {
-        await piece.mutateAsync({ jobId: job.id, action: 'revise', piece: route.piece, feedback: `${feedbackPrefix}${content}`, ...('node_id' in route ? { node_id: route.node_id } : {}) })
-      } else if (route.kind === 'segment' && job) {
-        if (!await segmentReview.submit({ action: 'revise', feedback: `${feedbackPrefix}${content}` })) return
-      } else if (route.kind === 'decision' && job) {
-        await decide.mutateAsync({
-          jobId: job.id,
-          action: 'revise',
-          feedback: `${feedbackPrefix}${content}`,
-        })
-      } else {
-        await note.mutateAsync({ content, ...(direct ? { to: conversation } : {}) })
-      }
+      setSendError(null); setSendingNote(true)
+      await sendChatFirst(
+        () => post<MeetingMessage>(`/books/${bookId}/notes`, { content, ...(direct ? { to: conversation } : {}), ...(chatQuotes[conversation] ? { quote: chatQuotes[conversation] } : {}) }),
+        () => feedback(content), direct)
+      setChatQuotes(previous => ({ ...previous, [sentConversation]: null }))
       setDrafts((previous) => previous[sentConversation] === text ? { ...previous, [sentConversation]: '' } : previous)
       if (sentConversation === 'group') setComposerNode(null)
-      setSent({
-        conversation: sentConversation,
-        message: revising ? '意见已交给编辑部，按你的要求修改。' : !oldSetup && (asking || (working && (job?.kind === 'book_setup' || job?.kind === 'write_book')))
-          ? '已送达。做完手头这一步后，编辑部会处理你的要求。'
-          : '已记下，下次开工会按你的要求来。',
-      })
-    } catch {
-      // 错误由 ErrorText 展示；失败时保留作者原文，不清空、不重发。
-    } finally { sending.current = false }
+
+    } catch (cause) {
+      setSendError(cause)
+    } finally { sending.current = false; setSendingNote(false) }
   }
 
-  const placeholder = legacyArc ? '这一篇要先按新写法重出，重出后再提意见' : blocked ? '这本书要先按新流程重开，重开后再提意见' : direct
-    ? `发消息给${ROLE_META[conversation].name}…`
+  const placeholder = direct ? `和${ROLE_META[conversation].name}聊聊，不会改动书稿…` : legacyArc ? '这一篇要先按新写法重出，重出后再提意见'
     : waiting && job?.pending?.kind === 'setup_piece' ? '说说这一块想怎么改…' : waiting
       ? job?.pending?.kind === 'setup_pitches'
         ? '写下哪里不满意，主编会重新出三个短版…'
@@ -118,12 +97,12 @@ function NoteComposer() {
       : asking
         ? '还有别的要求也可以先说，例如：主角叫云澈'
         : working
-          ? '插句话，例如：金手指再巧妙一点；开局直接打脸'
-          : '说说你的要求，编辑部下次开工会照办…'
+          ? '插句话或者问一句都行，例如：从下一章开始节奏快一点'
+          : '交代事情或者问问题都行，例如：下一卷感情线慢一点；主角现在什么境界？'
 
   return (
     <div className="shrink-0 border-t border-divider bg-pane-mid px-4 pt-3 pb-3">
-      {idle && !resumable && (book.status === 'ready' || book.status === 'writing') && (
+      {!direct && idle && !resumable && (book.status === 'ready' || book.status === 'writing') && (
         <div className="mb-3 border-b border-divider pb-3"><WritingControls compact /></div>
       )}
       {direct && (
@@ -138,7 +117,7 @@ function NoteComposer() {
           ))}
         </div>
       )}
-      {revising && <p className="mb-2 text-xs font-medium text-seal">提意见 · 发送后会修改当前待拍板的方案</p>}
+      {chatQuotes[conversation] && <div className="mb-2 flex items-start gap-2 rounded-lg bg-paper p-2 text-xs text-ink-2"><span className="min-w-0 flex-1 break-words">引用：{chatQuotes[conversation]!.where} · {chatQuotes[conversation]!.text.slice(0, 30)}……</span><button aria-label="取消引用" onClick={() => setChatQuotes(previous => ({ ...previous, [conversation]: null }))}>×</button></div>}
       <div className="flex items-end gap-2 rounded-xl border border-divider bg-card px-3 py-2 transition-shadow focus-within:border-ink-3 focus-within:shadow-[var(--shadow-paper)]">
         <textarea
           ref={ref}
@@ -157,12 +136,12 @@ function NoteComposer() {
           aria-label={direct ? `发消息给${ROLE_META[conversation].name}` : revising ? '修改意见' : '给编辑部发消息'}
           className="scroll-thin max-h-40 min-h-12 min-w-0 flex-1 resize-none bg-transparent py-1 text-sm leading-[1.75] text-ink placeholder:text-ink-3 focus:outline-none"
         />
-        <Button size="sm" variant={revising ? 'primary' : 'seal'} onClick={() => void send()} loading={pending} disabled={!text.trim() || tooLong || blocked} aria-label="发送">
-          {revising ? '提意见' : <SendHorizontal className="size-4" />}
+        <Button size="sm" variant={revising ? 'primary' : 'seal'} onClick={() => void send()} loading={pending} disabled={!text.trim() || tooLong} aria-label="发送">
+          <SendHorizontal className="size-4" />
         </Button>
       </div>
       <p className="mt-2 text-xs leading-relaxed text-ink-2" role="status">
-        {sent?.conversation === conversation ? sent.message : 'Enter 发送，Shift + Enter 换行。'}
+        Enter 发送，Shift + Enter 换行。
       </p>
       <ErrorText error={error} />
       {tooLong && <p className="mt-2 text-sm text-seal">当前意见最多 {inputLimit} 字，请精简后发送。原文已保留。</p>}
@@ -172,7 +151,11 @@ function NoteComposer() {
 
 /** 中栏固定会话：群聊、点名插话与产出卡片。 */
 export function ConversationPanel() {
-  const { bookId, job, messages, working, connected, draft, conversation, asking, waiting, manualNavigate } = useBookContext()
+  const { bookId, job, messages, working, connected, draft, conversation, asking, waiting, manualNavigate, chatTyping } = useBookContext()
+  const [now, setNow] = useState(() => Date.now())
+  const [resetError, setResetError] = useState<unknown>(null)
+  const [resetting, setResetting] = useState(false)
+  useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer) }, [])
   const [showGroup, setShowGroup] = useState(true)
   const reduce = useReducedMotion()
   const direct = conversation !== 'group'
@@ -196,11 +179,14 @@ export function ConversationPanel() {
             <h2 className="text-sm font-medium text-ink">{direct ? ROLE_META[conversation].name : '编辑部群聊'}</h2>
             <p className="mt-0.5 text-xs text-ink-2">{direct ? DUTIES[conversation] : '主编 · 设定师 · 写手 · 审稿'}</p>
           </div>
+          <Button size="sm" variant="ghost" disabled={resetting} onClick={async () => { setResetting(true); setResetError(null); try { await post(`/books/${bookId}/chat/${conversation}/reset`) } catch (cause) { setResetError(cause) } finally { setResetting(false) } }}>换个话题</Button>
           <span className={clsx('flex shrink-0 items-center gap-1 text-xs', connected ? 'text-lore' : 'text-ink-2')}>
             <span className={clsx('size-1.5 rounded-full', connected ? 'bg-lore' : 'bg-ink-3')} />
             {connected ? working ? '工作中' : '在线' : '连接中'}
           </span>
         </div>
+        <ErrorText error={resetError} />
+        {direct && <p className="mt-2 text-xs leading-relaxed text-ink-2">这里只聊天，不会改动书稿，也不会记成要求。聊出结论，点最新回复下面的「记成要求」或「照这个改」。</p>}
         {direct && (
           <label className="mt-2.5 flex cursor-pointer items-center gap-2 text-xs text-ink-2">
             <input type="checkbox" checked={showGroup} onChange={(event) => setShowGroup(event.target.checked)} className="size-3.5 accent-[var(--color-chief)]" />
@@ -226,6 +212,7 @@ export function ConversationPanel() {
       <MeetingFeed messages={messages} working={working} draft={draft} conversation={conversation} showGroup={showGroup} className="min-h-0 flex-1 px-4 py-5" />
       {job && working && <div className="shrink-0 border-t border-divider px-4 py-2"><RunningControls job={job} /></div>}
       {job && (job.status === 'failed' || job.status === 'cancelled') && <div className="shrink-0 border-t border-divider px-4 py-3"><ResumeControls job={job} /></div>}
+      {Object.values(chatTyping).filter(value => typingVisible(value, conversation, now)).map(value => <p key={value.thread} role="status" className="px-4 py-2 text-xs text-chief">{ROLES[value.speaker as keyof typeof ROLES]?.name ?? '主编'}正在想…</p>)}
       <NoteComposer />
     </section>
   )

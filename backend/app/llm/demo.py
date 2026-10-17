@@ -866,24 +866,70 @@ def _library_review(user: str) -> s.LibraryReview:
 
 
 def _library_intent(user: str) -> s.LibraryIntent:
-    note = _match(r"【作者的话】\n(.*?)(?=\n\n要求：|\Z)", user)
-    if not any(word in note for word in ("改", "重想", "换个")):
-        return s.LibraryIntent(kind="其他", reply="记下了，下次开工就照办。")
-    library = _match(r"【设定库目录】\n(.*?)(?=\n【作者的话】|\Z)", user)
+    note = _match(r"【作者的话】\n(.*?)(?=\n\n要求：|\Z)", user).strip()
+    if note.endswith(("？", "?")) or any(word in note for word in ("吗", "为什么", "怎么样", "什么")):
+        who = (
+            "设定师"
+            if any(w in note for w in ("境界", "设定", "在哪", "谁知道"))
+            else "写手"
+            if any(w in note for w in ("怎么写", "文风", "示范"))
+            else "审稿"
+            if any(w in note for w in ("毛病", "不好看", "漏洞"))
+            else "主编"
+        )
+        return s.LibraryIntent(kind="提问闲聊", who=who)
+    library = _match(r"【设定库目录】\n(.*?)(?=\n【最近的对话】|\Z)", user)
     names = re.findall(r"^- ([^\n（：]+)", library, re.M)
     name = next((name for name in names if name in note), "")
     if not name and "境界" in note:
         name = next((name for name in names if "境界" in name), "")
-    if not name:
-        return s.LibraryIntent(kind="其他", reply="这条意见涉及整体设定，我会查一遍。")
-    return s.LibraryIntent(
-        kind="改设定",
-        target_name=name,
-        part="名称" if "名称" in note or "名字" in note else "一段话",
-        mode="给几个写法",
-        instruction=note,
-        reply=f"好，我给「{name}」出三种写法，去设定库挑一个。",
+    if name and any(w in note for w in ("改", "换", "重想")):
+        return s.LibraryIntent(
+            kind="改设定",
+            target_name=name,
+            part="名称" if "名称" in note or "名字" in note else "一段话",
+            mode="给几个写法",
+            instruction=note,
+            reply=f"好，我给「{name}」出三种写法，去设定库挑一个。",
+        )
+    scope = (
+        "只管下一章"
+        if "下一章" in note
+        else "只管这一卷"
+        if "这一卷" in note
+        else "只管下一卷"
+        if "下一卷" in note
+        else "一直有效"
     )
+    return s.LibraryIntent(kind="写作要求", requirement=note, scope=scope, reply="记下了。")
+
+
+def _chat_reply(system, user):
+    note = _match(r"【作者这次说的】\n(.*?)(?=\n\n要求：|\Z)", user)
+    related = _match(r"【和这次的话有关的资料】\n(.*?)(?=\n\n【|\Z)", user)
+    names = re.findall(r"^.+? · ([^\n]+)$", related, re.M)
+    role = next((r for r in ("主编", "设定师", "写手", "审稿") if r in (system.splitlines() or ["主编"])[0]), "主编")
+    return s.ChatReply(reply=f"（演示）{role}回答：{note[:20]}。相关资料里有：{'、'.join(names) or '没有'}。")
+
+
+def _chat_conclusion(user):
+    recent = _match(r"【最近的对话】\n(.*?)(?=\n\n要求：|\Z)", user)
+    notes = re.findall(r"^作者：(.*)$", recent, re.M)
+    return s.ChatConclusion(found=True, text="（演示）" + (notes[-1][:20] if notes else ""), scope="一直有效")
+
+
+def _requirements_tidy(user):
+    items = []
+    for n, text in re.findall(r"^(\d+)\. (.*?)（[^\n]+；来自[^\n]*）$", user, re.M):
+        if text.endswith(("？", "?")):
+            items.append(s.TidyItem(index=int(n), action="删掉", reason="这是一句提问，不是要求"))
+        elif re.match(r"^对(主编|设定师|写手|审稿)：", text):
+            items.append(
+                s.TidyItem(index=int(n), action="改写", reason="去掉聊天时的称呼", rewrite=text.split("：", 1)[1])
+            )
+        else:
+            items.append(s.TidyItem(index=int(n), action="保留", reason="这是一条清楚的要求"))
+    return s.RequirementsTidy(items=items)
 
 
 async def respond(schema: type[BaseModel], system: str, user: str) -> BaseModel:
@@ -916,6 +962,12 @@ async def respond(schema: type[BaseModel], system: str, user: str) -> BaseModel:
         s.GapReport: lambda: _library_gaps(user),
         s.LibraryReview: lambda: _library_review(user),
         s.LibraryIntent: lambda: _library_intent(user),
+        s.ChatReply: lambda: _chat_reply(system, user),
+        s.ChatSummary: lambda: s.ChatSummary(
+            summary=f"（演示）之前聊了 {len(re.findall(r'^(?:作者|主编|设定师|写手|审稿)：', _match(r'【要并进去的对话】\n(.*?)(?=\n\n要求：|\Z)', user), re.M))} 条。"
+        ),
+        s.ChatConclusion: lambda: _chat_conclusion(user),
+        s.RequirementsTidy: lambda: _requirements_tidy(user),
     }
     if schema not in handlers:
         raise NotImplementedError(f"演示模式暂不支持 {schema.__name__}")

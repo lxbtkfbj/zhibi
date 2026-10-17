@@ -245,7 +245,7 @@ async def test_chat_target_missing_not_saved_as_requirement(client, sessionmaker
 
 
 @pytest.mark.parametrize("status", ["queued", "running", "waiting_author"])
-async def test_busy_chat_does_not_route_but_direct_rewrite_is_allowed(client, sessionmaker, monkeypatch, status):
+async def test_busy_chat_classifies_and_defers_but_direct_rewrite_is_allowed(client, sessionmaker, monkeypatch, status):
     from app.api import jobs as jobs_api
 
     book_id, entry_id, _ = await seed(sessionmaker)
@@ -253,12 +253,14 @@ async def test_busy_chat_does_not_route_but_direct_rewrite_is_allowed(client, se
         session.add(Job(book_id=book_id, kind="write_book", status=status, thread_id=f"test-{uuid.uuid4()}"))
         await session.commit()
 
-    async def unexpected(*args, **kwargs):
-        pytest.fail("忙碌时不应调用群聊路由")
+    async def classified(*args, **kwargs):
+        return s.LibraryIntent(kind="改设定", target_name="境界")
 
-    monkeypatch.setattr(jobs_api, "call_model", unexpected)
+    monkeypatch.setattr(jobs_api, "call_model", classified)
     response = await client.post(f"/api/books/{book_id}/notes", json={"content": "改境界"})
-    assert response.status_code == 201, response.text
+    assert response.status_code == (409 if status == "waiting_author" else 201), response.text
+    if status != "waiting_author":
+        assert response.json()["payload"]["outcome"]["kind"] == "later"
     response = await client.post(f"/api/books/{book_id}/library/rewrite", json=rewrite_body(entry_id, mode="expand"))
     assert response.status_code == 200, response.text
 
@@ -279,6 +281,7 @@ async def test_chat_started_during_routing_returns_to_normal_note_path(client, s
     assert response.status_code == 201, response.text
     async with sessionmaker() as session:
         assert list(await session.scalars(select(SettingCandidate))) == []
-        assert [row.text for row in await session.scalars(select(AuthorRequirement))] == ["把境界重想一下"]
+        assert list(await session.scalars(select(AuthorRequirement))) == []
+        assert response.json()["payload"]["outcome"]["kind"] == "later"
         message = await session.scalar(select(MeetingMessage))
-        assert message.job_id is not None
+        assert message.job_id is None

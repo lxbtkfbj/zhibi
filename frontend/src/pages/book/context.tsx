@@ -1,5 +1,6 @@
 import { createContext, useContext, type Dispatch, type SetStateAction } from 'react'
 import type { BookDetail, Conversation, Job, LiveDraft, MeetingMessage, Outline, StoryNode } from '../../api/types'
+import type { ChatQuote, ChatTyping } from '../../lib/chat'
 import type { NodeFeedback, WorkspaceTarget } from '../../lib/workspace'
 
 export interface BookContextValue {
@@ -8,6 +9,10 @@ export interface BookContextValue {
   job: Job | null
   messages: MeetingMessage[]
   connected: boolean
+  chatTyping: Record<string, ChatTyping>
+  chatQuotes: Record<string, ChatQuote | null>
+  setChatQuotes: Dispatch<SetStateAction<Record<string, ChatQuote | null>>>
+  askChief: (quote: ChatQuote) => void
   /** 写手正在写的正文（实时）；写完一段后 done 为 true */
   draft: LiveDraft | null
   working: boolean

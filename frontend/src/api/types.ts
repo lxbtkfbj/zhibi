@@ -513,7 +513,7 @@ export interface MeetingMessage {
   /** note：作者在编辑部工作时插的话 */
   kind: 'speech' | 'artifact' | 'status' | 'decision' | 'error' | 'note'
   content: string
-  payload: { type?: string; data?: unknown; thread?: Speaker } | null
+  payload: { type?: string; data?: unknown; thread?: Speaker | 'group'; reply_to?: number[]; quote?: { text: string; where: string }; outcome?: ChatOutcome } | null
   created_at: string | null
 }
 
@@ -571,4 +571,16 @@ export type RoleAssignments = Record<RoleKey, string | null>
 export interface Health {
   status: 'ok' | 'error'
   components: Record<string, { ok: boolean; detail: string }>
+}
+
+export interface ChatOutcome {
+  kind: 'requirement' | 'to_job' | 'edit' | 'not_found' | 'later' | 'chat'
+  requirement_id?: string
+  target_type?: string
+  target_id?: string
+  target_label?: string
+  mode?: string
+  revert_version_id?: string
+  candidate_id?: string
+  suggestion_id?: string
 }

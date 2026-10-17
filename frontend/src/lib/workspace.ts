@@ -167,8 +167,9 @@ export function retainedNodeFeedback(text: string, selected: NodeFeedback | null
 }
 
 export function composerRoute(job: Job | null, text: string, selected: NodeFeedback | null, direct = false) {
-  // 旧图不再接受修改；点名私聊只记作者要求，不触发旧流程。
-  if (job?.kind === 'book_setup' && job.setup_flow !== 3) return { kind: direct ? 'note' as const : 'blocked' as const }
+  if (direct) return { kind: 'note' as const }
+  // 旧图不再接受修改；私聊只发聊天，不触发旧流程。
+  if (job?.kind === 'book_setup' && job.setup_flow !== 3) return { kind: 'blocked' as const }
   // 新三步的意见只交给当前步骤；旧图已在上方阻断，不恢复旧块锁定或解锁动作。
   if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_piece') return { kind: 'piece' as const, action: 'revise' as const, piece: job.pending.piece, ...(job.pending.piece === 'segment' && retainedNodeFeedback(text, selected) ? { node_id: selected!.nodeId } : {}) }
   if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_pitches') return { kind: 'pitches' as const, action: 'redo' as const }

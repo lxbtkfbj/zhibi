@@ -790,9 +790,15 @@ class Answers(BaseModel):
     extra: str = Field("", max_length=5000)
 
 
+class ChatQuote(BaseModel):
+    text: str = Field(min_length=1, max_length=20000)
+    where: str = Field(min_length=1, max_length=300)
+
+
 class NoteIn(BaseModel):
     content: str = Field(min_length=1, max_length=5000)
     to: Literal["chief", "lorekeeper", "writer", "reviewer"] | None = None
+    quote: ChatQuote | None = None
 
 
 class MeetingMessageOut(BaseModel):

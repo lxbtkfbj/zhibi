@@ -281,6 +281,8 @@ def test_schemas_preserve_task_ast_and_prompt_catalog():
     actual = ast.parse((root / "backend/app/agents/schemas.py").read_text(encoding="utf-8"))
     classes = {node.name: node for node in actual.body if isinstance(node, ast.ClassDef)}
     for node in expected.body:
+        if node.name == "LibraryIntent":
+            continue  # 第三包任务6替换了意图schema，精确合同在test_chat_task6。
         assert ast.dump(classes[node.name]) == ast.dump(node)
     prompts = {
         "library_rewrite": (
@@ -289,7 +291,7 @@ def test_schemas_preserve_task_ast_and_prompt_catalog():
         ),
         "library_fill_gaps": ("chief", "concept genre_defaults library requirements"),
         "library_review": ("reviewer", "concept library_full outline scope"),
-        "library_route": ("chief", "library note"),
+        "library_route": ("chief", "library recent note"),
     }
     for name, (role, keys) in prompts.items():
         assert BY_NAME[name][3] == role
@@ -329,5 +331,7 @@ async def test_library_demo_all_structured_outputs(context, monkeypatch):
     intent = await demo.respond(s.LibraryIntent, "", intent_prompt + "重想武道境界\n\n要求：不要影响识别")
     assert (intent.kind, intent.target_name, intent.mode) == ("改设定", "武道境界", "给几个写法")
     fallback = await demo.respond(s.LibraryIntent, "", intent_prompt + "换个设定")
-    assert fallback.kind == "其他" and fallback.target_name == ""  # 目标不明时不能猜主角来改，应交查一遍。
-    assert (await demo.respond(s.LibraryIntent, "", intent_prompt + "下一章节奏快一点")).kind == "其他"
+    assert (
+        fallback.kind == "写作要求" and fallback.target_name == ""
+    )  # 目标不明时不能猜主角来改；演示按任务6归为写作要求。
+    assert (await demo.respond(s.LibraryIntent, "", intent_prompt + "下一章节奏快一点")).kind == "写作要求"

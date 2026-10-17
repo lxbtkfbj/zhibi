@@ -1,3 +1,4 @@
+import { AskChiefSelection } from '../../../components/AskChiefSelection'
 import clsx from 'clsx'
 import { ChevronDown, ChevronRight, Lock, Plus, Unlock } from 'lucide-react'
 import { useState } from 'react'
@@ -106,9 +107,9 @@ function OutlineDetail({ item, select, afterVolumeId, tree }: { item: OutlineIte
       </div>
     </div>
     <ErrorText error={error} />
-    {item.kind === 'ending' ? <p className="whitespace-pre-wrap text-[15px] leading-8">{item.ending.event || '（还没写结局）'}</p> : <>
+    {item.kind === 'ending' ? <AskChiefSelection where={`大纲 · ${item.name}`}><p className="whitespace-pre-wrap text-[15px] leading-8">{item.ending.event || '（还没写结局）'}</p></AskChiefSelection> : <>
       {started && <p className="rounded-lg bg-paper-2 px-3 py-2 text-xs leading-6 text-ink-2">这里已经开写，只能查看；还没写的内容仍可在下方节点里修改。</p>}
-      {notPlanned ? <><p className="text-sm leading-7 text-ink-2">写到再定 · 写到这里之前，主编会先来定下一篇</p>{!laterEnding && value && <p className="whitespace-pre-wrap text-sm leading-7">{value}</p>}</> : editable && id && node ? <RewriteField bookId={bookId} targetType={node.kind} targetId={id} path={node.kind === 'segment' ? 'text' : 'summary'} value={value} locked={item.locked} disabled={busy} label="一段话" optionsOnly /> : <p className="whitespace-pre-wrap text-[15px] leading-8">{value || '（还没写一段话）'}</p>}
+      {notPlanned ? <><p className="text-sm leading-7 text-ink-2">写到再定 · 写到这里之前，主编会先来定下一篇</p>{!laterEnding && value && <AskChiefSelection where={`大纲 · ${item.name}`}><p className="whitespace-pre-wrap text-sm leading-7">{value}</p></AskChiefSelection>}</> : editable && id && node ? <RewriteField bookId={bookId} targetType={node.kind} targetId={id} path={node.kind === 'segment' ? 'text' : 'summary'} value={value} quoteWhere={`大纲 · ${item.name}`} locked={item.locked} disabled={busy} label="一段话" optionsOnly /> : <AskChiefSelection where={`大纲 · ${item.name}`}><p className="whitespace-pre-wrap text-[15px] leading-8">{value || '（还没写一段话）'}</p></AskChiefSelection>}
       {editable && ownCount != null && <form className="flex flex-wrap items-end gap-3 border-t border-line pt-4" onSubmit={event => { event.preventDefault(); const amount = Number(count ?? ownCount); void run(async () => { if (!Number.isInteger(amount) || amount < 1) throw new Error('章数请填大于 0 的整数'); await patchNode({ chapter_count: amount }); setCount(null) }) }}><label className="space-y-1 text-xs text-ink-2"><span className="block">章数</span><input aria-label="章数" className={`${inputClass} !w-24`} type="number" min="1" value={count ?? ownCount} disabled={busy} onChange={event => setCount(event.target.value)} /></label><Button type="submit" size="sm" disabled={busy || count === null}>改章数</Button>{node?.kind === 'volume' && node.volume.units.length > 0 && <span className="pb-2 text-xs text-ink-2">已拆成单元，实际章数按各单元相加。</span>}</form>}
       {node?.kind === 'volume' && !node.volume.units.length && <p className="rounded-lg border border-dashed border-line-2 p-3 text-xs leading-6 text-ink-2">这一卷还没拆成单元。想要的情节写进这一卷的一段话，写到这一卷时主编会照着拆。</p>}
       {!!id && !started && !reviewLocked && <div className="flex flex-wrap gap-2 border-t border-line pt-4">

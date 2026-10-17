@@ -132,11 +132,11 @@ test('direction loading differentiates preparing options from following an actua
 })
 
 
-test('旧流程任务的群聊不可提意见，点名私聊始终只记要求', () => {
+test('旧流程任务的群聊不可提意见，私聊始终只发聊天', () => {
   for (const setup_flow of [undefined, null, 1, 2]) for (const status of ['queued', 'running', 'waiting_author', 'failed', 'cancelled']) {
     const legacy = { kind: 'book_setup', setup_flow, status, pending: { kind: 'setup_piece', piece: 'nodes' } }
     assert.equal(composerRoute(legacy, '保留原文', null).kind, 'blocked')
     assert.equal(composerRoute(legacy, '保留原文', null, true).kind, 'note')
   }
-  assert.equal(composerRoute({ kind: 'book_setup', setup_flow: 3, status: 'waiting_author', pending: { kind: 'setup_piece', flow: 3, piece: 'settings' } }, '修改', null, true).kind, 'piece')
+  assert.equal(composerRoute({ kind: 'book_setup', setup_flow: 3, status: 'waiting_author', pending: { kind: 'setup_piece', flow: 3, piece: 'settings' } }, '修改', null, true).kind, 'note')
 })

@@ -23,7 +23,7 @@ export interface WritingSettings {
   trial_read: boolean
 }
 export interface SettingsResponse { settings: WritingSettings; rules_text: string }
-export interface AuthorRequirement { id: string; book_id: string; text: string; source: string; created_at: string; updated_at: string }
+export interface AuthorRequirement { id: string; book_id: string; text: string; source: string; scope: 'always' | 'chapter' | 'volume'; chapter_index: number | null; volume_index: number | null; active: boolean; label: string; message_id: number | null; created_at: string; updated_at: string }
 export const settingsKeys = { defaults: ['new-book-defaults'], book: (id: string) => ['book-settings', id], requirements: (id: string) => ['author-requirements', id] }
 export const useBookSettings = (id: string) => useQuery({ queryKey: settingsKeys.book(id), queryFn: () => get<SettingsResponse>(`/books/${id}/settings`), refetchOnMount: 'always' })
 export const useNewBookDefaults = () => useQuery({ queryKey: settingsKeys.defaults, queryFn: () => get<SettingsResponse>('/settings/new-book-defaults'), refetchOnMount: 'always' })
