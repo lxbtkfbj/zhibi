@@ -281,7 +281,11 @@ async def _validate_changed_target(session, book_id, target, before, *, category
 
 
 @router.post("/versions/{version_id}/revert")
-async def revert_version(version_id: uuid.UUID, session: AsyncSession = SessionDep):
+async def revert_version(
+    version_id: uuid.UUID,
+    session: AsyncSession = SessionDep,
+    redis: Redis = Depends(get_redis),
+):
     version = await _editable_row(session, SettingVersion, version_id, allow_busy=True)
     target = await load_target(session, version.book_id, version.target_type, version.target_id, for_update=True)
     if isinstance(target, Chapter) and target.status != "final":
@@ -310,7 +314,10 @@ async def revert_version(version_id: uuid.UUID, session: AsyncSession = SessionD
     except IntegrityError as exc:
         raise HTTPException(409, "退回后的名称重复或引用已不存在") from exc
     await session.refresh(target)
-    return _target_out(target)
+    result = _target_out(target)
+    if isinstance(target, Book):
+        await _review_changed_concept(session, redis, target.id, before.get("story", ""))
+    return result
 
 
 @router.get("/books/{book_id}/candidates", response_model=list[CandidateOut])
@@ -410,11 +417,21 @@ async def choose_candidate(
     except IntegrityError as exc:
         raise HTTPException(409, "候选修改后的名称重复或引用已不存在") from exc
     await session.refresh(target)
-    return {
+    result = {
         "candidate": CandidateOut.model_validate(candidate),
         "target": _target_out(target),
         "suggestions": [SuggestionOut.model_validate(suggestion) for suggestion in suggestions],
     }
+    if isinstance(target, Book):
+        await _review_changed_concept(session, redis, target.id, before.get("story", ""))
+    return result
+
+
+async def _review_changed_concept(session, redis, book_id, old_story):
+    # 先保存作者这次改动，再查下游；查出来的只挂建议，不递归接受。
+    from app.api.library_ai import review_concept_change
+
+    await review_concept_change(session, redis, book_id, old_story)
 
 
 @router.get("/books/{book_id}/suggestions", response_model=list[SuggestionOut])
@@ -469,9 +486,32 @@ async def _apply_suggestion(session: AsyncSession, suggestion: SettingSuggestion
         target_type = "entry" if is_entry else "character"
     elif op == "create_category":
         data = deepcopy(_require(payload, "category", dict))
+        entries = data.pop("entries", [])
+        if not isinstance(entries, list) or any(not isinstance(entry, dict) for entry in entries):
+            raise HTTPException(422, "自建类别的条目必须是列表")
         data["style"] = {"卡片": "card", "段落": "paragraph"}.get(data.get("style"), data.get("style"))
         values = CategoryCreate.model_validate(data).model_dump()
-        session.add(SettingCategory(book_id=suggestion.book_id, key=uuid.uuid4().hex[:20], **values))
+        category = SettingCategory(book_id=suggestion.book_id, key=uuid.uuid4().hex[:20], **values)
+        session.add(category)
+        await session.flush()
+        for position, entry in enumerate(entries):
+            entry = deepcopy(entry)
+            if set(entry) - (set(WorldEntryBase.model_fields) | {"parent"}):
+                raise HTTPException(422, "建议包含不能编辑的字段")
+            # 建议里的类别名是模型给的显示名，接受后由程序绑定刚建立的类别。
+            entry.pop("parent", None)
+            entry["category"] = f"custom:{category.key}"
+            entry["status"] = {value: key for key, value in config.STATUSES.items()}.get(
+                entry.get("status"), entry.get("status", "must")
+            )
+            entry["style"] = category.style
+            entry["position"] = position
+            entry = WorldEntryBase.model_validate(entry).model_dump(exclude_unset=True)
+            entry = await validate_entry(session, suggestion.book_id, entry)
+            created = WorldEntry(book_id=suggestion.book_id, source="suggestion", **entry)
+            session.add(created)
+            await session.flush()
+            await record_version(session, suggestion.book_id, "entry", created, "suggestion", suggestion.title)
     elif op == "replace_in_chapters":
         old, new = _require(payload, "old", str), _require(payload, "new", str)
         numbers = _require(payload, "chapters", list)
@@ -548,8 +588,11 @@ async def _apply_suggestion(session: AsyncSession, suggestion: SettingSuggestion
 
 
 @router.post("/suggestions/{row_id}/accept", response_model=SuggestionOut)
-async def accept_suggestion(row_id: uuid.UUID, session: AsyncSession = SessionDep):
+async def accept_suggestion(row_id: uuid.UUID, session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)):
     suggestion = await _editable_row(session, SettingSuggestion, row_id, allow_busy=True)
+    book_id = suggestion.book_id
+    book = await session.get(Book, book_id)
+    old_story = (book.concept or {}).get("story", "")
     try:
         await _apply_suggestion(session, suggestion)
         await session.commit()
@@ -557,7 +600,9 @@ async def accept_suggestion(row_id: uuid.UUID, session: AsyncSession = SessionDe
         raise _splice_error(exc) from exc
     except IntegrityError as exc:
         raise HTTPException(409, "建议里的名称重复或引用已不存在") from exc
-    return suggestion
+    result = SuggestionOut.model_validate(suggestion)
+    await _review_changed_concept(session, redis, book_id, old_story)
+    return result
 
 
 @router.post("/suggestions/{row_id}/ignore", response_model=SuggestionOut)
@@ -572,8 +617,12 @@ async def ignore_suggestion(row_id: uuid.UUID, session: AsyncSession = SessionDe
 
 
 @router.post("/books/{book_id}/suggestions/accept-all")
-async def accept_all_suggestions(book: Book = Depends(get_book), session: AsyncSession = SessionDep):
+async def accept_all_suggestions(
+    book: Book = Depends(get_book), session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)
+):
     await lock_book(session, book.id)
+    book_id = book.id
+    old_story = (book.concept or {}).get("story", "")
     ids = list(
         await session.scalars(
             select(SettingSuggestion.id)
@@ -598,6 +647,7 @@ async def accept_all_suggestions(book: Book = Depends(get_book), session: AsyncS
         except IntegrityError:
             skipped.append({"id": suggestion_id, "reason": "建议里的名称重复或引用已不存在"})
     await session.commit()
+    await _review_changed_concept(session, redis, book_id, old_story)
     return jsonable_encoder(
         {"accepted": accepted, "skipped": skipped, "accepted_count": len(accepted), "skipped_count": len(skipped)}
     )

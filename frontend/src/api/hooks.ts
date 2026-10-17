@@ -1,5 +1,6 @@
 import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { del, get, patch, post, put } from './client'
+import { initialWriteRequest, waitForSetupCompletion } from '../lib/setupThree'
 import type {
   Bible,
   BookDetail,
@@ -78,7 +79,7 @@ export const useHealth = () =>
 export function useCreateBook() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (body: { idea: string; style_reference: string; ask: boolean; mode?: 'puzzle' | 'oneshot' }) =>
+    mutationFn: (body: { idea: string; style_reference: string; ask?: boolean; mode?: 'puzzle' | 'oneshot' }) =>
       post<{ book: BookDetail; job: Job }>('/books', body),
     onSuccess: (data) => {
       qc.setQueryData(keys.book(data.book.id), data.book)
@@ -263,14 +264,22 @@ export function useJobActions(bookId: string) {
   // 拍板条与对话框共享锁定状态，避免确认和修改意见同时提交。
   const segmentKey = ['segment-decision', bookId]
   const segmentPending = useIsMutating({ mutationKey: segmentKey }) > 0
+  const setupKey = ['setup-decision', bookId]
+  const setupPending = useIsMutating({ mutationKey: setupKey }) > 0
   const setJob = (job: Job) =>
     qc.setQueryData<BookDetail>(keys.book(bookId), (old) => (old ? { ...old, active_job: job } : old))
+  const pitches = useMutation({
+    mutationKey: setupKey,
+    mutationFn: ({ jobId, ...body }: { jobId: string; action: 'pick' | 'redo'; index?: number; title?: string; length?: number; feedback?: string }) => post<Job>(`/jobs/${jobId}/pitches`, body),
+    onSuccess: setJob,
+  })
   const directions = useMutation({
       mutationFn: ({ jobId, ...body }: { jobId: string; action: 'choose' | 'redo'; choice?: number; title?: string; mix?: string; length?: string; feedback?: string }) =>
         post<Job>(`/jobs/${jobId}/directions`, body),
       onSuccess: setJob,
     })
   const piece = useMutation({
+      mutationKey: setupKey,
       mutationFn: ({ jobId, ...body }: { jobId: string; action: 'confirm' | 'delegate' | 'revise' | 'candidates' | 'fill' | 'reopen' | 'unlock'; piece: SetupPiece; feedback?: string; node_id?: string; flips?: { topic: string; choice: string }[] }) =>
         post<Job>(`/jobs/${jobId}/piece`, body),
       onSuccess: setJob,
@@ -284,7 +293,19 @@ export function useJobActions(bookId: string) {
     onSuccess: setJob,
   })
   return {
-    directions, chooseDirection, redoDirections, piece, pieceAction: piece, segmentPending,
+    pitches, directions, chooseDirection, redoDirections, piece, pieceAction: piece, segmentPending, setupPending,
+    confirmSetupAndWrite: useMutation({
+      mutationKey: setupKey,
+      mutationFn: async ({ jobId, book, action }: { jobId: string; book: BookDetail; action: 'confirm' | 'delegate' }) => {
+        setJob(await post<Job>(`/jobs/${jobId}/piece`, { action, piece: 'outline' }))
+        await waitForSetupCompletion(() => get<Job>(`/jobs/${jobId}`), () => new Promise(resolve => setTimeout(resolve, 1000)))
+        return post<Job>(`/books/${bookId}/write`, initialWriteRequest(book))
+      },
+      onSuccess: job => {
+        qc.setQueryData<BookDetail>(keys.book(bookId), old => old ? { ...old, status: 'writing', active_job: job } : old)
+        void qc.invalidateQueries({ queryKey: keys.books })
+      },
+    }),
     segment: useMutation({
       mutationKey: segmentKey,
       mutationFn: ({ jobId, ...body }: { jobId: string; action: 'confirm' | 'delegate' | 'revise'; feedback?: string; flips?: { topic: string; choice: string }[]; pin_end?: boolean }) =>

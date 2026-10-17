@@ -112,7 +112,10 @@ async def get_book_detail(book: Book = Depends(get_book), session: AsyncSession 
 
 @router.patch("/books/{book_id}", response_model=BookDetail)
 async def update_book(
-    body: BookPatch, book: Book = Depends(get_book), session: AsyncSession = SessionDep
+    body: BookPatch,
+    book: Book = Depends(get_book),
+    session: AsyncSession = SessionDep,
+    redis: Redis = Depends(get_redis),
 ) -> BookDetail:
     await lock_book(session, book.id)
     await session.refresh(book, with_for_update=True)
@@ -136,6 +139,10 @@ async def update_book(
             setattr(book, field, {**(getattr(book, field) or {}), **card.model_dump(exclude_unset=True)})
     if body.concept is not None or body.title is not None:
         await record_version(session, book.id, "concept", book, "author", before=before)
+    if body.concept is not None and "story" in body.concept:
+        from app.api.library_ai import review_concept_change
+
+        await review_concept_change(session, redis, book.id, before.get("story", ""))
     await session.commit()
     await session.refresh(book)
     return await detail(session, book)

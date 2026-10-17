@@ -1,9 +1,7 @@
-import { RotateCcw } from 'lucide-react'
 import { useState } from 'react'
 import { useJobActions } from '../../api/hooks'
 import type { AuthorChoice, PieceKey } from '../../api/types'
-import { Button, ErrorText, Modal } from '../../components/ui'
-import { PIECES } from '../../lib/storyMap'
+import { Button, ErrorText } from '../../components/ui'
 import { useBookContext } from './context'
 
 /** 开书和定下一段共用同一组选择；提交者负责流程门禁和防重复。 */
@@ -30,20 +28,11 @@ export function Decisions({ decisions, name, disabled, loading, error, onRevise 
   </section>
 }
 
-/** 同时负责该块的决定和重新打开；不在属于其他块的页面泄漏操作。 */
+/** 旧页面保留决定展示入口；退役流程不再提供重新打开或解锁。 */
 export function PieceDecisions({ piece }: { piece: PieceKey }) {
-  const { bookId, book, job, working } = useBookContext()
-  const { pieceAction } = useJobActions(bookId)
-  const [open, setOpen] = useState(false)
-  const pending = job?.setup_flow !== 1 && job?.status === 'waiting_author' && job.pending?.kind === 'setup_piece' ? job.pending : null
-  const canReopen = !working && pending && book.setup_progress?.pieces?.[piece] === 'confirmed' && book.setup_progress?.mode === 'puzzle'
-  const index = PIECES.findIndex(item => item.key === piece)
-  const downstream = PIECES.slice(index + 1).filter(item => book.setup_progress?.pieces?.[item.key] === 'confirmed').map(item => item.name)
-  return <>
-    {pending?.piece === piece && !!pending.decisions?.length && <Decisions key={`${job?.id}-${pending.round}-${JSON.stringify(pending.decisions)}`} decisions={pending.decisions} name={`piece-${piece}`} disabled={pieceAction.isPending} loading={pieceAction.isPending} error={pieceAction.error} onRevise={flips => job && pieceAction.mutate({ jobId: job.id, action: 'revise', piece, flips })} />}
-    {canReopen && <div className="mb-5 flex flex-wrap items-center gap-2"><span className="text-xs text-lore">{PIECES[index].name} · 已确认</span><Button size="sm" variant="ghost" aria-label={`重新打开这一块：${PIECES[index].name}`} onClick={() => setOpen(true)}><RotateCcw className="size-4" />重新打开这一块</Button><ErrorText error={pieceAction.error} /></div>}
-    <Modal open={!!canReopen && open} title={`重新打开「${PIECES[index].name}」`} onClose={() => { if (!pieceAction.isPending) setOpen(false) }} footer={<><Button variant="ghost" onClick={() => setOpen(false)} disabled={pieceAction.isPending}>取消</Button><Button onClick={async () => { if (!job) return; try { await pieceAction.mutateAsync({ jobId: job.id, action: 'reopen', piece }); setOpen(false) } catch { /* 原决定和错误保留。 */ } }} loading={pieceAction.isPending}>确认重新打开</Button></>}>
-      <p className="text-sm leading-relaxed">{downstream.length ? `重新打开后，后面已经确认的「${downstream.join('」「')}」也会按新的内容重新检查一遍。` : '重新打开后，这一块会回到等你确认；后面的内容会按新的内容重新检查一遍。'}</p><ErrorText error={pieceAction.error} />
-    </Modal>
-  </>
+  const { bookId, job } = useBookContext()
+  const { pieceAction, setupPending } = useJobActions(bookId)
+  const pending = job?.setup_flow === 3 && job.status === 'waiting_author' && job.pending?.kind === 'setup_piece' ? job.pending : null
+  if (pending?.piece !== piece || !pending.decisions?.length) return null
+  return <Decisions key={`${job?.id}-${pending.round}-${JSON.stringify(pending.decisions)}`} decisions={pending.decisions} name={`piece-${piece}`} disabled={setupPending} loading={pieceAction.isPending} error={pieceAction.error} onRevise={flips => job && pieceAction.mutate({ jobId: job.id, action: 'revise', piece, flips })} />
 }

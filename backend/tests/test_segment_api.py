@@ -261,7 +261,7 @@ async def test_setup_flow_http_and_sse_keep_legacy_and_future_versions(client, s
             assert JobOut.model_validate(job_dict(job)).setup_flow == expected
     created = await client.post("/api/books", json={"idea": "一个少年寻找故乡的故事"})
     assert created.status_code == 201
-    assert created.json()["job"]["setup_flow"] == created.json()["book"]["active_job"]["setup_flow"] == 2
+    assert created.json()["job"]["setup_flow"] == created.json()["book"]["active_job"]["setup_flow"] == 3
 
 
 async def test_segment_approval_defaults_copy_update_and_no_prompt_rules(client, story):

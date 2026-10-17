@@ -9,7 +9,7 @@ import type { InterviewQuestion, Job, NodeUpdateProposal, WriteUntil } from '../
 import { Button, ErrorText, inputClass, TypingDots } from '../../components/ui'
 import { decisionCopy } from '../../lib/decision'
 import { useReducedMotion } from '../../lib/appearance'
-import { PIECES, targetPiece } from '../../lib/storyMap'
+import { setupPieces, targetPiece } from '../../lib/storyMap'
 import { pendingTarget } from '../../lib/workspace'
 import { changedText } from '../../lib/writingUi'
 import { useBookContext } from './context'
@@ -37,7 +37,7 @@ function NodeUpdateComparison({ proposal }: { proposal: NodeUpdateProposal }) {
 
 export function DecisionBar() {
   const { book, bookId, job, waiting, requestFeedback, manualNavigate, celebrate, segmentReview } = useBookContext()
-  const { pieceAction } = useJobActions(bookId)
+  const { pieceAction, confirmSetupAndWrite, setupPending } = useJobActions(bookId)
   const reduce = useReducedMotion()
   const pending = job?.pending
   const volumePending = pending?.kind === 'volume_review' ? pending : null
@@ -46,13 +46,15 @@ export function DecisionBar() {
   const target = pendingTarget(pending, bookId)
   const piece = pending?.kind === 'setup_piece' ? pending : null
   const nextSegment = pending?.kind === 'segment_review' ? pending : null
-  const name = PIECES.find(item => item.key === piece?.piece)?.name ?? ''
+  const name = setupPieces(job?.setup_flow).find(item => item.key === piece?.piece)?.name ?? ''
   const review = piece?.review ?? []
   const reminders = review.length + (piece?.warnings?.length ?? 0) + (piece?.suggestions?.length ?? 0) + (piece?.unlock_requests?.length ?? 0)
   const act = async (action: 'confirm' | 'delegate') => {
     if (!job || !piece) return
+    if (setupPending) return
     try {
-      await pieceAction.mutateAsync({ jobId: job.id, action, piece: piece.piece })
+      if (job.setup_flow === 3 && piece.piece === 'outline') await confirmSetupAndWrite.mutateAsync({ jobId: job.id, action, book })
+      else await pieceAction.mutateAsync({ jobId: job.id, action, piece: piece.piece })
       if (piece.piece === 'first_volume') celebrate()
     } catch { /* 失败保留待确认内容。 */ }
   }
@@ -64,16 +66,17 @@ export function DecisionBar() {
   if (needsSetupRestart(book, job) && job) return <div data-testid="restart-setup-bar" className="z-10 max-h-[42vh] shrink-0 overflow-y-auto border-b border-seal/25 bg-paper-2 px-5 py-3">
     <SetupRestartCard />
   </div>
-  return <AnimatePresence initial={false}>{waiting && job && target && <motion.div key="decision" data-testid="decision-bar" initial={reduce ? false : { opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: reduce ? 0 : 0.28, ease: 'easeOut' }} className="z-10 max-h-[42vh] shrink-0 overflow-y-auto border-b border-seal/25 bg-paper-2 px-5 py-3">
+  return <><div className="px-5 text-sm text-chief">{confirmSetupAndWrite.isPending && <p role="status" className="py-2">正在确认大纲，开书任务结束后会自动开写…</p>}<ErrorText error={confirmSetupAndWrite.error} /></div><AnimatePresence initial={false}>{waiting && job && target && <motion.div key="decision" data-testid="decision-bar" initial={reduce ? false : { opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: reduce ? 0 : 0.28, ease: 'easeOut' }} className="z-10 max-h-[42vh] shrink-0 overflow-y-auto border-b border-seal/25 bg-paper-2 px-5 py-3">
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <p className="text-sm font-medium text-seal">{nextSegment ? `待你确认：第 ${nextSegment.number} 段${nextSegment.warnings?.[0] ? `（${nextSegment.warnings[0]}）` : ''}` : piece ? `待你确认：${name}${piece.warnings?.[0] ? `（${piece.warnings[0]}）` : ''}` : pending?.kind === 'setup_directions' ? '待你选择：开书方向' : `待你拍板：${target.label}`}</p>
+      <p className="text-sm font-medium text-seal">{nextSegment ? `待你确认：第 ${nextSegment.number} 段${nextSegment.warnings?.[0] ? `（${nextSegment.warnings[0]}）` : ''}` : piece ? `待你确认：${name}${piece.warnings?.[0] ? `（${piece.warnings[0]}）` : ''}` : pending?.kind === 'setup_pitches' ? '待你选择：三个短版' : pending?.kind === 'setup_directions' ? '待你选择：开书方向' : `待你拍板：${target.label}`}</p>
       <div className="flex flex-wrap items-center gap-2">{piece ? <>
-        <Button size="sm" variant="seal" loading={pieceAction.isPending && pieceAction.variables?.action === 'confirm'} disabled={pieceAction.isPending} onClick={() => void act('confirm')}>确认这一块</Button>
-        <Button size="sm" variant="ghost" loading={pieceAction.isPending && pieceAction.variables?.action === 'delegate'} disabled={pieceAction.isPending} onClick={() => void act('delegate')}>交给编辑部定</Button>
+        <Button size="sm" variant="seal" loading={setupPending} disabled={setupPending} onClick={() => void act('confirm')}>{job.setup_flow === 3 ? piece.piece === 'outline' ? '确认，开写' : '确认' : '确认这一块'}</Button>
+        <Button size="sm" variant="ghost" disabled={setupPending} onClick={requestFeedback}>提意见</Button>
+        {job.setup_flow !== 3 && <Button size="sm" variant="ghost" loading={pieceAction.isPending && pieceAction.variables?.action === 'delegate'} disabled={setupPending} onClick={() => void act('delegate')}>交给编辑部定</Button>}
       </> : nextSegment ? <>
         <Button size="sm" variant="seal" loading={segmentReview.submitting && segmentReview.action === 'confirm'} disabled={segmentReview.submitting} onClick={() => void actSegment('confirm')}>确认这一段</Button>
         <Button size="sm" variant="ghost" loading={segmentReview.submitting && segmentReview.action === 'delegate'} disabled={segmentReview.submitting} onClick={() => void actSegment('delegate')}>交给编辑部定</Button>
-      </> : pending?.kind === 'setup_directions' ? <button className="text-sm text-chief underline underline-offset-4" onClick={() => manualNavigate(`/books/${bookId}`)}>去选择 →</button> : <><ApproveButton job={job} /><Button size="sm" variant="ghost" onClick={requestFeedback}>提意见</Button></>}</div>
+      </> : pending?.kind === 'setup_directions' || pending?.kind === 'setup_pitches' ? <button className="text-sm text-chief underline underline-offset-4" onClick={() => manualNavigate(`/books/${bookId}`)}>去选择 →</button> : <><ApproveButton job={job} /><Button size="sm" variant="ghost" onClick={requestFeedback}>提意见</Button></>}</div>
     </div>
     {conflicts.map((conflict, index) => <div key={index} role="alert" className="mt-3 flex items-start gap-2 rounded-lg border border-reviewer/35 bg-reviewer-soft px-3 py-2 text-sm leading-relaxed text-seal-dark"><AlertTriangle className="mt-0.5 size-4 shrink-0" /><p>{conflict}</p></div>)}
     {volumePending?.node_update && <NodeUpdateComparison proposal={volumePending.node_update} />}
@@ -93,7 +96,7 @@ export function DecisionBar() {
     {!!writingIssues?.length && <ul aria-label="卷纲与章节提醒" className="mt-3 space-y-1.5 border-t border-divider pt-2 text-sm leading-relaxed text-ink-2">{writingIssues.map((issue, index) => <li key={index}>{issue}</li>)}</ul>}
     <ErrorText error={pieceAction.error} />
     <ErrorText error={segmentReview.error} />
-  </motion.div>}</AnimatePresence>
+  </motion.div>}</AnimatePresence></>
 }
 
 /** 只有盖章按钮：编辑部面板里修改意见直接在底部输入框里说。 */

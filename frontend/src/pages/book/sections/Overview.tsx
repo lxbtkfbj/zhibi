@@ -12,12 +12,16 @@ import { directionProgressText } from '../../../lib/workspace'
 import { useBookContext } from '../context'
 import { InterviewForm, ResumeControls } from '../Decision'
 import { DirectionSelection } from '../DirectionSelection'
+import { PitchSelection } from '../PitchSelection'
 import { SetupRestartCard } from '../SetupRestartCard'
 import { PageHeader } from './common'
 
 function NextStep() {
   const { book, job, bookId, messages } = useBookContext()
   if (needsSetupRestart(book, job)) return <div data-testid="restart-setup-overview"><p className="mb-2 text-xs text-ink-2">下一步</p><SetupRestartCard /></div>
+  if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_pitches') {
+    return <PitchSelection key={`${job.id}-${job.pending.round}`} job={job} pending={job.pending} />
+  }
   if (job?.status === 'waiting_author' && job.pending?.kind === 'setup_directions') {
     return <DirectionSelection key={`${job.id}-${job.updated_at}`} job={job} pending={job.pending} />
   }

@@ -1,19 +1,19 @@
-"""通过真实接口和检查点走完整拼图流程；不使用作者数据库或外部模型。"""
+"""真实接口与检查点跑完三步，演示模式只用隔离测试数据库。"""
 
 import uuid
+from collections import Counter
 
 import httpx
 import pytest
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from redis.asyncio import Redis
 from sqlalchemy import select
 
-from app.agents import editorial, schemas
+from app.agents import schemas
 from app.config import get_settings
-from app.graphs.book_setup import PIECE_ORDER, build_setup_graph, length_question
+from app.graphs.book_setup import PIECE_ORDER
 from app.llm import demo
 from app.main import create_app
-from app.models import AuthorRequirement, Book, Job, MeetingMessage, Volume
+from app.models import Book, Chapter, Character, MeetingMessage, PlotUnit, Volume, WorldEntry
 from app.services import jobs
 from app.services.job_runner import execute_job
 
@@ -37,252 +37,264 @@ async def flow(monkeypatch):
                 assert status["status"] != "failed", status["error"]
             return None if response.status_code == 204 else response.json()
 
+        call.client = client
         yield call
     await application.state.redis.aclose()
 
 
-async def new_puzzle(flow, idea="一个少年捡到青灯"):
-    created = await flow("POST", "/books", {"idea": idea, "mode": "puzzle"})
-    bid, jid = created["book"]["id"], created["job"]["id"]
-    gate = await flow("GET", f"/jobs/{jid}")
-    assert gate["pending"]["kind"] == "setup_directions"
-    assert len(gate["pending"]["directions"]) == 3
-    await flow(
-        "POST",
-        f"/jobs/{jid}/directions",
-        {"action": "choose", "choice": 0, "length": "约 100 万字", "mix": "加入古镜追凶的悬念"},
-    )
-    assert (await flow("GET", f"/jobs/{jid}"))["pending"]["piece"] == "concept"
+async def new_puzzle(flow, idea="楚风重生，测试自建类别"):
+    result = await flow("POST", "/books", {"idea": idea, "mode": "puzzle"})
+    bid, jid = result["book"]["id"], result["job"]["id"]
+    gate = (await flow("GET", f"/jobs/{jid}"))["pending"]
+    assert gate["kind"] == "setup_pitches" and gate["flow"] == 3 and len(gate["pitches"]) == 3
+    await flow("POST", f"/jobs/{jid}/pitches", {"action": "pick", "index": 1, "length": 400})
     return bid, jid
 
 
-async def confirm(flow, jid, piece):
-    return await flow("POST", f"/jobs/{jid}/piece", {"action": "confirm", "piece": piece})
+async def confirm(flow, jid):
+    return await flow("POST", f"/jobs/{jid}/piece", {"action": "confirm"})
 
 
-async def test_direction_redos_checkpoint_recent_round_and_chosen_title(flow, monkeypatch):
-    captured = []
+async def test_complete_flow_focus_saved_first_and_write_reuses_first_unit(flow, sessionmaker, monkeypatch):
+    calls, inspected = Counter(), []
     original = demo.respond
 
-    async def capture(schema, system, user):
-        result = await original(schema, system, user)
-        if schema is schemas.BookDirections:
-            captured.append(user)
-            # 唯一标签区分三轮，避免只检查了「有上一轮」却把全部历史方向累积带回。
-            result.directions[0].name = f"仅第{len(captured)}轮方向"
-        elif schema is schemas.BookConcept:
-            result.title = "模型擅改的书名"
-        return result
+    async def respond(schema, system, user):
+        calls[schema.__name__] += 1
+        if schema is schemas.LibraryRest:
+            async with sessionmaker() as session:
+                heroes = list(await session.scalars(select(Character)))
+                entries = list(await session.scalars(select(WorldEntry)))
+                messages = list(await session.scalars(select(MeetingMessage.content)))
+                assert [hero.name for hero in heroes] == ["楚风"]
+                assert any(entry.name == "轮回镜" for entry in entries)
+                assert not any(entry.name == "武道境界" for entry in entries)
+                assert "重点先出来了：主角「楚风」和金手指「轮回镜」。其余设定正在补。" in messages
+                inspected.append(True)
+        return await original(schema, system, user)
 
-    monkeypatch.setattr(demo, "respond", capture)
-    created = await flow("POST", "/books", {"idea": "借用《某某》的设定", "mode": "puzzle"})
-    bid, jid = created["book"]["id"], created["job"]["id"]
-    first = (await flow("GET", f"/jobs/{jid}"))["pending"]
-    assert first["reference"]
-    assert first["length"] == length_question(3000)
-    assert "【上一轮的方向（作者不满意）】" not in captured[0]
-    await flow("POST", f"/jobs/{jid}/directions", {"action": "redo", "feedback": "第一轮意见：保留经营"})
-    second = (await flow("GET", f"/jobs/{jid}"))["pending"]
-    assert "仅第1轮方向" in captured[1] and "第一轮意见：保留经营" in captured[1]
-    assert first["reference"] in captured[1]
-    await flow("PATCH", f"/books/{bid}/settings", {"chapter_words": 2000})
-    await flow("POST", f"/jobs/{jid}/directions", {"action": "redo", "feedback": "第二轮意见：突出追凶"})
-    third = (await flow("GET", f"/jobs/{jid}"))["pending"]
-    assert third["length"] == length_question(2000)
-    assert "仅第2轮方向" in captured[2] and "仅第1轮方向" not in captured[2]
-    assert second["reference"] in captured[2]
-    # 更早的意见仍留在作者要求中，而方向正文仅带最近一轮。
-    assert "第一轮意见：保留经营" in captured[2] and "第二轮意见：突出追凶" in captured[2]
-    title = third["directions"][0]["titles"][1]
-    await flow(
-        "POST",
-        f"/jobs/{jid}/directions",
-        {"action": "choose", "choice": 0, "title": title, "length": third["length"]["options"][2]},
-    )
-    concept = (await flow("GET", f"/books/{bid}"))["concept"]
-    assert concept["title"] == title and "模型擅改的书名" in concept["alt_titles"]
-    assert concept["chapter_words"] == 2000
-    assert (await flow("GET", f"/jobs/{jid}"))["pending"]["piece"] == "concept"
-
-
-async def test_puzzle_complete_api_path_and_author_nodes(flow, sessionmaker, monkeypatch):
-    original = editorial.critique_setup
-
-    async def critique(*args, **kwargs):
-        setup = args[3]
-        if setup.get("first_volume", {}).get("units"):
-            return schemas.SetupCritique(
-                verdict="pass",
-                highlights=[],
-                issues=[
-                    schemas.ReviewIssue(
-                        target="concept", problem="目标读者可以更具体", suggestion="明确偏好智斗的读者", severity="low"
-                    )
-                ],
-                remark="第一卷可交作者，锁定概念只提建议。",
-            )
-        return await original(*args, **kwargs)
-
-    monkeypatch.setattr(editorial, "critique_setup", critique)
+    monkeypatch.setattr(demo, "respond", respond)
     bid, jid = await new_puzzle(flow)
-    for piece in ("concept", "protagonist", "world"):
-        await confirm(flow, jid, piece)
+    concept = (await flow("GET", f"/books/{bid}"))["concept"]
+    assert concept["target_length"] == 400 and concept["story"] and concept["secret_entry_id"]
+    await confirm(flow, jid)
     gate = (await flow("GET", f"/jobs/{jid}"))["pending"]
-    assert gate["piece"] == "segment" and not gate["warnings"]
-    nodes = await flow("GET", f"/books/{bid}/nodes")
-    await flow(
-        "POST",
-        f"/books/{bid}/nodes",
-        {"title": "作者远景", "event": "作者已想到的远景", "status": "pencil", "after_node_id": nodes[1]["id"]},
-    )
-    nodes = await flow("GET", f"/books/{bid}/nodes")
-    await flow("PATCH", f"/nodes/{nodes[1]['id']}", {"status": "pinned"})
-    await flow("PATCH", f"/nodes/{nodes[2]['id']}", {"event": "作者亲手改的暂定事件"})
-    author = await flow(
-        "POST",
-        f"/books/{bid}/nodes",
-        {"title": "作者亲定的告别", "event": "向故乡告别", "volume": 2, "after_node_id": nodes[2]["id"]},
-    )
-    assert author["status"] == "pinned" and author["origin"] == "author"
-    await flow("PATCH", f"/nodes/{nodes[3]['id']}", {"status": "empty", "event": ""})
-    await flow("POST", f"/jobs/{jid}/piece", {"action": "candidates", "piece": "segment", "node_id": nodes[2]["id"]})
+    assert gate["piece"] == "settings" and gate["summary"].startswith("主编建了 ")
+    assert "另外有 " in gate["summary"] and inspected
+    suggestions = await flow("GET", f"/books/{bid}/suggestions")
+    custom = next(row for row in suggestions if row["payload"].get("op") == "create_category")
+    assert custom["payload"]["category"]["entries"][0]["name"] == "末班车司机"
+    assert gate["suggestion_count"] == len(suggestions)
+    await flow("POST", f"/jobs/{jid}/piece", {"action": "revise", "feedback": "把境界改成九重天"})
+    levels = next(entry for entry in gate["setup"]["settings"]["entries"] if entry["name"] == "武道境界")
+    candidates = await flow("GET", f"/books/{bid}/candidates?target_type=entry&target_id={levels['id']}")
+    assert len(candidates) == 1 and len(candidates[0]["options"]) == 3
+    assert calls["LibraryRest"] == 1  # 提意见绝不整库重建。
+    await confirm(flow, jid)
     gate = (await flow("GET", f"/jobs/{jid}"))["pending"]
-    assert len(gate["candidates"]["nodes"]) == 3
-    candidate = gate["candidates"]["nodes"][0]
-    await flow(
-        "PATCH",
-        f"/nodes/{nodes[2]['id']}",
-        {
-            k: v
-            for k, v in candidate.items()
-            if k in {"title", "event", "prerequisite", "consequence", "volume", "editor_note"}
-        },
-    )
-    await flow(
-        "POST",
-        f"/jobs/{jid}/piece",
-        {"action": "fill", "piece": "segment", "node_id": nodes[3]["id"], "feedback": "中间要有一场宗门大比"},
-    )
-    after = await flow("GET", f"/books/{bid}/nodes")
-    filled = next(n for n in after if n["id"] == nodes[3]["id"])
-    assert filled["status"] == "pinned" and filled["origin"] == "author" and filled["event"]
-    await confirm(flow, jid, "segment")
-    gate = (await flow("GET", f"/jobs/{jid}"))["pending"]
-    assert gate["piece"] == "first_volume" and gate["suggestions"][0]["target"] == "concept"
-    await confirm(flow, jid, "first_volume")
+    assert gate["piece"] == "outline"
+    outline = gate["setup"]["outline"]
+    assert len(outline["arcs"]) == 4 and len(outline["volumes"]) == 2 and len(outline["units"]) == 4
+    assert outline["chapters"] and outline["volumes"][0]["status"] == "approved"
+    count = calls["ChapterPlanDraft"]
+    await confirm(flow, jid)
     book = await flow("GET", f"/books/{bid}")
     assert book["status"] == "ready" and book["setup_progress"]["current"] is None
     assert book["setup_progress"]["pieces"] == dict.fromkeys(PIECE_ORDER, "confirmed")
-    bible = await flow("GET", f"/books/{bid}/bible")
-    assert len(bible["secrets"]) >= 2
-    assert any(f["code"].startswith("E") for f in bible["foreshadowings"])
-    nodes_after = await flow("GET", f"/books/{bid}/nodes")
-    assert any(n["anchors"] for n in nodes_after)
-    pinned = next(n for n in nodes_after if n["id"] == nodes[1]["id"])
-    assert pinned["event"] == nodes[1]["event"]
+    assert (await flow("GET", f"/jobs/{jid}"))["status"] == "succeeded"
+    await flow("PATCH", f"/books/{bid}/settings", {"trial_read": False})
+    await flow("POST", f"/books/{bid}/write", {"until": "count", "count": 3})
     async with sessionmaker() as session:
-        volumes = list(
-            await session.scalars(select(Volume).where(Volume.book_id == uuid.UUID(bid)).order_by(Volume.index))
+        chapters = list(
+            await session.scalars(select(Chapter).where(Chapter.book_id == uuid.UUID(bid), Chapter.status == "final"))
         )
-        assert volumes[0].status == "approved" and all(v.target_node_id for v in volumes)
-        requirements = list(
-            await session.scalars(select(AuthorRequirement).where(AuthorRequirement.book_id == uuid.UUID(bid)))
-        )
-        assert any("100 万字" in r.text and r.source == "answer" for r in requirements)
-        assert any("混搭" in r.text and r.source == "answer" for r in requirements)
-        assert not any(r.text == "中间要有一场宗门大比" for r in requirements)
+        assert len(chapters) == 3
+    assert calls["ChapterPlanDraft"] == count
 
 
-async def test_confirm_fills_empty_and_reopen_resync(flow):
-    bid, jid = await new_puzzle(flow)
-    for piece in ("concept", "protagonist", "world"):
-        await confirm(flow, jid, piece)
-    nodes = await flow("GET", f"/books/{bid}/nodes")
-    await flow("PATCH", f"/nodes/{nodes[2]['id']}", {"status": "empty", "event": ""})
-    await confirm(flow, jid, "segment")
-    after = await flow("GET", f"/books/{bid}/nodes")
-    assert next(n for n in after if n["id"] == nodes[2]["id"])["status"] == "pencil"
-    await flow("POST", f"/jobs/{jid}/piece", {"action": "reopen", "piece": "world"})
-    progress = (await flow("GET", f"/books/{bid}"))["setup_progress"]
-    assert progress["pieces"]["world"] == "waiting"
-    assert progress["pieces"]["segment"] == progress["pieces"]["first_volume"] == "todo"
-    await confirm(flow, jid, "world")
-    assert (await flow("GET", f"/jobs/{jid}"))["pending"]["piece"] == "segment"
-    await confirm(flow, jid, "segment")
-    assert (await flow("GET", f"/jobs/{jid}"))["pending"]["piece"] == "first_volume"
+async def test_redo_exact_previous_latest_round_title_and_requirements(flow, monkeypatch):
+    captured = []
+    original = demo.respond
+
+    async def respond(schema, system, user):
+        result = await original(schema, system, user)
+        if schema is schemas.PitchSet:
+            captured.append(user)
+            result.pitches[0].name = f"仅第{len(captured)}轮短版"
+        return result
+
+    monkeypatch.setattr(demo, "respond", respond)
+    created = await flow("POST", "/books", {"idea": "对标一部传统玄幻", "mode": "puzzle"})
+    bid, jid = created["book"]["id"], created["job"]["id"]
+    assert "【上一轮的短版】\n" not in captured[0]
+    for feedback in ("保留经营", "加入追凶"):
+        await flow("POST", f"/jobs/{jid}/pitches", {"action": "redo", "feedback": feedback})
+    assert "【上一轮的短版】\n1. 仅第2轮短版：" in captured[2]
+    assert "【作者的意见】\n加入追凶" in captured[2] and "仅第1轮短版" not in captured[2]
+    gate = (await flow("GET", f"/jobs/{jid}"))["pending"]
+    assert gate["round"] == 3
+    await flow("POST", f"/jobs/{jid}/pitches", {"action": "pick", "index": 1, "title": "作者自己起名", "length": 400})
+    concept = (await flow("GET", f"/books/{bid}"))["concept"]
+    assert concept["title"] == "作者自己起名" and concept["target_length"] == 400
+    requirements = await flow("GET", f"/books/{bid}/requirements")
+    assert {"保留经营", "加入追凶"} <= {row["text"] for row in requirements}
 
 
-async def test_locked_notes_request_unlock_then_resync(flow, sessionmaker, monkeypatch):
-    bid, jid = await new_puzzle(flow)
-    await confirm(flow, jid, "concept")
-    before = (await flow("GET", f"/books/{bid}"))["concept"]
-    draft = editorial.draft_world
-
-    async def inject(*args, **kwargs):
-        async with sessionmaker() as session:
-            session.add(
-                MeetingMessage(
-                    book_id=uuid.UUID(bid),
-                    job_id=uuid.UUID(jid),
-                    speaker="author",
-                    kind="note",
-                    content="把已确认的概念改成追凶",
-                )
-            )
-            await session.commit()
-        return await draft(*args, **kwargs)
-
-    async def absorb(*args, **kwargs):
-        assert "定调" in kwargs["locked"]
-        return schemas.RevisionTriage(
-            concept_instructions="改成追凶",
-            unlock_requests=[schemas.UnlockRequest(target="concept", reason="需要改概念的核心卖点")],
-            remark="需要作者解锁概念",
-        )
-
-    monkeypatch.setattr(editorial, "draft_world", inject)
-    monkeypatch.setattr(editorial, "absorb_notes", absorb)
-    await confirm(flow, jid, "protagonist")
-    pending = (await flow("GET", f"/jobs/{jid}"))["pending"]
-    assert pending["piece"] == "world" and pending["unlock_requests"]
-    assert (await flow("GET", f"/books/{bid}"))["concept"] == before
-    monkeypatch.setattr(editorial, "draft_world", draft)
-    await flow("POST", f"/jobs/{jid}/piece", {"action": "unlock", "piece": "concept", "feedback": "核心卖点改成追凶"})
-    assert (await flow("GET", f"/jobs/{jid}"))["pending"]["piece"] == "concept"
-    for piece in PIECE_ORDER:
-        await confirm(flow, jid, piece)
+async def test_oneshot_stops_only_at_outline(flow):
+    result = await flow("POST", "/books", {"idea": "楚风带着轮回镜重生", "mode": "oneshot", "ask": True})
+    bid, jid = result["book"]["id"], result["job"]["id"]
+    gate = (await flow("GET", f"/jobs/{jid}"))["pending"]
+    assert gate["kind"] == "setup_piece" and gate["piece"] == "outline"
+    book = await flow("GET", f"/books/{bid}")
+    assert book["setup_progress"]["pieces"] == {"concept": "confirmed", "settings": "confirmed", "outline": "waiting"}
+    await confirm(flow, jid)
     assert (await flow("GET", f"/books/{bid}"))["status"] == "ready"
 
 
-async def test_old_checkpoint_without_flow_is_not_resumed(sessionmaker, monkeypatch):
-    monkeypatch.setattr(demo, "DELAY_S", 0)
+async def test_concept_length_retry_once_and_empty_secret_warning(flow, monkeypatch):
+    prompts = []
+    original = demo.respond
+
+    async def respond(schema, system, user):
+        result = await original(schema, system, user)
+        if schema is schemas.StoryConcept:
+            prompts.append(user)
+            result.story = "短"
+            result.secret = ""
+        return result
+
+    monkeypatch.setattr(demo, "respond", respond)
+    _, jid = await new_puzzle(flow)
+    assert len(prompts) == 2 and "定调要写成一段话，200-400 字，现在是 1 字。" in prompts[1]
+    gate = (await flow("GET", f"/jobs/{jid}"))["pending"]
+    assert len(gate["warnings"]) == 2
+    await confirm(flow, jid)
+    assert (await flow("GET", f"/jobs/{jid}"))["pending"]["piece"] == "settings"
+
+
+async def test_live_author_edits_are_not_overwritten_on_confirm(flow, sessionmaker):
+    bid, jid = await new_puzzle(flow)
     async with sessionmaker() as session:
-        book = Book(idea="旧书检查点")
-        session.add(book)
-        await session.flush()
-        job = Job(book_id=book.id, kind="book_setup", thread_id=f"legacy-{uuid.uuid4()}", params={"idea": book.idea})
-        session.add(job)
+        book = await session.get(Book, uuid.UUID(bid))
+        book.concept = {**book.concept, "story": "作者在确认前亲自保存的一段话。"}
+        secret = await session.get(WorldEntry, uuid.UUID(book.concept["secret_entry_id"]))
+        secret.content, secret.source = "作者改过的底牌", "ai_edited"
         await session.commit()
-    state = {
-        "idea": "旧书检查点",
-        "concept": {"title": "旧书", "target_volumes": 8, "target_length": 100, "chapter_words": 3000},
-        "segment": {
-            "opening": "旧开篇",
-            "ending": "旧结局",
-            "milestones": [{"index": 1, "title": "旧转折", "event": "出城", "change": "成长", "volume": 2}],
-        },
-        "queue": ["world", "threads", "volumes", "first_volume"],
-        "instructions": {},
-        "phase": "draft",
-        "round": 0,
-    }
-    async with AsyncPostgresSaver.from_conn_string(get_settings().checkpoint_dsn) as saver:
-        await saver.setup()
-        graph = build_setup_graph().compile(checkpointer=saver)
-        await graph.aupdate_state({"configurable": {"thread_id": job.thread_id}}, state, as_node="concept")
-    await execute_job(job.id)
+    await confirm(flow, jid)
+    assert (await flow("GET", f"/books/{bid}"))["concept"]["story"] == "作者在确认前亲自保存的一段话。"
     async with sessionmaker() as session:
-        stored = await session.get(Job, job.id)
-        assert stored.status == "failed"
-        assert "按新流程重开" in stored.error
-        assert (await session.get(Book, book.id)).setup_progress == {}
+        secret = await session.get(WorldEntry, secret.id)
+        assert secret.content == "作者改过的底牌"
+
+
+async def test_settings_failed_checks_retry_once_notes_review_and_flips(flow, monkeypatch):
+    counts, scopes = Counter(), []
+    original = demo.respond
+
+    async def respond(schema, system, user):
+        result = await original(schema, system, user)
+        counts[schema.__name__] += 1
+        if schema is schemas.LibraryRest:
+            result.entries = []
+            result.characters = []
+        if schema is schemas.LibraryReview:
+            scopes.append(user)
+        if schema is schemas.LibraryIntent:
+            result.kind = "其他"
+        return result
+
+    monkeypatch.setattr(demo, "respond", respond)
+    bid, jid = await new_puzzle(flow)
+    await confirm(flow, jid)
+    assert counts["LibraryRest"] == 2
+    suggestions = await flow("GET", f"/books/{bid}/suggestions")
+    assert any(
+        row["payload"].get("op") == "note" and row["title"] == "世界与地图的第一条要叫「世界概况」。"
+        for row in suggestions
+    )
+    assert any("这是开书时刚建好的设定库，查整个设定库。" in prompt for prompt in scopes)
+    await flow(
+        "POST",
+        f"/jobs/{jid}/piece",
+        {"action": "revise", "feedback": "查一下是否矛盾", "flips": [{"topic": "主角性格", "choice": "沉稳"}]},
+    )
+    assert any("按作者的意见查一遍：查一下是否矛盾" in prompt for prompt in scopes)
+    assert any("作者把「主角性格」改成了「沉稳」，查一遍哪些设定要跟着改。" in prompt for prompt in scopes)
+    assert counts["LibraryRest"] == 2
+
+
+async def test_outline_revise_keeps_locked_nodes_and_unchanged_chapters(flow, sessionmaker, monkeypatch):
+    prompts = []
+    original = demo.respond
+
+    async def respond(schema, system, user):
+        result = await original(schema, system, user)
+        if schema is schemas.OutlineDraft:
+            prompts.append(user)
+        return result
+
+    monkeypatch.setattr(demo, "respond", respond)
+    bid, jid = await new_puzzle(flow)
+    await confirm(flow, jid)
+    await confirm(flow, jid)
+    async with sessionmaker() as session:
+        volume = await session.scalar(select(Volume).where(Volume.book_id == uuid.UUID(bid)).order_by(Volume.index))
+        unit = await session.scalar(select(PlotUnit).where(PlotUnit.volume_id == volume.id).order_by(PlotUnit.index))
+        volume.locked, unit.locked = True, True
+        volume.summary, unit.summary = "作者锁住的卷", "作者锁住的单元"
+        chapters = list(await session.scalars(select(Chapter.id).where(Chapter.unit_id == unit.id)))
+        await session.commit()
+    await flow("POST", f"/jobs/{jid}/piece", {"action": "revise", "feedback": "其余卷写得更紧凑"})
+    assert "下面这些节点作者锁住了，原样保留：" in prompts[-1]
+    async with sessionmaker() as session:
+        assert (await session.get(Volume, volume.id)).summary == "作者锁住的卷"
+        assert (await session.get(PlotUnit, unit.id)).summary == "作者锁住的单元"
+        assert list(await session.scalars(select(Chapter.id).where(Chapter.unit_id == unit.id))) == chapters
+
+
+@pytest.mark.parametrize("action", ["reopen", "unlock", "candidates", "fill"])
+async def test_retired_piece_actions_return_422(flow, action):
+    _, jid = await new_puzzle(flow)
+    response = await flow.client.post(f"/api/jobs/{jid}/piece", json={"action": action})
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("change", ["saved_title", "deleted_requirement", "edited_requirement"])
+async def test_concept_revision_uses_live_title_and_never_revives_old_title_requirement(flow, monkeypatch, change):
+    from app.agents import editorial
+    from app.llm import demo_setup
+
+    blocks_seen = []
+    model_title = "模型新书名"
+
+    async def story(llm, blocks):
+        blocks_seen.append(blocks)
+        result = demo_setup.concept(blocks["idea"])
+        result.title = model_title
+        return result
+
+    monkeypatch.setattr(editorial, "draft_story", story)
+    created = await flow("POST", "/books", {"idea": "少年重生", "mode": "puzzle"})
+    bid, jid = created["book"]["id"], created["job"]["id"]
+    await flow("POST", f"/jobs/{jid}/pitches", {"action": "pick", "index": 1, "title": "最初选名", "length": 400})
+    assert (await flow("GET", f"/books/{bid}"))["concept"]["title"] == "最初选名"
+    rows = await flow("GET", f"/books/{bid}/requirements")
+    title_row = next(row for row in rows if row["text"] == "书名用《最初选名》")
+    if change == "saved_title":
+        await flow("PATCH", f"/books/{bid}", {"title": "作者手改名"})
+        expected = "作者手改名"
+    elif change == "deleted_requirement":
+        await flow("DELETE", f"/requirements/{title_row['id']}")
+        expected = model_title
+    else:
+        await flow("PATCH", f"/requirements/{title_row['id']}", {"text": "书名用《要求里新书名》"})
+        model_title = expected = "要求里新书名"
+    await flow("POST", f"/jobs/{jid}/piece", {"action": "revise", "feedback": "只把故事写得更紧凑"})
+    book = await flow("GET", f"/books/{bid}")
+    assert book["title"] == book["concept"]["title"] == expected
+    if change != "saved_title":
+        assert "书名用《最初选名》" not in blocks_seen[-1]["requirements"]
+        rows = await flow("GET", f"/books/{bid}/requirements")
+        assert "书名用《最初选名》" not in {row["text"] for row in rows}
+    if change == "edited_requirement":
+        assert "书名用《要求里新书名》" in blocks_seen[-1]["requirements"]

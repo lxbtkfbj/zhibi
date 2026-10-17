@@ -48,7 +48,7 @@ BOOK_STATUS_WHILE_RUNNING = {"book_setup": "setting_up", "write_book": "writing"
 BOOK_STATUS_WHILE_WAITING = {
     "setup_review": "awaiting_approval",
     "setup_questions": "setting_up",
-    "setup_directions": "setting_up",
+    "setup_pitches": "setting_up",
     "setup_piece": "setting_up",
     "volume_review": "writing",
     "segment_review": "writing",
@@ -143,7 +143,7 @@ async def _run(
         kind, book_id, thread_id, params = job.kind, job.book_id, job.thread_id, dict(job.params or {})
 
     emitter = Emitter(sm, redis, book_id, job_id)
-    if kind == "book_setup" and params.get("flow") != 2:
+    if kind == "book_setup" and params.get("flow") != 3:
         await emitter.say("system", LEGACY_SETUP_MESSAGE, kind="error")
         await _update_job(sm, redis, job_id, status="failed", error=LEGACY_SETUP_MESSAGE, finished_at=datetime.now(UTC))
         return

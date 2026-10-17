@@ -10,7 +10,7 @@ from sqlalchemy import select
 
 from app.config import get_settings
 from app.main import create_app
-from app.models import AuthorRequirement, Book, Job, MeetingMessage, StoryNode
+from app.models import AuthorRequirement, Book, Job, StoryNode
 from app.services import jobs
 from app.services.job_runner import BOOK_STATUS_WHILE_WAITING
 
@@ -31,7 +31,7 @@ def queued(monkeypatch):
     return calls
 
 
-async def gate(sessionmaker, *, kind="setup_piece", piece="segment", confirmed=("concept",), status="waiting_author"):
+async def gate(sessionmaker, *, kind="setup_piece", piece="outline", confirmed=("concept",), status="waiting_author"):
     async with sessionmaker() as session:
         book = Book(
             title="接口拼图测试",
@@ -50,7 +50,11 @@ async def gate(sessionmaker, *, kind="setup_piece", piece="segment", confirmed=(
         ]
         job = jobs.new_setup_job(book, mode="puzzle")
         job.status = status
-        job.pending = {"kind": kind, "piece": piece, "directions": [{"name": "青灯寿命"}, {"name": "古镜追凶"}]}
+        job.pending = {
+            "kind": kind,
+            "piece": piece,
+            "pitches": [{"name": "帝尊重生流", "titles": ["逆世帝尊"]}, {"name": "丹道碾压流"}],
+        }
         session.add_all([job, *nodes])
         await session.commit()
         return book.id, job.id, [node.id for node in nodes]
@@ -64,223 +68,82 @@ async def requirements(sessionmaker, book_id):
         }
 
 
-async def test_create_book_mode_defaults_override_and_immutable(client, sessionmaker, queued):
-    assert (await client.get("/api/settings/new-book-defaults")).json()["settings"]["setup_mode"] == "puzzle"
-    await client.put("/api/settings/new-book-defaults", json={"setup_mode": "puzzle"})
-    inherited = (await client.post("/api/books", json={"idea": "少年携古镜寻找身世"})).json()
-    explicit = (
-        await client.post("/api/books", json={"idea": "少年携青灯逆天改命", "mode": "oneshot", "ask": True})
+async def test_create_new_setup_uses_flow3_and_ignores_ask(client, queued, sessionmaker):
+    result = (
+        await client.post("/api/books", json={"idea": "少年携古镜寻找身世", "mode": "oneshot", "ask": True})
     ).json()
     async with sessionmaker() as session:
-        for result, expected in [(inherited, "puzzle"), (explicit, "oneshot")]:
-            book = await session.get(Book, uuid.UUID(result["book"]["id"]))
-            job = await session.get(Job, uuid.UUID(result["job"]["id"]))
-            assert book.settings["setup_mode"] == job.params["mode"] == expected
-    path = f"/api/books/{inherited['book']['id']}/settings"
-    assert (await client.patch(path, json={"setup_mode": "oneshot"})).status_code == 409
-    assert (await client.patch(path, json={"setup_mode": "puzzle", "chapter_words": 2400})).status_code == 200
-    assert (await client.post("/api/books", json={"idea": "少年携古镜寻找身世", "mode": "wrong"})).status_code == 422
-    assert BOOK_STATUS_WHILE_WAITING["setup_directions"] == BOOK_STATUS_WHILE_WAITING["setup_piece"] == "setting_up"
+        job = await session.get(Job, uuid.UUID(result["job"]["id"]))
+        assert job.params["flow"] == 3 and job.params["mode"] == "oneshot"
+        assert not job.params.get("ask")
 
 
-async def test_choose_direction_records_length_direction_mix_and_resume(client, sessionmaker, queued):
-    book_id, job_id, _ = await gate(sessionmaker, kind="setup_directions")
+@pytest.mark.parametrize("action", ["confirm", "delegate"])
+async def test_confirm_without_piece_and_duplicate_queue_guard(client, queued, sessionmaker, action):
+    _, jid, _ = await gate(sessionmaker)
+    responses = await asyncio.gather(
+        *[client.post(f"/api/jobs/{jid}/piece", json={"action": action}) for _ in range(2)]
+    )
+    assert sorted(r.status_code for r in responses) == [200, 409]
+    assert len(queued) == 1 and queued[0][1]["piece"] == "outline"
+
+
+@pytest.mark.parametrize("action", ["reopen", "unlock", "candidates", "fill", "approve"])
+async def test_retired_actions_are_422_without_writes(client, queued, sessionmaker, action):
+    _, jid, _ = await gate(sessionmaker)
+    response = await client.post(f"/api/jobs/{jid}/piece", json={"action": action, "piece": "outline"})
+    assert response.status_code == 422
+    assert not queued
+
+
+async def test_piece_revision_saves_feedback_and_flips_once(client, queued, sessionmaker):
+    bid, jid, _ = await gate(sessionmaker, piece="settings")
+    body = {"action": "revise", "feedback": "把境界改成九重天", "flips": [{"topic": "感情线", "choice": "单女主"}]}
+    assert (await client.post(f"/api/jobs/{jid}/piece", json=body)).status_code == 200
+    assert ("把境界改成九重天", "note") in await requirements(sessionmaker, bid)
+    assert ("「感情线」改成：单女主", "answer") in await requirements(sessionmaker, bid)
+    assert queued[0][1]["requirement_saved"]
+
+
+@pytest.mark.parametrize("body,code", [({"action": "revise"}, 422), ({"action": "confirm", "piece": "concept"}, 409)])
+async def test_piece_validation(client, queued, sessionmaker, body, code):
+    _, jid, _ = await gate(sessionmaker)
+    assert (await client.post(f"/api/jobs/{jid}/piece", json=body)).status_code == code
+    assert not queued
+
+
+async def test_pitch_pick_uses_one_based_index_custom_title_and_400(client, queued, sessionmaker):
+    bid, jid, _ = await gate(sessionmaker, kind="setup_pitches")
     response = await client.post(
-        f"/api/jobs/{job_id}/directions",
-        json={"action": "choose", "choice": 1, "length": "100 万字", "mix": "保留青灯的代价"},
+        f"/api/jobs/{jid}/pitches", json={"action": "pick", "index": 1, "length": 400, "title": "作者自己起的书名"}
     )
     assert response.status_code == 200, response.text
-    assert response.json()["status"] == "queued"
-    assert queued[-1][1] == {
-        "action": "choose",
-        "choice": 1,
-        "title": None,
-        "mix": "保留青灯的代价",
-        "length": "100 万字",
-        "feedback": "",
-        "requirement_saved": True,
-    }
-    assert await requirements(sessionmaker, book_id) == {
-        ("这本书打算写多长？——100 万字", "answer"),
-        ("开书方向：选用「古镜追凶」；混搭：保留青灯的代价", "answer"),
-    }
-    messages = (await client.get(f"/api/books/{book_id}/meeting")).json()
-    assert messages[-1]["content"] == "选方向「古镜追凶」。\n混搭：保留青灯的代价"
-    assert messages[-1]["payload"]["requirement_saved"]
-    assert (
-        await client.post(f"/api/jobs/{job_id}/directions", json={"action": "redo", "feedback": "改方向"})
-    ).status_code == 409
+    assert queued[0][1]["index"] == 1 and queued[0][1]["length"] == 400
+    assert ("书名用《作者自己起的书名》", "answer") in await requirements(sessionmaker, bid)
+    assert BOOK_STATUS_WHILE_WAITING["setup_pitches"] == "setting_up"
 
 
 @pytest.mark.parametrize(
     "body",
     [
-        {"action": "choose", "choice": 99, "length": "100 万字"},
-        {"action": "choose", "length": "100 万字"},
-        {"action": "choose", "choice": 0, "length": "  "},
-        {"action": "choose", "choice": 0, "length": "100 万字", "title": "旧方向没有这个候选"},
+        {"action": "pick", "index": 0},
+        {"action": "pick", "index": 3},
+        {"action": "pick", "index": 1, "length": 123},
         {"action": "redo", "feedback": "  "},
     ],
 )
-async def test_direction_invalid_input_is_atomic(client, sessionmaker, queued, body):
-    book_id, job_id, _ = await gate(sessionmaker, kind="setup_directions")
-    assert (await client.post(f"/api/jobs/{job_id}/directions", json=body)).status_code == 422
-    assert not queued and not await requirements(sessionmaker, book_id)
-    assert (await client.get(f"/api/jobs/{job_id}")).json()["status"] == "waiting_author"
-
-
-async def test_direction_redo_and_wrong_legacy_endpoint(client, sessionmaker, queued):
-    book_id, job_id, _ = await gate(sessionmaker, kind="setup_directions")
-    assert (await client.post(f"/api/jobs/{job_id}/decision", json={"action": "approve"})).status_code == 409
-    assert (await client.post(f"/api/books/{book_id}/notes", json={"content": "换个方向"})).status_code == 409
-    response = await client.post(
-        f"/api/jobs/{job_id}/directions", json={"action": "redo", "feedback": "  换成女主视角  "}
-    )
-    assert response.status_code == 200
-    assert await requirements(sessionmaker, book_id) == {("换成女主视角", "note")}
-    assert queued[-1][1]["feedback"] == "换成女主视角"
-
-
-async def test_choose_direction_validates_title_in_selected_card_and_saves_answer(client, sessionmaker, queued):
-    book_id, job_id, _ = await gate(sessionmaker, kind="setup_directions")
-    async with sessionmaker() as session:
-        job = await session.get(Job, job_id)
-        job.pending = {
-            **job.pending,
-            "directions": [
-                {"name": "青灯寿命", "titles": ["青灯渡命", "借命少年"]},
-                {"name": "古镜追凶", "titles": ["镜中追凶", "捕快照夜"]},
-            ],
-        }
-        await session.commit()
-    path = f"/api/jobs/{job_id}/directions"
-    body = {"action": "choose", "choice": 1, "length": "约 200 万字（长篇，约 670 章）"}
-    for invalid in ("青灯渡命", "不存在的书名", "", " 镜中追凶 "):
-        response = await client.post(path, json={**body, "title": invalid})
-        assert response.status_code == 422, response.text
-        assert not queued and not await requirements(sessionmaker, book_id)
-        assert (await client.get(f"/api/jobs/{job_id}")).json()["status"] == "waiting_author"
-    response = await client.post(path, json={**body, "title": "镜中追凶"})
-    assert response.status_code == 200, response.text
-    assert ("书名用《镜中追凶》", "answer") in await requirements(sessionmaker, book_id)
-    assert queued[-1][1]["title"] == "镜中追凶"
-    messages = (await client.get(f"/api/books/{book_id}/meeting")).json()
-    assert messages[-1]["content"] == "选方向「古镜追凶」，书名用《镜中追凶》。"
-
-
-async def test_piece_revise_flips_and_feedback_are_durable(client, sessionmaker, queued):
-    book_id, job_id, nodes = await gate(sessionmaker)
-    body = {
-        "action": "revise",
-        "piece": "segment",
-        "node_id": str(nodes[1]),
-        "feedback": "  转折提前  ",
-        "flips": [{"topic": "感情线", "choice": "单女主"}],
-    }
-    response = await client.post(f"/api/jobs/{job_id}/piece", json=body)
-    assert response.status_code == 200, response.text
-    assert await requirements(sessionmaker, book_id) == {("转折提前", "note"), ("「感情线」改成：单女主", "answer")}
-    assert queued[-1][1] == {**body, "feedback": "转折提前", "requirement_saved": True}
-
-
-@pytest.mark.parametrize("action", ["confirm", "delegate", "candidates", "fill", "revise"])
-async def test_piece_supported_actions(client, sessionmaker, queued, action):
-    book_id, job_id, nodes = await gate(sessionmaker)
-    body = {"action": action, "piece": "segment"}
-    if action in ("candidates", "fill", "revise"):
-        body["node_id"] = str(nodes[1])
-    if action == "fill":
-        body["feedback"] = "中间要有一场宗门大比"
-    response = await client.post(f"/api/jobs/{job_id}/piece", json=body)
-    assert response.status_code == 200, response.text
-    assert queued[-1][1]["requirement_saved"]
-    assert not await requirements(sessionmaker, book_id)  # fill 的一句话不变成全书作者要求
-    messages = (await client.get(f"/api/books/{book_id}/meeting")).json()
-    assert (
-        messages[-1]["content"]
-        == {
-            "confirm": "确认「第一段」，下一块。",
-            "delegate": "「第一段」交给编辑部定。",
-            "candidates": "给节点 2 出 3 个候选。",
-            "fill": "节点 2：中间要有一场宗门大比",
-            "revise": "请修改节点 2「待补」。",
-        }[action]
-    )
-
-
-@pytest.mark.parametrize(
-    "body,expected",
-    [
-        ({"action": "confirm", "piece": "world"}, 409),
-        ({"action": "revise", "piece": "segment", "feedback": " "}, 422),
-        ({"action": "candidates", "piece": "segment"}, 422),
-        ({"action": "fill", "piece": "segment"}, 422),
-        ({"action": "reopen", "piece": "segment"}, 422),
-        ({"action": "unlock", "piece": "world"}, 422),
-        ({"action": "revise", "piece": "segment", "flips": [{"topic": " ", "choice": "x"}]}, 422),
-    ],
-)
-async def test_piece_rejects_invalid_and_stale_requests(client, sessionmaker, queued, body, expected):
-    book_id, job_id, _ = await gate(sessionmaker)
-    response = await client.post(f"/api/jobs/{job_id}/piece", json=body)
-    assert response.status_code == expected, response.text
-    assert not queued and not await requirements(sessionmaker, book_id)
-
-
-async def test_piece_cross_book_current_piece_and_pinned_guards(client, sessionmaker, queued):
-    _, job_id, nodes = await gate(sessionmaker)
-    path = f"/api/jobs/{job_id}/piece"
-    assert (
-        await client.post(path, json={"action": "fill", "piece": "segment", "node_id": str(nodes[3])})
-    ).status_code == 422
-    assert (
-        await client.post(path, json={"action": "fill", "piece": "segment", "node_id": str(nodes[2])})
-    ).status_code == 409
-    _, cast_job, cast_nodes = await gate(sessionmaker, piece="world", confirmed=("concept", "segment"))
-    assert (
-        await client.post(
-            f"/api/jobs/{cast_job}/piece",
-            json={"action": "candidates", "piece": "world", "node_id": str(cast_nodes[1])},
-        )
-    ).status_code == 422
+async def test_pitch_invalid_inputs(client, queued, sessionmaker, body):
+    _, jid, _ = await gate(sessionmaker, kind="setup_pitches")
+    assert (await client.post(f"/api/jobs/{jid}/pitches", json=body)).status_code == 422
     assert not queued
 
 
-@pytest.mark.parametrize("action", ["reopen", "unlock"])
-async def test_reopen_previously_confirmed_piece(client, sessionmaker, queued, action):
-    book_id, job_id, _ = await gate(
-        sessionmaker, piece="first_volume", confirmed=("concept", "protagonist", "world", "segment")
-    )
+async def test_redo_saves_requirement_and_old_directions_are_retired(client, queued, sessionmaker):
+    bid, jid, _ = await gate(sessionmaker, kind="setup_pitches")
     response = await client.post(
-        f"/api/jobs/{job_id}/piece", json={"action": action, "piece": "segment", "feedback": "节点顺序按作者新想法调整"}
+        f"/api/jobs/{jid}/pitches", json={"action": "redo", "feedback": "保留主角，换个金手指"}
     )
     assert response.status_code == 200, response.text
-    assert await requirements(sessionmaker, book_id) == {("节点顺序按作者新想法调整", "note")}
-    assert queued[-1][1]["piece"] == "segment"
-
-
-async def test_unconfirmed_piece_cannot_reopen_and_wrong_gate_is_409(client, sessionmaker, queued):
-    _, job_id, _ = await gate(sessionmaker, piece="first_volume", confirmed=("concept",))
-    assert (
-        await client.post(f"/api/jobs/{job_id}/piece", json={"action": "reopen", "piece": "segment"})
-    ).status_code == 422
-    assert (
-        await client.post(f"/api/jobs/{job_id}/directions", json={"action": "redo", "feedback": "换方向"})
-    ).status_code == 409
-    _, wrong, _ = await gate(sessionmaker, status="running")
-    assert (
-        await client.post(f"/api/jobs/{wrong}/piece", json={"action": "confirm", "piece": "segment"})
-    ).status_code == 409
-    assert not queued
-
-
-async def test_double_submit_only_enqueues_once(client, sessionmaker, queued):
-    book_id, job_id, _ = await gate(sessionmaker)
-    responses = await asyncio.gather(
-        *[client.post(f"/api/jobs/{job_id}/piece", json={"action": "confirm", "piece": "segment"}) for _ in range(2)]
-    )
-    assert sorted(response.status_code for response in responses) == [200, 409]
-    assert len(queued) == 1
-    async with sessionmaker() as session:
-        messages = list(await session.scalars(select(MeetingMessage).where(MeetingMessage.book_id == book_id)))
-    assert len(messages) == 1
+    assert ("保留主角，换个金手指", "note") in await requirements(sessionmaker, bid)
+    old = await client.post(f"/api/jobs/{jid}/directions", json={})
+    assert old.status_code == 409 and old.json()["detail"] == "这个任务用的是旧流程，请按新流程重开"

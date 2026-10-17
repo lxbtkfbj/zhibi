@@ -14,7 +14,7 @@ from redis.asyncio import Redis
 from sqlalchemy import func, select
 
 from app.config import get_settings
-from app.graphs.book_setup import LEGACY_CONCEPT, ORDER, restart_state, route_start
+from app.graphs.book_setup import restart_state, route_start
 from app.llm import demo
 from app.main import create_app
 from app.models import (
@@ -99,7 +99,7 @@ async def test_restart_is_atomic_preserves_author_history_and_other_book(client,
     response = await client.post(f"/api/jobs/{jid}/restart-setup")
     assert response.status_code == 200, response.text
     new_id = uuid.UUID(response.json()["id"])
-    assert response.json()["setup_flow"] == 2 and queued == [(new_id, None)]
+    assert response.json()["setup_flow"] == 3 and queued == [(new_id, None)]
     async with Redis.from_url(get_settings().redis_url, decode_responses=True) as redis:
         events = [
             json.loads(fields["data"]) for _, fields in await redis.xrange(stream_key(bid)) if fields["event"] == "job"
@@ -109,10 +109,9 @@ async def test_restart_is_atomic_preserves_author_history_and_other_book(client,
         old, new, book = await session.get(Job, jid), await session.get(Job, new_id), await session.get(Book, bid)
         assert old.status == "cancelled" and old.finished_at
         assert new.params == {
-            "flow": 2,
+            "flow": 3,
             "idea": "寻找失踪妹妹",
             "style_reference": "短句",
-            "ask": False,
             "mode": "puzzle",
             "restart_from": str(jid),
             "keep_concept": confirmed,
@@ -120,18 +119,17 @@ async def test_restart_is_atomic_preserves_author_history_and_other_book(client,
         assert book.title == old_concept["title"]
         assert book.concept == (old_concept if confirmed else {})
         assert book.protagonist == book.world == book.spine == book.setup_progress == {}
-        for model in (
-            StoryNode,
-            NodeAnchor,
-            Secret,
-            Character,
-            Relationship,
-            WorldEntry,
-            PlotUnit,
-            Volume,
-            StoryThread,
-            Foreshadowing,
-        ):
+        pinned = list(await session.scalars(select(StoryNode).where(StoryNode.book_id == bid)))
+        assert pinned and all(row.status == "pinned" for row in pinned)
+        pinned_ids = {row.id for row in pinned}
+        anchors = list(await session.scalars(select(NodeAnchor).where(NodeAnchor.book_id == bid)))
+        assert all(row.node_id in pinned_ids for row in anchors)
+        heroes = list(await session.scalars(select(Character).where(Character.book_id == bid)))
+        assert {row.id for row in heroes} <= {row.character_id for row in anchors}
+        for model in (Secret, Foreshadowing):
+            rows = list(await session.scalars(select(model).where(model.book_id == bid)))
+            assert all(row.node_id in pinned_ids for row in rows)
+        for model in (Relationship, WorldEntry, PlotUnit, Volume, StoryThread):
             assert await session.scalar(select(func.count()).select_from(model).where(model.book_id == bid)) == 0
         for model in (AuthorRequirement, DraftVersion, LlmCall):
             assert await session.scalar(select(func.count()).select_from(model).where(model.book_id == bid)) == 1
@@ -163,7 +161,7 @@ async def test_concurrent_restart_creates_and_enqueues_only_once(client, queued,
         ("running", "setting_up", None, "编辑部正在工作，先停止再重开"),
         ("waiting_author", "ready", None, "这本书已经开完了，不需要重开"),
         ("failed", "writing", None, "这本书已经开完了，不需要重开"),
-        ("waiting_author", "setting_up", 2, "这个任务不需要重开"),
+        ("waiting_author", "setting_up", 3, "这个任务不需要重开"),
     ],
 )
 async def test_restart_rejects_wrong_state_without_writes(
@@ -195,7 +193,8 @@ async def test_legacy_gate_rejects_before_any_queue(client, queued, sessionmaker
         job.pending = pending
         await session.commit()
     response = await client.post(f"/api/jobs/{jid}/{path}", json=body)
-    assert response.status_code == 409 and response.json()["detail"] == jobs.LEGACY_SETUP_MESSAGE
+    assert response.status_code == 409
+    assert "按新流程重开" in response.json()["detail"]
     assert not queued
 
 
@@ -227,28 +226,22 @@ async def test_legacy_worker_never_builds_graph_and_waiting_redelivery_is_noop(s
 def test_restart_state_only_carries_author_materials(mode):
     params = {"idea": "原点子", "style_reference": "原风格", "mode": mode, "keep_concept": True}
     old = {
-        "direction": {"name": "作者选的方向"},
+        "direction": {"name": "作者选的方向", "logline": "少年找回妹妹"},
         "spine": {"ending": "弃用"},
         "queue": ["lore"],
         "brief": ["不能复制旧要求"],
     }
     concept = {"title": "作者书名", "protagonist_hook": "旧钩子"}
     state = restart_state(params, old, concept)
-    assert state["direction"] == old["direction"] and state["concept"] == concept
-    assert state["instructions"] == {"concept": LEGACY_CONCEPT}
-    assert state["queue"] == (["concept"] if mode == "puzzle" else list(ORDER))
-    assert state["brief"] == [] and not state["ask"]
+    assert state["flow"] == 3 and state["piece"] == "concept"
+    assert (
+        state["previous"]
+        == "【之前按旧流程选过的方向】\n作者选的方向：少年找回妹妹\n（作者之前选过它，三个短版里请保留它的好东西。）"
+    )
+    assert state["queue"] == ["concept"] and state["brief"] == []
     assert "spine" not in state and state["pieces"]["concept"] != "confirmed"
-    concept["core_loop"] = "查案找妹妹"
-    state = restart_state(params, old, concept)
-    assert state["pieces"]["concept"] == "confirmed" and state["piece"] == "protagonist"
-    assert state["queue"] == (["protagonist"] if mode == "puzzle" else list(ORDER[1:]))
-    assert state["instructions"] == {}
-    state = restart_state({**params, "keep_concept": False}, old, concept)
-    assert "concept" not in state and state["direction"] == old["direction"]
-    empty = restart_state(params, {}, concept)
-    assert "concept" not in empty and "direction" not in empty
-    assert route_start(empty) == ("directions" if mode == "puzzle" else "intake")
+    assert route_start(state) == "pitches"
+    assert restart_state(params, {}, concept)["previous"] == ""
 
 
 @pytest.mark.parametrize("checkpoint_exists", [True, False])
@@ -293,10 +286,10 @@ async def test_worker_reads_raw_old_checkpoint_or_gracefully_starts_without_it(
         assert job.status == "waiting_author", job.error
         if checkpoint_exists:
             assert captured[0]["retired_only"] == raw["retired_only"]
-            assert job.pending["piece"] == "concept" and job.pending["flow"] == 2
+            assert job.pending["kind"] == "setup_pitches" and job.pending["flow"] == 3
         else:
             assert captured == [{}]
-            assert job.pending["kind"] == "setup_directions"
+            assert job.pending["kind"] == "setup_pitches"
         assert (await session.get(Book, bid)).idea == "寻找失踪妹妹"
 
 
@@ -323,6 +316,6 @@ async def test_legacy_private_note_records_requirement_without_resuming_old_grap
 
 
 async def test_new_setup_waiting_private_note_still_requires_piece_action(client, sessionmaker):
-    bid, _ = await old_job(sessionmaker, flow=2)
+    bid, _ = await old_job(sessionmaker, flow=3)
     response = await client.post(f"/api/books/{bid}/notes", json={"content": "按原流程提意见", "to": "chief"})
     assert response.status_code == 409

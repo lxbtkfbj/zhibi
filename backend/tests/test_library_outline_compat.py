@@ -2,10 +2,12 @@
 
 import httpx
 import pytest
+from redis.asyncio import Redis
 from sqlalchemy import select
 
 from app.agents.context import format_lore, format_world
-from app.main import app
+from app.config import get_settings
+from app.main import create_app
 from app.models import Book, Chapter, PlotUnit, SettingVersion, StoryNode, Volume, WorldEntry
 from app.services.setup_store import _save_world, load_setup
 from app.services.writing_context import ALL_WORLD_UNDER, world_text
@@ -13,8 +15,11 @@ from app.services.writing_context import ALL_WORLD_UNDER, world_text
 
 @pytest.fixture
 async def client():
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-        yield client
+    app = create_app()
+    async with Redis.from_url(get_settings().redis_url) as redis:
+        app.state.redis = redis
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            yield client
 
 
 async def test_outline_tree_four_states_legacy_and_read_only(client, sessionmaker):

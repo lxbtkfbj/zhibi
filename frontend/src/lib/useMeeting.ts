@@ -1,11 +1,12 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { keys } from '../api/hooks'
+import { libraryKeys } from '../api/library'
 import type { BookDetail, Job, LiveDraft, MeetingMessage } from '../api/types'
 
 const SETTLED = new Set(['waiting_author', 'succeeded', 'failed', 'cancelled'])
 // 写作过程中这些产出一到，就刷新大纲、目录和进度，不必等整轮写完
-const REFRESH_ON = new Set(['concept', 'protagonist', 'world', 'segment', 'segment_plan', 'segment_volumes', 'lore', 'spine', 'threads', 'outline', 'volume_plan', 'chapter_plan', 'chapter_draft', 'chapter_polish', 'chapter_materials', 'chapter_final', 'unit_recap', 'volume_recap'])
+const REFRESH_ON = new Set(['concept', 'settings_focus', 'settings_rest', 'protagonist', 'world', 'segment', 'segment_plan', 'segment_volumes', 'lore', 'spine', 'threads', 'outline', 'volume_plan', 'chapter_plan', 'chapter_draft', 'chapter_polish', 'chapter_materials', 'chapter_final', 'unit_recap', 'volume_recap'])
 
 /**
  * 会议室实时消息。连接时服务器先补发历史，再推送新消息；
@@ -28,9 +29,12 @@ export function useMeeting(bookId: string) {
     })
     source.addEventListener('error', () => setConnected(false))
     source.addEventListener('book', () => {
-      for (const key of [keys.book(bookId), keys.books, keys.nodes(bookId), keys.bible(bookId), keys.outline(bookId), keys.threads(bookId), keys.secrets(bookId)]) {
+      for (const key of [keys.book(bookId), keys.books, keys.nodes(bookId), keys.bible(bookId), keys.outline(bookId), keys.threads(bookId), keys.secrets(bookId), libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), libraryKeys.candidates(bookId)]) {
         void qc.invalidateQueries({ queryKey: key })
       }
+    })
+    source.addEventListener('library', () => {
+      for (const key of [libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), libraryKeys.candidates(bookId), keys.bible(bookId)]) void qc.invalidateQueries({ queryKey: key })
     })
     source.addEventListener('message', (event) => {
       const message = JSON.parse((event as MessageEvent).data) as MeetingMessage
@@ -40,6 +44,7 @@ export function useMeeting(bookId: string) {
         return { bookId, messages: [...base, message] }
       })
       if (message.kind === 'artifact' && REFRESH_ON.has(message.payload?.type ?? '')) {
+        for (const key of [libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), libraryKeys.candidates(bookId)]) void qc.invalidateQueries({ queryKey: key })
         for (const key of [keys.chapters(bookId), keys.outline(bookId), keys.book(bookId)]) qc.invalidateQueries({ queryKey: key })
         if (['spine', 'segment', 'segment_volumes'].includes(message.payload?.type ?? '')) qc.invalidateQueries({ queryKey: keys.nodes(bookId) })
         if (message.payload?.type === 'chapter_final' || ['lore', 'world', 'segment', 'segment_volumes'].includes(message.payload?.type ?? '')) {
@@ -56,7 +61,7 @@ export function useMeeting(bookId: string) {
       qc.setQueryData<BookDetail>(keys.book(bookId), (old) => (old ? { ...old, active_job: job } : old))
       if (SETTLED.has(job.status)) {
         setDraft({ bookId, draft: null })
-        const all = [keys.book(bookId), keys.outline(bookId), keys.bible(bookId), keys.threads(bookId), keys.nodes(bookId), keys.secrets(bookId), keys.chapters(bookId), keys.usage(bookId), keys.books]
+        const all = [keys.book(bookId), keys.outline(bookId), keys.bible(bookId), keys.threads(bookId), keys.nodes(bookId), keys.secrets(bookId), keys.chapters(bookId), keys.usage(bookId), keys.books, libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), libraryKeys.candidates(bookId)]
         for (const key of all) {
           qc.invalidateQueries({ queryKey: key })
         }

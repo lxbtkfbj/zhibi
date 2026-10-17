@@ -329,5 +329,5 @@ async def test_library_demo_all_structured_outputs(context, monkeypatch):
     intent = await demo.respond(s.LibraryIntent, "", intent_prompt + "重想武道境界\n\n要求：不要影响识别")
     assert (intent.kind, intent.target_name, intent.mode) == ("改设定", "武道境界", "给几个写法")
     fallback = await demo.respond(s.LibraryIntent, "", intent_prompt + "换个设定")
-    assert fallback.target_name == "楚风"
+    assert fallback.kind == "其他" and fallback.target_name == ""  # 目标不明时不能猜主角来改，应交查一遍。
     assert (await demo.respond(s.LibraryIntent, "", intent_prompt + "下一章节奏快一点")).kind == "其他"

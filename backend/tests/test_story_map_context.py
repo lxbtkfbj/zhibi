@@ -10,7 +10,6 @@ from app.agents.context import (
     format_volume_card,
 )
 from app.agents.planning import attach_new_foreshadowings, ref_seq, secret_seq
-from app.graphs.book_setup import first_volume_blocks
 from app.services.writing_context import format_chapter_outline
 
 
@@ -139,8 +138,3 @@ def test_volume_unit_and_chapter_fields():
         assert f"情绪：{label}（爽）" in text
         assert text.endswith("揭晓：S2 揭给 柳如烟——当面展示")
     assert "情绪" not in format_chapter_outline({"goal": "旧章纲"})
-
-
-def test_first_volume_context_reads_new_opening():
-    blocks = first_volume_blocks({"segment": {"nodes": [{"kind": "opening", "event": "新的开篇"}]}})
-    assert "开篇设计：新的开篇" in blocks["story_so_far"]

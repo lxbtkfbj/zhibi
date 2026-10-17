@@ -6,7 +6,6 @@ import re
 from pathlib import Path
 
 from app.agents import schemas as s
-from app.agents.context import format_concept
 from app.llm import demo
 from app.prompts import VARIABLE, default_content, render
 from app.prompts.catalog import BY_NAME, VARIABLE_LABELS, validate_content
@@ -55,15 +54,13 @@ def test_six_prompts_moved_verbatim_and_registered():
 
 def test_short_segment_and_finale_demo_contract():
     for marker in ("测试短段", "测试收尾"):
-        concept = demo._concept(f"【作者的点子】\n{marker}\n")
-        text = format_concept(concept.model_dump())
+        text = marker
         assert marker in text
         split = demo._segment_volumes(text + "\n卷号从第 5 卷开始")
         assert [(v.index, v.chapter_count) for v in split.volumes] == [(5, 6)]
         for index in (1, 5):
             plan = demo._volume_plan(text + f"\n请为第 {index} 卷写「卷纲」")
             assert [u.chapter_count for u in plan.units] == [3, 3]
-    assert demo._concept("【作者的点子】\n测试收尾\n").target_length == 5
     assert [v.index for v in demo._segment_volumes("卷号从第 5 卷开始").volumes] == [5, 6]
     base = "【全书方向：关键节点】\n节点 4「重建家园」· 结局\n\n【篇幅】\n"
     normal = demo._next_segment(base + "篇幅还宽裕，按正常的一段来规划。\n\n要求：说只够一段时选结局。")
@@ -81,10 +78,9 @@ def test_demo_want_changes_every_few_chapters():
 
 
 def test_demo_segment_flag_fixture_only_affects_explicit_first_round():
-    concept = demo._concept("【作者的点子】\n测试短段，测试段提醒\n\n")
-    assert "测试段提醒" in concept.benchmark
-    first = demo._next_segment(concept.benchmark)
+    marker = "测试短段，测试段提醒"
+    first = demo._next_segment(marker)
     assert not first.pursuit
-    revised = demo._next_segment(concept.benchmark + "\n【当前的下一段】\n这一段的目标：取证\n【修改要求】\n补全追求")
+    revised = demo._next_segment(marker + "\n【当前的下一段】\n这一段的目标：取证\n【修改要求】\n补全追求")
     assert revised.pursuit
     assert demo._next_segment("普通演示").pursuit

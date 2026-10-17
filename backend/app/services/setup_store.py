@@ -12,6 +12,7 @@ from app.agents.glossary import clean_techniques
 from app.library_config import category_style, normalize_category
 from app.models import (
     Book,
+    Chapter,
     Character,
     DraftVersion,
     Foreshadowing,
@@ -668,24 +669,92 @@ async def save_piece(session: AsyncSession, book_id: uuid.UUID, piece: str, setu
 
 
 async def reset_for_restart(session: AsyncSession, book_id: uuid.UUID, keep_concept: bool) -> None:
-    """仅清空旧开书产物；作者要求、会议、历史草稿和调用记录原样保留。"""
+    """只清掉旧任务未确认的 AI 产出；作者编辑和已确认内容不因重开丢失。"""
     book = await session.get(Book, book_id)
     if book is None:
         raise ValueError("书不存在")
-    for model in (
-        NodeAnchor,
-        Secret,
-        Relationship,
-        Character,
-        WorldEntry,
-        PlotUnit,
-        Volume,
-        StoryThread,
-        Foreshadowing,
-        StoryNode,
-    ):
-        await session.execute(delete(model).where(model.book_id == book_id))
-    book.spine, book.protagonist, book.world, book.setup_progress = {}, {}, {}, {}
+    pieces = (book.setup_progress or {}).get("pieces", {})
+    volumes = await _rows(session, Volume, Volume.book_id == book_id)
+    units = await _rows(session, PlotUnit, PlotUnit.book_id == book_id)
+    chapters = await _rows(session, Chapter, Chapter.book_id == book_id)
+    locked_volumes = {row.id for row in volumes if row.locked}
+    written_units = {row.unit_id for row in chapters if row.content or row.status == "final"}
+    protected_units = {
+        row.id for row in units if row.locked or row.id in written_units or row.volume_id in locked_volumes
+    }
+    protected_volumes = locked_volumes | {row.volume_id for row in units if row.id in protected_units}
+    if pieces.get("segment") == "confirmed":
+        protected_volumes.update(row.id for row in volumes)
+    if pieces.get("first_volume") == "confirmed":
+        protected_units.update(row.id for row in units)
+        protected_volumes.update(row.id for row in volumes)
+    protected_nodes = {
+        row.target_node_id for row in volumes if row.id in protected_volumes and row.target_node_id is not None
+    }
+    nodes = await _rows(session, StoryNode, StoryNode.book_id == book_id)
+    protected_nodes.update(row.id for row in nodes if row.status == "pinned")
+    if pieces.get("world") != "confirmed":
+        characters = await _rows(session, Character, Character.book_id == book_id)
+        protected_characters = {row.id for row in characters if row.source not in {"ai", "migration"} or row.locked}
+        relations = await _rows(session, Relationship, Relationship.book_id == book_id)
+        # 关联本身没有来源字段；保住作者角色关联的另一端，避免 CASCADE 静默删关系。
+        for relation in relations:
+            if {relation.source_id, relation.target_id} & protected_characters:
+                protected_characters.update((relation.source_id, relation.target_id))
+        anchors = await _rows(session, NodeAnchor, NodeAnchor.book_id == book_id)
+        protected_characters.update(row.character_id for row in anchors if row.node_id in protected_nodes)
+        for row in characters:
+            if row.id not in protected_characters:
+                await session.delete(row)
+        entries = await _rows(session, WorldEntry, WorldEntry.book_id == book_id)
+        by_id = {row.id: row for row in entries}
+        protected_entries = {row.id for row in entries if row.source not in {"ai", "migration"} or row.locked}
+        # 作者维护的地方所属关系也要保住；不能删除上级再让 SET NULL 改写作者条目。
+        pending = list(protected_entries)
+        while pending:
+            parent = by_id[pending.pop()].parent_id
+            if parent in by_id and parent not in protected_entries:
+                protected_entries.add(parent)
+                pending.append(parent)
+        for row in entries:
+            if row.id not in protected_entries:
+                await session.delete(row)
+        book.world = {}
+    if pieces.get("protagonist") != "confirmed":
+        book.protagonist = {}
+    if pieces.get("first_volume") != "confirmed":
+        removed_units = {row.id for row in units if row.id not in protected_units}
+        # 章的外键是 SET NULL；先删未写章纲，不能留下无单元的开书旧产物。
+        for chapter in chapters:
+            if (
+                (chapter.unit_id in removed_units or chapter.unit_id is None)
+                and not chapter.content
+                and chapter.status != "final"
+            ):
+                await session.delete(chapter)
+        for row in units:
+            if row.id in removed_units:
+                await session.delete(row)
+        for row in volumes:
+            if row.id not in protected_volumes:
+                await session.delete(row)
+    if pieces.get("segment") != "confirmed":
+        for model in (NodeAnchor, Secret, StoryThread, Foreshadowing):
+            query = delete(model).where(model.book_id == book_id)
+            if model in {NodeAnchor, Secret, Foreshadowing} and protected_nodes:
+                query = query.where(model.node_id.is_(None) | model.node_id.not_in(protected_nodes))
+            if model is Secret:
+                # 留下仍被保留的设定条目引用的信息差。
+                references = select(WorldEntry.secret_id).where(
+                    WorldEntry.book_id == book_id, WorldEntry.secret_id.is_not(None)
+                )
+                query = query.where(Secret.id.not_in(references))
+            await session.execute(query)
+        for row in nodes:
+            if row.id not in protected_nodes:
+                await session.delete(row)
+        book.spine = {}
+    book.setup_progress = {}
     if not keep_concept:
         book.concept = {}
     await session.flush()
@@ -706,7 +775,10 @@ def volume_dict(v: Volume, nodes: list | None = None) -> dict[str, Any]:
 
 
 def unit_dict(u: PlotUnit) -> dict[str, Any]:
-    return {key: getattr(u, key) for key in UNIT_FIELDS}
+    values = {key: getattr(u, key) for key in UNIT_FIELDS}
+    if u.summary:
+        values["summary"] = u.summary
+    return values
 
 
 def foreshadow_dict(f: Foreshadowing, nodes: list | None = None) -> dict[str, Any]:
@@ -854,3 +926,13 @@ async def snapshot(
     payload: dict,
 ) -> None:
     session.add(DraftVersion(book_id=book_id, job_id=job_id, round=round_, source=source, note=note, payload=payload))
+
+
+# Third-package callers use these explicit entry points; legacy writing helpers above stay readable.
+from app.services.setup_store_v3 import (  # noqa: E402,F401
+    load_new_setup,
+    save_library_focus,
+    save_library_rest,
+    save_outline,
+    save_story_concept,
+)

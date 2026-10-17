@@ -7,7 +7,6 @@ import httpx
 import pytest
 from sqlalchemy import select
 
-from app.graphs.book_setup import first_volume_blocks
 from app.main import app
 from app.models import Book, Character, Foreshadowing, NodeAnchor, Secret, StoryNode, Volume
 from app.services.setup_store import load_setup
@@ -107,8 +106,6 @@ async def check_binding(sessionmaker, story, endpoint_id, *, original_deleted=Fa
         assert (await session.get(Secret, story["secret"])).node_id == expected_old
         anchor = await session.get(NodeAnchor, story["anchor"])
         assert (anchor.node_id if anchor else None) == expected_old
-        blocks = first_volume_blocks(setup)
-        assert "考核夺名额" in blocks["segment"] and "从药碗异常切入" in blocks["opening"]
         return nodes
 
 

@@ -30,20 +30,20 @@ const QUICK_PHRASES = {
 /** 每个会话保留自己的草稿；切稿件路由不会重挂载这块区域。 */
 function NoteComposer() {
   const { job, working, waiting, asking, bookId, book, conversation, focusComposer, composerNode, setComposerNode, composerDrafts: drafts, setComposerDrafts: setDrafts, segmentReview } = useBookContext()
-  const { note, decide, directions, piece } = useJobActions(bookId)
+  const { note, decide, directions, pitches, piece, setupPending } = useJobActions(bookId)
   const [sent, setSent] = useState<{ conversation: string; message: string } | null>(null)
   const ref = useRef<HTMLTextAreaElement>(null)
   const sending = useRef(false)
   const text = drafts[conversation] ?? ''
   const direct = conversation !== 'group'
-  const oldSetup = job?.kind === 'book_setup' && job.setup_flow === 1
+  const oldSetup = job?.kind === 'book_setup' && job.setup_flow !== 3
   const blocked = oldSetup && !direct
   const revising = waiting && !oldSetup
   const feedbackPrefix = direct ? `（给${ROLE_META[conversation].name}）` : ''
   const inputLimit = waiting ? 5000 - feedbackPrefix.length : 5000
   const tooLong = text.trim().length > inputLimit
-  const pending = note.isPending || decide.isPending || directions.isPending || piece.isPending || segmentReview.submitting
-  const error = note.error ?? decide.error ?? directions.error ?? piece.error ?? segmentReview.error
+  const pending = setupPending || note.isPending || decide.isPending || directions.isPending || pitches.isPending || piece.isPending || segmentReview.submitting
+  const error = note.error ?? decide.error ?? directions.error ?? pitches.error ?? piece.error ?? segmentReview.error
   const idle = !working && !waiting && !asking
   const resumable = job?.status === 'failed' || job?.status === 'cancelled'
 
@@ -76,7 +76,9 @@ function NoteComposer() {
     try {
       const route = composerRoute(job, text, conversation === 'group' ? composerNode : null, direct)
       if (route.kind === 'blocked') return
-      if (route.kind === 'directions' && job) {
+      if (route.kind === 'pitches' && job) {
+        await pitches.mutateAsync({ jobId: job.id, action: 'redo', feedback: `${feedbackPrefix}${content}` })
+      } else if (route.kind === 'directions' && job) {
         await directions.mutateAsync({ jobId: job.id, action: 'redo', feedback: `${feedbackPrefix}${content}` })
       } else if (route.kind === 'piece' && job) {
         await piece.mutateAsync({ jobId: job.id, action: 'revise', piece: route.piece, feedback: `${feedbackPrefix}${content}`, ...('node_id' in route ? { node_id: route.node_id } : {}) })
@@ -107,7 +109,9 @@ function NoteComposer() {
   const placeholder = blocked ? '这本书要先按新流程重开，重开后再提意见' : direct
     ? `发消息给${ROLE_META[conversation].name}…`
     : waiting && job?.pending?.kind === 'setup_piece' ? '说说这一块想怎么改…' : waiting
-      ? job?.pending?.kind === 'setup_directions'
+      ? job?.pending?.kind === 'setup_pitches'
+        ? '写下哪里不满意，主编会重新出三个短版…'
+        : job?.pending?.kind === 'setup_directions'
         ? '写下哪里不满意，主编会重新出开书方向…'
         : decisionCopy(job?.pending, bookId).placeholder
       : asking

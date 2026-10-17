@@ -6,8 +6,10 @@ import uuid
 
 import httpx
 import pytest
+from redis.asyncio import Redis
 from sqlalchemy import func, select, text
 
+from app.config import get_settings
 from app.main import create_app
 from app.models import Book, Character, Job, PlotUnit, SettingVersion, StoryNode, Volume, WorldEntry
 from app.services.versions import snapshot_of
@@ -70,7 +72,9 @@ async def test_waiting_edit_rechecks_busy_state_after_acquiring_book_lock(sessio
 
     method, url, payload = requests[operation]
     request = None
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=create_app()), base_url="http://test") as client:
+    app = create_app()
+    app.state.redis = Redis.from_url(get_settings().redis_url)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         try:
             async with sessionmaker() as blocker:
                 await blocker.execute(select(Book.id).where(Book.id == book_id).with_for_update())
@@ -82,6 +86,7 @@ async def test_waiting_edit_rechecks_busy_state_after_acquiring_book_lock(sessio
                 await blocker.commit()
             response = await asyncio.wait_for(request, timeout=10)
         finally:
+            await app.state.redis.aclose()
             if request is not None and not request.done():
                 request.cancel()
                 with contextlib.suppress(asyncio.CancelledError):

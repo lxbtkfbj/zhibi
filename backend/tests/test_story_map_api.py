@@ -4,16 +4,21 @@ import uuid
 
 import httpx
 import pytest
+from redis.asyncio import Redis
 from sqlalchemy import select
 
-from app.main import app
+from app.config import get_settings
+from app.main import create_app
 from app.models import Book, Character, Foreshadowing, Job, NodeAnchor, Secret, StoryNode, Volume
 
 
 @pytest.fixture
 async def client():
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-        yield client
+    app = create_app()
+    async with Redis.from_url(get_settings().redis_url) as redis:
+        app.state.redis = redis
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            yield client
 
 
 @pytest.fixture

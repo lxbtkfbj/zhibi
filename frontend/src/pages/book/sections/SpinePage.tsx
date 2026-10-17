@@ -12,6 +12,7 @@ import { StoryMapStrip } from '../../../components/StoryMapStrip'
 import { WritingSegmentBand } from '../../../components/WritingSegmentBand'
 import { Button, Card, ErrorText, inputClass, Modal, Reveal, Skeleton } from '../../../components/ui'
 import { canPlanNextSegment, isWritingComplete, nodeCounts, NODE_STATUS, plannedVolumeChapters, segmentBands, segments, writingPosition, type WritingPosition } from '../../../lib/storyMap'
+import { needsSetupRestart } from '../../../lib/setupPresentation'
 import { firstSegment, isUnplannedSegment, showFirstSegment } from '../../../lib/setupSegment'
 import { useBookContext } from '../context'
 import { PieceDecisions } from '../PieceDecisions'
@@ -98,8 +99,8 @@ export function SpinePage() {
   const writing = chapters.some(chapter => chapter.status === 'final')
   const setup = ['setting_up', 'awaiting_approval'].includes(book.status) || (job?.kind === 'book_setup' && ['queued', 'running', 'waiting_author'].includes(job.status))
   const pending = job?.status === 'waiting_author' && job.pending?.kind === 'setup_piece' ? job.pending : null
-  const canRequestNodes = !writing && setup && pending?.piece === 'segment'
-  const busy = working || planSegment.isPending || pieceAction.isPending || mutations.create.isPending || mutations.update.isPending || mutations.remove.isPending || mutations.reorder.isPending
+  const canRequestNodes = !needsSetupRestart(book, job) && !writing && setup && pending?.piece === 'segment'
+  const busy = working || needsSetupRestart(book, job) || planSegment.isPending || pieceAction.isPending || mutations.create.isPending || mutations.update.isPending || mutations.remove.isPending || mutations.reorder.isPending
   const counts = nodeCounts(nodes)
   const bands = segments(nodes, outline?.volumes ?? [])
   const plannedBands = segmentBands(nodes, outline?.volumes ?? [], chapters)

@@ -16,8 +16,14 @@ def format_concept(c: dict[str, Any]) -> str:
         [
             f"书名：{c.get('title', '')}（备选：{'、'.join(c.get('alt_titles', []))}）",
             f"类型：{c.get('genre', '')}；标签：{'、'.join(c.get('tags', []))}",
-            f"一句话简介：{c.get('logline', '')}",
-            f"核心卖点：\n{_lines(c.get('selling_points', []))}",
+            *(
+                [f"定调：{c['story']}"]
+                if c.get("story")
+                else [
+                    f"一句话简介：{c.get('logline', '')}",
+                    f"核心卖点：\n{_lines(c.get('selling_points', []))}",
+                ]
+            ),
             *[
                 f"{label}：{c[key]}"
                 for label, key in (
@@ -575,6 +581,7 @@ def format_outline(outline: dict[str, Any]) -> str:
 def format_unit(u: dict[str, Any]) -> str:
     lines = [
         f"单元{u.get('index')}「{u.get('title')}」约 {u.get('chapter_count')} 章",
+        *([f"一段话：{u['summary']}"] if u.get("summary") else []),
         f"目标：{u.get('goal', '')}",
         f"冲突：{u.get('conflict', '')}",
         f"高潮：{u.get('climax', '')}",
@@ -640,50 +647,6 @@ def format_direction(d: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def format_direction_choice(direction: dict[str, Any] | None) -> str:
-    if not direction:
-        return ""
-    lines = [
-        "【作者选定的方向】",
-        f"方向「{direction.get('name', '')}」：{direction.get('logline', '')}",
-        f"主角：{direction.get('protagonist', '')}",
-        *([f"驱动力：{direction['drive']}"] if direction.get("drive") else []),
-        f"金手指：{direction.get('golden_finger', '')}",
-        *([f"核心循环：{direction['core_loop']}"] if direction.get("core_loop") else []),
-        f"开局：{direction.get('opening', '')}",
-        f"卖点：{'；'.join(direction.get('selling_points') or [])}",
-        f"舞台阶梯：{direction.get('stage_ladder', '')}",
-        f"基调：{direction.get('tone', '')}",
-        f"目标读者：{direction.get('reader', '')}",
-    ]
-    if direction.get("titles"):
-        lines.append("书名候选：" + "".join(f"《{title}》" for title in direction["titles"]))
-    if direction.get("title"):
-        lines.append(f"作者选定的书名：《{direction['title']}》")
-    if direction.get("mix"):
-        lines.extend(["", "【作者的混搭要求】", direction["mix"]])
-    return "\n".join(lines)
-
-
-def format_previous_directions(previous: dict[str, Any] | None) -> str:
-    """只渲染被作者否决的最近一轮，不把更早的方向嵌套带回模型。"""
-    if not previous:
-        return ""
-    lines = ["【上一轮的方向（作者不满意）】"]
-    if previous.get("reference"):
-        lines.append(f"你对对标作品的理解：{previous['reference']}")
-    for index, direction in enumerate(previous.get("directions") or [], 1):
-        line = (
-            f"{index}. 方向「{direction.get('name', '')}」：{direction.get('logline', '')}；"
-            f"金手指：{direction.get('golden_finger', '')}；舞台阶梯：{direction.get('stage_ladder', '')}"
-        )
-        if direction.get("titles"):
-            line += "；书名候选：" + "".join(f"《{title}》" for title in direction["titles"])
-        lines.append(line)
-    lines.append(f"作者的意见：{previous.get('feedback', '')}")
-    return "\n".join(lines)
-
-
 def format_target_node(volume: dict[str, Any], nodes: list[dict[str, Any]]) -> str:
     target = volume.get("target_node") or 0
     if not isinstance(target, int) or not 1 <= target <= len(nodes):
@@ -705,28 +668,6 @@ def format_target_node(volume: dict[str, Any], nodes: list[dict[str, Any]]) -> s
         following = nodes[target]
         lines.append(f"再下一个节点：节点 {target + 1}「{following.get('title', '')}」：{following.get('event', '')}")
     return "\n".join(lines)
-
-
-def format_locked(state: dict[str, Any]) -> str:
-    from app.agents.setup_puzzle import PIECE_NAMES, PIECE_ORDER
-
-    nodes = (state.get("segment") or {}).get("nodes") or []
-    pinned = [
-        f"节点 {index}「{node.get('title', '')}」"
-        for index, node in enumerate(nodes, 1)
-        if node.get("status") == "pinned"
-    ]
-    confirmed = [PIECE_NAMES[piece] for piece in PIECE_ORDER if (state.get("pieces") or {}).get(piece) == "confirmed"]
-    if state.get("mode", "oneshot") == "puzzle" and confirmed:
-        result = "【作者已确认（锁定）的部分】" + "、".join(confirmed)
-        if pinned:
-            result += "\n其中铁钉节点：" + "、".join(pinned)
-        return result
-    return (
-        "【作者钉死的节点】" + "、".join(pinned) + "（铁钉，不能擅自改；仅本轮作者明确点名时可按要求改，改完仍是铁钉）"
-        if pinned
-        else ""
-    )
 
 
 def format_pitches(pitches: list[dict[str, Any]]) -> str:

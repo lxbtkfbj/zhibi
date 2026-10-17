@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { ArrowRight, Check, Feather, MessageCircleQuestion, Plus, Sparkles, Trash2 } from 'lucide-react'
+import { ArrowRight, Feather, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { motion, useReducedMotion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
@@ -11,16 +11,6 @@ import { BookCover } from '../components/BookCover'
 import { Cloud, Diamond, FretDivider, InkMountains } from '../components/decor'
 import { Badge, Button, ErrorText, Modal, Reveal, Skeleton, Spinner } from '../components/ui'
 import { cleanTitle, displayStatus, greeting } from '../lib/status'
-
-const ASK_KEY = 'zhibi:ask-first'
-
-function readAskPref() {
-  try {
-    return localStorage.getItem(ASK_KEY) !== '0'
-  } catch {
-    return true
-  }
-}
 
 const IDEAS = [
   '一个能看见别人剩余寿命的杂役弟子，在吃人的宗门里步步为营',
@@ -34,7 +24,6 @@ function Composer({ autoFocus, flat }: { autoFocus?: boolean; flat?: boolean }) 
   const [idea, setIdea] = useState('')
   const [style, setStyle] = useState('')
   const [showStyle, setShowStyle] = useState(false)
-  const [ask, setAskState] = useState(readAskPref)
   const defaults = useNewBookDefaults()
   const [selectedMode, setSelectedMode] = useState<'puzzle' | 'oneshot' | null>(null)
   const mode = selectedMode ?? defaults.data?.settings.setup_mode ?? 'puzzle'
@@ -55,20 +44,11 @@ function Composer({ autoFocus, flat }: { autoFocus?: boolean; flat?: boolean }) 
     if (autoFocus) ref.current?.focus()
   }, [autoFocus])
 
-  const setAsk = (value: boolean) => {
-    setAskState(value)
-    try {
-      localStorage.setItem(ASK_KEY, value ? '1' : '0')
-    } catch {
-      /* 浏览器禁用存储时忽略 */
-    }
-  }
-
   const submit = async () => {
     // 快捷键会绕过按钮的禁用状态，这里再拦一次，避免重复建书
     if (!ready || create.isPending || !defaults.data) return
     try {
-      const result = await create.mutateAsync({ idea: idea.trim(), style_reference: style.trim(), ask: mode === 'oneshot' && ask, mode })
+      const result = await create.mutateAsync({ idea: idea.trim(), style_reference: style.trim(), mode })
       navigate(`/books/${result.book.id}`)
     } catch { /* 错误在创建区显示，保留点子 */ }
   }
@@ -101,8 +81,9 @@ function Composer({ autoFocus, flat }: { autoFocus?: boolean; flat?: boolean }) 
       )}
       <div className="flex flex-wrap items-center gap-3 border-t border-line/70 px-3 py-3">
         <span className="text-sm text-ink-2">开书方式</span>
-        <Segmented label="开书方式" value={mode} options={[{ value: 'puzzle', label: '逐块确认（推荐）' }, { value: 'oneshot', label: '一口气出方案' }]} onChange={setSelectedMode} />
+        <Segmented label="开书方式" value={mode} options={[{ value: 'puzzle', label: '逐块确认（推荐）' }, { value: 'oneshot', label: '一口气做完再给我看' }]} onChange={setSelectedMode} />
       </div>
+      {mode === 'oneshot' && <p className="px-4 pb-3 text-xs leading-relaxed text-ink-2">一口气做完再给我看：定调和设定库做完不停，停在大纲给你看</p>}
       <div className="flex flex-wrap items-center gap-2 px-2 pb-1">
         <button
           onClick={() => setShowStyle(!showStyle)}
@@ -117,18 +98,6 @@ function Composer({ autoFocus, flat }: { autoFocus?: boolean; flat?: boolean }) 
           <Sparkles className="size-3.5" />
           给我一个灵感
         </button>
-        {mode === 'oneshot' && <button
-          onClick={() => setAsk(!ask)}
-          aria-pressed={ask}
-          title="篇幅、主角名字、金手指、结局……主编动笔前先跟你对一下，免得写完整套方案才发现方向不对"
-          className={clsx(
-            'flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[13px] transition-colors',
-            ask ? 'bg-chief-soft text-chief' : 'text-ink-3 hover:bg-line/50 hover:text-ink',
-          )}
-        >
-          {ask ? <Check className="size-3.5" /> : <MessageCircleQuestion className="size-3.5" />}
-          先问我几个问题
-        </button>}
         <span className="ml-auto hidden text-xs text-ink-3 sm:inline">Ctrl + Enter</span>
         <Button variant="seal" size="lg" onClick={submit} loading={create.isPending} disabled={!ready || !defaults.data}>
           交给编辑部
@@ -153,11 +122,11 @@ function NewBookDialog({ open, onClose }: { open: boolean; onClose: () => void }
   return (
     <Modal open={open} onClose={onClose} title="开一本新书" wide>
       <p className="mb-4 text-sm leading-relaxed text-ink-2">
-        写下你的点子，一句话就够。先选方向，再一起完成定调、主角、世界与人、第一段和第一卷。
+        写下你的点子，一句话就够。先挑短版，再一起完成定调、设定库和大纲。
       </p>
       <Composer autoFocus flat />
       <p className="mt-3 text-xs leading-relaxed text-ink-3">
-        逐块确认会在每一块做完后停下来；一口气模式可选择「先问我几个问题」。编辑部工作时，你也可以随时在讨论里插话。
+        逐步确认会在每一步做完后停下来；一口气模式完成定调和设定库，停在大纲给你看。编辑部工作时，你也可以随时在讨论里插话。
       </p>
     </Modal>
   )

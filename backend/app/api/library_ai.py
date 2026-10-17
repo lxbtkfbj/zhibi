@@ -6,6 +6,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 from redis.asyncio import Redis
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -155,11 +156,14 @@ async def rewrite_target(session, redis, book, body: RewriteIn):
         raise _splice_error(exc) from exc
     except IntegrityError as exc:
         raise HTTPException(409, "修改后的名称重复或引用已不存在") from exc
-    return {
+    response = {
         "applied": {"path": body.path, "before": old, "after": new},
         "version": version.version,
         "suggestions": [SuggestionOut.model_validate(row) for row in suggestions],
     }
+    if isinstance(target, Book) and body.path.split("@", 1)[0] == "story":
+        await review_concept_change(session, redis, book_id, before.get("story", ""))
+    return response
 
 
 @router.post("/books/{book_id}/library/rewrite")
@@ -237,10 +241,12 @@ async def fill_gaps(
     return {"suggestions": [SuggestionOut.model_validate(row) for row in suggestions], "note": result.note}
 
 
-async def review_library(session, redis, book, check: CheckIn | None = None):
+async def review_library(
+    session, redis, book, check: CheckIn | None = None, *, scope: str | None = None, kind: str = "review"
+):
     book_id = book.id
     ctx = await load_context(session, book)
-    scope = "查整个设定库。"
+    scope = scope or "查整个设定库。"
     if check:
         target = await load_target(session, book_id, check.target_type, check.target_id)
         scope = f"只查这一条：{ctx.target_heading(target)}；需要时对照别的条目。"
@@ -252,7 +258,14 @@ async def review_library(session, redis, book, check: CheckIn | None = None):
     ctx = await load_context(session, book)
     suggestions = []
     for issue in result.issues:
-        target = next((row for row in [*ctx.characters, *ctx.entries] if row.name == issue.target_name), None)
+        target = next(
+            (
+                row
+                for row in [*ctx.characters, *ctx.entries, *ctx.nodes, *ctx.volumes, *ctx.units]
+                if ctx.target_name(row) == issue.target_name
+            ),
+            None,
+        )
         payload = {"op": "note", "why": issue.why}
         target_type = target_type_of(target) if target is not None else None
         target_id = target.id if target is not None else None
@@ -272,7 +285,7 @@ async def review_library(session, redis, book, check: CheckIn | None = None):
                     break
         row = SettingSuggestion(
             book_id=book_id,
-            kind="review",
+            kind=kind,
             target_type=target_type,
             target_id=target_id,
             title=f"【{issue.kind}】{issue.title}",
@@ -301,3 +314,20 @@ async def check(
     redis: Redis = Depends(get_redis),
 ):
     return await review_library(session, redis, book, body)
+
+
+async def review_concept_change(session, redis, book_id, old_story: str) -> None:
+    book = await session.get(Book, book_id)
+    new_story = (book.concept or {}).get("story", "")
+    if old_story == new_story:
+        return
+    built = await session.scalar(
+        select(WorldEntry.id).where(WorldEntry.book_id == book_id, ~WorldEntry.tags.contains(["底牌"])).limit(1)
+    )
+    if built is None:
+        built = await session.scalar(select(Character.id).where(Character.book_id == book_id).limit(1))
+    if built is None:
+        return
+    scope = f"定调改了。\n改之前：{old_story}\n改之后：{new_story}\n查设定库和大纲里哪些地方要跟着改。"
+    await session.commit()
+    await review_library(session, redis, book, scope=scope, kind="concept")

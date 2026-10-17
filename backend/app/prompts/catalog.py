@@ -6,16 +6,12 @@ from app.prompts import VARIABLE, canonical_name, default_content
 
 # 名称、中文名、分组、实际调用角色、使用时机。顺序就是界面顺序。
 CATALOG = [
-    ("setup_interview", "动笔前提问", "开书", "chief", "开书前了解作者的点子"),
-    ("setup_directions", "开书方向", "开书", "chief", "逐块确认模式下先给作者几个方向"),
-    ("setup_concept", "定调", "开书", "chief", "开书第一步：定调"),
-    ("setup_protagonist", "定主角", "开书", "chief", "开书第二步：主角卡"),
-    ("setup_world", "世界、第一张地图和这里的人", "开书", "lorekeeper", "开书第三步：世界与人"),
-    ("setup_segment", "第一段怎么走与全书方向", "开书", "chief", "开书第四步：第一段的走向"),
+    ("setup_pitches", "三个短版", "开书", "chief", "开书第一步：按点子给三个短版定调"),
+    ("setup_story", "定调", "开书", "chief", "把挑中的短版展开成定调"),
+    ("library_build_focus", "建库：主角和金手指", "开书", "lorekeeper", "开书第二步：先出重点"),
+    ("library_build_rest", "建库：其余设定", "开书", "lorekeeper", "开书第二步：补齐设定库"),
+    ("setup_outline", "出大纲", "开书", "chief", "开书第三步：大纲"),
     ("split_segment", "这一段分卷与线索", "开书", "chief", "开书第四步分卷；写作中定下一段后分卷"),
-    ("setup_node_slot", "节点候选与补空位", "开书", "chief", "作者要换节点或补空位时"),
-    ("setup_critique", "审开书方案", "开书", "reviewer", "审阅完整开书方案"),
-    ("setup_triage", "处理作者意见", "开书", "chief", "收到开书方案修改意见时"),
     ("setup_notes", "处理作者插话", "开书", "chief", "开书进行中处理插话与设置修改"),
     ("library_rewrite", "改一处", "设定库", "lorekeeper", "作者让 AI 改设定库或大纲里的一处"),
     ("library_fill_gaps", "补漏", "设定库", "chief", "看设定库还缺什么"),
@@ -48,6 +44,8 @@ CATALOG = [
 BY_NAME = {row[0]: row for row in CATALOG}
 
 VARIABLE_LABELS = {
+    "pitch": "挑中的短版",
+    "category_hints": "每一类该写清什么",
     "library": "设定库目录",
     "library_full": "设定库全文",
     "target_full": "这一条的全文",

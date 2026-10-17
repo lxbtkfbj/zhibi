@@ -257,13 +257,11 @@ async def test_one_pitch_does_not_call_direction_or_judgement_llm(sessionmaker, 
     directions.assert_not_called()
 
 
-async def test_answer_trial_and_volume_sources(sessionmaker, monkeypatch):
-    from app.graphs import book_setup, write_book
+async def test_trial_and_volume_sources(sessionmaker, monkeypatch):
+    from app.graphs import write_book
 
     book_id, job_id = await fixture_book(sessionmaker)
     rt = runtime(sessionmaker, book_id, job_id)
-    monkeypatch.setattr(book_setup, "interrupt", lambda _: {"brief": ["动笔前的回答"]})
-    await book_setup.interview_gate_node({}, rt)
     monkeypatch.setattr(write_book, "interrupt", lambda _: {"action": "revise", "feedback": "卷纲的意见"})
     await volume_gate_node({"volume_index": 2}, rt)
     monkeypatch.setattr(write_book, "interrupt", lambda _: {"action": "revise", "feedback": "试读的意见"})
@@ -271,7 +269,6 @@ async def test_answer_trial_and_volume_sources(sessionmaker, monkeypatch):
     async with sessionmaker() as session:
         rows = (await session.scalars(sa.select(AuthorRequirement).where(AuthorRequirement.book_id == book_id))).all()
     assert {row.text: row.source for row in rows} == {
-        "动笔前的回答": "answer",
         "卷纲的意见": "volume:2",
         "试读的意见": "trial",
     }

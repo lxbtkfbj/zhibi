@@ -8,6 +8,14 @@ export const PIECES = [
   { key: 'first_volume', name: '第一卷', path: '/volume/1', number: '⑤' },
 ] as const satisfies readonly { key: PieceKey; name: string; path: string; number: string }[]
 
+export const THREE_PIECES = [
+  { key: 'concept', name: '定调', path: '/concept', number: '①' },
+  { key: 'settings', name: '设定库', path: '/world', number: '②' },
+  { key: 'outline', name: '大纲', path: '/spine', number: '③' },
+] as const
+
+export const setupPieces = (flow?: number | null) => flow === 3 ? THREE_PIECES : PIECES
+
 export const PIECE_STATUS_LABELS: Record<PieceStatus, string> = {
   todo: '未开始', drafting: '正在做', waiting: '等你确认', confirmed: '已确认', done: '已做完',
 }
@@ -17,10 +25,10 @@ export const targetPiece: Record<SetupTarget, PieceKey> = {
 }
 
 /** 旧书没有进度时五块均未开始，不从产出或章数臆测确认状态。 */
-export function pieceStatuses(progress: SetupProgress | null | undefined) {
+export function pieceStatuses(progress: SetupProgress | null | undefined, flow?: number | null) {
   return {
     current: progress?.current ?? null,
-    pieces: PIECES.map(piece => ({ ...piece, status: progress?.pieces?.[piece.key] ?? 'todo' as PieceStatus, current: piece.key === progress?.current })),
+    pieces: setupPieces(flow).map(piece => ({ ...piece, status: progress?.pieces?.[piece.key] ?? 'todo' as PieceStatus, current: piece.key === progress?.current })),
   }
 }
 

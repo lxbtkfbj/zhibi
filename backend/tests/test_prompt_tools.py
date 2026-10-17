@@ -17,7 +17,6 @@ from sqlalchemy import func, select
 
 from app.agents import playbook
 from app.llm import router as module
-from app.llm.demo import _concept
 from app.llm.router import DEMO_PROFILE, LLMError, LLMRouter, Outcome, ResolvedProfile
 from app.main import app
 from app.models import Book, LlmCall, PromptOverride
@@ -27,21 +26,6 @@ from app.prompts.catalog import CATALOG, variables
 
 class Answer(BaseModel):
     answer: str
-
-
-@pytest.mark.parametrize(
-    "rule,expected",
-    [
-        ("2-6 个字的经典短书名，像《逆天邪神》《斗破苍穹》，不要用「主标题：副标题」的长书名。", "青灯问道"),
-        (
-            "番茄式长书名，「主题：一句话卖点」的格式，例如《苟道邪尊：平时低调发育，战时越境秒杀》。",
-            "青灯问道：看透寿元的我在宗门步步为营",
-        ),
-        ("雾海归舟", "雾海归舟"),
-    ],
-)
-def test_demo_concept_follows_title_rules(rule, expected):
-    assert _concept(f"【这本书的写作规矩】\n- 书名：{rule}\n- 人称：全书用第三人称叙述。\n\n正文").title == expected
 
 
 @pytest.fixture
@@ -75,23 +59,23 @@ async def test_catalog_has_chinese_variable_labels_and_safe_names(client):
 
 
 async def test_override_validates_renders_and_restores(client, sessionmaker):
-    original = default_content("setup_concept")
-    values = {var["name"]: "" for var in variables("setup_concept")}
+    original = default_content("setup_story")
+    values = {var["name"]: "" for var in variables("setup_story")}
     values["idea"] = "作者原文 {{不是模板变量}}"
-    baseline = render("setup_concept", **values)
+    baseline = render("setup_story", **values)
     assert "{{不是模板变量}}" in baseline
     for invalid, message in ((original.replace("{{idea}}", ""), "缺少变量"), (original + "{{unknown}}", "不支持")):
-        response = await client.put("/api/prompts/setup_concept", json={"content": invalid})
+        response = await client.put("/api/prompts/setup_story", json={"content": invalid})
         assert response.status_code == 422 and message in response.json()["detail"]
         async with sessionmaker() as session:
-            assert await session.get(PromptOverride, "setup_concept") is None
+            assert await session.get(PromptOverride, "setup_story") is None
     custom = "作者自定义：\n" + original
-    response = await client.put("/api/prompts/setup_concept", json={"content": custom})
+    response = await client.put("/api/prompts/setup_story", json={"content": custom})
     assert response.status_code == 200 and response.json()["customized"]
-    assert render("setup_concept", **values).startswith("作者自定义：")
-    response = await client.delete("/api/prompts/setup_concept")
+    assert render("setup_story", **values).startswith("作者自定义：")
+    response = await client.delete("/api/prompts/setup_story")
     assert response.status_code == 200 and not response.json()["customized"]
-    assert render("setup_concept", **values) == baseline
+    assert render("setup_story", **values) == baseline
 
 
 async def test_playbook_validation_hot_reload_and_explicit_pick(client):
@@ -148,15 +132,15 @@ async def test_demo_structured_logs_original_request_response_and_latest_prompt(
     router = LLMRouter(sessionmaker)
     monkeypatch.setattr(module.demo, "respond", AsyncMock(return_value=Answer(answer="原样回复")))
     system = render("persona_chief", rules=render("rules"))
-    user = render("setup_concept", idea="点子", chosen_direction="", requirements="规矩", style="", revision="")
+    user = render("setup_story", idea="点子", pitch="", requirements="规矩", style="", revision="")
     await router.structured("chief", Answer, system, user, purpose="开书·概念")
     call = (await rows(sessionmaker))[0]
     assert call.request["system"] == system and call.request["user"] == user
     assert call.request["schema_name"] == "Answer" and call.request["schema"] == Answer.model_json_schema()
     assert call.request["method"] == "demo"
-    assert set(call.request["prompt_names"]) >= {"setup_concept", "persona_chief", "rules"}
+    assert set(call.request["prompt_names"]) >= {"setup_story", "persona_chief", "rules"}
     assert json.loads(call.response) == {"answer": "原样回复"}
-    prompt = (await client.get("/api/prompts/setup_concept")).json()
+    prompt = (await client.get("/api/prompts/setup_story")).json()
     assert prompt["last_call"]["id"] == call.id
 
 

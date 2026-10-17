@@ -723,15 +723,14 @@ class Decision(BaseModel):
     feedback: str = Field("", max_length=5000)
 
 
-SetupPiece = Literal["concept", "protagonist", "world", "segment", "first_volume"]
+SetupPiece = Literal["concept", "settings", "outline"]
 
 
-class DirectionDecision(BaseModel):
-    action: Literal["choose", "redo"]
-    choice: int | None = Field(None, ge=0)
-    title: str | None = Field(None, description="作者选中的书名，必须属于所选方向的书名候选")
-    mix: str = Field("", max_length=20000)
-    length: str = Field("", max_length=1000)
+class PitchDecision(BaseModel):
+    action: Literal["pick", "redo"]
+    index: int | None = Field(None, ge=1, le=3)
+    length: Literal[50, 100, 200, 400, 500] | None = None
+    title: str | None = Field(None, min_length=1, max_length=200)
     feedback: str = Field("", max_length=20000)
 
 
@@ -748,10 +747,9 @@ class ChoiceFlip(BaseModel):
 
 
 class PieceDecision(BaseModel):
-    action: Literal["confirm", "delegate", "revise", "candidates", "fill", "reopen", "unlock"]
-    piece: SetupPiece
+    action: Literal["confirm", "delegate", "revise"]
+    piece: SetupPiece | None = None
     feedback: str = Field("", max_length=20000)
-    node_id: uuid.UUID | None = None
     flips: list[ChoiceFlip] = Field(default_factory=list, max_length=3)
 
 

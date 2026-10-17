@@ -17,7 +17,7 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.llm import demo
 from app.main import create_app
-from app.models import Book, Job, MeetingMessage
+from app.models import Book, Job, MeetingMessage, StoryThread
 from app.services import jobs
 from app.services.job_runner import execute_job
 
@@ -133,9 +133,11 @@ async def test_new_book_flow(client, queued):
     listed = (await client.get("/api/books")).json()
     assert listed[0]["job_status"] == "waiting_author"
     book = (await client.get(f"/api/books/{book_id}")).json()
-    assert book["status"] == "awaiting_approval"
+    assert book["status"] == "setting_up"
     assert book["active_job"]["status"] == "waiting_author"
-    assert book["title"] == "青灯问道"
+    assert book["title"] == "逆世帝尊"
+    assert book["active_job"]["setup_flow"] == 3
+    assert book["active_job"]["pending"]["piece"] == "outline"
 
     outline = (await client.get(f"/api/books/{book_id}/outline")).json()
     assert len(outline["volumes"]) == 2
@@ -148,7 +150,7 @@ async def test_new_book_flow(client, queued):
     hero = next(c for c in bible["characters"] if c["role_type"] == "主角")
     res = await client.patch(f"/api/characters/{hero['id']}", json={"condition": "伤好了"})
     assert res.json()["condition"] == "伤好了"
-    villain = next(c for c in bible["characters"] if c["name"] == "赵乾")
+    villain = next(c for c in bible["characters"] if c["name"] == "秦昊")
     res = await client.post(
         f"/api/books/{book_id}/relationships",
         json={"source_id": hero["id"], "target_id": villain["id"], "kind": "同门"},
@@ -159,27 +161,29 @@ async def test_new_book_flow(client, queued):
     )
     assert res.status_code == 201
 
-    assert (await client.post(f"/api/jobs/{job_id}/decision", json={"action": "revise"})).status_code == 422
-    res = await client.post(f"/api/jobs/{job_id}/decision", json={"action": "revise", "feedback": "第三单元再紧凑一些"})
+    assert (await client.post(f"/api/jobs/{job_id}/piece", json={"action": "revise"})).status_code == 422
+    res = await client.post(f"/api/jobs/{job_id}/piece", json={"action": "revise", "feedback": "第三单元再紧凑一些"})
     assert res.json()["status"] == "queued"
     await run_queued(queued)
 
-    # 作者改过的内容在 AI 修改后依然保留（演示模型的大纲修改不改第一单元标题之外的东西）
+    # 大纲重写不整库重建，作者改过的角色状态和自建条目原样保留。
     bible = (await client.get(f"/api/books/{book_id}/bible")).json()
     assert next(c for c in bible["characters"] if c["role_type"] == "主角")["condition"] == "伤好了"
     assert any(w["name"] == "破扫帚" for w in bible["world_entries"])
 
-    res = await client.post(f"/api/jobs/{job_id}/decision", json={"action": "approve"})
+    res = await client.post(f"/api/jobs/{job_id}/piece", json={"action": "confirm"})
     await run_queued(queued)
     book = (await client.get(f"/api/books/{book_id}")).json()
     assert book["status"] == "ready"
     assert (await client.get(f"/api/jobs/{job_id}")).json()["status"] == "succeeded"
-    assert (await client.post(f"/api/jobs/{job_id}/decision", json={"action": "approve"})).status_code == 409
+    assert (await client.post(f"/api/jobs/{job_id}/piece", json={"action": "confirm"})).status_code == 409
 
     messages = (await client.get(f"/api/books/{book_id}/meeting")).json()
     assert messages[0]["speaker"] == "author"
-    assert any(m["kind"] == "artifact" and m["payload"]["type"] == "critique" for m in messages)
-    assert messages[-1]["kind"] == "decision"
+    assert any(m["kind"] == "artifact" and m["payload"]["type"] == "outline" for m in messages)
+    assert any(m["speaker"] == "reviewer" for m in messages)
+    assert messages[-1]["speaker"] == "chief"
+    assert messages[-1]["content"] == "开书方案定好了，可以开写了。"
     after = messages[-3]["id"]
     tail = (await client.get(f"/api/books/{book_id}/meeting", params={"after": after})).json()
     assert [m["id"] for m in tail] == [m["id"] for m in messages[-2:]]
@@ -240,58 +244,51 @@ async def test_sse_replays_history_then_streams(client, queued, live_server):
     assert ids == sorted(ids) and len(ids) == len(set(ids))
 
 
-async def test_questions_then_note_then_review(client, queued):
-    """动笔前提问 → 作者回答（含补充）→ 作者插话 → 方案出来后插话改走「提修改意见」。"""
+async def test_ask_is_ignored_and_queued_note_is_read_before_outline(client, queued):
+    """旧 ask 参数忽略；工作中插话仍被消费，三步完成后停在大纲等待。"""
     res = await client.post("/api/books", json={"idea": "一个能看见别人寿命的少年", "mode": "oneshot", "ask": True})
     book_id, job_id = res.json()["book"]["id"], res.json()["job"]["id"]
+    assert res.json()["job"]["setup_flow"] == 3
+    assert (await client.get(f"/api/books/{book_id}")).json()["status"] == "setting_up"
+    # 尚未生成方案，不能确认，也不能走已退役的开书提问／整套拍板。
+    assert (await client.post(f"/api/jobs/{job_id}/piece", json={"action": "confirm"})).status_code == 409
+    assert (await client.post(f"/api/jobs/{job_id}/decision", json={"action": "approve"})).status_code == 409
+    assert (await client.post(f"/api/jobs/{job_id}/answers", json={})).status_code == 409
+
+    res = await client.post(f"/api/books/{book_id}/notes", json={"content": "开局节奏一定要快"})
+    assert res.status_code == 201
+    assert res.json()["kind"] == "note" and res.json()["job_id"] == job_id
     await run_queued(queued)
 
     job = (await client.get(f"/api/jobs/{job_id}")).json()
     assert job["status"] == "waiting_author"
-    assert job["pending"]["kind"] == "setup_questions"
-    questions = job["pending"]["questions"]
-    assert (await client.get(f"/api/books/{book_id}")).json()["status"] == "setting_up"
-    # 还没出方案，不能拍板
-    assert (await client.post(f"/api/jobs/{job_id}/decision", json={"action": "approve"})).status_code == 409
-
-    # 回答问题时也可以先插一句
-    res = await client.post(f"/api/books/{book_id}/notes", json={"content": "开局节奏一定要快"})
-    assert res.status_code == 201
-    assert res.json()["kind"] == "note"
-
-    res = await client.post(
-        f"/api/jobs/{job_id}/answers",
-        json={
-            "answers": [{"index": 0, "answer": questions[0]["options"][2]}, {"index": 1, "answer": ""}],
-            "extra": "主角叫云澈",
-        },
-    )
-    assert res.json()["status"] == "queued"
-    assert queued[-1][1]["brief"] == [f"{questions[0]['question']}——{questions[0]['options'][2]}", "补充：主角叫云澈"]
-    assert (await client.post(f"/api/jobs/{job_id}/answers", json={})).status_code == 409  # 已经答过了
-
-    await run_queued(queued)
-    job = (await client.get(f"/api/jobs/{job_id}")).json()
-    assert job["pending"]["kind"] == "setup_review"
+    assert job["pending"]["kind"] == "setup_piece" and job["pending"]["piece"] == "outline"
     book = (await client.get(f"/api/books/{book_id}")).json()
-    assert book["status"] == "awaiting_approval"
+    assert book["status"] == "setting_up"
+    assert book["setup_progress"]["pieces"] == {"concept": "confirmed", "settings": "confirmed", "outline": "waiting"}
     nodes = (await client.get(f"/api/books/{book_id}/nodes")).json()
     assert any(node["kind"] == "milestone" for node in nodes)
     assert "milestones" not in book["spine"]
     outline = (await client.get(f"/api/books/{book_id}/outline")).json()
-    # 全书计划 200 万字，但开书只规划第一段的两卷，不提前分配后面的篇幅。
-    assert outline["volumes"][1]["chapter_count"] == 30
-    assert sum(v["chapter_count"] for v in outline["volumes"]) == 61
+    # 仅第一篇分卷，第 1 卷章数对齐单元，不再沿用第二包的 31+30 章。
+    assert len(outline["volumes"]) == 2
+    assert outline["volumes"][0]["chapter_count"] == sum(
+        unit["chapter_count"] for unit in outline["volumes"][0]["units"]
+    )
+    assert len(outline["volumes"][0]["units"]) == 4
+    assert not outline["volumes"][1]["units"]
+    assert sum(bool(node["segment"]) for node in nodes) == 1
 
     messages = (await client.get(f"/api/books/{book_id}/meeting")).json()
     note = next(m for m in messages if m["kind"] == "note")
-    # 插话被主编读到并回应
     assert any(m["speaker"] == "chief" and m["kind"] == "speech" and m["id"] > note["id"] for m in messages)
-    assert any(m["kind"] == "artifact" and m["payload"]["type"] == "questions" for m in messages)
-    assert any(m["kind"] == "artifact" and m["payload"]["type"] == "segment" for m in messages)
-
-    # 方案出来以后，插话要走「提修改意见」
+    types = {m["payload"]["type"] for m in messages if m["kind"] == "artifact"}
+    assert {"pitches", "concept", "settings_focus", "settings_rest", "outline", "chapter_plan"} <= types
+    assert not {"questions", "critique", "segment"}.intersection(types)
+    assert "开局节奏一定要快" in book["requirements"]
+    # 大纲等待时继续走本步意见，不接受普通插话和旧 answers 接口。
     assert (await client.post(f"/api/books/{book_id}/notes", json={"content": "再改改"})).status_code == 409
+    assert (await client.post(f"/api/jobs/{job_id}/answers", json={})).status_code == 409
 
     ending = next(node for node in nodes if node["kind"] == "ending")
     res = await client.patch(f"/api/nodes/{ending['id']}", json={"event": "作者改的结局"})
@@ -300,22 +297,57 @@ async def test_questions_then_note_then_review(client, queued):
     assert len((await client.get(f"/api/books/{book_id}/nodes")).json()) == len(nodes)
 
 
-async def test_write_chapters_and_read_them(client, queued):
+@pytest.fixture
+async def legacy_thread_book(sessionmaker):
+    """已开完旧书的线索显式布置，测试编辑 API，不要求新三步提前生成任务 5 的线索。"""
+    async with sessionmaker() as session:
+        book = Book(title="旧书线索编辑", idea="已有旧书", status="ready", concept={"title": "旧书线索编辑"})
+        session.add(book)
+        await session.flush()
+        session.add_all(
+            [
+                StoryThread(
+                    book_id=book.id,
+                    index=1,
+                    name="寻找妹妹",
+                    kind="主线",
+                    summary="追寻妹妹的下落",
+                    beats=[{"volume": 1, "beat": "找到第一条线索"}],
+                ),
+                StoryThread(
+                    book_id=book.id,
+                    index=2,
+                    name="同行之人",
+                    kind="感情线",
+                    summary="从试探到信任",
+                    beats=[{"volume": 1, "beat": "初次结伴"}],
+                ),
+            ]
+        )
+        await session.commit()
+        return book.id
+
+
+async def test_write_chapters_and_read_them(client, queued, legacy_thread_book):
     res = await client.post("/api/books", json={"idea": "一个能看见别人寿命的少年", "mode": "oneshot"})
     book_id, job_id = res.json()["book"]["id"], res.json()["job"]["id"]
     # 方案还没定稿不能开写
     assert (await client.post(f"/api/books/{book_id}/write", json={"count": 1})).status_code == 409
     await run_queued(queued)
-    await client.post(f"/api/jobs/{job_id}/decision", json={"action": "approve"})
+    await client.post(f"/api/jobs/{job_id}/piece", json={"action": "confirm"})
     await run_queued(queued)
 
-    threads = (await client.get(f"/api/books/{book_id}/threads")).json()
+    assert (await client.get(f"/api/books/{book_id}/threads")).json() == []
+    threads = (await client.get(f"/api/books/{legacy_thread_book}/threads")).json()
     assert threads[0]["kind"] == "主线" and threads[0]["beats"][0]["volume"] == 1
     res = await client.patch(f"/api/threads/{threads[1]['id']}", json={"summary": "作者改的感情线"})
     assert res.json()["summary"] == "作者改的感情线"
     outline = (await client.get(f"/api/books/{book_id}/outline")).json()
     first = outline["volumes"][0]
-    assert first["status"] == "approved" and first["stage"] and first["units"][0]["thread_beats"]
+    assert first["status"] == "approved" and first["summary"] and first["units"][0]["summary"]
+    planned = (await client.get(f"/api/books/{book_id}/chapters")).json()
+    assert len(planned) == first["units"][0]["chapter_count"]
+    assert all(chapter["status"] == "planned" for chapter in planned)
 
     res = await client.post(f"/api/books/{book_id}/write", json={"until": "count", "count": 2})
     assert res.status_code == 201, res.text
@@ -329,7 +361,8 @@ async def test_write_chapters_and_read_them(client, queued):
     assert book["status"] == "writing"
     assert book["chapters_final"] == 2 and book["words_final"] > 0
     listing = (await client.get(f"/api/books/{book_id}/chapters")).json()
-    assert [c["status"] for c in listing] == ["final", "final", "planned", "planned", "planned", "planned"]
+    assert [c["status"] for c in listing] == ["final", "final", *(["planned"] * (len(planned) - 2))]
+    assert [c["id"] for c in listing] == [c["id"] for c in planned]  # 开写复用开书已出的章纲。
     assert listing[0]["outline"] is None  # 目录不带章纲
     by_volume = (await client.get(f"/api/books/{book_id}/chapters", params={"volume": 1})).json()
     assert by_volume[0]["outline"]["hook"]
@@ -370,7 +403,7 @@ async def test_export_needs_final_chapters(client, queued):
     assert (await client.get(f"/api/books/{res.json()['book']['id']}/export.txt")).status_code == 409
 
 
-async def note_book(sessionmaker, kind=None, status="queued", pending=None):
+async def note_book(sessionmaker, kind=None, status="queued", pending=None, *, flow=3):
     """只布置任务状态，不运行模型，隔离插话接口的分流规则。"""
     async with sessionmaker() as session:
         book = Book(idea="一个能看见别人寿命的少年", requirements=["已有的作者要求"])
@@ -384,7 +417,7 @@ async def note_book(sessionmaker, kind=None, status="queued", pending=None):
                 status=status,
                 pending=pending,
                 thread_id=f"note-{uuid.uuid4()}",
-                params={"flow": 2} if kind == "book_setup" else {},
+                params={"flow": flow} if kind == "book_setup" else {},
             )
             session.add(job)
         await session.commit()
@@ -398,7 +431,6 @@ async def note_book(sessionmaker, kind=None, status="queued", pending=None):
         ("book_setup", "running", None),
         ("write_book", "queued", None),
         ("write_book", "running", None),
-        ("book_setup", "waiting_author", {"kind": "setup_questions"}),
     ],
 )
 async def test_targeted_notes_wait_for_active_reader(client, sessionmaker, kind, status, pending):
@@ -418,6 +450,26 @@ async def test_targeted_notes_wait_for_active_reader(client, sessionmaker, kind,
     assert [(m.speaker, m.kind, m.payload) for m in messages] == [
         ("author", "note", {"thread": "lorekeeper", "requirement_saved": True})
     ]
+
+
+async def test_legacy_setup_questions_private_note_is_remembered_without_resuming_old_graph(client, sessionmaker):
+    """只有显式旧流程夹具保留 questions；旧私聊记要求，不冒充新流程提问或唤醒旧图。"""
+    book_id, _ = await note_book(sessionmaker, "book_setup", "waiting_author", {"kind": "setup_questions"}, flow=2)
+    response = await client.post(
+        f"/api/books/{book_id}/notes", json={"content": "保留作者补充的姓名", "to": "lorekeeper"}
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["job_id"] is None
+    async with sessionmaker() as session:
+        book = await session.get(Book, book_id)
+        assert book.requirements == ["已有的作者要求", "保留作者补充的姓名"]
+        messages = list(
+            await session.scalars(
+                select(MeetingMessage).where(MeetingMessage.book_id == book_id).order_by(MeetingMessage.id)
+            )
+        )
+    assert [(message.speaker, message.kind) for message in messages] == [("author", "note"), ("lorekeeper", "speech")]
+    assert all(message.job_id is None for message in messages)
 
 
 @pytest.mark.parametrize("recipient", [None, "chief", "lorekeeper", "writer", "reviewer"])

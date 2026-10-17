@@ -11,7 +11,7 @@ export interface InterviewQuestion {
 }
 
 export type PieceKey = 'concept' | 'protagonist' | 'world' | 'segment' | 'first_volume'
-export type SetupPiece = PieceKey
+export type SetupPiece = PieceKey | 'settings' | 'outline'
 export type PieceStatus = 'todo' | 'drafting' | 'waiting' | 'confirmed' | 'done'
 export type SetupTarget = 'concept' | 'protagonist' | 'world' | 'segment' | 'volumes' | 'first_volume'
 
@@ -20,6 +20,12 @@ export interface AuthorChoice {
   chosen: string
   alternatives: string[]
   why: string
+}
+
+export interface BookPitch {
+  name: string
+  text: string
+  titles: string[]
 }
 
 export interface BookDirection {
@@ -96,7 +102,8 @@ export type Pending =
   | { kind: 'setup_questions'; flow?: number; questions: InterviewQuestion[] }
   | { kind: 'setup_review'; flow?: number; round: number; title?: string }
   | { kind: 'setup_directions'; flow?: number; reference?: string; directions: BookDirection[]; recommended: number; length: InterviewQuestion & { chapter_words?: number } }
-  | { kind: 'setup_piece'; flow?: number; flags?: Record<string, string[]>; review?: { question: string; problem: string; suggestion: string }[]; piece: PieceKey; round: number; warnings?: string[]; decisions?: AuthorChoice[]; suggestions?: SetupSuggestion[]; unlock_requests?: { target: SetupTarget; reason: string }[]; candidates?: { node_id: string; nodes: NodeCandidate[] } | null }
+  | { kind: 'setup_pitches'; flow: 3; round: number; benchmark: string; pitches: BookPitch[]; recommended: number; length: InterviewQuestion & { chapter_words?: number } }
+  | { kind: 'setup_piece'; flow?: number; flags?: Record<string, string[]>; review?: { question: string; problem: string; suggestion: string }[]; piece: SetupPiece; summary?: string; round: number; warnings?: string[]; decisions?: AuthorChoice[]; suggestions?: SetupSuggestion[]; unlock_requests?: { target: SetupTarget; reason: string }[]; candidates?: { node_id: string; nodes: NodeCandidate[] } | null }
   | { kind: 'segment_review'; flow: 2; number: number; round: number; plan: NextSegmentPlan; split: NextSegmentSplit; warnings: string[]; flags: Record<string, string[]>; decisions: AuthorChoice[] }
   | { kind: 'volume_review'; volume: number; title: string; issues?: string[]; node_update?: NodeUpdateProposal | null; node_conflict?: string }
   | { kind: 'trial_read'; chapters: number }
@@ -119,6 +126,9 @@ export interface Job {
 }
 
 export interface Concept {
+  story?: string
+  pitches?: BookPitch[]
+  secret_entry_id?: string | null
   title?: string
   alt_titles?: string[]
   genre?: string
@@ -173,6 +183,8 @@ export interface World {
 
 /** 一段的规划，保存在这一段的终点节点上。 */
 export interface SegmentPlan {
+  title?: string
+  text?: string
   number: number
   status: 'confirmed' | 'auto'
   planned_at: number
@@ -241,8 +253,8 @@ export interface Secret {
 
 export interface SetupProgress {
   mode?: 'puzzle' | 'oneshot'
-  current?: PieceKey | null
-  pieces?: Partial<Record<PieceKey, PieceStatus>>
+  current?: SetupPiece | null
+  pieces?: Partial<Record<SetupPiece, PieceStatus>>
 }
 
 export interface BookSummary {
@@ -297,6 +309,7 @@ export interface StoryThread {
 }
 
 export interface PlotUnit {
+  summary?: string
   id: string
   index: number
   title: string

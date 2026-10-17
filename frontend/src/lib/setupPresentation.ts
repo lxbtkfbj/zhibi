@@ -81,5 +81,5 @@ export function nextSegmentFields(value: unknown): SetupField[] {
 
 export function needsSetupRestart(book: Pick<BookDetail, 'status'>, job: Job | null): boolean {
   return (book.status === 'setting_up' || book.status === 'awaiting_approval') && job?.kind === 'book_setup' &&
-    job.setup_flow === 1 && ['waiting_author', 'failed', 'cancelled'].includes(job.status)
+    job.setup_flow !== 3 && ['waiting_author', 'failed', 'cancelled'].includes(job.status)
 }

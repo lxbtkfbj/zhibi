@@ -14,7 +14,7 @@ LEGACY_SETUP_MESSAGE = (
 
 
 def is_legacy_setup(job: Job) -> bool:
-    return job.kind == "book_setup" and (job.params or {}).get("flow") != 2
+    return job.kind == "book_setup" and (job.params or {}).get("flow") != 3
 
 
 def new_setup_job(book: Book, ask: bool = False, mode: str | None = None) -> Job:
@@ -23,10 +23,9 @@ def new_setup_job(book: Book, ask: bool = False, mode: str | None = None) -> Job
         kind="book_setup",
         thread_id=f"setup-{book.id}-{uuid.uuid4().hex[:8]}",
         params={
-            "flow": 2,
+            "flow": 3,
             "idea": book.idea,
             "style_reference": book.style_reference,
-            "ask": ask,
             "mode": mode or (book.settings or {}).get("setup_mode", "oneshot"),
         },
     )
@@ -64,7 +63,7 @@ DECISION_KINDS = (
     "volume_review",
     "trial_read",
     "chapter_stuck",
-    "setup_directions",
+    "setup_pitches",
     "setup_piece",
     "segment_review",
 )

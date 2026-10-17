@@ -107,19 +107,17 @@ test('puzzle progress distinguishes work, confirmation, direction selection and 
   assert.equal(progressText({...book,active_job:{...job,status:'waiting_author',pending:{kind:'setup_directions'}}},[],null,null), '等你选择：开书方向')
   assert.equal(progressText({...book,setup_progress:{mode:'oneshot'}},messages,null,null),'开书中 · 主编在定节点')
 })
-test('node conversation routing revises waiting pieces and never grants a removed prefix', () => {
+test('新三步的意见只修改当前步骤，旧节点定向授权不跨入新流程', () => {
   const selection = nodeFeedback({id:'node-3',index:3,title:'飞升神界'})
-  const waiting = {...job,status:'waiting_author',pending:{kind:'setup_piece',piece:'segment'}}
+  const waiting = {...job,setup_flow:3,status:'waiting_author',pending:{kind:'setup_piece',flow:3,piece:'outline'}}
   assert.equal(selection.prefix, '关于节点 3「飞升神界」：')
-  assert.deepEqual(composerRoute(waiting,`${selection.prefix}换个敌人`,selection),{kind:'piece',action:'revise',piece:'segment',node_id:'node-3'})
-  assert.deepEqual(composerRoute(waiting,'换个敌人',selection),{kind:'piece',action:'revise',piece:'segment'})
+  assert.deepEqual(composerRoute(waiting,`${selection.prefix}换个敌人`,selection),{kind:'piece',action:'revise',piece:'outline'})
   assert.equal(retainedNodeFeedback('',selection),null)
-  assert.deepEqual(composerRoute(waiting,selection.prefix,null),{kind:'piece',action:'revise',piece:'segment'})
-  assert.deepEqual(composerRoute(job,selection.prefix,selection),{kind:'note'})
+  assert.deepEqual(composerRoute({...job,setup_flow:3},selection.prefix,selection),{kind:'note'})
   assert.deepEqual(composerRoute(null,selection.prefix,selection),{kind:'note'})
-  assert.deepEqual(composerRoute({...waiting,pending:{kind:'setup_directions'}},'换一批',selection),{kind:'directions',action:'redo'})
-  for (const piece of ['concept','protagonist','world','first_volume']) {
-    assert.deepEqual(composerRoute({...waiting,pending:{kind:'setup_piece',piece}},`${selection.prefix}换个敌人`,selection),{kind:'piece',action:'revise',piece})
+  assert.deepEqual(composerRoute({...waiting,pending:{kind:'setup_pitches',flow:3}},'换一批',selection),{kind:'pitches',action:'redo'})
+  for (const piece of ['concept','settings','outline']) {
+    assert.deepEqual(composerRoute({...waiting,pending:{kind:'setup_piece',flow:3,piece}},'改一下',selection),{kind:'piece',action:'revise',piece})
   }
 })
 
@@ -135,10 +133,10 @@ test('direction loading differentiates preparing options from following an actua
 
 
 test('旧流程任务的群聊不可提意见，点名私聊始终只记要求', () => {
-  for (const status of ['queued', 'running', 'waiting_author', 'failed', 'cancelled']) {
-    const legacy = { kind: 'book_setup', setup_flow: 1, status, pending: { kind: 'setup_piece', piece: 'nodes' } }
+  for (const setup_flow of [undefined, null, 1, 2]) for (const status of ['queued', 'running', 'waiting_author', 'failed', 'cancelled']) {
+    const legacy = { kind: 'book_setup', setup_flow, status, pending: { kind: 'setup_piece', piece: 'nodes' } }
     assert.equal(composerRoute(legacy, '保留原文', null).kind, 'blocked')
     assert.equal(composerRoute(legacy, '保留原文', null, true).kind, 'note')
   }
-  assert.equal(composerRoute({ kind: 'book_setup', setup_flow: 2, status: 'waiting_author', pending: { kind: 'setup_piece', piece: 'world' } }, '修改', null, true).kind, 'piece')
+  assert.equal(composerRoute({ kind: 'book_setup', setup_flow: 3, status: 'waiting_author', pending: { kind: 'setup_piece', flow: 3, piece: 'settings' } }, '修改', null, true).kind, 'piece')
 })
