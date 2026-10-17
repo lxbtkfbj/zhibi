@@ -1,6 +1,7 @@
 """开书方案与数据库之间的读写；按稳定编号对齐，保留作者维护的字段。"""
 
 import uuid
+from collections import Counter
 from copy import deepcopy
 from typing import Any
 
@@ -8,6 +9,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.glossary import clean_techniques
+from app.library_config import category_style, normalize_category
 from app.models import (
     Book,
     Character,
@@ -17,6 +19,7 @@ from app.models import (
     PlotUnit,
     Relationship,
     Secret,
+    SettingCategory,
     StoryNode,
     StoryThread,
     Volume,
@@ -339,15 +342,34 @@ async def _save_world(session: AsyncSession, book: Book, world: dict) -> None:
         by_name[name] = row
     for row in old.values():
         await session.delete(row)
-    old_world = {w.name: w for w in await _rows(session, WorldEntry, WorldEntry.book_id == book_id)}
-    seen = set()
+    old_world = {
+        (normalize_category(w.category), w.name): w
+        for w in await _rows(session, WorldEntry, WorldEntry.book_id == book_id)
+    }
+    incoming = {}
     for entry in world.get("world_entries", []):
         name = (entry.get("name") or "").strip()
-        if not name or name in seen:
-            continue
-        seen.add(name)
-        row = old_world.pop(name, None) or WorldEntry(book_id=book_id, name=name)
+        key = (normalize_category(entry.get("category") or "其他"), name)
+        if name and key not in incoming:
+            incoming[key] = entry
+    name_counts = Counter(name for _, name in incoming)
+    custom_styles = {
+        f"custom:{category.key}": category.style
+        for category in await _rows(session, SettingCategory, SettingCategory.book_id == book_id)
+    }
+    for key, entry in incoming.items():
+        _, name = key
+        row = old_world.pop(key, None)
+        if row is None and name_counts[name] == 1:
+            matches = [old_key for old_key in old_world if old_key[1] == name]
+            # 旧流程同名换类仍保留 ID；有同名跨类别时必须按类别精确匹配。
+            if len(matches) == 1:
+                row = old_world.pop(matches[0])
+        if row is None:
+            row = WorldEntry(book_id=book_id, name=name)
         _assign(row, entry, ("category", "content"))
+        row.category = normalize_category(row.category or "其他")
+        row.style = category_style(row.category, custom_styles)
         session.add(row)
     for row in old_world.values():
         await session.delete(row)
@@ -774,7 +796,10 @@ async def load_setup(session: AsyncSession, book_id: uuid.UUID) -> dict[str, dic
                 "mystery_answer",
             )
         },
-        "world_entries": [{"category": row.category, "name": row.name, "content": row.content} for row in world],
+        "world_entries": [
+            {key: deepcopy(getattr(row, key)) for key in ("category", "name", "content", "style", "fields", "levels")}
+            for row in world
+        ],
         "characters": [
             {
                 key: getattr(row, key)

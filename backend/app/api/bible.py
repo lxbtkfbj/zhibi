@@ -28,6 +28,8 @@ from app.schemas import (
     WorldEntryOut,
     WorldEntryPatch,
 )
+from app.services.library import author_source, lock_book, validate_entry
+from app.services.versions import record_version, snapshot_of
 
 router = APIRouter(tags=["bible"])
 
@@ -56,10 +58,18 @@ async def get_bible(book: Book = Depends(get_book), session: AsyncSession = Sess
 
 
 async def _create(session: AsyncSession, book_id: uuid.UUID, model: Any, body: BaseModel) -> Any:
+    await lock_book(session, book_id)
     await ensure_idle(session, book_id)
-    row = model(book_id=book_id, **body.model_dump())
+    data = body.model_dump(exclude_unset=True)
+    if model is WorldEntry:
+        data = await validate_entry(session, book_id, data)
+    if model in (Character, WorldEntry):
+        data["source"] = "author"
+    row = model(book_id=book_id, **data)
     session.add(row)
     try:
+        if model in (Character, WorldEntry):
+            await record_version(session, book_id, "character" if model is Character else "entry", row, "author")
         await session.commit()
     except IntegrityError as exc:
         raise HTTPException(409, "名称重复或引用的人物不存在") from exc
@@ -71,7 +81,19 @@ async def _update(session: AsyncSession, model: Any, row_id: uuid.UUID, body: Ba
     row = await session.get(model, row_id)
     if row is None:
         raise HTTPException(404, "条目不存在")
+    await lock_book(session, row.book_id)
     await ensure_idle(session, row.book_id)
+    row = await session.scalar(
+        select(model).where(model.id == row_id).with_for_update().execution_options(populate_existing=True)
+    )
+    if row is None:
+        raise HTTPException(404, "条目不存在")
+    versioned = model in (Character, WorldEntry)
+    before = snapshot_of(row) if versioned else None
+    previous_source = row.source if versioned else None
+    data = body.model_dump(exclude_unset=True)
+    if model is WorldEntry:
+        data = await validate_entry(session, row.book_id, data, current=row)
     if model is Foreshadowing:
         await validate_node(session, row.book_id, body.model_dump(exclude_unset=True).get("node_id"))
     if model is Character and body.name is not None and body.name != row.name:
@@ -83,9 +105,20 @@ async def _update(session: AsyncSession, model: Any, row_id: uuid.UUID, body: Ba
                     {**knower, "name": body.name} if knower.get("name") == old_name else knower
                     for knower in secret.knowers
                 ]
-    for key, value in body.model_dump(exclude_unset=True).items():
+    for key, value in data.items():
         setattr(row, key, value)
     try:
+        if versioned:
+            row.source = author_source(row)
+            await record_version(
+                session,
+                row.book_id,
+                "character" if model is Character else "entry",
+                row,
+                row.source,
+                before=before,
+                previous_source=previous_source,
+            )
         await session.commit()
     except IntegrityError as exc:
         raise HTTPException(409, "名称重复") from exc
@@ -97,7 +130,13 @@ async def _delete(session: AsyncSession, model: Any, row_id: uuid.UUID) -> None:
     row = await session.get(model, row_id)
     if row is None:
         raise HTTPException(404, "条目不存在")
+    await lock_book(session, row.book_id)
     await ensure_idle(session, row.book_id)
+    row = await session.scalar(
+        select(model).where(model.id == row_id).with_for_update().execution_options(populate_existing=True)
+    )
+    if row is None:
+        raise HTTPException(404, "条目不存在")
     await session.delete(row)
     await session.commit()
 

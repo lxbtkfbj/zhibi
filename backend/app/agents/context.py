@@ -134,6 +134,19 @@ def format_protagonist(card: dict, character: dict | None = None, hook: str = ""
     return "\n".join(lines)
 
 
+def format_world_entry(item: dict) -> str:
+    """保留原条目行，只在其后追加阶梯各级或卡片字段。"""
+    lines = [f"- [{item.get('category', '')}] {item.get('name', '')}：{item.get('content', '')}"]
+    if item.get("style") == "ladder":
+        for level in item.get("levels") or []:
+            lines.append(f"{level.get('name', '')}：{level['text']}" if level.get("text") else level.get("name", ""))
+    elif item.get("style") == "card":
+        lines.extend(
+            f"{field.get('name', '')}：{field['value']}" for field in item.get("fields") or [] if field.get("value")
+        )
+    return "\n".join(lines)
+
+
 def format_world(world: dict) -> str:
     """世界与地图；开书阶段可附带尚未存入设定库的列表。"""
     if not world:
@@ -171,13 +184,7 @@ def format_world(world: dict) -> str:
     lines.append("核心谜团：" + "；".join(mystery))
     blocks = ["\n".join(lines)]
     if world.get("world_entries"):
-        blocks.append(
-            "设定条目：\n"
-            + "\n".join(
-                f"- [{item.get('category', '')}] {item.get('name', '')}：{item.get('content', '')}"
-                for item in world["world_entries"]
-            )
-        )
+        blocks.append("设定条目：\n" + "\n".join(format_world_entry(item) for item in world["world_entries"]))
     if world.get("characters"):
         blocks.append("人物：\n" + "\n\n".join(format_character(ch) for ch in world["characters"]))
     if world.get("relationships"):
@@ -255,10 +262,7 @@ def format_opening(opening: dict | None) -> str:
 def format_lore(lore: dict[str, Any]) -> str:
     if not lore:
         return "（暂无）"
-    world = "\n".join(
-        f"- [{w.get('category', '')}] {w.get('name', '')}：{w.get('content', '')}"
-        for w in lore.get("world_entries", [])
-    )
+    world = "\n".join(format_world_entry(w) for w in lore.get("world_entries", []))
     characters = "\n\n".join(format_character(ch) for ch in lore.get("characters", []))
     relations = "\n".join(
         f"- {r.get('source')} 与 {r.get('target')}：{r.get('kind')}。{r.get('description', '')}"

@@ -33,6 +33,13 @@ class Character(UUIDPk, Timestamps, Base):
     notes: Mapped[str] = mapped_column(Text, default="")
     is_alive: Mapped[bool] = mapped_column(Boolean, default=True)
     first_appearance_chapter: Mapped[int | None] = mapped_column(Integer)
+    one_line: Mapped[str] = mapped_column(Text, default="", server_default="")
+    relation: Mapped[str] = mapped_column(Text, default="", server_default="")
+    status: Mapped[str] = mapped_column(String(10), default="must", server_default="must")
+    tags: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
+    locked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    source: Mapped[str] = mapped_column(String(20), default="ai", server_default="ai")
+    position: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
 
 class Relationship(UUIDPk, Timestamps, Base):
@@ -50,10 +57,23 @@ class WorldEntry(UUIDPk, Timestamps, Base):
     __tablename__ = "world_entries"
 
     book_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("books.id", ondelete="CASCADE"), index=True)
-    # 地理 / 势力 / 力量体系 / 历史 / 物品 / 规则 / 其他
-    category: Mapped[str] = mapped_column(String(30), default="其他")
+    # 内置类别中文名，或 custom:<key>；自建类别的 key 最长 40 字符。
+    category: Mapped[str] = mapped_column(String(47), default="特殊规则")
     name: Mapped[str] = mapped_column(String(100))
     content: Mapped[str] = mapped_column(Text, default="")
+    style: Mapped[str] = mapped_column(String(10), default="paragraph", server_default="paragraph")
+    status: Mapped[str] = mapped_column(String(10), default="must", server_default="must")
+    tags: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
+    one_line: Mapped[str] = mapped_column(Text, default="", server_default="")
+    aliases: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
+    fields: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
+    levels: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("world_entries.id", ondelete="SET NULL"))
+    secret_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("secrets.id", ondelete="SET NULL"))
+    locked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    source: Mapped[str] = mapped_column(String(20), default="ai", server_default="ai")
+    position: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    created_chapter: Mapped[int | None] = mapped_column(Integer)
 
 
 class Foreshadowing(UUIDPk, Timestamps, Base):

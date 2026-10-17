@@ -34,7 +34,9 @@ from app.schemas import (
     WriteRequest,
 )
 from app.services import jobs, writing_store
+from app.services.library import lock_book
 from app.services.meeting import post_message
+from app.services.versions import record_version, snapshot_of
 
 router = APIRouter(tags=["books"])
 
@@ -112,7 +114,10 @@ async def get_book_detail(book: Book = Depends(get_book), session: AsyncSession 
 async def update_book(
     body: BookPatch, book: Book = Depends(get_book), session: AsyncSession = SessionDep
 ) -> BookDetail:
+    await lock_book(session, book.id)
+    await session.refresh(book, with_for_update=True)
     await ensure_idle(session, book.id)
+    before = snapshot_of(book)
     if body.title is not None:
         book.title = body.title
         book.concept = {**(book.concept or {}), "title": body.title}
@@ -129,6 +134,8 @@ async def update_book(
         card = getattr(body, field)
         if card is not None:
             setattr(book, field, {**(getattr(book, field) or {}), **card.model_dump(exclude_unset=True)})
+    if body.concept is not None or body.title is not None:
+        await record_version(session, book.id, "concept", book, "author", before=before)
     await session.commit()
     await session.refresh(book)
     return await detail(session, book)
@@ -167,12 +174,24 @@ async def update_volume(volume_id: uuid.UUID, body: VolumePatch, session: AsyncS
     volume = await session.get(Volume, volume_id, options=[selectinload(Volume.units)])
     if volume is None:
         raise HTTPException(404, "卷不存在")
+    await lock_book(session, volume.book_id)
     await ensure_idle(session, volume.book_id)
+    volume = await session.scalar(
+        select(Volume)
+        .where(Volume.id == volume_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+        .options(selectinload(Volume.units))
+    )
+    if volume is None:
+        raise HTTPException(404, "卷不存在")
+    before = snapshot_of(volume)
     await validate_node(session, volume.book_id, body.target_node_id)
     for key, value in body.model_dump(exclude_unset=True).items():
         if key == "techniques":
             value = clean_techniques(value)
         setattr(volume, key, value)
+    await record_version(session, volume.book_id, "volume", volume, "author", before=before)
     await session.commit()
     await session.refresh(volume, attribute_names=["units", "updated_at"])
     return VolumeOut.model_validate(volume)
@@ -183,11 +202,19 @@ async def update_unit(unit_id: uuid.UUID, body: UnitPatch, session: AsyncSession
     unit = await session.get(PlotUnit, unit_id)
     if unit is None:
         raise HTTPException(404, "剧情单元不存在")
+    await lock_book(session, unit.book_id)
     await ensure_idle(session, unit.book_id)
+    unit = await session.scalar(
+        select(PlotUnit).where(PlotUnit.id == unit_id).with_for_update().execution_options(populate_existing=True)
+    )
+    if unit is None:
+        raise HTTPException(404, "剧情单元不存在")
+    before = snapshot_of(unit)
     for key, value in body.model_dump(exclude_unset=True).items():
         if key == "techniques":
             value = clean_techniques(value)
         setattr(unit, key, value)
+    await record_version(session, unit.book_id, "unit", unit, "author", before=before)
     await session.commit()
     await session.refresh(unit)
     return UnitOut.model_validate(unit)

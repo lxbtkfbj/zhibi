@@ -6,7 +6,18 @@ from fastapi import FastAPI
 from redis.asyncio import Redis
 from sqlalchemy import select
 
-from app.api import bible, book_settings, books, health, jobs, llm_settings, prompt_tools, story_map
+from app.api import (
+    bible,
+    book_settings,
+    books,
+    health,
+    jobs,
+    library,
+    llm_settings,
+    outline_tree,
+    prompt_tools,
+    story_map,
+)
 from app.config import get_settings
 from app.crypto import encrypt
 from app.db import dispose_engine, get_sessionmaker
@@ -46,7 +57,18 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     application = FastAPI(title="执笔 API", version="0.1.0", lifespan=lifespan)
-    for module in (health, llm_settings, books, bible, jobs, book_settings, prompt_tools, story_map):
+    for module in (
+        health,
+        llm_settings,
+        books,
+        bible,
+        jobs,
+        book_settings,
+        prompt_tools,
+        story_map,
+        library,
+        outline_tree,
+    ):
         application.include_router(module.router, prefix="/api")
     return application
 

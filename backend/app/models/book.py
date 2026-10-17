@@ -88,6 +88,7 @@ class Volume(UUIDPk, Timestamps, Base):
     stage: Mapped[str] = mapped_column(Text, default="")
     summary: Mapped[str] = mapped_column(Text, default="")
     goal: Mapped[str] = mapped_column(Text, default="")
+    locked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     # 这一卷想做成什么、卷首处境
     want: Mapped[str] = mapped_column(Text, default="", server_default="")
     pressure: Mapped[str] = mapped_column(Text, default="", server_default="")
@@ -127,6 +128,8 @@ class PlotUnit(UUIDPk, Timestamps, Base):
     index: Mapped[int] = mapped_column(Integer)
     title: Mapped[str] = mapped_column(String(200))
     chapter_count: Mapped[int] = mapped_column(Integer, default=8)
+    summary: Mapped[str] = mapped_column(Text, default="", server_default="")
+    locked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     goal: Mapped[str] = mapped_column(Text, default="")
     conflict: Mapped[str] = mapped_column(Text, default="")
     climax: Mapped[str] = mapped_column(Text, default="")

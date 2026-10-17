@@ -23,6 +23,7 @@ from app.schemas import (
     SecretOut,
     SecretPatch,
 )
+from app.services.versions import record_version, snapshot_of
 
 router = APIRouter(tags=["story-map"])
 
@@ -170,8 +171,14 @@ async def create_node(body: NodeCreate, book: Book = Depends(get_book), session:
 @router.patch("/nodes/{node_id}", response_model=NodeOut)
 async def update_node(node_id: uuid.UUID, body: NodePatch, session: AsyncSession = SessionDep):
     node = await _row(session, StoryNode, node_id)
-    await ensure_idle(session, node.book_id)
     book = await _lock_book(session, node.book_id)
+    await ensure_idle(session, node.book_id)
+    node = await session.scalar(
+        select(StoryNode).where(StoryNode.id == node_id).with_for_update().execution_options(populate_existing=True)
+    )
+    if node is None:
+        raise HTTPException(404, "条目不存在")
+    before = snapshot_of(node)
     _allow_empty(book, body.status)
     for field, value in body.model_dump(exclude_unset=True).items():
         if field == "segment":
@@ -181,6 +188,7 @@ async def update_node(node_id: uuid.UUID, body: NodePatch, session: AsyncSession
                 value["opening"] = {**(node.segment.get("opening") or {}), **value["opening"]}
             value = {**node.segment, **value}
         setattr(node, field, value)
+    await record_version(session, node.book_id, "segment", node, "author", before=before)
     await session.commit()
     await session.refresh(node)
     return await _node_out(session, node)

@@ -78,6 +78,8 @@ class OpeningPatch(CardPatch):
 
 class SegmentPatch(CardPatch):
     # 段号、确认状态、规划章数和收尾标记由程序维护，不允许手动传入。
+    title: str = ""  # 篇名
+    text: str = ""  # 篇的一段话
     map: str = ""  # 这一段在哪张地图
     trouble: str = ""  # 开篇压着主角的小麻烦
     opponent: str = ""  # 这一段的大对手

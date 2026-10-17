@@ -34,6 +34,7 @@ from app.agents.context import (
     format_unit,
     format_volume_card,
     format_world,
+    format_world_entry,
     planned_chapters,
 )
 from app.agents.glossary import glossary_block
@@ -236,9 +237,20 @@ def world_text(rows: list[WorldEntry], mention: str, picked: list[str] | None = 
     if len(rows) > ALL_WORLD_UNDER:
         wanted = set(picked or [])
         rows = [
-            w for w in rows if w.category in ("力量体系", "规则") or (w.name in wanted if picked else w.name in mention)
+            w
+            for w in rows
+            if w.category in ("力量体系", "规则", "等级体系", "特殊规则")
+            or (w.name in wanted if picked else w.name in mention)
         ]
-    return "\n".join(f"- [{w.category}] {w.name}：{w.content}" for w in rows) or "（暂无）"
+    return (
+        "\n".join(
+            format_world_entry(
+                {key: getattr(w, key) for key in ("category", "name", "content", "style", "levels", "fields")}
+            )
+            for w in rows
+        )
+        or "（暂无）"
+    )
 
 
 def ledger_for_refs(ledger: list[dict[str, Any]], refs: list[str], volume: int) -> list[dict[str, Any]]:

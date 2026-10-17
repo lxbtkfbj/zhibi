@@ -183,6 +183,8 @@ class UnitOut(ORM):
     id: uuid.UUID
     index: int
     title: str
+    summary: str = ""
+    locked: bool = False
     chapter_count: int
     goal: str
     conflict: str
@@ -204,6 +206,8 @@ class UnitOut(ORM):
 
 class UnitPatch(BaseModel):
     title: str | None = None
+    summary: str | None = None
+    locked: bool | None = None
     chapter_count: int | None = Field(None, ge=1, le=50)
     goal: str | None = None
     conflict: str | None = None
@@ -215,7 +219,7 @@ class UnitPatch(BaseModel):
     editor_note: str | None = None
     techniques: list[str] | None = None
 
-    @field_validator("loop")
+    @field_validator("loop", "summary", "locked")
     @classmethod
     def loop_not_null(cls, value):
         if value is None:
@@ -238,6 +242,7 @@ class VolumeOut(ORM):
     pressure: str = ""
     stage: str = ""
     summary: str
+    locked: bool = False
     goal: str
     climax: str = ""
     antagonist: str = ""
@@ -260,6 +265,7 @@ class VolumePatch(BaseModel):
     pressure: str | None = None
     stage: str | None = None
     summary: str | None = None
+    locked: bool | None = None
     goal: str | None = None
     climax: str | None = None
     antagonist: str | None = None
@@ -271,7 +277,7 @@ class VolumePatch(BaseModel):
     editor_note: str | None = None
     techniques: list[str] | None = None
 
-    @field_validator("want", "pressure")
+    @field_validator("want", "pressure", "locked")
     @classmethod
     def segment_fields_not_null(cls, value):
         if value is None:
@@ -356,6 +362,20 @@ class WriteRequest(BaseModel):
 # ---------- 设定库 ----------
 
 
+SettingStatus = Literal["must", "one", "later"]
+SettingStyle = Literal["card", "ladder", "paragraph"]
+
+
+class SettingField(BaseModel):
+    name: str = Field(min_length=1)
+    value: str = ""
+
+
+class SettingLevel(BaseModel):
+    name: str = ""
+    text: str = ""
+
+
 class CharacterBase(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     aliases: list[str] = []
@@ -372,11 +392,18 @@ class CharacterBase(BaseModel):
     condition: str = ""
     notes: str = ""
     is_alive: bool = True
+    one_line: str = ""
+    relation: str = ""
+    status: SettingStatus = "must"
+    tags: list[str] = []
+    locked: bool = False
+    position: int = 0
 
 
 class CharacterOut(CharacterBase, ORM):
     id: uuid.UUID
     first_appearance_chapter: int | None
+    source: str = "ai"
 
 
 class CharacterPatch(BaseModel):
@@ -395,12 +422,18 @@ class CharacterPatch(BaseModel):
     condition: str | None = None
     notes: str | None = None
     is_alive: bool | None = None
+    one_line: str | None = None
+    relation: str | None = None
+    status: SettingStatus | None = None
+    tags: list[str] | None = None
+    locked: bool | None = None
+    position: int | None = None
 
-    @field_validator("want")
+    @field_validator("*")
     @classmethod
     def want_not_null(cls, value):
         if value is None:
-            raise ValueError("此刻想要什么不能为空值")
+            raise ValueError("角色字段不能为空值")
         return value
 
 
@@ -408,16 +441,71 @@ class WorldEntryBase(BaseModel):
     category: str = "其他"
     name: str = Field(min_length=1, max_length=100)
     content: str = ""
+    style: SettingStyle | None = None
+    status: SettingStatus = "must"
+    tags: list[str] = []
+    one_line: str = ""
+    aliases: list[str] = []
+    fields: list[SettingField] = []
+    levels: list[SettingLevel] = []
+    parent_id: uuid.UUID | None = None
+    secret_id: uuid.UUID | None = None
+    locked: bool = False
+    position: int = 0
+
+    @field_validator("style")
+    @classmethod
+    def style_not_null(cls, value):
+        if value is None:
+            raise ValueError("样式不能为空值")
+        return value
+
+    @field_validator("fields")
+    @classmethod
+    def unique_fields(cls, value):
+        names = [field.name for field in value]
+        if len(names) != len(set(names)):
+            raise ValueError("卡片字段名不能重复")
+        return value
 
 
 class WorldEntryOut(WorldEntryBase, ORM):
     id: uuid.UUID
+    style: SettingStyle = "paragraph"
+    source: str = "ai"
+    created_chapter: int | None = None
 
 
 class WorldEntryPatch(BaseModel):
     category: str | None = None
     name: str | None = Field(None, min_length=1, max_length=100)
     content: str | None = None
+    style: SettingStyle | None = None
+    status: SettingStatus | None = None
+    tags: list[str] | None = None
+    one_line: str | None = None
+    aliases: list[str] | None = None
+    fields: list[SettingField] | None = None
+    levels: list[SettingLevel] | None = None
+    parent_id: uuid.UUID | None = None
+    secret_id: uuid.UUID | None = None
+    locked: bool | None = None
+    position: int | None = None
+
+    @field_validator("*")
+    @classmethod
+    def not_null(cls, value, info):
+        if value is None and info.field_name not in {"parent_id", "secret_id"}:
+            raise ValueError("设定字段不能为空值")
+        return value
+
+    @field_validator("fields")
+    @classmethod
+    def unique_fields(cls, value):
+        names = [field.name for field in value]
+        if len(names) != len(set(names)):
+            raise ValueError("卡片字段名不能重复")
+        return value
 
 
 class RelationshipIn(BaseModel):
