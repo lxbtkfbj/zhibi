@@ -129,7 +129,8 @@ export function useRevertVersion(bookId: string) {
 }
 export function useLibraryItemActions(bookId: string) {
   const invalidate = useInvalidateLibrary(bookId)
-  const update = useMutation({ mutationFn: ({ type, id, body }: { type: 'character' | 'entry'; id: string; body: LibraryItemPatch }) => patch<LibraryItem>(`/${type === 'character' ? 'characters' : 'world-entries'}/${id}`, body), onSuccess: invalidate })
+  // 改一处不等其他数据刷新完：保存成功就算完成，刷新在后台进行。
+  const update = useMutation({ mutationFn: ({ type, id, body }: { type: 'character' | 'entry'; id: string; body: LibraryItemPatch }) => patch<LibraryItem>(`/${type === 'character' ? 'characters' : 'world-entries'}/${id}`, body), onSuccess: () => { void invalidate() } })
   const create = useMutation({ mutationFn: ({ type, body }: { type: 'character' | 'entry'; body: LibraryItemPatch & { name: string } }) => post<LibraryItem>(`/books/${bookId}/${type === 'character' ? 'characters' : 'world-entries'}`, body), onSuccess: invalidate })
   const remove = useMutation({ mutationFn: ({ type, id }: { type: 'character' | 'entry'; id: string }) => del(`/${type === 'character' ? 'characters' : 'world-entries'}/${id}`), onSuccess: invalidate })
   return { update, create, remove }
