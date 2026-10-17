@@ -6,7 +6,7 @@ import { useSearchParams } from 'react-router-dom'
 import { useChapters, useNodes } from '../../../api/hooks'
 import { useOutlineChanges, useOutlineTree } from '../../../api/outline'
 import { RewriteField, TargetHistory } from '../../../components/RewriteField'
-import { Button, Card, ErrorText, inputClass, Modal, Skeleton } from '../../../components/ui'
+import { Button, Card, ErrorText, inputClass, Modal, Segmented, Skeleton } from '../../../components/ui'
 import { arcStarted, arcText, buildOutlineTree, defaultOutlineExpanded, isLaterEnding, outlineAncestors, outlineRange, outlineStatusText, unitStarted, volumeStarted, type OutlineItem } from '../../../lib/outlineTree'
 import { useBookContext } from '../context'
 import { SetupGate } from '../SetupGate'
@@ -24,11 +24,11 @@ type Form = { kind: 'edit' | 'add-unit' | 'add-volume' | 'ending'; title: string
 function TreeRow({ item, selected, expanded, toggle, select, depth = 0 }: { item: OutlineItem; selected: string; expanded: Set<string>; toggle: (key: string) => void; select: (key: string) => void; depth?: number }) {
   const open = expanded.has(item.key)
   return <li role="treeitem" aria-selected={selected === item.key} aria-expanded={item.children.length ? open : undefined}>
-    <div className={clsx('flex min-w-0 items-start rounded-lg py-1', selected === item.key ? 'bg-seal-soft' : item.status === 'writing' || item.status === 'drafting' ? 'bg-chief-soft/50' : 'hover:bg-paper-2')} style={{ paddingLeft: `${depth * 12}px` }}>
+    <div className={clsx('flex min-w-0 items-start rounded-lg py-0.5', selected === item.key ? 'bg-chief-soft/70' : 'hover:bg-subtle')} style={{ paddingLeft: `${depth * 12}px` }}>
       <button type="button" className="mt-1.5 flex size-6 shrink-0 items-center justify-center text-ink-2 disabled:invisible" disabled={!item.children.length} aria-label={`${open ? '收起' : '展开'}${item.name}`} onClick={() => toggle(item.key)}>{open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}</button>
       <button type="button" className="min-w-0 flex-1 py-1.5 pr-2 text-left" onClick={() => select(item.key)} data-testid={`outline-node-${item.key}`}>
-        <span className={clsx('block break-words text-sm', selected === item.key && 'font-semibold text-seal')}>{item.name}{item.locked && <Lock className="ml-1 inline size-3" aria-label="已锁住" />}</span>
-        {item.kind !== 'book' && <span className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-[11px] text-ink-2"><span>{outlineRange(item)}</span><span className={clsx(item.status === 'writing' || item.status === 'drafting' ? 'font-medium text-chief' : '')}>{outlineStatusText(item.status)}</span></span>}
+        <span className={clsx('block break-words text-[13px]', selected === item.key ? 'font-medium text-chief' : 'text-ink')}>{item.name}{item.locked && <Lock className="ml-1 inline size-3 text-ink-3" aria-label="已锁住" />}</span>
+        {item.kind !== 'book' && <span className="mt-0.5 flex flex-wrap gap-x-2 gap-y-1 text-[11px] text-ink-3"><span>{outlineRange(item)}</span><span className={clsx(item.status === 'writing' || item.status === 'drafting' ? 'font-medium text-chief' : item.status === 'pending' ? 'text-seal' : '')}>{outlineStatusText(item.status)}</span></span>}
       </button>
     </div>
     {open && item.children.length > 0 && <ul role="group">{item.children.map(child => <TreeRow key={child.key} item={child} selected={selected} expanded={expanded} toggle={toggle} select={select} depth={depth + 1} />)}</ul>}
@@ -99,7 +99,7 @@ function OutlineDetail({ item, select, afterVolumeId, tree }: { item: OutlineIte
     setForm(null)
   }
   return <section className="space-y-5" data-testid="outline-detail">
-    <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-serif text-xl leading-relaxed font-bold">{item.name}</h2><p className="mt-2 text-xs text-ink-2">{outlineStatusText(item.status)}{outlineRange(item) && ` · ${outlineRange(item)}`}</p></div>
+    <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line pb-4"><div><h2 className="font-serif text-xl leading-relaxed font-bold">{item.name}</h2><p className="mt-1 text-xs text-ink-3">{outlineStatusText(item.status)}{outlineRange(item) && ` · ${outlineRange(item)}`}</p></div>
       <div className="flex flex-wrap gap-1.5">
         {editable && <><Button size="sm" variant="soft" disabled={busy} onClick={() => setForm({ kind: 'edit', title, text: value, count: '' })}>自己改</Button><Button size="sm" disabled={busy} onClick={() => void run(() => node?.kind === 'segment' ? change.mutateAsync({ action: 'patch', kind: 'ending', id: id!, body: { status: item.locked ? 'pencil' : 'pinned' } }) : patchNode({ locked: !item.locked }))}>{item.locked ? <Unlock className="size-3.5" /> : <Lock className="size-3.5" />}{item.locked ? '解锁' : '锁住'}</Button></>}
         {id && node && <TargetHistory bookId={bookId} targetType={node.kind} targetId={id} disabled={started || busy} />}
@@ -152,12 +152,11 @@ export function OutlinePage() {
     manualNavigate(`/books/${bookId}/outline?view=tree&node=${encodeURIComponent(key)}`)
   }
   return <div data-testid="outline-page">
-    <PageHeader eyebrow="书稿" title="大纲" subtitle="先看眼前要写的，再慢慢走向结局。" />
-    <div className="mb-6 flex gap-2 border-b border-line pb-4" aria-label="大纲看法">{([['tree', '树'], ['map', '地图'], ['threads', '线索']] as const).map(([key, label]) => <Button key={key} variant={view === key ? 'seal' : 'ghost'} size="sm" onClick={() => manualNavigate(`/books/${bookId}/outline?view=${key}${requested ? `&node=${encodeURIComponent(requested)}` : ''}`)}>{label}</Button>)}</div>
-    {view === 'map' ? <SpinePage /> : view === 'threads' ? <ThreadsPage /> : query.isLoading ? <Skeleton className="h-64" /> : query.isError ? <><ErrorText error={query.error} /><Button onClick={() => void query.refetch()}>重新加载大纲</Button></> : root && selected ? <div className="grid min-w-0 gap-5 min-[769px]:grid-cols-[minmax(160px,0.85fr)_minmax(0,1.7fr)]">
-      <Card className={clsx('min-w-0 self-start p-2', showMobileDetail && 'max-[768px]:hidden')}><ul role="tree" aria-label="全书大纲树"><TreeRow item={root} selected={selected.key} expanded={open} toggle={key => setExpanded(() => { const next = new Set(open); if (next.has(key)) next.delete(key); else next.add(key); return { target: expansionKey(requested), keys: next } })} select={select} /></ul></Card>
-      <Card className={clsx('min-w-0 p-4 @lg/manuscript:p-5', !showMobileDetail && 'max-[768px]:hidden')}><Button size="sm" variant="ghost" className="mb-4 min-[769px]:hidden" onClick={() => { setMobileDetail(false); setMobileListFor(selected.key) }}>返回树</Button><OutlineDetail key={selected.key} item={selected} select={select} afterVolumeId={afterVolumeId} tree={query.data!} /></Card>
-    </div> : <p className="text-sm text-ink-2">主编还在准备大纲，完成后会出现在这里。</p>}
     <SetupGate piece="outline" />
+    <PageHeader eyebrow="书稿" title="大纲" subtitle="先看眼前要写的，再慢慢走向结局。" action={<Segmented label="大纲看法" value={view} options={[['tree', '树'], ['map', '地图'], ['threads', '线索']] as const} onChange={key => manualNavigate(`/books/${bookId}/outline?view=${key}${requested ? `&node=${encodeURIComponent(requested)}` : ''}`)} />} />
+    {view === 'map' ? <SpinePage /> : view === 'threads' ? <ThreadsPage /> : query.isLoading ? <Skeleton className="h-64" /> : query.isError ? <><ErrorText error={query.error} /><Button onClick={() => void query.refetch()}>重新加载大纲</Button></> : root && selected ? <div className="grid min-w-0 gap-5 @2xl/manuscript:grid-cols-[minmax(220px,300px)_minmax(0,1fr)]">
+      <Card className={clsx('min-w-0 self-start p-2 shadow-none', showMobileDetail && 'max-[768px]:hidden')}><ul role="tree" aria-label="全书大纲树"><TreeRow item={root} selected={selected.key} expanded={open} toggle={key => setExpanded(() => { const next = new Set(open); if (next.has(key)) next.delete(key); else next.add(key); return { target: expansionKey(requested), keys: next } })} select={select} /></ul></Card>
+      <Card className={clsx('min-w-0 p-5 shadow-none @3xl/manuscript:p-7', !showMobileDetail && 'max-[768px]:hidden')}><Button size="sm" variant="ghost" className="mb-4 min-[769px]:hidden" onClick={() => { setMobileDetail(false); setMobileListFor(selected.key) }}>返回树</Button><OutlineDetail key={selected.key} item={selected} select={select} afterVolumeId={afterVolumeId} tree={query.data!} /></Card>
+    </div> : <p className="rounded-xl border border-dashed border-line-2 px-6 py-14 text-center text-sm text-ink-2">主编还在准备大纲，完成后会出现在这里。</p>}
   </div>
 }

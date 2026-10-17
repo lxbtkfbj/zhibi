@@ -7,18 +7,18 @@
   --font-serif: "Noto Serif SC", "Songti SC", "Source Han Serif SC", "SimSun", serif;
 
   /* 宣纸与墨 */
-  --color-paper: #f6f1e6;
-  --color-paper-2: #f8f3e9;
+  --color-paper: #f5f0e6;
+  --color-paper-2: #f9f5ed;
   --color-sidebar: #ece4d4;
-  --color-conversation: #f6f1e6;
-  --color-manuscript: #fffdf8;
-  --color-divider: #e2d8c4;
-  --color-card: #fffdf8;
-  --color-ink: #262320;
-  --color-ink-2: #57514a;
-  --color-ink-3: #8d867b;
-  --color-line: #e7dfcf;
-  --color-line-2: #d5cab4;
+  --color-conversation: #f4efe5;
+  --color-manuscript: #fffdf9;
+  --color-divider: #e3dacb;
+  --color-card: #fffefb;
+  --color-ink: #24201c;
+  --color-ink-2: #5a534a;
+  --color-ink-3: #8b8478;
+  --color-line: #ebe4d6;
+  --color-line-2: #d9cfbe;
 
   /* 朱砂 */
   --color-seal: #b4432e;
@@ -32,24 +32,27 @@
   --color-lore-soft: #dff0eb;
   --color-writer: #a0652a;
   --color-writer-soft: #f5ead9;
-  --color-reviewer: #b4432e;
-  --color-reviewer-soft: #f5e1da;
+  --color-reviewer: #9a4a3a;
+  --color-reviewer-soft: #f3e3de;
   --color-pane-left: #ece4d4;
-  --color-pane-mid: #f6f1e6;
-  --color-page: #fffdf8;
+  --color-pane-mid: #f4efe5;
+  --color-page: #fffdf9;
   --color-settings-divider: #efe8da;
-  --color-author-bubble: #e8dfcc;
+  --color-author-bubble: #ebe2d1;
   --color-overlay: rgb(0 0 0 / 0.45);
-  --color-on-role: #fffdf8;
+  --color-on-role: #fffdf9;
   --color-edit-highlight: #f6e3a9;
   --color-on-seal: #f6eadf;
   --color-binding: #e9dcc0;
   --color-cover-ink: #2a2622;
   --color-cover-shadow: #000000;
 
-  --shadow-paper: 0 1px 2px rgb(70 50 25 / 0.05), 0 6px 20px -8px rgb(70 50 25 / 0.12);
+  --shadow-paper: 0 1px 2px rgb(70 50 25 / 0.04), 0 4px 14px -10px rgb(70 50 25 / 0.14);
   --shadow-lift: 0 2px 4px rgb(70 50 25 / 0.06), 0 18px 40px -16px rgb(70 50 25 / 0.28);
   --shadow-panel: -8px 0 32px -18px rgb(70 50 25 / 0.25);
+
+  --color-subtle: #f5f0e7;
+  --shadow-bar: 0 -10px 28px -18px rgb(70 50 25 / 0.28);
 
   --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -74,6 +77,9 @@
 
 [data-theme="ink"] {
   color-scheme: dark;
+  --color-subtle: #322d27;
+  --shadow-bar: 0 -10px 28px -18px rgb(0 0 0 / 0.7);
+  --color-reviewer: #c97a66;
   --color-paper: #26221e;
   --color-paper-2: #2b2723;
   --color-sidebar: #1f1c19;
@@ -100,7 +106,6 @@
   --color-lore-soft: #243e36;
   --color-writer: #d2944f;
   --color-writer-soft: #463624;
-  --color-reviewer: #d0644b;
   --color-reviewer-soft: #492d25;
   --color-on-role: #211c18;
   --color-edit-highlight: #655024;
@@ -151,6 +156,12 @@ body {
 .scroll-thin {
   scrollbar-width: thin;
   scrollbar-color: var(--color-line-2) transparent;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
 .font-serif {

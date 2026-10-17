@@ -1,4 +1,4 @@
-import type { ChapterBrief, Foreshadowing, ForeshadowStep } from '../api/types'
+import type { ChapterBrief, Foreshadowing, ForeshadowStep, WriteUntil } from '../api/types'
 
 export const EMOTION_LABELS: Record<number, string> = {
   [-2]: '憋屈压抑', [-1]: '偏压', 0: '平稳或悬着', 1: '偏扬', 2: '爆发爽快',
@@ -53,3 +53,12 @@ export function changedText(before: string, after: string) {
   const split = (text: string[]) => ({ prefix: text.slice(0, start).join(''), changed: text.slice(start, text.length - suffix).join(''), suffix: suffix ? text.slice(-suffix).join('') : '' })
   return { before: split(oldText), after: split(newText), differs: before !== after }
 }
+
+/** 这一轮写多少：书稿底部操作条和概览共用。 */
+export const WRITE_OPTIONS: { key: string; label: string; until: WriteUntil; count: number; hint: string }[] = [
+  { key: '1', label: '写 1 章', until: 'count', count: 1, hint: '先写一章看看' },
+  { key: '3', label: '写 3 章', until: 'count', count: 3, hint: '新书写完前 3 章会请你试读' },
+  { key: '10', label: '写 10 章', until: 'count', count: 10, hint: '中途可以随时插话或停下' },
+  { key: 'volume', label: '写完这一卷', until: 'volume', count: 1, hint: '一卷写完就停，等你看看' },
+  { key: 'book', label: '一直写到完本', until: 'book', count: 1, hint: '每卷开写前仍会请你拍板卷纲' },
+]

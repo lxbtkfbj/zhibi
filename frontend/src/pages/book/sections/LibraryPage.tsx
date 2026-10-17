@@ -1,23 +1,23 @@
-import { PrefillGate } from '../PrefillGate'
 import { libraryQuoteWhere } from '../../../lib/chat'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { post } from '../../../api/client'
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import clsx from 'clsx'
-import { ArrowLeft, ChevronDown, ChevronUp, LockKeyhole, Plus, Search, UnlockKeyhole, X } from 'lucide-react'
+import { ArrowLeft, ChevronDown, ChevronRight, ChevronUp, Library, Lightbulb, LockKeyhole, Plus, Search, UnlockKeyhole, X } from 'lucide-react'
 import { useSecrets } from '../../../api/hooks'
 import { useLibrary, useLibraryCategoryActions, useLibraryConfig, useLibraryItemActions, useLibrarySuggestionActions, useLibrarySuggestions, useRewrite, useTargetVersions } from '../../../api/library'
 import type { CategoryInput, LibraryCategory, LibraryConfig, LibraryItem, LibraryItemPatch, LibrarySnapshot, LibrarySuggestion } from '../../../api/library'
-import { Button, ErrorText, inputClass, Modal } from '../../../components/ui'
+import { Button, ErrorText, inputClass, Modal, Skeleton } from '../../../components/ui'
 import { RewriteField, TargetHistory } from '../../../components/RewriteField'
 import { filterLibraryRows, libraryRows, parentChoices, suggestionAction, suggestionTargetId } from '../../../lib/libraryView'
 import type { LibraryRow } from '../../../lib/libraryView'
 import { useBookContext } from '../context'
 import { SetupGate } from '../SetupGate'
 import { PageHeader } from './common'
+import { LibrarySubnav } from './LibrarySubnav'
 
-const panel = 'rounded-2xl border border-line bg-card'
+const panel = 'rounded-xl border border-line bg-card'
 
 function NewItemModal({ bookId, categories, defaultCategory, config, onClose, onCreated }: { bookId: string; categories: LibraryCategory[]; defaultCategory?: string; config: LibraryConfig; onClose: () => void; onCreated: (item: LibraryItem, category: string) => void }) {
   const { create } = useLibraryItemActions(bookId)
@@ -70,6 +70,7 @@ function SuggestionInbox({ bookId, suggestions, library, onJump, compact = false
   const [error, setError] = useState<unknown>(null)
   const [skipped, setSkipped] = useState<{ title: string; reason: string }[]>([])
   const [written, setWritten] = useState<string | null>(null)
+  const [open, setOpen] = useState(false)
   const items = library ? libraryRows(library) : []
   // 标题保存的是生成时的锁状态；解锁后不能继续拿旧标题阻止作者接受。
   const locked = (suggestion: LibrarySuggestion) => items.find(item => item.id === suggestion.target_id)?.locked ?? false
@@ -85,11 +86,18 @@ function SuggestionInbox({ bookId, suggestions, library, onJump, compact = false
     if (suggestions.some(item => item.kind === 'written') && !window.confirm('建议中有前文替换。全部接受会把列出的正文旧叫法也一起换掉；你可以先逐条展开查看。确认全部接受？')) return
     try { const result = await acceptAll.mutateAsync(); setSkipped(result.skipped.map(item => ({ title: suggestions.find(row => row.id === item.id)?.title ?? '这条建议', reason: item.reason }))) } catch { /* 显示接口错误 */ }
   }
-  const list = <div className="mt-3 space-y-3">{suggestions.map(suggestion => <div key={suggestion.id} className="rounded-xl border border-line bg-card p-3"><div className="flex flex-wrap items-start justify-between gap-2"><button type="button" className="min-w-0 flex-1 text-left text-sm leading-relaxed hover:text-chief" onClick={() => onJump(suggestion)}>{suggestion.kind === 'chat' && <span className="mr-2 rounded bg-chief-soft px-1.5 py-0.5 text-xs text-chief">群聊里说的</span>}{title(suggestion)}{locked(suggestion) && <span className="text-seal">（已锁）</span>}</button><div className="flex gap-1"><Button size="sm" variant="ghost" disabled={resolve.isPending || acceptAll.isPending || runChat.isPending || (suggestion.kind === 'chat' && (working || waiting || asking))} onClick={() => accept(suggestion)}>{suggestionAction(suggestion)}</Button><Button size="sm" variant="ghost" disabled={resolve.isPending || acceptAll.isPending} onClick={() => resolve.mutate({ id: suggestion.id, action: 'ignore' })}>{suggestion.kind === 'written' ? '只管以后' : '不用'}</Button></div></div>{suggestion.kind === 'written' && <details className="mt-2 text-xs text-ink-2" open={written === suggestion.id || undefined}><summary className="cursor-pointer">查看前文出现的位置</summary><div className="mt-2 space-y-2">{Array.isArray(suggestion.payload.matches) && (suggestion.payload.matches as { chapter: number; count: number; contexts: string[] }[]).map(match => <div key={match.chapter}><p className="font-medium">第 {match.chapter} 章 · {match.count} 处</p>{match.contexts.map((context, index) => <p key={index} className="mt-1 rounded bg-paper-2 p-2 leading-relaxed">…{context}…</p>)}</div>)}{written === suggestion.id && <Button size="sm" variant="danger" disabled={resolve.isPending} onClick={() => resolve.mutate({ id: suggestion.id, action: 'accept' })}>确认，替换上面的前文</Button>}</div></details>}</div>)}<ErrorText error={error ?? runChat.error ?? resolve.error ?? acceptAll.error} /></div>
-  return <section aria-label={compact ? '这一条的建议' : '待处理的建议'} className={clsx(panel, 'p-4')}>
-    {compact ? <><h3 className="text-sm font-medium">这一条的建议</h3>{list}</> : <><div className="flex flex-wrap items-center justify-between gap-2"><h2 className="font-serif font-bold">待处理的建议 {suggestions.length}</h2><Button size="sm" disabled={resolve.isPending} loading={acceptAll.isPending} onClick={() => void acceptEvery()}>全部接受</Button></div><details className="mt-2"><summary className="cursor-pointer text-sm text-chief">展开建议</summary>{list}</details></>}
-    {!compact && <ErrorText error={acceptAll.error} />}
-    {!!skipped.length && <div role="status" className="mt-3 rounded-lg bg-seal-soft p-3 text-sm text-seal"><p className="font-medium">以下建议暂未接受：</p>{skipped.map((row, index) => <p key={index} className="mt-2">{row.title}：{row.reason}</p>)}</div>}
+  const list = <div className="mt-3 space-y-2">{suggestions.map(suggestion => <div key={suggestion.id} className="rounded-lg border border-line bg-card p-3"><div className="flex flex-wrap items-start justify-between gap-2"><button type="button" className="min-w-0 flex-1 text-left text-sm leading-relaxed hover:text-chief" onClick={() => onJump(suggestion)}>{suggestion.kind === 'chat' && <span className="mr-2 rounded bg-chief-soft px-1.5 py-0.5 text-xs text-chief">群聊里说的</span>}{title(suggestion)}{locked(suggestion) && <span className="text-seal">（已锁）</span>}</button><div className="flex gap-1"><Button size="sm" variant="ghost" disabled={resolve.isPending || acceptAll.isPending || runChat.isPending || (suggestion.kind === 'chat' && (working || waiting || asking))} onClick={() => accept(suggestion)}>{suggestionAction(suggestion)}</Button><Button size="sm" variant="ghost" disabled={resolve.isPending || acceptAll.isPending} onClick={() => resolve.mutate({ id: suggestion.id, action: 'ignore' })}>{suggestion.kind === 'written' ? '只管以后' : '不用'}</Button></div></div>{suggestion.kind === 'written' && <details className="mt-2 text-xs text-ink-2" open={written === suggestion.id || undefined}><summary className="cursor-pointer">查看前文出现的位置</summary><div className="mt-2 space-y-2">{Array.isArray(suggestion.payload.matches) && (suggestion.payload.matches as { chapter: number; count: number; contexts: string[] }[]).map(match => <div key={match.chapter}><p className="font-medium">第 {match.chapter} 章 · {match.count} 处</p>{match.contexts.map((context, index) => <p key={index} className="mt-1 rounded bg-paper-2 p-2 leading-relaxed">…{context}…</p>)}</div>)}{written === suggestion.id && <Button size="sm" variant="danger" disabled={resolve.isPending} onClick={() => resolve.mutate({ id: suggestion.id, action: 'accept' })}>确认，替换上面的前文</Button>}</div></details>}</div>)}<ErrorText error={error ?? runChat.error ?? resolve.error ?? acceptAll.error} /></div>
+  if (compact) return <section aria-label="这一条的建议" className="rounded-xl border border-line bg-subtle p-4"><h3 className="text-sm font-medium">这一条的建议</h3>{list}</section>
+  return <section aria-label="待处理的建议" className="mb-5 rounded-xl border border-line bg-paper-2">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 py-2 pr-2 pl-4">
+      <Lightbulb aria-hidden className="size-4 shrink-0 text-writer" />
+      <h2 className="text-[13px] font-medium text-ink">{suggestions.length} 条建议等你看</h2>
+      <button type="button" aria-expanded={open} onClick={() => setOpen(value => !value)} className="text-[13px] text-chief hover:underline hover:underline-offset-4">{open ? '收起' : '逐条看'}</button>
+      <Button className="ml-auto" size="sm" variant="outline" disabled={resolve.isPending} loading={acceptAll.isPending} onClick={() => void acceptEvery()}>全部接受</Button>
+    </div>
+    {open && <div className="border-t border-line px-4 pb-4">{list}</div>}
+    {!!acceptAll.error && <div className="px-4 pb-3"><ErrorText error={acceptAll.error} /></div>}
+    {!!skipped.length && <div role="status" className="mx-4 mb-4 rounded-lg bg-seal-soft p-3 text-sm text-seal-dark"><p className="font-medium">以下建议暂未接受：</p>{skipped.map((row, index) => <p key={index} className="mt-2">{row.title}：{row.reason}</p>)}</div>}
   </section>
 }
 
@@ -119,16 +127,16 @@ function LibraryDetail({ bookId, item, library, config, suggestions, onDeleted, 
     try { await remove.mutateAsync({ type: item.targetType, id: item.id }); onDeleted() } catch { /* 保留原文 */ }
   }
   const secret = secrets.data?.find(row => row.id === item.secret_id)
-  return <article aria-label={`${item.name}详情`} className={clsx(panel, 'p-4 sm:p-5')}>
+  return <article aria-label={`${item.name}详情`} className={clsx(panel, 'p-5 @3xl/manuscript:p-7')}>
     <header className="border-b border-line pb-4">
-      <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="min-w-0 break-words font-serif text-2xl font-bold">{item.name}</h2><Button size="sm" variant="ghost" disabled={update.isPending} onClick={() => change({ locked: !item.locked })}>{item.locked ? <LockKeyhole className="size-4" /> : <UnlockKeyhole className="size-4" />}{item.locked ? '已锁住 · 解锁' : '锁住'}</Button></div>
-      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-ink-2"><span>{category?.name}</span><span>·</span><select className="rounded border border-line bg-paper-2 px-2 py-1 text-ink" aria-label="条目状态" value={item.status} disabled={update.isPending} onChange={event => change({ status: event.target.value })}>{Object.entries(config.statuses).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><span>· {config.sources[item.source] ?? item.source}</span><span>· 第 {versions.data?.[0]?.version ?? 1} 版</span></div>
+      <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="min-w-0 break-words font-serif text-[22px] font-bold">{item.name}</h2><Button size="sm" variant="ghost" disabled={update.isPending} onClick={() => change({ locked: !item.locked })}>{item.locked ? <LockKeyhole className="size-4" /> : <UnlockKeyhole className="size-4" />}{item.locked ? '已锁住 · 解锁' : '锁住'}</Button></div>
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-ink-3"><span>{category?.name}</span><span>·</span><select className="rounded-md border border-line bg-card px-1.5 py-0.5 text-ink" aria-label="条目状态" value={item.status} disabled={update.isPending} onChange={event => change({ status: event.target.value })}>{Object.entries(config.statuses).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><span>· {config.sources[item.source] ?? item.source}</span><span>· 第 {versions.data?.[0]?.version ?? 1} 版</span></div>
       <div className="mt-3 flex flex-wrap items-center gap-1.5">{item.tags.map(value => <button key={value} type="button" disabled={update.isPending} className="inline-flex items-center gap-1 rounded-full bg-chief-soft px-2.5 py-1 text-xs text-chief" onClick={() => change({ tags: item.tags.filter(row => row !== value) })} aria-label={`移除标签${value}`}>{value}<X className="size-3" /></button>)}{config.common_tags.filter(value => !item.tags.includes(value)).map(value => <button key={value} type="button" disabled={update.isPending} className="rounded-full border border-dashed border-line-2 px-2.5 py-1 text-xs text-ink-3 hover:text-chief" onClick={() => addTag(value)}>＋{value}</button>)}<form className="flex gap-1" onSubmit={event => { event.preventDefault(); addTag(tag) }}><input aria-label="新标签" className="w-24 rounded-lg border border-line bg-paper-2 px-2 py-1 text-xs" value={tag} onChange={event => setTag(event.target.value)} placeholder="加标签" /><button className="rounded px-1 text-xs text-chief" type="submit" disabled={!tag.trim() || update.isPending}>添加</button></form></div>
-      <div className="mt-3 flex flex-wrap gap-1.5"><Button size="sm" variant="ghost" onClick={() => { setAddingLevel(false); setEditing(true) }}>自己改</Button><TargetHistory bookId={bookId} targetType={item.targetType} targetId={item.id} /><Button size="sm" variant="ghost" loading={inspect.isPending} onClick={() => inspect.mutate({ mode: 'check', target_type: item.targetType, target_id: item.id })}>查一查</Button><Button size="sm" variant="ghost" loading={rewrite.isPending} onClick={fill}>让 AI 先填一版</Button><details className="relative"><summary className="cursor-pointer rounded-xl px-3 py-1.5 text-[13px] text-ink-2">更多</summary><div className="absolute right-0 z-10 mt-1 rounded-xl border border-line bg-paper-2 p-2 shadow-lg"><Button size="sm" variant="danger" loading={remove.isPending} onClick={() => void deleteItem()}>删除这一条</Button></div></details></div>
+      <div className="mt-3 flex flex-wrap gap-1.5"><Button size="sm" variant="ghost" onClick={() => { setAddingLevel(false); setEditing(true) }}>自己改</Button><TargetHistory bookId={bookId} targetType={item.targetType} targetId={item.id} /><Button size="sm" variant="ghost" loading={inspect.isPending} onClick={() => inspect.mutate({ mode: 'check', target_type: item.targetType, target_id: item.id })}>查一查</Button><Button size="sm" variant="ghost" loading={rewrite.isPending} onClick={fill}>让 AI 先填一版</Button><details className="relative"><summary className="flex h-8 cursor-pointer list-none items-center rounded-lg px-3 text-[13px] text-ink-2 hover:bg-line/70 hover:text-ink [&::-webkit-details-marker]:hidden">更多</summary><div className="absolute left-0 z-10 mt-1 rounded-xl border border-line bg-card p-1.5 shadow-[var(--shadow-lift)]"><Button size="sm" variant="danger" loading={remove.isPending} onClick={() => void deleteItem()}>删除这一条</Button></div></details></div>
     </header>
     <div className="mt-5 space-y-5">
-      {style === 'card' && <div className="divide-y divide-line">{item.targetType === 'character' ? config.character_category.fields.map(spec => <div key={spec.column} className="grid gap-2 py-3 sm:grid-cols-[7rem_minmax(0,1fr)]"><h3 className="pt-1 text-xs text-ink-2">{spec.name}</h3><div className="min-w-0">{spec.column === 'aliases' ? <p className="text-sm leading-relaxed">{item.aliases?.join('、') || <span className="text-ink-3">（空）</span>}</p> : field(spec.column, String(item[spec.column] ?? ''), undefined, '（空）')}</div></div>) : fieldNames.map(name => <div key={name} className="grid gap-2 py-3 sm:grid-cols-[7rem_minmax(0,1fr)]"><h3 className="pt-1 text-xs text-ink-2">{name}</h3><div className="min-w-0">{field(`fields.${name}`, item.fields?.find(row => row.name === name)?.value ?? '', undefined, '（空）')}</div></div>)}</div>}
-      {item.targetType === 'character' && <section className="rounded-xl bg-paper-2 p-4"><h3 className="mb-3 text-sm font-medium">写作中每章更新<span className="ml-2 text-xs font-normal text-ink-3">设定师每章写</span></h3><dl className="space-y-2 text-sm">{config.character_category.state_fields.map(spec => <div className="grid grid-cols-[5rem_minmax(0,1fr)] gap-2" key={spec.column}><dt className="text-ink-2">{spec.name}</dt><dd>{typeof item[spec.column] === 'boolean' ? (item[spec.column] ? '活着' : '已故') : String(item[spec.column] || '（空）')}</dd></div>)}</dl></section>}
+      {style === 'card' && <div className="divide-y divide-line">{item.targetType === 'character' ? config.character_category.fields.map(spec => <div key={spec.column} className="grid gap-1 py-3 @xl/manuscript:grid-cols-[6.5rem_minmax(0,1fr)] @xl/manuscript:gap-3"><h3 className="pt-1 text-xs text-ink-3">{spec.name}</h3><div className="min-w-0">{spec.column === 'aliases' ? <p className="text-sm leading-relaxed">{item.aliases?.join('、') || <span className="text-ink-3">（空）</span>}</p> : field(spec.column, String(item[spec.column] ?? ''), undefined, '（空）')}</div></div>) : fieldNames.map(name => <div key={name} className="grid gap-1 py-3 @xl/manuscript:grid-cols-[6.5rem_minmax(0,1fr)] @xl/manuscript:gap-3"><h3 className="pt-1 text-xs text-ink-3">{name}</h3><div className="min-w-0">{field(`fields.${name}`, item.fields?.find(row => row.name === name)?.value ?? '', undefined, '（空）')}</div></div>)}</div>}
+      {item.targetType === 'character' && <section className="rounded-xl border border-line bg-subtle p-4"><h3 className="mb-3 text-sm font-medium">写作中每章更新<span className="ml-2 text-xs font-normal text-ink-3">设定师每章写</span></h3><dl className="space-y-2 text-sm">{config.character_category.state_fields.map(spec => <div className="grid grid-cols-[5rem_minmax(0,1fr)] gap-2" key={spec.column}><dt className="text-ink-2">{spec.name}</dt><dd>{typeof item[spec.column] === 'boolean' ? (item[spec.column] ? '活着' : '已故') : String(item[spec.column] || '（空）')}</dd></div>)}</dl></section>}
       {style === 'ladder' && <><section><h3 className="mb-2 text-xs text-ink-2">总说明</h3>{field('content', item.content ?? '')}</section><ol className="space-y-4">{item.levels?.map((level, index) => <li className="relative border-l-2 border-chief/25 pl-4" key={index}><span className="absolute top-1 -left-[9px] flex size-4 items-center justify-center rounded-full bg-chief-soft text-[10px] text-chief">{index + 1}</span><div className="font-bold">{field(`levels.${index}.name`, level.name)}</div><div className="mt-2">{field(`levels.${index}.text`, level.text, undefined, '（还没写介绍）')}</div></li>)}</ol><Button variant="ghost" size="sm" onClick={() => { setAddingLevel(true); setEditing(true) }}>＋加一级</Button></>}
       {style === 'paragraph' && <><section className="text-sm"><h3 className="mb-2 text-xs text-ink-3">一句话</h3>{field('one_line', item.one_line)}</section><section>{field('content', item.content ?? '')}</section></>}
       {item.categoryKey === '世界与地图' && <label className="block space-y-2 text-sm"><span className="text-ink-2">属于哪里</span><select aria-label="属于哪里" className={clsx(inputClass, 'w-full')} value={item.parent_id ?? ''} disabled={update.isPending} onChange={event => change({ parent_id: event.target.value || null })}><option value="">不属于其他地方</option>{parentChoices(library.entries, item).map(row => <option value={row.id} key={row.id}>{row.name}</option>)}</select></label>}
@@ -141,8 +149,17 @@ function LibraryDetail({ bookId, item, library, config, suggestions, onDeleted, 
   </article>
 }
 
+function CategoryHeader({ label, count, must, dot, open, onClick }: { label: string; count?: number; must?: number; dot?: boolean; open: boolean; onClick: () => void }) {
+  return <button type="button" aria-expanded={open} onClick={onClick} className={clsx('flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-[13px] transition-colors', open ? 'font-medium text-ink' : 'text-ink-2 hover:bg-subtle hover:text-ink')}>
+    {open ? <ChevronDown className="size-3.5 shrink-0 text-ink-3" /> : <ChevronRight className="size-3.5 shrink-0 text-ink-3" />}
+    <span className="min-w-0 flex-1 truncate">{label}</span>
+    {dot && <span aria-label="有待处理建议" className="size-1.5 shrink-0 rounded-full bg-seal" />}
+    <span className="shrink-0 text-right text-[11px] text-ink-3 tabular-nums" title={must ? `${count ?? 0} 条，其中 ${must} 条现在要定` : undefined}>{count ?? 0}</span>
+  </button>
+}
+
 export function LibraryPage() {
-  const { bookId, job, working, manualNavigate, outline } = useBookContext()
+  const { bookId, book, job, working, manualNavigate, outline } = useBookContext()
   const config = useLibraryConfig()
   const library = useLibrary(bookId)
   const suggestions = useLibrarySuggestions(bookId)
@@ -158,11 +175,13 @@ export function LibraryPage() {
   const focus = params.get('view') === 'focus' || !params.has('cat')
   const category = library.data?.categories.find(row => row.key === params.get('cat'))
   const data = library.data
-  const pending = job?.status === 'waiting_author' && job.pending?.kind === 'setup_piece' && job.pending.piece === 'settings' ? job.pending : null
   const rows = data && config.data ? filterLibraryRows(data, suggestions.data ?? [], { category: category?.key, focus, mustOnly, suggestionsOnly, search }, Object.keys(config.data.statuses)) : []
   const selected = rows.find(row => row.id === params.get('id')) ?? rows[0]
   const hasExplicitSelection = !!params.get('id') && !!selected
   const suggested = new Set((suggestions.data ?? []).map(suggestionTargetId))
+  const total = (data?.characters.length ?? 0) + (data?.entries.length ?? 0)
+  const must = data?.categories.reduce((sum, row) => sum + row.must_count, 0) ?? 0
+  const settingUp = job?.kind === 'book_setup' && working
   const navigate = (next: { category?: string; id?: string; focus?: boolean }) => {
     const query = new URLSearchParams(next.focus ? { view: 'focus' } : { cat: next.category ?? category?.key ?? data?.categories[0]?.key ?? '' })
     if (next.id) query.set('id', next.id)
@@ -184,38 +203,58 @@ export function LibraryPage() {
     if (!window.confirm(`删除「${category.name}」这个自建类别？`)) return
     try { await categoryActions.remove.mutateAsync(category.id); navigate({ focus: true }) } catch { /* 显示接口错误 */ }
   }
-  return <section data-testid="library-page" className="space-y-5">
-    <PageHeader eyebrow="书稿 · 设定库" title="把故事里的人和事，放在手边" subtitle="先看重点；需要的时候，再把一处写清楚。修改只动你选中的地方。" />
-    <PrefillGate />
-    {job?.kind === 'book_setup' && <div aria-label="设定库总结" className="rounded-xl border border-chief/20 bg-chief-soft/50 px-4 py-3 text-sm leading-relaxed text-chief">{pending?.summary || (working ? '重点先出来，其余设定正在补。先看「重点」就行。' : `主编建了 ${(data?.characters.length ?? 0) + (data?.entries.length ?? 0)} 条设定，先看「重点」就行。`)}</div>}
-    {!!suggestions.data?.length && <SuggestionInbox bookId={bookId} suggestions={suggestions.data} library={data} onJump={jumpSuggestion} />}
-    <nav aria-label="设定类别" className="flex flex-wrap gap-2 max-[768px]:flex-nowrap max-[768px]:overflow-x-auto max-[768px]:pb-2">
-      <button type="button" className={clsx('shrink-0 whitespace-nowrap rounded-xl border px-3 py-2 text-sm', focus ? 'border-chief/40 bg-chief-soft text-chief' : 'border-line bg-card text-ink-2')} onClick={() => navigate({ focus: true })}>重点{data && <span className="ml-1.5 text-xs">{data.focus.characters.length + data.focus.entries.length}</span>}</button>
-      {data?.categories.map(row => <button type="button" key={row.key} className={clsx('shrink-0 whitespace-nowrap rounded-xl border px-3 py-2 text-sm', !focus && category?.key === row.key ? 'border-chief/40 bg-chief-soft text-chief' : 'border-line bg-card text-ink-2')} onClick={() => navigate({ category: row.key })}>{row.name} <span className="text-xs">{row.count}{row.must_count > 0 && ` · 要定 ${row.must_count}`}</span>{libraryRows(data).some(item => item.categoryKey === row.key && suggested.has(item.id)) && <span className="ml-1.5 inline-block size-1.5 rounded-full bg-seal" aria-label="有待处理建议" />}</button>)}
-      <Button size="sm" variant="ghost" disabled={!config.data} onClick={() => setCategoryEditor('new')}><Plus className="size-3.5" />自建类别</Button>
-    </nav>
-      {!focus && category && !category.builtin && <details className="relative"><summary className="cursor-pointer rounded-xl border border-line px-3 py-2 text-sm">类别更多</summary><div className="absolute right-0 z-10 mt-1 w-40 space-y-1 rounded-xl border border-line bg-paper-2 p-2 shadow-lg"><Button className="w-full" variant="ghost" size="sm" onClick={() => setCategoryEditor(category)}>修改这个类别</Button><Button className="w-full" variant="ghost" size="sm" onClick={() => void removeCategory()}>删除这个类别</Button></div></details>}
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-3 text-sm">
-      <label className="flex items-center gap-2"><input type="checkbox" className="accent-[var(--color-chief)]" checked={mustOnly} onChange={event => setMustOnly(event.target.checked)} />只看现在要定</label>
-      <label className="flex items-center gap-2"><input type="checkbox" className="accent-[var(--color-chief)]" checked={suggestionsOnly} onChange={event => setSuggestionsOnly(event.target.checked)} />只看有建议</label>
-      <label className="relative min-w-36 flex-1"><Search className="pointer-events-none absolute top-3 left-3 size-4 text-ink-3" /><input aria-label="搜索设定" className={clsx(inputClass, 'w-full pl-9')} value={search} onChange={event => setSearch(event.target.value)} placeholder="搜索…" /></label>
-      <Button size="sm" disabled={actions.inspect.isPending} onClick={() => actions.inspect.mutate({ mode: 'fill-gaps' })}>让 AI 补漏</Button>
-      <Button size="sm" disabled={actions.inspect.isPending} onClick={() => actions.inspect.mutate({ mode: 'review' })}>全部查一遍</Button>
-    </div>
-    {actions.inspect.isPending && <p role="status" className="text-sm text-chief">主编正在想……结果会放进待处理的建议，也会在群聊里告诉你。</p>}
+  const itemList = <ul className="mt-0.5 mb-1.5 space-y-px pl-3">{rows.map(row => <li key={row.id}><button type="button" data-testid={`library-item-${row.id}`} aria-current={selected?.id === row.id ? 'true' : undefined} onClick={() => navigate({ category: row.categoryKey, focus, id: row.id })}
+      className={clsx('block w-full rounded-lg py-1.5 pr-2 text-left transition-colors', selected?.id === row.id ? 'bg-chief-soft/70' : 'hover:bg-subtle')} style={{ paddingLeft: `${10 + Math.min(row.depth, 5) * 12}px` }}>
+      <span className="flex items-center gap-1.5"><span className={clsx('min-w-0 truncate text-[13px]', selected?.id === row.id ? 'font-medium text-chief' : 'text-ink')}>{row.name}</span>{suggested.has(row.id) && <span className="size-1.5 shrink-0 rounded-full bg-seal" aria-label="有待处理建议" />}{row.locked && <LockKeyhole aria-label="已锁住" className="size-3 shrink-0 text-ink-3" />}<span className="ml-auto shrink-0 text-[11px] text-ink-3">{config.data?.statuses[row.status]}</span></span>
+      <span className="mt-0.5 block truncate text-xs text-ink-3">{row.one_line || '还没有一句话'}</span>
+    </button></li>)}
+    {!rows.length && <li className="px-2.5 py-2 text-xs leading-relaxed text-ink-3">{search || mustOnly || suggestionsOnly ? '没有符合条件的条目，换个筛选试试。' : '这一类还是空的。'}</li>}
+  </ul>
+  const filterChip = (label: string, value: boolean, set: (value: boolean) => void) => <button type="button" aria-pressed={value} onClick={() => set(!value)} className={clsx('rounded-full border px-2.5 py-0.5 text-xs transition-colors', value ? 'border-chief/40 bg-chief-soft text-chief' : 'border-line-2 text-ink-2 hover:text-ink')}>{label}</button>
+  return <section data-testid="library-page">
+    <SetupGate piece="settings" />
+    <PageHeader eyebrow="书稿 · 设定库" title="设定库"
+      subtitle={data ? total ? `共 ${total} 条${must ? ` · 现在要定 ${must} 条` : ''}${settingUp ? ' · 其余设定正在补' : ''}` : '把故事里的人和事放在手边。'
+        : undefined}
+      action={<>
+        <Button size="sm" variant="outline" disabled={actions.inspect.isPending} onClick={() => actions.inspect.mutate({ mode: 'fill-gaps' })}>让 AI 补漏</Button>
+        <Button size="sm" variant="outline" disabled={actions.inspect.isPending || !total} onClick={() => actions.inspect.mutate({ mode: 'review' })}>全部查一遍</Button>
+        <Button size="sm" variant="primary" disabled={!data || !config.data} onClick={() => setAdd(true)}><Plus className="size-3.5" />新增</Button>
+      </>} />
+    <LibrarySubnav current="library" />
+    {actions.inspect.isPending && <p role="status" className="mb-4 flex items-center gap-2 text-[13px] text-chief"><span className="size-1.5 rounded-full bg-chief motion-safe:animate-pulse" />主编正在想……结果会放进待处理的建议，也会在群聊里告诉你。</p>}
     <ErrorText error={config.error ?? library.error ?? suggestions.error ?? actions.inspect.error ?? categoryActions.remove.error ?? localError} />
-    {(config.isLoading || library.isLoading) && <p role="status" className="py-10 text-center text-ink-2">正在打开设定库…</p>}
-    {data && config.data && <div className="grid items-start gap-4 min-[769px]:grid-cols-[minmax(170px,0.7fr)_minmax(0,2fr)]">
+    {!!suggestions.data?.length && <SuggestionInbox bookId={bookId} suggestions={suggestions.data} library={data} onJump={jumpSuggestion} />}
+    {(config.isLoading || library.isLoading) && <div className="grid gap-5 @3xl/manuscript:grid-cols-[260px_minmax(0,1fr)]"><Skeleton className="h-80" /><Skeleton className="h-80" /></div>}
+    {data && config.data && !total && <div className="rounded-xl border border-dashed border-line-2 px-6 py-14 text-center">
+      <Library aria-hidden className="mx-auto size-6 text-ink-3" />
+      <p className="mt-3 font-serif text-lg font-bold text-ink">设定库还空着</p>
+      <p className="mx-auto mt-2 max-w-md text-[13px] leading-relaxed text-ink-2">{job?.kind === 'book_setup' && !book.concept.story ? '选好故事方向后，主编会先建主角和金手指，其余设定随后补上。想好的设定也可以先写进来。' : '可以自己先写一条，也可以让 AI 按定调补一遍。'}</p>
+      <Button className="mt-5" size="sm" variant="outline" onClick={() => setAdd(true)}><Plus className="size-3.5" />自己先写一条</Button>
+    </div>}
+    {data && config.data && !!total && <div className="grid items-start gap-5 @3xl/manuscript:grid-cols-[260px_minmax(0,1fr)]">
       <aside aria-label="设定条目列表" className={clsx(panel, 'overflow-hidden', hasExplicitSelection && 'max-[768px]:hidden')}>
-        <div className="border-b border-line px-4 py-3 text-sm font-medium">{focus ? '重点' : category?.name} <span className="ml-2 text-xs text-ink-3">{rows.length} 条</span></div>
-        <div className="max-h-[65vh] overflow-y-auto">{rows.map(row => <button key={row.id} type="button" data-testid={`library-item-${row.id}`} onClick={() => navigate({ category: row.categoryKey, focus, id: row.id })} className={clsx('block w-full border-b border-line/60 py-3 pr-3 text-left transition-colors hover:bg-paper-2', selected?.id === row.id ? 'border-l-2 border-l-chief bg-chief-soft/30' : 'border-l-2 border-l-transparent')} style={{ paddingLeft: `${14 + Math.min(row.depth, 5) * 14}px` }}><span className="flex flex-wrap items-center gap-x-2 gap-y-1"><span className="font-medium">{row.name}{suggested.has(row.id) && <span className="ml-1.5 inline-block size-1.5 rounded-full bg-seal" aria-label="有待处理建议" />}</span><span className="text-[11px] text-ink-3">{config.data?.statuses[row.status]}</span></span><span className="mt-1 block truncate text-xs text-ink-2">{row.one_line || '还没有一句话'}</span></button>)}{!rows.length && <p className="px-4 py-8 text-sm leading-relaxed text-ink-3">没有符合条件的条目。换个筛选，或新建一条。</p>}</div>
-        <Button variant="ghost" className="m-2" size="sm" onClick={() => setAdd(true)}><Plus className="size-3.5" />新增一条</Button>
+        <div className="space-y-2 border-b border-line p-2.5">
+          <label className="relative block"><Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-ink-3" /><input aria-label="搜索设定" className="h-8 w-full rounded-lg border border-line bg-card pr-2.5 pl-8 text-[13px] placeholder:text-ink-3 focus:border-ink-3 focus:outline-none" value={search} onChange={event => setSearch(event.target.value)} placeholder="搜索设定" /></label>
+          <div className="flex flex-wrap gap-1.5">{filterChip('只看现在要定', mustOnly, setMustOnly)}{filterChip('只看有建议', suggestionsOnly, setSuggestionsOnly)}</div>
+        </div>
+        <nav aria-label="设定类别" className="scroll-thin max-h-[64vh] overflow-y-auto p-1.5">
+          <CategoryHeader label="重点" count={data.focus.characters.length + data.focus.entries.length} open={focus} onClick={() => navigate({ focus: true })} />
+          {focus && itemList}
+          {data.categories.map(row => <div key={row.key}>
+            <CategoryHeader label={row.name} count={row.count} must={row.must_count} dot={libraryRows(data).some(item => item.categoryKey === row.key && suggested.has(item.id))} open={!focus && category?.key === row.key} onClick={() => navigate({ category: row.key })} />
+            {!focus && category?.key === row.key && <>
+              {!row.builtin && <div className="flex gap-3 pb-1 pl-8 text-xs"><button type="button" className="text-chief hover:underline" onClick={() => setCategoryEditor(row)}>改这个类别</button><button type="button" className="text-ink-3 hover:text-seal hover:underline" onClick={() => void removeCategory()}>删掉</button></div>}
+              {itemList}
+            </>}
+          </div>)}
+          <button type="button" disabled={!config.data} onClick={() => setCategoryEditor('new')} className="mt-1 flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] text-chief hover:bg-subtle"><Plus className="size-3.5" />自建类别</button>
+        </nav>
       </aside>
       <div className={clsx('min-w-0', !hasExplicitSelection && 'max-[768px]:hidden')}>
         {selected ? <><Button className="mb-3 min-[769px]:hidden" variant="ghost" size="sm" onClick={() => navigate({ category: category?.key, focus })}><ArrowLeft className="size-4" />返回列表</Button><LibraryDetail key={selected.id} bookId={bookId} item={selected} library={data} config={config.data} suggestions={(suggestions.data ?? []).filter(suggestion => suggestionTargetId(suggestion) === selected.id)} onDeleted={() => navigate({ category: category?.key, focus })} onJump={jumpSuggestion} /></> : <div className={clsx(panel, 'px-6 py-14 text-center text-sm text-ink-3')}>从左边选一条，慢慢写清楚。</div>}
       </div>
     </div>}
-    <SetupGate piece="settings" />
     {add && data && config.data && <NewItemModal bookId={bookId} categories={data.categories} defaultCategory={category?.key} config={config.data} onClose={() => setAdd(false)} onCreated={(item, categoryKey) => { setAdd(false); setMustOnly(false); setSuggestionsOnly(false); setSearch(''); navigate({ category: categoryKey, id: item.id }) }} />}
     {categoryEditor && <CategoryModal key={categoryEditor === 'new' ? 'new' : categoryEditor.id} bookId={bookId} category={categoryEditor === 'new' ? undefined : categoryEditor} config={config.data} onClose={() => setCategoryEditor(null)} onSaved={key => { setCategoryEditor(null); navigate({ category: key }) }} />}
   </section>

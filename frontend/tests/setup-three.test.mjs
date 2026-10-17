@@ -33,11 +33,13 @@ test('正式页面使用后端类别和候选接口，不复制类别配置，�
   const home = readFileSync(new URL('../src/pages/Home.tsx', import.meta.url), 'utf8')
   const page = readFileSync(new URL('../src/pages/book/sections/LibraryPage.tsx', import.meta.url), 'utf8')
   const pitches = readFileSync(new URL('../src/pages/book/PitchSelection.tsx', import.meta.url), 'utf8')
+  // 页面只负责点选，提交在书稿底部的操作条里。
+  const actionBar = readFileSync(new URL('../src/pages/book/ActionBar.tsx', import.meta.url), 'utf8')
   assert.ok(!home.includes('先问我几个问题'))
   assert.ok(home.includes('定调和设定库做完不停，停在大纲给你看'))
   assert.ok(page.includes('useLibraryConfig'))
   assert.ok(page.includes('SetupGate'))
-  assert.ok(pitches.includes('index: index + 1'))
+  assert.ok(actionBar.includes('index: picked.index + 1'))
   assert.ok(pitches.includes('pending.recommended === index + 1'))
 })
 

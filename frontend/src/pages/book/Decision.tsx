@@ -1,17 +1,12 @@
 import { needsSetupRestart } from '../../lib/setupPresentation'
-import { SetupRestartCard } from './SetupRestartCard'
 import clsx from 'clsx'
-import { AlertTriangle, Check, CirclePause, PenLine, RotateCcw, Stamp } from 'lucide-react'
+import { Check, CirclePause, PenLine, RotateCcw, Stamp } from 'lucide-react'
 import { useState } from 'react'
-import { AnimatePresence, motion } from 'motion/react'
 import { useJobActions } from '../../api/hooks'
-import type { InterviewQuestion, Job, NodeUpdateProposal, WriteUntil } from '../../api/types'
+import type { InterviewQuestion, Job, NodeUpdateProposal } from '../../api/types'
 import { Button, ErrorText, inputClass, TypingDots } from '../../components/ui'
 import { decisionCopy } from '../../lib/decision'
-import { useReducedMotion } from '../../lib/appearance'
-import { setupPieces, targetPiece } from '../../lib/storyMap'
-import { pendingTarget } from '../../lib/workspace'
-import { changedText } from '../../lib/writingUi'
+import { changedText, WRITE_OPTIONS } from '../../lib/writingUi'
 import { useBookContext } from './context'
 
 const NODE_COMPARISON_FIELDS = [
@@ -33,71 +28,6 @@ export function NodeUpdateComparison({ proposal }: { proposal: NodeUpdateProposa
     })}</div>
     <p className="mt-3 text-xs leading-relaxed text-ink-2"><span className="mr-2 text-chief">调整理由</span>{proposal.reason || '主编尚未说明理由，可先提意见再批准。'}</p>
   </section>
-}
-
-export function DecisionBar() {
-  const { book, bookId, job, waiting, requestFeedback, manualNavigate, celebrate, segmentReview } = useBookContext()
-  const { pieceAction, confirmSetupAndWrite, setupPending } = useJobActions(bookId)
-  const reduce = useReducedMotion()
-  const pending = job?.pending
-  const volumePending = pending?.kind === 'volume_review' ? pending : null
-  const conflicts = [...new Set([...(volumePending?.issues ?? []).filter(issue => /^节点冲突[：:]/.test(issue)), ...(volumePending?.node_conflict ? [`节点冲突：${volumePending.node_conflict}`] : [])])]
-  const writingIssues = (pending?.kind === 'volume_review' || pending?.kind === 'chapter_stuck' ? decisionCopy(pending, bookId).issues ?? [] : []).filter(issue => !/^节点冲突[：:]/.test(issue) && !(volumePending?.node_update && issue.startsWith('节点调整：')))
-  const target = pendingTarget(pending, bookId)
-  const piece = pending?.kind === 'setup_piece' ? pending : null
-  const nextSegment = pending?.kind === 'segment_review' ? pending : null
-  const name = setupPieces(job?.setup_flow).find(item => item.key === piece?.piece)?.name ?? ''
-  const review = piece?.review ?? []
-  const reminders = review.length + (piece?.warnings?.length ?? 0) + (piece?.suggestions?.length ?? 0) + (piece?.unlock_requests?.length ?? 0)
-  const act = async (action: 'confirm' | 'delegate') => {
-    if (!job || !piece) return
-    if (setupPending) return
-    try {
-      if (job.setup_flow === 3 && piece.piece === 'outline') await confirmSetupAndWrite.mutateAsync({ jobId: job.id, action, book })
-      else await pieceAction.mutateAsync({ jobId: job.id, action, piece: piece.piece })
-      if (piece.piece === 'first_volume') celebrate()
-    } catch { /* 失败保留待确认内容。 */ }
-  }
-  const actSegment = async (action: 'confirm' | 'delegate' | 'redo') => {
-    try {
-      await segmentReview.submit({ action })
-    } catch { /* 失败保留下一篇和作者意见，允许重试。 */ }
-  }
-  if (needsSetupRestart(book, job) && job) return <div data-testid="restart-setup-bar" className="z-10 max-h-[42vh] shrink-0 overflow-y-auto border-b border-seal/25 bg-paper-2 px-5 py-3">
-    <SetupRestartCard />
-  </div>
-  if (job?.setup_flow === 3 && pending?.kind === 'setup_piece') return null
-  return <><div className="px-5 text-sm text-chief">{confirmSetupAndWrite.isPending && <p role="status" className="py-2">正在确认大纲，开书任务结束后会自动开写…</p>}<ErrorText error={confirmSetupAndWrite.error} /></div><AnimatePresence initial={false}>{waiting && job && target && <motion.div key="decision" data-testid="decision-bar" initial={reduce ? false : { opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: reduce ? 0 : 0.28, ease: 'easeOut' }} className="z-10 max-h-[42vh] shrink-0 overflow-y-auto border-b border-seal/25 bg-paper-2 px-5 py-3">
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <p className="text-sm font-medium text-seal">{nextSegment ? `待你确认：第 ${nextSegment.number} 篇${nextSegment.warnings?.[0] ? `（${nextSegment.warnings[0]}）` : ''}` : piece ? `待你确认：${name}${piece.warnings?.[0] ? `（${piece.warnings[0]}）` : ''}` : pending?.kind === 'setup_pitches' ? '待你选择：三个故事方向' : pending?.kind === 'setup_directions' ? '待你选择：开书方向' : `待你拍板：${target.label}`}</p>
-      <div className="flex flex-wrap items-center gap-2">{piece ? <>
-        <Button size="sm" variant="seal" loading={setupPending} disabled={setupPending} onClick={() => void act('confirm')}>{job.setup_flow === 3 ? piece.piece === 'outline' ? '确认，开写' : '确认' : '确认这一块'}</Button>
-        <Button size="sm" variant="ghost" disabled={setupPending} onClick={requestFeedback}>提意见</Button>
-        {job.setup_flow !== 3 && <Button size="sm" variant="ghost" loading={pieceAction.isPending && pieceAction.variables?.action === 'delegate'} disabled={setupPending} onClick={() => void act('delegate')}>交给编辑部定</Button>}
-      </> : nextSegment?.flow === 2 ? <Button size="sm" variant="seal" disabled={segmentReview.submitting} loading={segmentReview.submitting} onClick={() => void actSegment('redo')}>按新写法重出</Button> : nextSegment ? <>
-        <Button size="sm" variant="seal" loading={segmentReview.submitting && segmentReview.action === 'confirm'} disabled={segmentReview.submitting} onClick={() => void actSegment('confirm')}>确认这一篇</Button>
-        <Button size="sm" variant="ghost" loading={segmentReview.submitting && segmentReview.action === 'delegate'} disabled={segmentReview.submitting} onClick={() => void actSegment('delegate')}>交给编辑部定</Button>
-      </> : pending?.kind === 'setup_directions' || pending?.kind === 'setup_pitches' ? <button className="text-sm text-chief underline underline-offset-4" onClick={() => manualNavigate(pending?.kind === 'setup_pitches' ? `/books/${bookId}/concept` : `/books/${bookId}`)}>去选择 →</button> : <><ApproveButton job={job} /><Button size="sm" variant="ghost" onClick={requestFeedback}>提意见</Button></>}</div>
-    </div>
-    {conflicts.map((conflict, index) => <div key={index} role="alert" className="mt-3 flex items-start gap-2 rounded-lg border border-reviewer/35 bg-reviewer-soft px-3 py-2 text-sm leading-relaxed text-seal-dark"><AlertTriangle className="mt-0.5 size-4 shrink-0" /><p>{conflict}</p></div>)}
-    {volumePending?.node_update && <NodeUpdateComparison proposal={volumePending.node_update} />}
-    {!!nextSegment?.warnings?.length && <details className="mt-3 border-t border-divider pt-2">
-      <summary className="cursor-pointer text-xs text-ink-2">下一篇的提醒（{nextSegment.warnings.length}）</summary>
-      <ul aria-label="下一篇的提醒" className="mt-3 space-y-2 text-sm leading-relaxed text-ink-2">{nextSegment.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>
-    </details>}
-    {!!reminders && piece && <details className="mt-3 border-t border-divider pt-2">
-      <summary className="cursor-pointer text-xs text-ink-2">提醒与审稿建议（{reminders}）</summary>
-      <ul className="mt-3 space-y-3 text-sm leading-relaxed text-ink-2">
-        {piece.warnings?.map((warning, index) => <li key={`warning-${index}`}><span className="mr-2 text-xs text-seal">提醒</span>{warning}</li>)}
-        {review.map((issue, index) => <li key={`review-${index}`}>审稿：{issue.problem}——{issue.suggestion}</li>)}
-        {piece.suggestions?.map((suggestion, index) => <li key={`suggestion-${index}`}><span className="mr-2 text-xs text-chief">审稿建议</span>{suggestion.problem}<p className="mt-1">{suggestion.suggestion}</p><Button size="sm" variant="ghost" className="mt-1" disabled={pieceAction.isPending} loading={pieceAction.isPending && pieceAction.variables?.feedback === `${suggestion.problem}\n${suggestion.suggestion}`} onClick={() => pieceAction.mutate({ jobId: job.id, action: 'unlock', piece: targetPiece[suggestion.target], feedback: `${suggestion.problem}\n${suggestion.suggestion}` })}>解锁并修改</Button></li>)}
-        {piece.unlock_requests?.map((request, index) => <li key={`unlock-${index}`}><span className="mr-2 text-xs text-chief">解锁请求</span>{request.reason}<div><Button size="sm" variant="ghost" className="mt-1" disabled={pieceAction.isPending} loading={pieceAction.isPending && pieceAction.variables?.feedback === request.reason} onClick={() => pieceAction.mutate({ jobId: job.id, action: 'unlock', piece: targetPiece[request.target], feedback: request.reason })}>解锁并修改</Button></div></li>)}
-      </ul>
-    </details>}
-    {!!writingIssues?.length && <ul aria-label="卷纲与章节提醒" className="mt-3 space-y-1.5 border-t border-divider pt-2 text-sm leading-relaxed text-ink-2">{writingIssues.map((issue, index) => <li key={index}>{issue}</li>)}</ul>}
-    <ErrorText error={pieceAction.error} />
-    <ErrorText error={segmentReview.error} />
-  </motion.div>}</AnimatePresence></>
 }
 
 /** 只有盖章按钮：编辑部面板里修改意见直接在底部输入框里说。 */
@@ -123,13 +53,6 @@ export function ApproveButton({ job }: { job: Job }) {
   )
 }
 
-const WRITE_OPTIONS: { key: string; label: string; until: WriteUntil; count: number; hint: string }[] = [
-  { key: '1', label: '写 1 章', until: 'count', count: 1, hint: '先写一章看看' },
-  { key: '3', label: '写 3 章', until: 'count', count: 3, hint: '新书写完前 3 章会请你试读' },
-  { key: '10', label: '写 10 章', until: 'count', count: 10, hint: '中途可以随时插话或停下' },
-  { key: 'volume', label: '写完这一卷', until: 'volume', count: 1, hint: '一卷写完就停，等你看看' },
-  { key: 'book', label: '一直写到完本', until: 'book', count: 1, hint: '每卷开写前仍会请你拍板卷纲' },
-]
 
 /** 开写：选这一轮写多少，编辑部按卷纲和章纲逐章写，写够就停。 */
 export function WritingControls({ compact }: { compact?: boolean }) {

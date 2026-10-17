@@ -4,7 +4,9 @@ import { conversationContains, unreadCount } from './workspace'
 
 const CONVERSATIONS: Conversation[] = ['group', 'chief', 'lorekeeper', 'writer', 'reviewer']
 const WIDTH_KEY = 'zhibi:conversation-ratio'
-const DEFAULT_RATIO = 0.42
+const DEFAULT_RATIO = 0.36
+/** 聊天栏再宽也不好读；超宽屏把多出来的地方留给书稿。 */
+const MAX_CHAT = 860
 function savedRatio() {
   try {
     const value = Number(localStorage.getItem(WIDTH_KEY))
@@ -18,7 +20,7 @@ export function useWorkspaceResize() {
   const [ratio, setRatio] = useState(savedRatio)
   const [available, setAvailable] = useState(1000)
   const [dragging, setDragging] = useState(false)
-  const max = Math.max(360, available - 321)
+  const max = Math.max(360, Math.min(MAX_CHAT, available - 321))
   const width = Math.round(Math.max(360, Math.min(available * ratio, max)))
   useEffect(() => {
     const el = container.current

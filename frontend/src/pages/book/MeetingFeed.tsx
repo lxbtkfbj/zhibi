@@ -2,7 +2,7 @@ import { ChatOutcome } from './ChatActions'
 import { nextSegmentFields, protagonistFields, segmentFields, worldFields, type SetupField } from '../../lib/setupPresentation'
 import { useReducedMotion } from '../../lib/appearance'
 import clsx from 'clsx'
-import { AlertTriangle, Check, ChevronDown, X } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Check, ChevronDown, FileText, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
 import type { Concept, InterviewQuestion, LiveDraft, MeetingMessage, PlotUnit, Speaker, StoryThread } from '../../api/types'
@@ -21,17 +21,17 @@ export function RoleAvatar({
   working,
 }: {
   speaker: Speaker | 'group'
-  size?: 'sm' | 'md' | 'lg'
+  size?: 'xs' | 'sm' | 'md' | 'lg'
   working?: boolean
 }) {
-  const meta = speaker === 'group' ? { ...ROLE_META.chief, name: '编辑部群聊', short: '群' } : ROLE_META[speaker] ?? ROLE_META.system
+  const meta = speaker === 'group' ? { ...ROLE_META.chief, name: '编辑部群聊', short: '群', dot: 'bg-ink-2' } : ROLE_META[speaker] ?? ROLE_META.system
   return (
     <span
       className={clsx(
         'relative inline-flex shrink-0 items-center justify-center rounded-full font-serif font-bold text-on-role',
         meta.dot,
         working && 'breath',
-        { sm: 'size-7 text-xs', md: 'size-8 text-sm', lg: 'size-11 text-base' }[size],
+        { xs: 'size-5 text-[11px]', sm: 'size-6 text-xs', md: 'size-8 text-sm', lg: 'size-11 text-base' }[size],
       )}
       title={meta.name}
     >
@@ -574,23 +574,28 @@ function ArtifactCard({ message }: { message: MeetingMessage }) {
   const reduce = useReducedMotion()
   const target = artifactTarget(message, bookId, outline)
   return (
-    <div data-testid={`artifact-message-${message.id}`} data-artifact-type={message.payload?.type} className="min-w-0 border-l-2 border-seal bg-paper/70">
-      <div className="flex items-start gap-1">
+    <div data-testid={`artifact-message-${message.id}`} data-artifact-type={message.payload?.type} className="min-w-0 overflow-hidden rounded-xl border border-line bg-card">
+      <div className="flex items-stretch">
         <button
           type="button"
           onClick={() => target ? manualNavigate(target.path) : setOpen((value) => !value)}
-          className="min-w-0 flex-1 px-3 py-2 text-left hover:bg-paper"
+          title={target ? `在右边打开：${target.label}` : undefined}
+          className="flex min-w-0 flex-1 items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-subtle"
         >
-          <span className="block text-sm font-medium text-ink">{message.content}</span>
-          <span className="mt-1 block text-xs text-seal">{target ? '在右边打开 →' : '查看产出内容'}</span>
+          <span aria-hidden className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-subtle text-ink-2 ring-1 ring-line"><FileText className="size-3.5" /></span>
+          <span className="min-w-0 flex-1">
+            <span className="line-clamp-2 text-[13px] leading-snug font-medium text-ink">{message.content}</span>
+            <span className="mt-0.5 block text-xs text-ink-3">{target ? `在右边打开 · ${target.label}` : '展开看内容'}</span>
+          </span>
+          {target && <ArrowRight aria-hidden className="size-3.5 shrink-0 text-ink-3" />}
         </button>
         <button
           type="button"
           onClick={() => setOpen((value) => !value)}
           aria-expanded={open}
           aria-label={`${open ? '收起' : '展开'}${message.content}`}
-          title={open ? '收起内容' : '展开内容'}
-          className="m-1 rounded p-2 text-ink-2 hover:bg-paper"
+          title={open ? '收起内容' : '在这里展开内容'}
+          className="flex w-9 shrink-0 items-center justify-center border-l border-line text-ink-3 transition-colors hover:bg-subtle hover:text-ink"
         >
           <ChevronDown className={clsx('size-4 transition-transform duration-300', open && 'rotate-180')} />
         </button>
@@ -604,7 +609,7 @@ function ArtifactCard({ message }: { message: MeetingMessage }) {
             transition={{ duration: reduce ? 0 : 0.28, ease: [0.22, 1, 0.36, 1] }}
             className="overflow-hidden"
           >
-            <div className="@container border-t border-divider px-3 py-3 text-sm leading-[1.75] text-ink-2">
+            <div className="@container border-t border-line px-3.5 py-3 text-sm leading-[1.75] text-ink-2">
               <ArtifactBody message={message} />
             </div>
           </motion.div>
@@ -631,12 +636,12 @@ function LiveDraftRow({ draft, fromGroup }: { draft: LiveDraft; fromGroup?: bool
     <div className="flex gap-2.5">
       <RoleAvatar speaker="writer" working />
       <div className="min-w-0 flex-1">
-        <p className="mb-1.5 flex flex-wrap items-center gap-1.5 text-xs text-ink-2">
+        <p className="mb-1 flex flex-wrap items-center gap-1.5 text-xs text-ink-3">
           <span className="font-medium text-writer">写手</span>
           {fromGroup && <GroupTag />}
           <span>{DRAFT_MODE[draft.mode]}第 {draft.chapter} 章 · {draft.text.replace(/\s/g, '').length} 字</span>
         </p>
-        <div className="rounded-[2px_12px_12px_12px] border border-divider bg-card px-3 py-2.5">
+        <div className="rounded-[4px_14px_14px_14px] bg-card px-3.5 py-2.5 ring-1 ring-line/70">
           <p className="font-serif chat-text leading-[1.75] whitespace-pre-wrap text-ink">
             <span className="caret">{tail.length < draft.text.length && '…'}{tail}</span>
           </p>
@@ -650,42 +655,53 @@ function LiveDraftRow({ draft, fromGroup }: { draft: LiveDraft; fromGroup?: bool
 }
 
 function GroupTag() {
-  return <span className="rounded-sm border border-divider px-1 text-xs text-ink-2">群聊</span>
+  return <span className="rounded border border-line-2 px-1 text-[11px] leading-4 text-ink-3">群聊</span>
 }
 
-function MessageRow({ message, fromGroup }: { message: MeetingMessage; fromGroup?: boolean }) {
+function MessageRow({ message, fromGroup, continued }: { message: MeetingMessage; fromGroup?: boolean; continued?: boolean }) {
   const meta = ROLE_META[message.speaker] ?? ROLE_META.system
   const author = message.speaker === 'author'
   if (message.kind === 'error') {
     return (
-      <div className="flex gap-2 rounded border border-seal/30 bg-seal-soft px-3 py-2 text-sm text-seal">
+      <div className="flex gap-2 rounded-lg border border-seal/30 bg-seal-soft px-3 py-2 text-sm text-seal-dark">
         <AlertTriangle className="mt-0.5 size-4 shrink-0" />
         <span className="break-words">{message.content}</span>
       </div>
     )
   }
   if (message.kind === 'decision' && !author) {
-    return <p className="py-1 text-center text-xs text-ink-2">{message.content}</p>
+    return <p className="py-0.5 text-center text-xs text-ink-3">{message.content}</p>
   }
+  const wide = message.kind === 'artifact' || message.kind === 'plan'
+  if (author) return (
+    <div className={clsx('flex flex-col items-end', fromGroup && 'opacity-80', continued && '-mt-2.5')}>
+      {fromGroup && <p className="mb-1 flex items-center gap-1.5 text-xs text-ink-3"><GroupTag />你</p>}
+      <div title={time(message.created_at)} className="max-w-[85%] rounded-[14px_4px_14px_14px] bg-author-bubble px-3.5 py-2.5 chat-text leading-[1.75] break-words whitespace-pre-wrap text-ink">{message.content}</div>
+      {!fromGroup && <ChatOutcome message={message} />}
+    </div>
+  )
   return (
-    <div className={clsx('flex gap-2.5', author && 'flex-row-reverse', fromGroup && 'opacity-80')}>
-      <RoleAvatar speaker={message.speaker} />
-      <div className={clsx('min-w-0 max-w-[calc(100%-42px)]', message.kind === 'artifact' && 'flex-1')}>
-        <p className={clsx('mb-1.5 flex flex-wrap items-center gap-1.5 text-xs', author && 'justify-end')}>
-          <span className={clsx('font-medium', author ? 'text-ink-2' : meta.text)}>{author ? '你' : meta.name}</span>
+    <div className={clsx('flex gap-2.5', fromGroup && 'opacity-80', continued && '-mt-2.5')}>
+      {continued ? <span aria-hidden className="w-8 shrink-0" /> : <RoleAvatar speaker={message.speaker} />}
+      <div className={clsx('min-w-0 max-w-[calc(100%-42px)]', wide && 'flex-1')}>
+        {!continued && <p className="mb-1 flex flex-wrap items-center gap-1.5 text-xs">
+          <span className={clsx('font-medium', meta.text)}>{meta.name}</span>
           {fromGroup && <GroupTag />}
           <time className="text-ink-3">{time(message.created_at)}</time>
-        </p>
-        <div className={clsx(
-          'border border-divider px-3 py-2.5 chat-text leading-[1.75] text-ink',
-          author ? 'rounded-[12px_2px_12px_12px] bg-author-bubble whitespace-pre-wrap break-words' : 'rounded-[2px_12px_12px_12px] bg-card',
-        )}>
-          {message.kind === 'plan' ? <PlanCard message={message} /> : message.kind === 'artifact' ? <ArtifactCard message={message} /> : author ? message.content : <Speech message={message} />}
-        </div>
-        {author && !fromGroup && <ChatOutcome message={message} />}
+        </p>}
+        {message.kind === 'plan' ? <PlanCard message={message} /> : message.kind === 'artifact' ? <ArtifactCard message={message} />
+          : <div className="rounded-[4px_14px_14px_14px] bg-card px-3.5 py-2.5 chat-text leading-[1.75] text-ink ring-1 ring-line/70"><Speech message={message} /></div>}
       </div>
     </div>
   )
+}
+
+/** 同一个人五分钟内连着说的话合成一组，只显示一次头像和名字。 */
+function continues(previous: FeedEntry | undefined, entry: FeedEntry) {
+  if (!previous || previous.statuses || previous.privateThread || entry.statuses || entry.privateThread) return false
+  const a = previous.message, b = entry.message
+  if (a.speaker !== b.speaker || !!previous.fromGroup !== !!entry.fromGroup || a.kind === 'error' || b.kind === 'error' || a.kind === 'decision' || b.kind === 'decision') return false
+  return !!a.created_at && !!b.created_at && new Date(b.created_at).getTime() - new Date(a.created_at).getTime() < 5 * 60_000
 }
 
 type Conversation = 'group' | Exclude<Speaker, 'author' | 'system'>
@@ -726,7 +742,7 @@ function StatusGroup({ messages, live, fromGroup }: { messages: MeetingMessage[]
   const [expanded, setExpanded] = useState(false)
   const latest = messages[messages.length - 1]
   return (
-    <div className="space-y-1.5 py-1 text-center text-xs leading-relaxed text-ink-2">
+    <div className="space-y-1 py-0.5 text-center text-xs leading-relaxed text-ink-3">
       {expanded && messages.slice(0, -1).map((message) => <p key={message.id}>{message.content}</p>)}
       <div className="flex flex-wrap items-center justify-center gap-1.5">
         {fromGroup && <GroupTag />}
@@ -792,8 +808,8 @@ export function MeetingFeed({
       className={clsx('scroll-thin space-y-4 overflow-y-auto', className)}
     >
       {entries.length === 0 && !writing && (
-        <div className="px-4 py-12 text-center">
-          <p className="font-serif text-lg text-ink-2">{conversation === 'group' ? '编辑部，等你开口' : `和${ROLE_META[conversation].name}说说你的想法`}</p>
+        <div className="px-4 py-16 text-center">
+          <p className="font-serif text-lg text-ink">{conversation === 'group' ? '编辑部，等你开口' : `和${ROLE_META[conversation].name}说说你的想法`}</p>
           <p className="mt-2 text-sm leading-relaxed text-ink-2">{conversation === 'group' ? '讨论和产出会留在这里，书稿在右边展开。' : '这里只商量，聊出结论后由你决定要不要落实。'}</p>
         </div>
       )}
@@ -805,14 +821,14 @@ export function MeetingFeed({
           transition={{ duration: reduce ? 0 : 0.28, ease: [0.22, 1, 0.36, 1] }}
         >
           {entry.privateThread ? (
-            <button type="button" onClick={() => setConversation(entry.privateThread!)} title={entry.message.speaker === 'author' ? entry.message.content : undefined} className="block w-full truncate py-1 text-center text-xs leading-relaxed text-ink-2 hover:text-ink hover:underline">
+            <button type="button" onClick={() => setConversation(entry.privateThread!)} title={entry.message.speaker === 'author' ? entry.message.content : undefined} className="block w-full truncate py-0.5 text-center text-xs leading-relaxed text-ink-3 hover:text-ink hover:underline">
               {entry.message.speaker === 'author'
                 ? `你私聊了${ROLE_META[entry.privateThread].name}：${entry.message.content.length > 45 ? `${entry.message.content.slice(0, 45)}…` : entry.message.content}`
                 : `${ROLE_META[entry.privateThread].name}回复了你`}
             </button>
           ) : entry.statuses ? (
             <StatusGroup messages={entry.statuses} live={liveStatus && index === entries.length - 1} fromGroup={entry.fromGroup} />
-          ) : <MessageRow message={entry.message} fromGroup={entry.fromGroup} />}
+          ) : <MessageRow message={entry.message} fromGroup={entry.fromGroup} continued={continues(entries[index - 1], entry)} />}
         </motion.div>
       ))}
       {writing && <LiveDraftRow draft={writing} fromGroup={conversation !== 'group'} />}

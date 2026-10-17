@@ -10,6 +10,7 @@ import { EditableText } from '../../../components/Editable'
 import { Badge, Button, Card, EmptyState, ErrorText, inputClass, Skeleton } from '../../../components/ui'
 import { useBookContext } from '../context'
 import { Locked, PageHeader } from './common'
+import { LibrarySubnav } from './LibrarySubnav'
 
 function Stagger({ i, children, className }: { i: number; children: ReactNode; className?: string }) {
   const reduce = useReducedMotion()
@@ -43,7 +44,8 @@ export function RelationsPage() {
 
   return (
     <div>
-      <PageHeader eyebrow="设定库" title="人物关系" subtitle="谁和谁是什么关系、之间有什么张力。" />
+      <PageHeader eyebrow="设定库" title="设定库" subtitle="人物关系：谁和谁是什么关系、之间有什么张力。" />
+      <LibrarySubnav current="relations" />
       <Locked locked={locked} />
       {isLoading && <Skeleton className="h-48" />}
       {!isLoading && relations.length === 0 && <EmptyState title="还没有人物关系" />}
@@ -141,13 +143,14 @@ export function ForeshadowingPage() {
     <div>
       <PageHeader
         eyebrow="设定库"
-        title="伏笔与期待"
+        title="设定库"
         subtitle="伏笔是暗中埋下的线，期待是读者明知并等着兑现的承诺。编辑部按台账安排立下、提醒与兑现。"
         action={!locked && <Button size="sm" variant="soft" disabled={busy} onClick={() => { setNewKind(filter === '全部' ? '伏笔' : filter); setAdding(true) }}><Plus className="size-4" />添加条目</Button>}
       />
+      <LibrarySubnav current="foreshadowing" />
       <Locked locked={locked} />
-      <div role="group" aria-label="按台账类型筛选" className="mb-5 inline-flex gap-1 rounded-xl bg-paper p-1 ring-1 ring-line">
-        {(['全部', '伏笔', '期待'] as const).map(value => <button key={value} aria-pressed={filter === value} onClick={() => setFilter(value)} className={clsx('rounded-lg px-4 py-2 text-sm transition-colors', filter === value ? 'bg-card text-chief shadow-sm' : 'text-ink-2 hover:bg-card/60')}>{value}</button>)}
+      <div role="group" aria-label="按台账类型筛选" className="mb-5 inline-flex gap-0.5 rounded-lg bg-line/70 p-0.5">
+        {(['全部', '伏笔', '期待'] as const).map(value => <button key={value} aria-pressed={filter === value} onClick={() => setFilter(value)} className={clsx('rounded-md px-3 py-1 text-[13px] transition-colors', filter === value ? 'bg-card font-medium text-ink shadow-[0_1px_2px_rgb(0_0_0/0.06)]' : 'text-ink-2 hover:text-ink')}>{value}</button>)}
       </div>
       {adding && !locked && <form className="mb-5 space-y-3 rounded-xl border border-line bg-card p-4" onSubmit={event => {
         event.preventDefault()

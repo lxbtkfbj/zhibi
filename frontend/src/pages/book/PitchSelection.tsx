@@ -1,30 +1,67 @@
+import clsx from 'clsx'
+import { Check, MessageSquareText } from 'lucide-react'
 import { useState } from 'react'
 import { useJobActions } from '../../api/hooks'
 import type { Job, Pending } from '../../api/types'
-import { Badge, Button, ErrorText, inputClass } from '../../components/ui'
+import { Button } from '../../components/ui'
+import { useBookContext } from './context'
+import { PageHeader } from './sections/common'
 
+/** 选故事方向：页面里只管点选，提交在书稿底部的操作条里。 */
 export function PitchSelection({ job, pending }: { job: Job; pending: Extract<Pending, { kind: 'setup_pitches' }> }) {
-  const { pitches, setupPending } = useJobActions(job.book_id)
-  const [length, setLength] = useState(pending.length.options[pending.length.recommended] ?? pending.length.options[0] ?? '')
-  const [titles, setTitles] = useState<Record<number, string>>({})
-  const [feedback, setFeedback] = useState('')
-  const [notice, setNotice] = useState('')
-  const busy = setupPending || pitches.isSuccess
-  const choose = (index: number) => pitches.mutate({ jobId: job.id, action: 'pick', index: index + 1, length: Number(length.match(/\d+/)?.[0]), ...(titles[index]?.trim() ? { title: titles[index].trim() } : {}) })
-  return <section aria-label="选择故事方向" className="space-y-6">
-    <div><h2 className="font-serif text-xl font-bold">先挑一个故事方向</h2><p className="mt-2 text-sm leading-relaxed text-ink-2">挑好篇幅和故事方向，主编会把它展开成定调。也可以在下面说说想怎么混搭。</p></div>
-    {pending.benchmark && <section aria-label="主编对对标作品的理解" className="rounded-xl border border-chief/20 bg-chief-soft/40 p-4"><p className="whitespace-pre-wrap text-[15px] leading-relaxed">我理解的对标作品：{pending.benchmark}</p><p className="mt-2 text-xs text-ink-2">理解得不对？在下面的输入框里告诉主编。</p></section>}
-    <div className="grid gap-4 @2xl/manuscript:grid-cols-3">{pending.pitches.map((pitch, index) => <article key={`${index}-${pitch.name}`} aria-label={`故事方向 ${index + 1}：${pitch.name}`} className="rounded-xl border border-line bg-card p-5">
-      <div className="mb-3 flex flex-wrap items-center gap-2"><h3 className="font-serif text-lg font-bold">{index + 1}. {pitch.name}</h3>{pending.recommended === index + 1 && <Badge tone="busy">主编推荐</Badge>}</div>
-      <p className="whitespace-pre-wrap text-[15px] leading-loose">{pitch.text}</p>
-      <fieldset disabled={busy} className="mt-4"><legend className="mb-2 text-xs text-ink-2">书名候选</legend><div className="flex flex-wrap gap-2">{pitch.titles.map(title => <button key={title} type="button" aria-pressed={titles[index] === title} onClick={() => setTitles(previous => ({ ...previous, [index]: previous[index] === title ? '' : title }))} className={`rounded-lg border px-3 py-2 text-sm ${titles[index] === title ? 'border-chief bg-chief-soft text-chief' : 'border-line'}`}>《{title}》</button>)}</div><input aria-label={`故事方向 ${index + 1} 的书名`} value={titles[index] ?? ''} onChange={event => setTitles(previous => ({ ...previous, [index]: event.target.value }))} placeholder="也可以自己写书名；不填就由主编起名" maxLength={200} className={`${inputClass} mt-3`} /></fieldset>
-      <Button className="mt-4" variant="soft" disabled={busy} loading={pitches.isPending && pitches.variables?.index === index + 1} onClick={() => choose(index)}>用这个</Button>
-    </article>)}</div>
-    <fieldset disabled={busy}><legend className="mb-3 text-sm font-medium">{pending.length.question}</legend><div className="flex flex-wrap gap-2">{pending.length.options.map((option, index) => <label key={option} className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm ${length === option ? 'border-chief bg-chief-soft text-chief' : 'border-line text-ink-2'}`}><input type="radio" name="pitch-length" checked={length === option} onChange={() => setLength(option)} />{option}{index === pending.length.recommended && <span className="text-xs">推荐</span>}</label>)}</div></fieldset>
-    <label className="block text-sm text-ink-2">都不满意，或者想混搭？<textarea aria-label="重出故事方向的意见" value={feedback} onChange={event => setFeedback(event.target.value)} placeholder="都不要？想混搭？直接说，比如：第一个的主角，配第二个的金手指" disabled={busy} rows={3} maxLength={5000} className={`${inputClass} mt-2`} /></label>
-    <Button disabled={busy} loading={pitches.isPending && pitches.variables?.action === 'redo'} onClick={() => { if (!feedback.trim()) { setNotice('先写一句你想怎么改'); return } setNotice(''); pitches.mutate({ jobId: job.id, action: 'redo', feedback: feedback.trim() }) }}>再来三个</Button>
-    {busy && <p role="status" className="text-sm text-chief">{pitches.variables?.action === 'redo' ? '主编正在重新出三个故事方向…' : '主编正在展开定调…'}</p>}
-    {notice && <p role="alert" className="text-sm text-seal">{notice}</p>}
-    <ErrorText error={pitches.error} />
+  const { pitchChoice, setPitchChoice, requestFeedback } = useBookContext()
+  const { setupPending } = useJobActions(job.book_id)
+  const key = `${job.id}-${pending.round}`
+  const current = pitchChoice?.key === key ? pitchChoice : null
+  const [length, setLength] = useState(current?.length ?? pending.length.options[pending.length.recommended] ?? pending.length.options[0] ?? '')
+  const [titles, setTitles] = useState<Record<number, string>>(() => current ? { [current.index]: current.title } : {})
+  const busy = setupPending
+  const choose = (index: number, title = titles[index] ?? '') => { if (!busy) setPitchChoice({ key, index, name: pending.pitches[index].name, title, length }) }
+  const setTitle = (index: number, title: string) => {
+    setTitles(previous => ({ ...previous, [index]: title }))
+    choose(index, title)
+  }
+  return <section aria-label="选择故事方向">
+    <PageHeader eyebrow="书稿 · 定调" title="挑一个故事方向" subtitle="点一下卡片就选中，书名可以在卡片里挑，也可以自己写；选好后点底部的「用这个方向」，主编会把它展开成定调。" />
+    {pending.benchmark && <section aria-label="主编对对标作品的理解" className="mb-6 rounded-xl border border-line bg-subtle px-4 py-3">
+      <p className="text-xs text-ink-3">主编理解的对标作品</p>
+      <p className="mt-1 text-sm leading-relaxed whitespace-pre-wrap text-ink">{pending.benchmark}</p>
+      <p className="mt-1.5 text-xs text-ink-3">理解得不对？在群聊里告诉主编。</p>
+    </section>}
+    <fieldset disabled={busy} className="mb-6">
+      <legend className="mb-2 text-[13px] font-medium text-ink">{pending.length.question}</legend>
+      <div className="flex flex-wrap gap-2">{pending.length.options.map((option, index) => <label key={option} className={clsx('flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-[13px] transition-colors has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-seal', length === option ? 'border-ink bg-ink text-paper-2' : 'border-line-2 bg-card text-ink-2 hover:text-ink')}>
+        <input type="radio" name="pitch-length" className="sr-only" checked={length === option} onChange={() => { setLength(option); if (current) setPitchChoice({ ...current, length: option }) }} />{option}{index === pending.length.recommended && <span className={clsx('text-[11px]', length === option ? 'text-paper-2/70' : 'text-seal')}>推荐</span>}
+      </label>)}</div>
+    </fieldset>
+    <div role="radiogroup" aria-label="三个故事方向" className="grid gap-4 @3xl/manuscript:grid-cols-3">{pending.pitches.map((pitch, index) => {
+      const selected = current?.index === index
+      return <article key={`${index}-${pitch.name}`} aria-label={`故事方向 ${index + 1}：${pitch.name}`} onClick={() => choose(index)}
+        className={clsx('relative flex cursor-pointer flex-col rounded-xl border bg-card p-5 transition-[border-color,box-shadow]', selected ? 'border-ink shadow-[0_0_0_1px_var(--color-ink)]' : 'border-line hover:border-line-2 hover:shadow-[var(--shadow-paper)]', busy && 'pointer-events-none opacity-70')}>
+        <div className="mb-3 flex items-start gap-2">
+          <div className="min-w-0 flex-1">
+            <p className="text-xs text-ink-3">方向 {index + 1}{pending.recommended === index + 1 && <span className="ml-2 rounded bg-seal-soft px-1.5 py-px text-[11px] text-seal-dark">主编推荐</span>}</p>
+            <h3 className="mt-1 font-serif text-lg font-bold text-ink">{pitch.name}</h3>
+          </div>
+          <button type="button" role="radio" aria-checked={selected} aria-label={`选方向 ${index + 1}`} onClick={event => { event.stopPropagation(); choose(index) }}
+            className={clsx('mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border transition-colors', selected ? 'border-ink bg-ink text-paper-2' : 'border-line-2 bg-card')}>{selected && <Check className="size-3" />}</button>
+        </div>
+        <p className="flex-1 text-[14px] leading-[1.9] whitespace-pre-wrap text-ink-2">{pitch.text}</p>
+        <fieldset disabled={busy} className="mt-4 border-t border-line pt-3" onClick={event => event.stopPropagation()}>
+          <legend className="sr-only">书名</legend>
+          <p className="mb-2 text-xs text-ink-3">书名（不选也行，主编会再起）</p>
+          <div className="flex flex-wrap gap-1.5">{pitch.titles.map(title => <button key={title} type="button" aria-pressed={titles[index] === title} onClick={() => setTitle(index, titles[index] === title ? '' : title)}
+            className={clsx('rounded-md border px-2.5 py-1 text-[13px] transition-colors', titles[index] === title ? 'border-chief/50 bg-chief-soft text-chief' : 'border-line-2 text-ink-2 hover:text-ink')}>《{title}》</button>)}</div>
+          <input aria-label={`故事方向 ${index + 1} 的书名`} value={titles[index] ?? ''} onChange={event => setTitle(index, event.target.value)} onFocus={() => choose(index)} placeholder="自己写一个书名" maxLength={200}
+            className="mt-2 h-8 w-full rounded-lg border border-line bg-card px-2.5 text-[13px] placeholder:text-ink-3 focus:border-ink-3 focus:outline-none" />
+        </fieldset>
+      </article>
+    })}</div>
+    <div className="mt-6 flex flex-wrap items-center gap-3 rounded-xl border border-dashed border-line-2 px-4 py-3 text-[13px] text-ink-2">
+      <MessageSquareText aria-hidden className="size-4 shrink-0 text-ink-3" />
+      <span className="min-w-0 flex-1">都不满意，或者想混搭？直接在群聊里说，比如「第一个的主角，配第二个的金手指」，主编会重出三个。</span>
+      <Button size="sm" variant="outline" onClick={requestFeedback}>在群聊里说</Button>
+    </div>
+    {busy && <p role="status" className="mt-4 text-[13px] text-chief">主编正在处理你的选择…</p>}
   </section>
 }

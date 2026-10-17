@@ -22,17 +22,17 @@ export function Button({
       {...rest}
       disabled={disabled || loading}
       className={clsx(
-        'press inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl font-medium whitespace-nowrap transition-colors',
+        'press inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg font-medium whitespace-nowrap transition-colors',
         'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-seal',
         'disabled:cursor-not-allowed disabled:opacity-50',
-        { sm: 'h-8 px-3 text-[13px]', md: 'h-10 px-4 text-sm', lg: 'h-12 px-6 text-[15px]' }[size],
+        { sm: 'h-8 px-3 text-[13px]', md: 'h-9 px-4 text-sm', lg: 'h-11 px-5 text-[15px]' }[size],
         {
-          primary: 'bg-ink text-paper-2 shadow-[var(--shadow-paper)] hover:bg-ink-2',
-          seal: 'bg-seal text-paper-2 shadow-[var(--shadow-paper)] hover:bg-seal-dark',
-          ghost: 'text-ink-2 hover:bg-line/60 hover:text-ink',
-          outline: 'border border-line-2 bg-card text-ink hover:border-ink-3/50 hover:bg-paper-2',
+          primary: 'bg-ink text-paper-2 hover:bg-ink-2',
+          seal: 'bg-seal text-on-role hover:bg-seal-dark',
+          ghost: 'text-ink-2 hover:bg-line/70 hover:text-ink',
+          outline: 'border border-line-2 bg-card text-ink hover:border-ink-3/50 hover:bg-subtle',
           danger: 'border border-seal/40 bg-card text-seal hover:bg-seal-soft',
-          soft: 'bg-paper-2 text-ink-2 ring-1 ring-line hover:text-ink hover:ring-line-2',
+          soft: 'border border-line bg-subtle text-ink-2 hover:border-line-2 hover:text-ink',
         }[variant],
         className,
       )}
@@ -283,7 +283,21 @@ export function Label({ children, hint }: { children: ReactNode; hint?: ReactNod
 }
 
 export const inputClass =
-  'w-full rounded-xl border border-line-2 bg-card px-3.5 py-2.5 text-[15px] text-ink placeholder:text-ink-3 transition-shadow focus:border-seal/60 focus:outline-none focus:ring-4 focus:ring-seal/10'
+  'w-full rounded-lg border border-line-2 bg-card px-3.5 py-2.5 text-[15px] text-ink placeholder:text-ink-3 transition-shadow focus:border-ink-3 focus:outline-none focus:ring-4 focus:ring-ink/5'
+
+/** 页内的几种看法切换（树／地图／线索、条目／人物关系……）。 */
+export function Segmented<T extends string>({ value, options, onChange, label, className }: { value: T; options: readonly (readonly [T, ReactNode])[]; onChange: (value: T) => void; label: string; className?: string }) {
+  return (
+    <div role="tablist" aria-label={label} className={clsx('inline-flex max-w-full shrink-0 gap-0.5 overflow-x-auto rounded-lg bg-line/70 p-0.5 no-scrollbar', className)}>
+      {options.map(([key, text]) => (
+        <button key={key} type="button" role="tab" aria-selected={value === key} onClick={() => onChange(key)}
+          className={clsx('flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1 text-[13px] whitespace-nowrap transition-colors', value === key ? 'bg-card font-medium text-ink shadow-[0_1px_2px_rgb(0_0_0/0.06)]' : 'text-ink-2 hover:text-ink')}>
+          {text}
+        </button>
+      ))}
+    </div>
+  )
+}
 
 export function ErrorText({ error }: { error: unknown }) {
   if (!error) return null

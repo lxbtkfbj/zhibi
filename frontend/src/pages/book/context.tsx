@@ -37,6 +37,9 @@ export interface BookContextValue {
   composerDrafts: Record<string, string>
   setComposerDrafts: Dispatch<SetStateAction<Record<string, string>>>
   celebrate: () => void
+  /** 选故事方向时页面里点选的那一张；底部操作条负责提交。 */
+  pitchChoice: PitchChoice | null
+  setPitchChoice: (choice: PitchChoice | null) => void
   segmentPinEnd: boolean
   setSegmentPinEnd: (value: boolean) => void
   segmentReview: {
@@ -45,6 +48,15 @@ export interface BookContextValue {
     error: unknown
     submit: (body: SegmentDecisionInput) => Promise<boolean>
   }
+}
+
+export interface PitchChoice {
+  /** 任务 id 加轮次；重出一轮后旧选择自动作废。 */
+  key: string
+  index: number
+  name: string
+  title: string
+  length: string
 }
 
 export interface SegmentDecisionInput {
