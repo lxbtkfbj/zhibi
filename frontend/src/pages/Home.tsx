@@ -20,8 +20,6 @@ const IDEAS = [
 
 function Composer({ autoFocus, flat }: { autoFocus?: boolean; flat?: boolean }) {
   const [idea, setIdea] = useState('')
-  const [style, setStyle] = useState('')
-  const [showStyle, setShowStyle] = useState(false)
   const [placeholder, setPlaceholder] = useState(0)
   const create = useCreateBook()
   const navigate = useNavigate()
@@ -44,7 +42,7 @@ function Composer({ autoFocus, flat }: { autoFocus?: boolean; flat?: boolean }) 
     // 开书只走「一步一步看」，每一步做完停下来给作者确认
     if (!ready || create.isPending) return
     try {
-      const result = await create.mutateAsync({ idea: idea.trim(), style_reference: style.trim(), mode: 'puzzle', prefill: false })
+      const result = await create.mutateAsync({ idea: idea.trim(), style_reference: '', mode: 'puzzle', prefill: false })
       navigate(`/books/${result.book.id}`)
     } catch { /* 错误在创建区显示，保留点子 */ }
   }
@@ -65,23 +63,7 @@ function Composer({ autoFocus, flat }: { autoFocus?: boolean; flat?: boolean }) 
         onKeyDown={(e) => e.key === 'Enter' && (e.ctrlKey || e.metaKey) && void submit()}
         className="w-full resize-none rounded-xl bg-transparent px-4 pt-3 font-serif text-lg leading-relaxed text-ink placeholder:text-ink-3/70 focus:outline-none"
       />
-      {showStyle && (
-        <textarea
-          value={style}
-          onChange={(e) => setStyle(e.target.value)}
-          rows={3}
-          autoFocus
-          placeholder="贴一段你喜欢的文字，编辑部会参考它的文风"
-          className="mx-2 mb-2 w-[calc(100%-1rem)] resize-none rounded-xl bg-paper-2 px-3 py-2 text-sm leading-relaxed ring-1 ring-line focus:ring-line-2 focus:outline-none"
-        />
-      )}
       <div className="flex flex-wrap items-center gap-2 px-2 pb-1">
-        <button
-          onClick={() => setShowStyle(!showStyle)}
-          className={clsx('rounded-lg px-2.5 py-1.5 text-[13px] transition-colors', showStyle ? 'bg-line/60 text-ink' : 'text-ink-3 hover:bg-line/50 hover:text-ink')}
-        >
-          {showStyle ? '收起文风参考' : '+ 文风参考'}
-        </button>
         <button
           onClick={() => setIdea(IDEAS[Math.floor(Math.random() * IDEAS.length)])}
           className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[13px] text-ink-3 transition-colors hover:bg-line/50 hover:text-ink"
@@ -208,11 +190,6 @@ export function Home() {
           </Reveal>
           <Reveal delay={0.16}>
             <Composer />
-          </Reveal>
-          <Reveal delay={0.24}>
-            <p className="mt-4 text-center text-[13px] text-ink-3">
-              定调 · 设定库 · 大纲 —— 随时插话，三步都能回头改
-            </p>
           </Reveal>
         </div>
       </section>
