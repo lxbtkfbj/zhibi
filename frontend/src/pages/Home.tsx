@@ -5,8 +5,6 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useBooks, useCreateBook, useDeleteBook, useProfiles } from '../api/hooks'
 import type { BookSummary } from '../api/types'
-import { useNewBookDefaults } from '../api/settings'
-import { Segmented } from '../components/settings/SettingsList'
 import { BookCover } from '../components/BookCover'
 import { Cloud, Diamond, FretDivider, InkMountains } from '../components/decor'
 import { Badge, Button, ErrorText, Modal, Reveal, Skeleton, Spinner } from '../components/ui'
@@ -23,11 +21,7 @@ const IDEAS = [
 function Composer({ autoFocus, flat }: { autoFocus?: boolean; flat?: boolean }) {
   const [idea, setIdea] = useState('')
   const [style, setStyle] = useState('')
-  const [prefill, setPrefill] = useState(false)
   const [showStyle, setShowStyle] = useState(false)
-  const defaults = useNewBookDefaults()
-  const [selectedMode, setSelectedMode] = useState<'puzzle' | 'oneshot' | null>(null)
-  const mode = selectedMode ?? defaults.data?.settings.setup_mode ?? 'puzzle'
   const [placeholder, setPlaceholder] = useState(0)
   const create = useCreateBook()
   const navigate = useNavigate()
@@ -47,9 +41,10 @@ function Composer({ autoFocus, flat }: { autoFocus?: boolean; flat?: boolean }) 
 
   const submit = async () => {
     // 快捷键会绕过按钮的禁用状态，这里再拦一次，避免重复建书
-    if (!ready || create.isPending || !defaults.data) return
+    // 开书只走「一步一步看」，每一步做完停下来给作者确认
+    if (!ready || create.isPending) return
     try {
-      const result = await create.mutateAsync({ idea: idea.trim(), style_reference: style.trim(), mode, prefill })
+      const result = await create.mutateAsync({ idea: idea.trim(), style_reference: style.trim(), mode: 'puzzle', prefill: false })
       navigate(`/books/${result.book.id}`)
     } catch { /* 错误在创建区显示，保留点子 */ }
   }
@@ -80,12 +75,6 @@ function Composer({ autoFocus, flat }: { autoFocus?: boolean; flat?: boolean }) 
           className="mx-2 mb-2 w-[calc(100%-1rem)] resize-none rounded-xl bg-paper-2 px-3 py-2 text-sm leading-relaxed ring-1 ring-line focus:ring-line-2 focus:outline-none"
         />
       )}
-      <div className="flex flex-wrap items-center gap-3 border-t border-line/70 px-3 py-3">
-        <span className="text-sm text-ink-2">开书方式</span>
-        <Segmented label="开书方式" value={mode} options={[{ value: 'puzzle', label: '一步一步看' }, { value: 'oneshot', label: '一口气做完再给我看' }]} onChange={setSelectedMode} />
-      </div>
-      <div className="px-4 pb-3"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={prefill} onChange={event => setPrefill(event.target.checked)} className="accent-[var(--color-chief)]" />先写设定，写好了再出故事方向</label><p className="mt-1 text-xs leading-relaxed text-ink-2">有想好的金手指、境界、人物，可以先写进设定库，故事方向会围着它们出。</p></div>
-      {mode === 'oneshot'  && <p className="px-4 pb-3 text-xs leading-relaxed text-ink-2">定调和设定库做完不停，停在大纲给你看</p>}
       <div className="flex flex-wrap items-center gap-2 px-2 pb-1">
         <button
           onClick={() => setShowStyle(!showStyle)}
@@ -101,7 +90,7 @@ function Composer({ autoFocus, flat }: { autoFocus?: boolean; flat?: boolean }) 
           给我一个灵感
         </button>
         <span className="ml-auto hidden text-xs text-ink-3 sm:inline">Ctrl + Enter</span>
-        <Button variant="seal" size="lg" onClick={submit} loading={create.isPending} disabled={!ready || !defaults.data}>
+        <Button variant="seal" size="lg" onClick={submit} loading={create.isPending} disabled={!ready}>
           交给编辑部
           <ArrowRight className="size-4" />
         </Button>
@@ -113,8 +102,6 @@ function Composer({ autoFocus, flat }: { autoFocus?: boolean; flat?: boolean }) 
       )}
       <div className="px-2">
         <ErrorText error={create.error} />
-        <ErrorText error={defaults.error} />
-        {defaults.isError && <button className="text-sm text-seal underline" onClick={() => void defaults.refetch()}>重试读取新书默认</button>}
       </div>
     </div>
   )
@@ -128,7 +115,7 @@ function NewBookDialog({ open, onClose }: { open: boolean; onClose: () => void }
       </p>
       <Composer autoFocus flat />
       <p className="mt-3 text-xs leading-relaxed text-ink-3">
-        逐步确认会在每一步做完后停下来；一口气模式完成定调和设定库，停在大纲给你看。编辑部工作时，你也可以随时在讨论里插话。
+        每一步做完都会停下来给你看。编辑部工作时，你也可以随时在讨论里插话。
       </p>
     </Modal>
   )
