@@ -447,7 +447,8 @@ class ChapterOutlineIn(BaseModel):
 
 
 class ChapterPatch(BaseModel):
-    title: str | None = Field(None, min_length=1, max_length=200)
+    # 空的就是还没起名（新书页上撤销编辑部起的章名时会存回空的）
+    title: str | None = Field(None, max_length=200)
     content: str | None = None
     # 只改给出的几项；已经开写的章不能改
     outline: ChapterOutlineIn | None = None
@@ -459,6 +460,14 @@ class ChapterCreate(BaseModel):
     # 插在哪：这一章之前或之后（同一个单元里的章号）；都不给就接在单元最后
     before_index: int | None = None
     after_index: int | None = None
+
+
+class OutlineWriteIn(BaseModel):
+    """让编辑部把大纲上的这一段写出来：全书结局、篇、卷、单元、章。"""
+
+    target_type: Literal["book", "segment", "volume", "unit", "chapter"]
+    target_id: str = Field(max_length=64)
+    request: str = Field(default="", max_length=1000)
 
 
 class FillRequest(BaseModel):

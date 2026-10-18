@@ -1360,6 +1360,53 @@ function CountField({ node }: { node: VNode }) {
   )
 }
 
+/** 编辑部帮写这一段：说一句想要什么（不说也行），直接写进去，不满意点撤销。正在写的那一段记在这里，换页回来还看得到。 */
+const writingNodes = new Set<string>()
+
+function WriteHelp({ node }: { node: VNode }) {
+  const { actions, notify } = useWorkspace()
+  const [open, setOpen] = useState(false)
+  const [request, setRequest] = useState('')
+  const [writing, setWriting] = useState(() => writingNodes.has(node.id))
+  if (!actions.writeNode || !actions.canWrite?.(node)) return null
+  const what = ({ 章: '这一章的章纲', 全书: '结局', 篇: '这一篇', 卷: '这一卷', 单元: '这个单元' } as Record<string, string>)[node.kind] ?? '这一段'
+  const empty = node.sections ? node.sections.every((f) => !f.text.trim()) : !node.text.trim()
+  const go = () => {
+    const id = node.id
+    writingNodes.add(id)
+    setWriting(true)
+    setOpen(false)
+    actions.writeNode!(node, request.trim())
+      .then((reply) => {
+        setRequest('')
+        notify?.(`编辑部写好了${what}${reply.note ? `：${reply.note}` : ''}`, () => actions.saveNode(node, reply.before))
+      })
+      .catch((error: unknown) => notify?.(`没写成：${errorText(error)}`))
+      .finally(() => {
+        writingNodes.delete(id)
+        setWriting(false)
+      })
+  }
+  if (writing) return <p className="flex items-center gap-1.5 text-[13px] text-chief"><Sparkles className="size-3.5" />主编在写{what}，一般半分钟上下，写好直接换上…</p>
+  if (!open) return <div><AskButton onClick={() => setOpen(true)}>{empty ? `编辑部帮写${what}` : `编辑部帮改写${what}`}</AskButton></div>
+  return (
+    <div className="rounded-2xl border border-line bg-subtle p-5">
+      <div className="mb-3 flex items-center gap-2">
+        <span className="flex size-6 items-center justify-center rounded-full bg-chief font-serif text-xs text-on-role">主</span>
+        <p className="text-[15px] text-ink">想让{what}写成什么样？</p>
+        <button type="button" onClick={() => setOpen(false)} className="ml-auto text-[13px] text-ink-3 hover:text-ink">收起</button>
+      </div>
+      <textarea autoFocus value={request} onChange={(e) => setRequest(e.target.value)} rows={2}
+        placeholder={empty ? '比如：主角在这里第一次亮出金手指，要憋屈一阵再爆。不写也行，编辑部照前后的大纲和设定来。' : '比如：节奏快一点，结尾留个钩子。不写也行；你写过的意思都会留着，在上面补全写顺。'}
+        className="w-full resize-none rounded-xl border border-line-2 bg-card px-4 py-3 text-[15px] leading-relaxed text-ink [field-sizing:content] placeholder:text-ink-3 focus:border-ink-3 focus:outline-none" />
+      <div className="mt-3 flex items-center justify-between gap-4">
+        <p className="text-xs text-ink-3">{node.kind === '章' || node.kind === '全书' ? '' : '名字你起过的就不换，'}写好直接换上；不满意，底下点撤销就换回原来的。</p>
+        <button type="button" onClick={go} className="h-9 shrink-0 rounded-lg bg-ink px-5 text-sm text-paper-2 transition-colors hover:bg-ink-2">写</button>
+      </div>
+    </div>
+  )
+}
+
 function OutlinePage({ book, outline, id, nav, onAdd, onInsert, onMove, fresh }: {
   book: VBook; outline: VNode; id: string; nav: Nav; onAdd: (id: string) => void
   onInsert: (node: VNode, where: 'before' | 'after') => void; onMove: (node: VNode, direction: 'up' | 'down') => void; fresh: boolean
@@ -1411,6 +1458,7 @@ function OutlinePage({ book, outline, id, nav, onAdd, onInsert, onMove, fresh }:
           ))
           : <Prose value={node.text} readOnly={!actions.canEdit(node, 'text')} spot={`n|${node.id}`} placeholder={NODE_PLACEHOLDER[node.kind]}
             onSave={(text) => save(actions.saveNode(node, { text }))} />}
+        <WriteHelp node={node} />
         {child && (canAdd || !!node.children?.length) && (
           <section>
             <h3 className="mb-1 text-[13px] tracking-[0.15em] text-ink-3">下面的{child}{node.children?.length ? ` · ${node.children.length} 个` : ''}</h3>
@@ -1900,14 +1948,15 @@ export function Workspace({ book: base, actions, right, chat, chatBadge, openCha
 
   const report = useCallback((error: unknown) => setToast(`没存上：${errorText(error)}`), [])
   // 编辑部刚改了一处：底下一条「改好了 · 撤销」，过一会儿自己收起
-  const [undo, setUndo] = useState<{ text: string; versionId: string } | null>(null)
+  const [undo, setUndo] = useState<{ text: string; versionId?: string; restore?: () => Promise<void> } | null>(null)
   useEffect(() => {
     if (!undo) return
     const timer = setTimeout(() => setUndo(null), 15000)
     return () => clearTimeout(timer)
   }, [undo])
-  const onUndo = useCallback((text: string, versionId?: string | null) => {
-    if (versionId) setUndo({ text, versionId })
+  const onUndo = useCallback((text: string, how?: string | (() => Promise<void>) | null) => {
+    if (typeof how === 'function') setUndo({ text, restore: how })
+    else if (how) setUndo({ text, versionId: how })
     else setToast(text)
   }, [])
 
@@ -2107,9 +2156,10 @@ export function Workspace({ book: base, actions, right, chat, chatBadge, openCha
           <div className="fixed bottom-8 left-1/2 z-50 flex max-w-[min(640px,90vw)] -translate-x-1/2 items-center gap-3 rounded-full bg-ink px-5 py-2.5 text-[13px] text-paper-2 shadow-[var(--shadow-lift)]">
             <Wand2 className="size-3.5 shrink-0" /><span className="line-clamp-2">{undo.text}</span>
             <button type="button" className="shrink-0 whitespace-nowrap underline underline-offset-4 hover:text-white" onClick={() => {
-              const versionId = undo.versionId
+              const { versionId, restore } = undo
               setUndo(null)
-              actions.revert?.(versionId).then(() => setToast('撤销了，换回了原来的')).catch(report)
+              const back = restore ? restore() : versionId ? actions.revert?.(versionId) : undefined
+              back?.then(() => setToast('撤销了，换回了原来的')).catch(report)
             }}>撤销</button>
           </div>
         )}

@@ -6,7 +6,7 @@ import { del, get, patch, post, put } from '../../api/client'
 import type { LibraryItem, LibrarySnapshot } from '../../api/library'
 import type { ChapterBrief } from '../../api/types'
 import type { OutlineTree } from '../../lib/outlineTree'
-import type { RewriteOutcome, WorkspaceActions } from './actions'
+import type { NodeChange, RewriteOutcome, WorkspaceActions } from './actions'
 import { type ApiParts, CHARACTER_COLUMNS, ENTRY_CATEGORY, WORLD_OVERVIEW, bookFromApi, contentKey } from './fromApi'
 import { findEntry, findNode, type VBook, type VEntry } from './model'
 
@@ -203,7 +203,7 @@ export function useLiveBook(bookId: string) {
         else if (ref.type === 'unit') await done(patch(`/units/${ref.id}`, { ...(change.name !== undefined ? { title: change.name } : {}), ...(change.text !== undefined ? { summary: change.text } : {}), ...count }))
         else if (ref.type === 'chapter') {
           const body: Record<string, unknown> = {}
-          if (change.name) body.title = change.name
+          if (change.name !== undefined) body.title = change.name
           if (change.sections) body.outline = chapterOutline(change.sections)
           if (Object.keys(body).length) await done(patch(`/books/${bookId}/chapters/${ref.id}`, body))
         }
@@ -300,6 +300,14 @@ export function useLiveBook(bookId: string) {
         return { revertVersionId: reply.revert_version_id, candidate: reply.candidate }
       },
       chooseOption: async (candidateId, index) => (await done(post<{ revert_version_id?: string | null }>(`/candidates/${candidateId}/choose`, { index }))).revert_version_id ?? null,
+      writeNode: async (node, request) => {
+        const ref = node.ref
+        if (!ref) throw new Error('这一段还不能让编辑部写')
+        const reply = await done(post<{ note: string; before: NodeChange }>(`/books/${bookId}/outline/write`, { target_type: ref.type, target_id: ref.id, request }))
+        return { note: reply.note, before: reply.before }
+      },
+      // 开写了的章、卷、单元不写；章纲只有还没开写的能写
+      canWrite: (node) => !!node.ref && (node.kind === '章' ? node.progress === '已规划' : !node.progress || node.progress === '已规划'),
       revert: (versionId) => done(post(`/versions/${versionId}/revert`)).then(() => undefined),
       fillEntry: async (entry) => {
         const reply = await done(post<{ filled: string[]; revert_version_id?: string | null }>(`/books/${bookId}/fill-entry`, {

@@ -832,6 +832,17 @@ def _library_fill(user: str) -> s.EntryFill:
     return s.EntryFill(values=values, note=f"（演示）补了 {len(values)} 栏。")
 
 
+def _outline_write(user: str, chapter: bool) -> s.OutlineNodeWrite | s.ChapterOutlineWrite:
+    """大纲帮写一段：照「要写的那一段」的名字出演示文字。"""
+    name = (re.search(r"在看大纲上的(.+?)，想让你", user) or [None, "这一段"])[1]
+    if chapter:
+        return s.ChapterOutlineWrite(
+            title="演示章名", goal=f"（演示）{name}要做成的事", scenes=["（演示）场景一", "（演示）场景二"],
+            cool_point="（演示）爽点", hook="（演示）钩子", note="（演示）写了章纲。",
+        )
+    return s.OutlineNodeWrite(title="演示名字", text=f"（演示）{name}的剧情：起、压、爆、收。", note="（演示）写了一段。")
+
+
 def _library_draft(user: str) -> s.DraftSet:
     """帮写几条：按提示里的栏目逐栏填演示文字。"""
     category = (re.search(r"「(.+?)」这一类", user) or [None, "设定"])[1]
@@ -1095,6 +1106,8 @@ async def respond(schema: type[BaseModel], system: str, user: str) -> BaseModel:
         s.GapReport: lambda: _library_gaps(user),
         s.DraftSet: lambda: _library_draft(user),
         s.EntryFill: lambda: _library_fill(user),
+        s.OutlineNodeWrite: lambda: _outline_write(user, False),
+        s.ChapterOutlineWrite: lambda: _outline_write(user, True),
         s.LibraryReview: lambda: _library_review(user),
         s.LibraryIntent: lambda: _library_intent(user),
         s.ChatReply: lambda: _chat_reply(system, user),

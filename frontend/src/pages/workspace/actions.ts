@@ -58,7 +58,7 @@ export interface WorkspaceActions {
   resetTemplate(category: VCategory): Promise<void>
   createCategory(name: string, style: CategoryStyle, fields: string[], about: string): Promise<void>
   /** sections 是章纲那几栏，键是栏目名（发生什么、看点、结尾钩子） */
-  saveNode(node: VNode, change: { name?: string; text?: string; sections?: Record<string, string>; chapters?: number }): Promise<void>
+  saveNode(node: VNode, change: NodeChange): Promise<void>
   /** 在这个节点下面加一个下一层，返回新节点的 id */
   addNode(parent: VNode): Promise<string | undefined>
   deleteNode(node: VNode): Promise<void>
@@ -82,14 +82,21 @@ export interface WorkspaceActions {
   revert?(versionId: string): Promise<void>
   /** 让编辑部把这一条空着的栏目补上，写过的不动 */
   fillEntry?(entry: VEntry): Promise<{ filled: string[]; revertVersionId?: string | null }>
+  /** 编辑部帮写大纲上的这一段（结局、篇、卷、单元写名字和一段话，章写章纲），直接写进去；before 是改之前的样子，撤销就存回去 */
+  writeNode?(node: VNode, request: string): Promise<{ note: string; before: NodeChange }>
+  /** 这一段能不能让编辑部写：开写了的不行 */
+  canWrite?(node: VNode): boolean
 }
+
+/** 大纲上一段要改的地方。sections 是章纲那几栏，键是栏目名（发生什么、看点、结尾钩子）；chapters 是章数，0 是还没定 */
+export interface NodeChange { name?: string; text?: string; sections?: Record<string, string>; chapters?: number }
 
 interface WorkspaceTools {
   actions: WorkspaceActions
   /** 存不上时在页面底下说一声 */
   report: (error: unknown) => void
-  /** 编辑部做完一件事在页面底下说一声；带版本的可以撤销 */
-  notify?: (text: string, versionId?: string | null) => void
+  /** 编辑部做完一件事在页面底下说一声；带版本（或带怎么换回去）的可以撤销 */
+  notify?: (text: string, undo?: string | (() => Promise<void>) | null) => void
 }
 
 export const ActionsContext = createContext<WorkspaceTools | null>(null)

@@ -976,3 +976,22 @@ class DraftSet(Lenient):
 class EntryFill(Lenient):
     values: list[FieldValue] = Field(default_factory=list, description="只写【要补的栏目】里的那几栏，栏目名照抄")
     note: str = Field(default="", description="给作者的一句话：这次补了什么思路")
+
+
+class OutlineNodeWrite(Lenient):
+    """大纲上的一段：全书结局、篇、卷、单元，只有名字和一段话。"""
+
+    title: str = Field(default="", description="名字，不带「第几篇」「第几卷」；全书结局不用写")
+    text: str = Field(description="这一段")
+    note: str = Field(default="", description="给作者的一句话：这次的思路")
+
+
+class ChapterOutlineWrite(Lenient):
+    """大纲上的一章：章名和章纲。"""
+
+    title: str = Field(default="", description="章名，不带「第几章」，网文风格，4-12 字")
+    goal: str = Field(description="这一章要完成的剧情任务，一句话")
+    scenes: list[str] = Field(default_factory=list, description="按顺序 2-4 个场景，每个一句：在哪、谁、发生什么")
+    cool_point: str = Field(default="", description="这一章的爽点或情绪高点")
+    hook: str = Field(default="", description="结尾停在什么悬念上")
+    note: str = Field(default="", description="给作者的一句话：这次的思路")

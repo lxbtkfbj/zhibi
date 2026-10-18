@@ -18,7 +18,7 @@ from app.api.deps import SessionDep, ensure_idle, get_book
 from app.api.library_ai import call_model
 from app.library_config import BUILTIN_CATEGORIES, CHARACTER_CATEGORY, GOLDFINGER, LEGACY_ROLE_TYPES, ROLE_TYPES
 from app.models import Book, Chapter, Character, PlotUnit, SettingCategory, StoryNode, Volume, WorldEntry
-from app.schemas import ArcCreate, CardLayoutIn, ChapterCreate, DraftRequest, FillRequest, OutlineMove
+from app.schemas import ArcCreate, CardLayoutIn, ChapterCreate, DraftRequest, FillRequest, OutlineMove, OutlineWriteIn
 from app.services import outline_structure
 from app.services.desk import (
     CHARACTER_COLUMNS,
@@ -32,6 +32,7 @@ from app.services.desk import (
 )
 from app.services.library import lock_book
 from app.services.library_context import load_context
+from app.services.outline_write import write_outline_node
 from app.services.requirements import active_requirements, requirement_text
 from app.services.versions import record_version, snapshot_of
 
@@ -424,6 +425,12 @@ async def draft_entries(body: DraftRequest, book: Book = Depends(get_book), sess
 async def fill_one_entry(body: FillRequest, book: Book = Depends(get_book), session: AsyncSession = SessionDep) -> dict:
     """让编辑部把这一条空着的栏目补上（卡片右上角「⋯」里点的）。"""
     return await fill_entry(session, book, body.target_type, body.target_id, body.request)
+
+
+@router.post("/books/{book_id}/outline/write")
+async def write_outline(body: OutlineWriteIn, book: Book = Depends(get_book), session: AsyncSession = SessionDep) -> dict:
+    """大纲上每一页的「编辑部帮写这一段」：直接写进去，返回改之前的样子好撤销。"""
+    return await write_outline_node(session, book, body.target_type, body.target_id, body.request)
 
 
 @router.post("/books/{book_id}/outline/move")
