@@ -1,7 +1,7 @@
 /** 工作台原型用的两本假书：理想样子的示例书，和刚开的空书。只为看样子，不连后台。 */
 
 import {
-  CATEGORY_HINTS, CHARACTER_PLACEHOLDERS, GOLDFINGER_PLACEHOLDERS, defaultCategories, linkMentions,
+  CATEGORY_NAMES, CHARACTER_PLACEHOLDERS, GOLDFINGER_PLACEHOLDERS, emptyCategory, linkMentions, numberChapters,
   type VBook, type VCategory, type VEntry, type VNode,
 } from './model'
 
@@ -24,7 +24,7 @@ interface CharacterInput {
 function character(c: CharacterInput): VEntry {
   const labels = ['外貌', '性格与说话方式', '身世', '想要什么', '能力', ...(c.role === '主角' ? [] : ['和主角的关系']), '备注'] as const
   return {
-    id: c.id, kind: 'character', category: '角色', name: c.name, oneLine: c.oneLine, tags: c.tags ?? [], locked: false, role: c.role,
+    id: c.id, kind: 'character', category: '角色列表', name: c.name, oneLine: c.oneLine, tags: c.tags ?? [], locked: false, role: c.role,
     facts: [['别名', c.alias ?? ''], ['定位', c.role], ['性别', c.gender ?? ''], ['年龄', c.age ?? '']],
     sections: labels.map((label) => ({ label, text: c.long[label] ?? '', placeholder: CHARACTER_PLACEHOLDERS[label] })),
     now: c.now ? [['想要', c.now.想要 ?? ''], ['在哪', c.now.在哪 ?? ''], ['处境', c.now.处境 ?? ''], ['活着', c.now.活着 ?? '']] : undefined,
@@ -34,17 +34,14 @@ function character(c: CharacterInput): VEntry {
 
 function paragraph(category: string, e: { id: string; name: string; oneLine: string; body: string; tags?: string[]; locked?: boolean; parent?: string; knownBy?: string }): VEntry {
   return {
-    id: e.id, kind: 'paragraph', category, name: e.name, oneLine: e.oneLine, tags: e.tags ?? [], locked: !!e.locked, parent: e.parent,
-    facts: e.knownBy ? [['谁知道', e.knownBy]] : [],
-    sections: [{ label: '详细', text: e.body, placeholder: `一段话写清：${CATEGORY_HINTS[category]?.join('；') ?? ''}。` }],
-    appears: [],
+    id: e.id, kind: 'paragraph', category, name: e.name, oneLine: '', tags: e.tags ?? [], locked: !!e.locked, parent: e.parent,
+    facts: [], sections: [], body: [e.oneLine, e.body].filter(Boolean).join(''), knownBy: e.knownBy, appears: [],
   }
 }
 
 const categories: VCategory[] = [
   {
-    name: '角色',
-    hints: CATEGORY_HINTS.角色,
+    ...emptyCategory('角色列表'),
     entries: [
       character({
         id: 'chenmo', name: '陈默', oneLine: '外门杂役，一睁眼就能看见所有人头顶剩下的寿命。', tags: ['主角'], role: '主角', alias: '小默子', gender: '男', age: '十七岁',
@@ -80,8 +77,7 @@ const categories: VCategory[] = [
     ],
   },
   {
-    name: '金手指',
-    hints: CATEGORY_HINTS.金手指,
+    ...emptyCategory('金手指'),
     entries: [
       {
         id: 'eye', kind: 'goldfinger', category: '金手指', name: '窥命之眼', oneLine: '看得见所有人头顶剩下的寿命，看得越久，折自己的寿越多。', tags: ['金手指'], locked: false, holder: 'chenmo',
@@ -98,8 +94,7 @@ const categories: VCategory[] = [
     ],
   },
   {
-    name: '等级体系',
-    hints: CATEGORY_HINTS.等级体系,
+    ...emptyCategory('等级体系'),
     entries: [
       {
         id: 'realm', kind: 'ladder', category: '等级体系', name: '修炼境界', oneLine: '每破一境多一甲子寿命，所以人人都在拼命往上爬。', tags: [], locked: false, facts: [], sections: [],
@@ -115,35 +110,30 @@ const categories: VCategory[] = [
     ],
   },
   {
-    name: '世界与地图',
-    hints: CATEGORY_HINTS.世界与地图,
+    ...emptyCategory('地点列表'),
     entries: [
-      paragraph('世界与地图', { id: 'world', name: '世界概况', oneLine: '灵气一年比一年稀薄，寿命成了修士最值钱的东西。', body: '东洲七宗分据七山，青冥宗居首。凡人六十而终，修士靠境界续命；境界卡住的人，只能另想办法。钱用灵石，但真正的硬通货是寿元。' }),
-      paragraph('世界与地图', { id: 'outer', name: '青冥宗外门', oneLine: '青冥宗山脚的一圈院落，三千外门弟子。', body: '' }),
-      paragraph('世界与地图', { id: 'yard', name: '外门杂役院', oneLine: '青冥宗最底下的地方，三百杂役挤在一座山坳里。', parent: 'outer', body: '每月初一发一次丹药，每年一次外门考核。考不过的人就“下山”了，再没人见过。杂役之间互相盯着，谁多领了一口饭，第二天全院都知道。' }),
+      paragraph('地点列表', { id: 'outer', name: '青冥宗外门', oneLine: '青冥宗山脚的一圈院落，三千外门弟子。', body: '' }),
+      paragraph('地点列表', { id: 'yard', name: '外门杂役院', oneLine: '青冥宗最底下的地方，三百杂役挤在一座山坳里。', parent: 'outer', body: '每月初一发一次丹药，每年一次外门考核。考不过的人就“下山”了，再没人见过。杂役之间互相盯着，谁多领了一口饭，第二天全院都知道。' }),
     ],
   },
   {
-    name: '势力划分',
-    hints: CATEGORY_HINTS.势力划分,
-    entries: [paragraph('势力划分', { id: 'sect', name: '青冥宗', oneLine: '东洲第一宗，表面仙风道骨，暗地敲骨吸髓。', body: '' })],
+    ...emptyCategory('势力列表'),
+    entries: [paragraph('势力列表', { id: 'sect', name: '青冥宗', oneLine: '东洲第一宗，表面仙风道骨，暗地敲骨吸髓。', body: '' })],
   },
   {
-    name: '物品与功法',
-    hints: CATEGORY_HINTS.物品与功法,
+    ...emptyCategory('物品功法'),
     entries: [
-      paragraph('物品与功法', { id: 'pill', name: '筑基丹', oneLine: '宗门每年发给外门弟子的“恩赐”，吃过的人寿命都停在同一天。', tags: ['第一卷'], body: '丹房出的，每年初一由传功执事亲手发。吃下去当场破境，三年之内却都会在同一个日子“坐化”。现在陈默手里有一枚没吃的。' }),
+      paragraph('物品功法', { id: 'pill', name: '筑基丹', oneLine: '宗门每年发给外门弟子的“恩赐”，吃过的人寿命都停在同一天。', tags: ['第一卷'], body: '丹房出的，每年初一由传功执事亲手发。吃下去当场破境，三年之内却都会在同一个日子“坐化”。现在陈默手里有一枚没吃的。' }),
     ],
   },
   {
-    name: '往事与秘密',
-    hints: CATEGORY_HINTS.往事与秘密,
+    ...emptyCategory('往事秘密'),
     entries: [
-      paragraph('往事与秘密', { id: 'secret', name: '老祖的寿命', oneLine: '老祖靠“筑基丹”把弟子的寿命收到自己身上。', tags: ['底牌'], locked: true, knownBy: '只有你和编辑部', body: '三百年来，每一枚筑基丹都是一张“借命契”。吃丹的人破境越快，被收走的寿命越多。老祖头顶只剩一个时辰，是因为今年的丹还没收回来。' }),
-      paragraph('往事与秘密', { id: 'origin', name: '陈默的来历', oneLine: '陈默是老祖当年收命时漏下的一个孩子，所以他的眼睛看得见寿命。', knownBy: '只有你和编辑部；打算第二篇揭开', body: '' }),
+      paragraph('往事秘密', { id: 'secret', name: '老祖的寿命', oneLine: '老祖靠“筑基丹”把弟子的寿命收到自己身上。', tags: ['底牌'], locked: true, knownBy: '只有你和编辑部', body: '三百年来，每一枚筑基丹都是一张“借命契”。吃丹的人破境越快，被收走的寿命越多。老祖头顶只剩一个时辰，是因为今年的丹还没收回来。' }),
+      paragraph('往事秘密', { id: 'origin', name: '陈默的来历', oneLine: '陈默是老祖当年收命时漏下的一个孩子，所以他的眼睛看得见寿命。', knownBy: '只有你和编辑部；打算第二篇揭开', body: '' }),
     ],
   },
-  { name: '特殊规则', hints: CATEGORY_HINTS.特殊规则, starters: ['寿命能不能转给别人', '宗门门规', '“下山”是什么意思'], entries: [] },
+  emptyCategory('特殊规则'),
 ]
 
 const outline: VNode = {
@@ -186,27 +176,28 @@ export const SAMPLE_BOOK: VBook = {
   tags: ['天赋觉醒', '苟道', '宗门', '智斗'],
   length: 200,
   chapterWords: 2500,
+  world: '东洲七宗分据七山，青冥宗居首。灵气一年比一年稀薄，凡人六十而终，修士靠境界续命；境界卡住的人，只能另想办法。钱用灵石，但真正的硬通货是寿元——寿命成了修士最值钱的东西。',
   blurb: '头顶还剩三天寿命的传功执事，正一脸慈祥地递来一枚“筑基丹”。\n底层杂役陈默一睁眼，就能看破所有人的剩余寿数。\n在这座表面仙风道骨、暗地敲骨吸髓的吃人宗门里，别人的死期，就是他的生机。\n所有人都以为他平平无奇，直到某天，他撞见了那位号称与天地同寿的宗门老祖——\n老祖头顶上的数字，赫然只剩一个时辰。',
   categories,
   outline,
   pending: 2,
 }
+numberChapters(SAMPLE_BOOK.outline)
 linkMentions(SAMPLE_BOOK)
 
 /** 刚点完「下一步」的书：只有新建页填的几项。 */
 export function emptyBook(): VBook {
-  const genre = '都市'
-  const shown = defaultCategories(genre)
   return {
     id: 'empty',
     title: '未命名',
     channel: '男频',
-    genre,
+    genre: '都市',
     tags: ['系统', '重生'],
     length: 200,
     chapterWords: 2500,
     blurb: '重生回高考前一晚，这次我只想安安静静当个学渣。',
-    categories: shown.map((name) => ({ name, hints: CATEGORY_HINTS[name] ?? [], entries: [] })),
+    world: '',
+    categories: CATEGORY_NAMES.map(emptyCategory),
     outline: { id: 'book', kind: '全书', title: '全书', text: '', uses: [] },
     pending: 0,
   }

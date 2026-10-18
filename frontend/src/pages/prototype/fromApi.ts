@@ -2,9 +2,9 @@
 
 import type { LibraryItem, LibrarySnapshot } from '../../api/library'
 import type { ChapterBrief, Relationship } from '../../api/types'
-import { arcText, isLaterEnding, type OutlineTree } from '../../lib/outlineTree'
+import { arcText, isLaterEnding, outlineStatusText, unitStatus, type OutlineTree } from '../../lib/outlineTree'
 import {
-  ALL_CATEGORIES, CATEGORY_HINTS, CHARACTER_PLACEHOLDERS, LEGACY_ROLES, cn, defaultCategories, linkMentions,
+  CATEGORY_DEFS, CHARACTER_PLACEHOLDERS, LEGACY_ROLES, cn, emptyCategory, linkMentions, numberChapters,
   type VBook, type VCategory, type VEntry, type VNode,
 } from './model'
 
@@ -36,7 +36,7 @@ function characterEntry(item: LibraryItem, relations: Relationship[], names: Map
     ['活着', item.is_alive === false ? '已经死了' : ''],
   ]
   return {
-    id: item.id, kind: 'character', category: '角色', name: item.name, oneLine: text(item.one_line), tags: item.tags ?? [], locked: item.locked, role,
+    id: item.id, kind: 'character', category: '角色列表', name: item.name, oneLine: text(item.one_line), tags: item.tags ?? [], locked: item.locked, role,
     facts: [['别名', (item.aliases ?? []).join('、')], ['定位', role], ['性别', text(item.gender)], ['年龄', text(item.age)]],
     sections: long.map(([label, value]) => ({ label, text: value, placeholder: CHARACTER_PLACEHOLDERS[label] })),
     now: now.some(([, value]) => value) ? now : undefined,
@@ -48,44 +48,40 @@ function characterEntry(item: LibraryItem, relations: Relationship[], names: Map
   }
 }
 
-function settingEntry(item: LibraryItem, category: string, hints: string[]): VEntry {
+/** 段落类只要「名字＋一段话」：旧数据的一句话常常就是正文第一句，正文空着才用它。 */
+function settingEntry(item: LibraryItem, category: string): VEntry {
   const base = {
-    id: item.id, category, name: item.name, oneLine: text(item.one_line), tags: item.tags ?? [], locked: item.locked,
-    parent: item.parent_id ?? undefined, facts: [] as VEntry['facts'], appears: [],
+    id: item.id, category, name: item.name, oneLine: '', tags: item.tags ?? [], locked: item.locked,
+    parent: item.parent_id ?? undefined, facts: [] as VEntry['facts'], sections: [], appears: [],
   }
   if (item.style === 'ladder') {
-    return { ...base, kind: 'ladder', sections: [], overview: text(item.content), levels: (item.levels ?? []).map((l) => ({ name: l.name, text: l.text })) }
+    return { ...base, kind: 'ladder', overview: text(item.content) || text(item.one_line), levels: (item.levels ?? []).map((l) => ({ name: l.name, text: l.text })) }
   }
   const fields = (item.fields ?? []).filter((f) => f.name)
-  return {
-    ...base,
-    kind: 'paragraph',
-    sections: fields.length
-      ? fields.map((f) => ({ label: f.name, text: text(f.value) }))
-      : [{ label: '详细', text: text(item.content), placeholder: `一段话写清：${hints.join('；')}。` }],
-  }
+  if (fields.length) return { ...base, kind: 'paragraph', sections: fields.map((f) => ({ label: f.name, text: text(f.value) })) }
+  return { ...base, kind: 'paragraph', body: text(item.content) || text(item.one_line) }
 }
 
 function outlineNodes(tree: OutlineTree, chapters: ChapterBrief[]): VNode {
   const byIndex = new Map(chapters.map((c) => [c.index, c]))
-  const chapterNode = (index: number, title: string): VNode => {
+  const chapterNode = (index: number, title: string, status: string): VNode => {
     const brief = byIndex.get(index)
     const o = brief?.outline
     const happen = [text(o?.goal), ...(o?.scenes ?? []).map(text)].filter(Boolean).join('\n')
     const sections = o && (happen || o.cool_point || o.hook)
       ? [{ label: '发生什么', text: happen }, { label: '看点', text: text(o.cool_point) }, { label: '结尾钩子', text: text(o.hook) }]
       : [{ label: brief?.summary ? '这一章写了什么' : '发生什么', text: text(brief?.summary), placeholder: '发生什么；看点；结尾的钩子' }]
-    return { id: `c${index}`, kind: '章', title: `第${index}章　${title || '待定'}`, text: '', sections, uses: [] }
+    return { id: `c${index}`, kind: '章', title: `第${index}章　${title || '待定'}`, text: '', sections, progress: outlineStatusText(status), uses: [] }
   }
   const volumes = (arcVolumes: OutlineTree['arcs'][number]['volumes']) =>
     arcVolumes.map((v): VNode => ({
       id: `v${v.index}`, kind: '卷', title: `第${cn(v.index)}卷　${v.title || '未命名'}`, text: text(v.summary), locked: v.locked, uses: [],
       chapters: v.units.length ? v.units.reduce((sum, u) => sum + Math.max(0, u.chapter_count), 0) : v.chapter_count || undefined,
-      later: v.status === 'later',
+      later: v.status === 'later', progress: outlineStatusText(v.status),
       children: v.units.map((u): VNode => ({
         id: `u${u.id}`, kind: '单元', title: `单元${cn(u.index)}　${u.title || '未命名'}`, text: text(u.summary), locked: u.locked, uses: [],
-        chapters: u.chapter_count || undefined,
-        children: u.chapters.map((c) => chapterNode(c.index, c.title)),
+        chapters: u.chapter_count || undefined, progress: outlineStatusText(unitStatus(u)),
+        children: u.chapters.map((c) => chapterNode(c.index, c.title, c.status)),
       })),
     }))
   const children: VNode[] = tree.segmented
@@ -97,43 +93,44 @@ function outlineNodes(tree: OutlineTree, chapters: ChapterBrief[]): VNode {
       }
     })
     : volumes(tree.arcs.flatMap((arc) => arc.volumes))
-  return { id: 'book', kind: '全书', title: '全书', text: text(tree.ending?.event), uses: [], children }
+  const root: VNode = { id: 'book', kind: '全书', title: '全书', text: text(tree.ending?.event), uses: [], children }
+  numberChapters(root)
+  return root
 }
 
 export function bookFromApi(parts: ApiParts): VBook {
   const concept = parts.book.concept ?? {}
-  const genre = text(concept.genre) || parts.book.genre || ''
   const { library } = parts
   const names = new Map(library.characters.map((c) => [c.id, c.name]))
   const characters = library.characters.map((c) => characterEntry(c, parts.relationships, names))
+  const builtinName = (key: string) => CATEGORY_DEFS.find((d) => d.from.includes(key))?.name
 
-  // 金手指单独一类：带「金手指」标签的条目都收过来；角色卡上标了金手指的，在这一类里留个指向
-  const goldfinger: VEntry[] = []
+  // 世界概况一本书只有一篇，单独拿出来；带「金手指」标签的都归金手指
+  let world = ''
   const byCategory = new Map<string, VEntry[]>()
-  const catName = (key: string) => library.categories.find((c) => c.key === key)?.name ?? key
   for (const item of library.entries) {
-    const category = item.tags?.includes('金手指') ? '金手指' : catName(item.category ?? '')
-    const hints = CATEGORY_HINTS[category] ?? (library.categories.find((c) => c.name === category)?.hint ?? '').split(/[；;。]/).filter(Boolean)
-    const entry = settingEntry(item, category, hints)
-    if (category === '金手指') goldfinger.push(entry)
-    else byCategory.set(category, [...(byCategory.get(category) ?? []), entry])
+    const key = item.category ?? ''
+    if (key === '世界与地图' && item.name.trim() === '世界概况') {
+      world = text(item.content) || text(item.one_line)
+      continue
+    }
+    const category = item.tags?.includes('金手指') ? '金手指' : builtinName(key) ?? library.categories.find((c) => c.key === key)?.name ?? key
+    byCategory.set(category, [...(byCategory.get(category) ?? []), settingEntry(item, category)])
   }
   for (const c of characters.filter((c) => c.tags.includes('金手指'))) {
-    goldfinger.push({
-      id: `gf-${c.id}`, kind: 'goldfinger', category: '金手指', name: `${c.name}的本事`, oneLine: c.sections.find((s) => s.label === '能力')?.text ?? '', tags: ['金手指'], locked: c.locked,
-      facts: [], sections: [{ label: '能做什么', text: c.sections.find((s) => s.label === '能力')?.text ?? '' }], holder: c.id, appears: [],
-    })
+    const ability = c.sections.find((s) => s.label === '能力')?.text ?? ''
+    byCategory.set('金手指', [...(byCategory.get('金手指') ?? []), {
+      id: `gf-${c.id}`, kind: 'goldfinger', category: '金手指', name: `${c.name}的本事`, oneLine: ability, tags: ['金手指'], locked: c.locked,
+      facts: [], sections: [{ label: '能做什么', text: ability }], holder: c.id, appears: [],
+    }])
   }
 
-  const custom = library.categories.filter((c) => !c.builtin && c.key !== '角色卡片').map((c) => c.name)
-  const shown = defaultCategories(genre)
-  const order = [...ALL_CATEGORIES, ...custom]
-  const categories: VCategory[] = []
-  for (const name of order) {
-    const entries = name === '角色' ? characters : name === '金手指' ? goldfinger : byCategory.get(name) ?? []
-    if (!entries.length && !shown.includes(name) && !custom.includes(name)) continue
-    const hint = library.categories.find((c) => c.name === name)?.hint ?? ''
-    categories.push({ name, hints: CATEGORY_HINTS[name] ?? hint.split(/[；;。]/).filter(Boolean), entries })
+  const categories: VCategory[] = CATEGORY_DEFS.map((def) => ({
+    ...emptyCategory(def.name),
+    entries: def.name === '角色列表' ? characters : byCategory.get(def.name) ?? [],
+  }))
+  for (const custom of library.categories.filter((c) => !c.builtin && c.key !== '角色卡片')) {
+    categories.push({ name: custom.name, about: custom.hint, entries: byCategory.get(custom.name) ?? [], custom: { style: custom.style, fields: custom.fields ?? [] } })
   }
 
   const length = typeof concept.target_length === 'number' ? concept.target_length : undefined
@@ -141,11 +138,12 @@ export function bookFromApi(parts: ApiParts): VBook {
     id: parts.book.id,
     title: text(concept.title) || parts.book.title || '未命名',
     channel: text(concept.channel),
-    genre,
+    genre: text(concept.genre) || parts.book.genre || '',
     tags: Array.isArray(concept.tags) ? (concept.tags as string[]) : [],
     length,
     chapterWords: typeof concept.chapter_words === 'number' && concept.chapter_words > 0 ? concept.chapter_words : 2500,
     blurb: text(concept.story) || text(concept.logline),
+    world,
     categories,
     outline: outlineNodes(parts.outline, parts.chapters),
     pending: library.suggestions_pending ?? 0,

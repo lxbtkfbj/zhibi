@@ -8,10 +8,12 @@ export interface VField {
 
 export interface VEntry {
   id: string
+  /** 角色卡、金手指是一栏一栏的；段落类是「名字＋一段话」；阶梯是一级一级的 */
   kind: 'character' | 'goldfinger' | 'paragraph' | 'ladder'
   /** 归在哪一类（显示名） */
   category: string
   name: string
+  /** 角色、金手指的一句话；段落类不用 */
   oneLine: string
   tags: string[]
   locked: boolean
@@ -19,8 +21,10 @@ export interface VEntry {
   role?: string
   /** 右边资料卡里的短字段：名称、内容、空着时的提示 */
   facts: [string, string, string?][]
-  /** 正文里一段一段的长字段 */
+  /** 一栏一栏的长字段（角色卡、金手指、自定栏目的卡片） */
   sections: VField[]
+  /** 段落类的那一段话 */
+  body?: string
   /** 角色此刻的状态，设定师每章更新；全空就不显示 */
   now?: [string, string][]
   relations?: { to: string; kind: string; text: string }[]
@@ -33,13 +37,16 @@ export interface VEntry {
   levels?: { name: string; text: string }[]
   /** 地点属于哪里：父条目 id */
   parent?: string
+  /** 秘密：谁知道 */
+  knownBy?: string
   appears: { node: string; label: string }[]
 }
 
 export interface VCategory {
   name: string
-  hints: string[]
-  starters?: string[]
+  /** 一句话说清这一类放什么 */
+  about: string
+  example?: { name: string; text: string }
   entries: VEntry[]
   /** 作者自建的类别：样式和卡片的栏目 */
   custom?: { style: 'paragraph' | 'card' | 'ladder'; fields: string[] }
@@ -53,6 +60,10 @@ export interface VNode {
   /** 章纲：发生什么、看点、结尾钩子 */
   sections?: VField[]
   chapters?: number
+  /** 第几章到第几章，程序按顺序算 */
+  range?: [number, number]
+  /** 写到哪了：没写 / 正在写 / 写完 */
+  progress?: string
   later?: boolean
   locked?: boolean
   uses: string[]
@@ -68,30 +79,48 @@ export interface VBook {
   length?: number
   chapterWords: number
   blurb: string
+  /** 世界概况：一本书只有一篇，单独放在设定最上面 */
+  world: string
   categories: VCategory[]
   outline: VNode
   pending: number
 }
 
-export const ALL_CATEGORIES = ['角色', '金手指', '等级体系', '世界与地图', '势力划分', '物品与功法', '往事与秘密', '特殊规则']
+/** 八个默认类别。名字三到五个字；from 是真实设定库里对应的类别。 */
+export const CATEGORY_DEFS: { name: string; from: string[]; about: string; example?: { name: string; text: string } }[] = [
+  { name: '角色列表', from: ['角色卡片'], about: '有名有姓、会再出场的人；会说话的器灵、系统人格也算。' },
+  { name: '金手指', from: [], about: '主角最大的倚仗：系统、物品、体质、重生记忆……能做什么、有什么代价、怎么变强。' },
+  {
+    name: '等级体系', from: ['等级体系'], about: '一切分高低的等级：修炼境界、玩家等级、鬼的等级、官阶……一本书可以有好几套。',
+    example: { name: '修炼境界', text: '炼气：分九层，外门弟子大多卡在这里。\n筑基：寿命翻倍。\n金丹：可以开宗立派。\n元婴：先只列个名字，以后再补。' },
+  },
+  {
+    name: '地点列表', from: ['世界与地图'], about: '一个个地方。写清它属于哪里，目录里会排成一棵树。',
+    example: { name: '青阳城', text: '属于东域。楚、秦、柳三家分治的小城，城外是黑风山脉，常有妖兽出没。主角开局就在这里，处处受人冷眼。' },
+  },
+  {
+    name: '势力列表', from: ['势力划分'], about: '宗门、家族、国家、公司、公会、队伍。',
+    example: { name: '天音宗', text: '东域三大宗门之一，只收女弟子。宗主闭关百年，大长老掌权。和主角所在的宗门是死对头，内部分成宗主一系和大长老一系。' },
+  },
+  {
+    name: '物品功法', from: ['物品与功法'], about: '能拿到、能学、能传下去的东西：法宝、丹药、道具、功法、技能、血脉。',
+    example: { name: '九转筑基丹', text: '筑基用的三品丹药。吃了能把筑基的把握从三成提到七成；炼一炉要九叶还魂草，市面上一年出不了十颗。现在只有城主府有存货。' },
+  },
+  {
+    name: '往事秘密', from: ['往事与秘密'], about: '过去发生的事，和藏着的真相。秘密记得写谁知道、打算什么时候揭开。',
+    example: { name: '三百年前的灭门案', text: '三百年前，青云宗一夜之间被灭门，只活下来一个孩子。谁知道：只有现任掌门。打算第二卷揭开：那个孩子就是主角的师父。' },
+  },
+  {
+    name: '特殊规则', from: ['特殊规则'], about: '这个世界特有的规矩、限制和代价。一条规矩一个名字，内容可以一条条列。',
+    example: { name: '夺舍法则', text: '1. 只能夺舍神识比自己弱的人\n2. 一辈子只能夺舍一次\n3. 夺舍后三年内修为不能再往上走' },
+  },
+]
 
-/**
- * 默认显示哪几类。原本按题材收起用不上的，但题材猜不准：《神秘复苏》是都市却有鬼的等级，
- * 《惊悚乐园》有专精等级和纸并强凶狂神。空类别只占目录一行，所以八类一律全显示。
- */
-export function defaultCategories(_genre: string): string[] {
-  return ALL_CATEGORIES
-}
+export const CATEGORY_NAMES = CATEGORY_DEFS.map((c) => c.name)
 
-export const CATEGORY_HINTS: Record<string, string[]> = {
-  角色: ['有名有姓、会再出场的人', '会说话的器灵、系统人格也算'],
-  金手指: ['是什么、能做什么', '有什么规矩和限制、要付什么代价', '怎么一步步变强', '从哪来，最好落在底牌上'],
-  等级体系: ['怎么往上升、越级多难、有什么代价', '各级写名称和一段介绍，按高低排', '高阶的可以先只列名字，以后再补'],
-  世界与地图: ['这是什么地方，给人什么感觉', '属于哪里、谁说了算', '有什么规矩或危险', '主角在这里处境如何、能得到什么'],
-  势力划分: ['什么组织、想要什么', '谁领头、实力多大', '和主角是敌是友', '内部有什么矛盾'],
-  物品与功法: ['是什么东西或什么本事', '有什么用、有什么限制', '从哪来、谁想要它', '现在在谁手里'],
-  往事与秘密: ['过去发生了什么，或藏着什么真相', '谁知道、谁不知道', '打算什么时候、怎么揭开', '和主角有什么关系'],
-  特殊规则: ['管什么、怎么运作', '有什么限制和代价', '会给故事制造什么麻烦或机会'],
+export function emptyCategory(name: string): VCategory {
+  const def = CATEGORY_DEFS.find((c) => c.name === name)
+  return { name, about: def?.about ?? '', example: def?.example, entries: [] }
 }
 
 /** 角色卡的字段（照真实设定库），定位按这个顺序分组。 */
@@ -101,7 +130,7 @@ export const LEGACY_ROLES: Record<string, string> = { 反派: '对手', 龙套: 
 export const CHARACTER_PLACEHOLDERS: Record<string, string> = {
   外貌: '一两处让人记住的地方就够了，比如疤、小动作',
   性格与说话方式: '怎么说话最能看出这个人：话多话少、爱用什么词',
-  身世: '公开的来历；藏着的写进「往事与秘密」，这里标一句「另有秘密」',
+  身世: '公开的来历；藏着的写进「往事秘密」，这里标一句「另有秘密」',
   想要什么: '长远想要什么，眼下想要什么',
   能力: '会什么本事，有什么限制',
   和主角的关系: '对主角来说，他是谁',
@@ -142,6 +171,24 @@ export function findNode(node: VNode, id: string, path: VNode[] = []): VNode[] |
     if (found) return found
   }
   return null
+}
+
+/** 按顺序给每个卷、单元、章算出「第几章到第几章」。 */
+export function numberChapters(root: VNode): void {
+  let next = 1
+  const visit = (node: VNode) => {
+    if (node.kind === '章') {
+      const n = Number(/第(\d+)章/.exec(node.title)?.[1] ?? next)
+      node.range = [n, n]
+      next = n + 1
+      return
+    }
+    const start = next
+    if (node.children?.length) node.children.forEach(visit)
+    else if (node.chapters) next += node.chapters
+    if (next > start) node.range = [start, next - 1]
+  }
+  visit(root)
 }
 
 /** 把条目名字在大纲里出现的地方连起来：条目的「出现在」和大纲节点的「用到的设定」。 */
