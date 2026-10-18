@@ -134,6 +134,9 @@ function LinkChip({ icon, children, onClick }: { icon?: ReactNode; children: Rea
   )
 }
 
+/** 卡片里的小按钮（新增关系、加上一栏）：白底细框，和「编辑部帮写」同一种，小一号，不带加号。 */
+const smallButton = 'h-8 rounded-lg border border-line-2 bg-card px-3.5 text-[13px] text-ink-2 transition-colors hover:border-ink-3/50 hover:text-ink disabled:opacity-40 disabled:hover:border-line-2 disabled:hover:text-ink-2'
+
 function AskButton({ children, onClick }: { children: ReactNode; onClick: () => void }) {
   return (
     <button type="button" onClick={onClick} className="h-9 rounded-lg border border-line-2 bg-card px-4 text-sm text-ink-2 transition-colors hover:border-ink-3/50 hover:text-ink">
@@ -456,9 +459,8 @@ function SettingsDirectory({ book, selected, onSelect, onCreateCategory, onNewEn
         <NewCategoryForm taken={book.categories.map((c) => c.name)} onCancel={() => setCreating(false)}
           onCreate={(name, style, fields) => { setCreating(false); onCreateCategory(name, style, fields) }} />
       ) : (
-        <button type="button" onClick={() => setCreating(true)}
-          className="mt-4 flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-line-2 py-2 text-[13px] text-ink-3 transition-colors hover:border-ink-3/60 hover:text-ink">
-          <Plus className="size-3.5" />新建一类
+        <button type="button" onClick={() => setCreating(true)} className={clsx(smallButton, 'mt-4 w-full bg-card/70')}>
+          新建一类
         </button>
       )}>
       {q ? (
@@ -694,7 +696,7 @@ function Relations({ book, entry, nav, readOnly }: { book: VBook; entry: VEntry;
         </div>
       ) : (
         <button type="button" onClick={() => setAdding(true)} disabled={!people.length} title={people.length ? undefined : '先建别的人物'}
-          className="mt-2 flex items-center gap-1 text-[13px] text-ink-3 hover:text-ink disabled:opacity-50"><Plus className="size-3.5" />加一个关系</button>
+          className={clsx(smallButton, 'mt-3')}>新增关系</button>
       ))}
     </section>
   )
@@ -983,11 +985,10 @@ function FieldList({ title, note, items, counts, locked, onEdit, onCommit, addPl
           )
         })}
         <div className="flex items-center gap-2 px-3 py-2">
-          <Plus className="ml-1 size-3.5 shrink-0 text-ink-3" />
           <input value={draft} onChange={(e) => setDraft(e.target.value)} maxLength={12} placeholder={addPlaceholder}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) add() }}
             className="h-8 min-w-0 flex-1 bg-transparent px-1 text-[15px] text-ink placeholder:text-ink-3 focus:outline-none" />
-          <button type="button" onClick={add} disabled={!draft.trim()} className="rounded-md px-3 py-1 text-sm text-ink-2 hover:bg-subtle hover:text-ink disabled:opacity-40">加上</button>
+          <button type="button" onClick={add} disabled={!draft.trim()} className={clsx(smallButton, 'h-7 px-3')}>加上</button>
         </div>
       </div>
     </section>
