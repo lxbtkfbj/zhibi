@@ -4,7 +4,7 @@ import type { LibraryItem, LibrarySnapshot } from '../../api/library'
 import type { ChapterBrief, Relationship } from '../../api/types'
 import { arcText, isLaterEnding, outlineStatusText, unitStatus, type OutlineTree } from '../../lib/outlineTree'
 import {
-  CATEGORY_DEFS, CHARACTER_PLACEHOLDERS, LEGACY_ROLES, cn, emptyCategory, linkMentions, numberChapters,
+  CATEGORY_DEFS, CHARACTER_FIELDS, CHARACTER_PLACEHOLDERS, LEGACY_ROLES, cn, emptyCategory, linkMentions, numberChapters,
   type VBook, type VCategory, type VEntry, type VNode,
 } from './model'
 
@@ -18,32 +18,31 @@ export interface ApiParts {
 
 const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
 
-function characterEntry(item: LibraryItem, relations: Relationship[], names: Map<string, string>): VEntry {
+function characterEntry(item: LibraryItem, relations: Relationship[], names: Map<string, string>, lead?: string): VEntry {
   const role = LEGACY_ROLES[item.role_type ?? ''] ?? item.role_type ?? '配角'
-  const long: [string, string][] = [
-    ['外貌', text(item.appearance)],
-    ['性格与说话方式', text(item.personality)],
-    ['身世', text(item.background)],
-    ['想要什么', text(item.goal)],
-    ['能力', text(item.abilities)],
-    ...(role === '主角' ? [] : [['和主角的关系', text(item.relation)] as [string, string]]),
-    ['备注', text(item.notes)],
-  ]
+  // 真实设定库还没有软肋、成长与结局、所属、实力与地位，原型里先空着
+  const values: Record<string, string> = {
+    外貌: text(item.appearance), 性格与说话方式: text(item.personality), 身世: text(item.background),
+    想要什么: text(item.goal), 能力: text(item.abilities), 备注: text(item.notes),
+  }
   const now: [string, string][] = [
-    ['想要', text(item.want)],
+    ['实力与地位', ''],
     ['在哪', text(item.location)],
     ['处境', text(item.condition)],
-    ['活着', item.is_alive === false ? '已经死了' : ''],
+    ['想要', text(item.want)],
   ]
+  // 「和主角的关系」并进关系：当成和主角的一条
+  const toLead = text(item.relation) && lead && lead !== item.id ? [{ to: lead, kind: '和主角', text: text(item.relation) }] : []
   return {
     id: item.id, kind: 'character', category: '角色列表', name: item.name, oneLine: text(item.one_line), tags: item.tags ?? [], locked: item.locked, role,
-    facts: [['别名', (item.aliases ?? []).join('、')], ['定位', role], ['性别', text(item.gender)], ['年龄', text(item.age)]],
-    sections: long.map(([label, value]) => ({ label, text: value, placeholder: CHARACTER_PLACEHOLDERS[label] })),
+    dead: item.is_alive === false,
+    facts: [['定位', role], ['所属', '', '哪个宗门、家族、势力'], ['性别', text(item.gender)], ['年龄', text(item.age)], ['别名', (item.aliases ?? []).join('、')]],
+    sections: CHARACTER_FIELDS.map((label) => ({ label, text: values[label] ?? '', placeholder: CHARACTER_PLACEHOLDERS[label] })),
     now: now.some(([, value]) => value) ? now : undefined,
-    relations: relations
+    relations: [...toLead, ...relations
       .filter((r) => r.source_id === item.id || r.target_id === item.id)
       .map((r) => ({ to: r.source_id === item.id ? r.target_id : r.source_id, kind: r.kind, text: r.description }))
-      .filter((r) => names.has(r.to)),
+      .filter((r) => names.has(r.to))],
     appears: [],
   }
 }
@@ -102,7 +101,8 @@ export function bookFromApi(parts: ApiParts): VBook {
   const concept = parts.book.concept ?? {}
   const { library } = parts
   const names = new Map(library.characters.map((c) => [c.id, c.name]))
-  const characters = library.characters.map((c) => characterEntry(c, parts.relationships, names))
+  const lead = library.characters.find((c) => (LEGACY_ROLES[c.role_type ?? ''] ?? c.role_type) === '主角')?.id
+  const characters = library.characters.map((c) => characterEntry(c, parts.relationships, names, lead))
   const builtinName = (key: string) => CATEGORY_DEFS.find((d) => d.from.includes(key))?.name
 
   // 世界概况一本书只有一篇，单独拿出来；带「金手指」标签的都归金手指

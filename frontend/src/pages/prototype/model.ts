@@ -19,6 +19,8 @@ export interface VEntry {
   locked: boolean
   /** 角色的定位，用来在目录里分组 */
   role?: string
+  /** 角色已经死了：名字旁边标一下，不用「此刻」里写「活着」 */
+  dead?: boolean
   /** 右边资料卡里的短字段：名称、内容、空着时的提示 */
   facts: [string, string, string?][]
   /** 一栏一栏的长字段（角色卡、金手指、自定栏目的卡片） */
@@ -127,14 +129,18 @@ export function emptyCategory(name: string): VCategory {
 export const ROLE_ORDER = ['主角', '女主', '男主', '班底', '对手', '导师', '配角']
 export const LEGACY_ROLES: Record<string, string> = { 反派: '对手', 龙套: '配角' }
 
+/** 角色卡的长栏目，按这个顺序。「和主角的关系」并进了关系，不单列。 */
+export const CHARACTER_FIELDS = ['外貌', '性格与说话方式', '身世', '想要什么', '软肋', '能力', '成长与结局', '备注']
+
 export const CHARACTER_PLACEHOLDERS: Record<string, string> = {
-  外貌: '一两处让人记住的地方就够了，比如疤、小动作',
-  性格与说话方式: '怎么说话最能看出这个人：话多话少、爱用什么词',
+  外貌: '一两处让人记住的地方，比如疤、小动作',
+  性格与说话方式: '话多话少、口头禅，一句话就能看出这个人',
   身世: '公开的来历；藏着的写进「往事秘密」，这里标一句「另有秘密」',
-  想要什么: '长远想要什么，眼下想要什么',
+  想要什么: '这辈子最想要的是什么（眼下想要的写在「此刻」）',
+  软肋: '怕什么、在乎谁，拿什么能逼住他',
   能力: '会什么本事，有什么限制',
-  和主角的关系: '对主角来说，他是谁',
-  备注: '随手记：口头禅、忌讳、以后可能用上的点子',
+  成长与结局: '在书里会怎么变，最后怎么收场',
+  备注: '随手记',
 }
 
 export const GOLDFINGER_PLACEHOLDERS: Record<string, string> = {

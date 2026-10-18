@@ -10,7 +10,7 @@ import { BookCover } from '../../components/BookCover'
 import type { OutlineTree } from '../../lib/outlineTree'
 import { type ApiParts, bookFromApi } from './fromApi'
 import {
-  CHARACTER_PLACEHOLDERS, GOLDFINGER_PLACEHOLDERS, ROLE_ORDER, cn, emptyCategory, findEntry, findNode, numberChapters,
+  CHARACTER_FIELDS, CHARACTER_PLACEHOLDERS, GOLDFINGER_PLACEHOLDERS, ROLE_ORDER, cn, emptyCategory, findEntry, findNode, numberChapters,
   type VBook, type VCategory, type VEntry, type VField, type VNode,
 } from './model'
 import { CHAT, PENDING, SAMPLE_BOOK, emptyBook } from './sampleBook'
@@ -133,6 +133,8 @@ function Editable({ children, className, multiline, boxed, placeholder, autoFocu
 }
 
 const LONG = 260
+/** 这些定位的角色栏目全摆出来；配角写两三笔就够 */
+const MAJOR_ROLES = ['主角', '女主', '男主', '班底', '对手', '导师']
 
 /** 一段长文字：可以直接改；太长先折起来。 */
 function Prose({ text, placeholder, autoFocus }: { text: string; placeholder?: string; autoFocus?: boolean }) {
@@ -587,13 +589,16 @@ function CharacterCard({ book, entry, nav, fresh }: { book: VBook; entry: VEntry
   const secret = entry.secret ? findEntry(book, entry.secret) : undefined
   const goldfinger = entry.goldfinger ? findEntry(book, entry.goldfinger) : undefined
   const holder = entry.holder ? findEntry(book, entry.holder) : undefined
-  const show = (label: string, value: string) => !!value || opened.includes(label)
-  const facts = entry.facts.filter(([label, value]) => show(label, value))
+  // 重要角色和金手指：栏目一打开就全摆着；配角只摆外貌、性格，其余收在「还可以写」
+  const major = entry.kind === 'goldfinger' || MAJOR_ROLES.includes(entry.role ?? '')
+  const always = major ? entry.sections.map((f) => f.label) : ['外貌', '性格与说话方式']
+  const show = (label: string, value: string) => !!value || opened.includes(label) || always.includes(label)
+  const facts = entry.facts.filter(([label, value]) => !!value || opened.includes(label) || major)
   const sections = entry.sections.filter((f) => show(f.label, f.text))
   const now = entry.now?.filter(([, value]) => value) ?? []
   const relations = entry.relations ?? []
   const more = [
-    ...entry.facts.filter(([label, value]) => !show(label, value)).map(([label]) => label),
+    ...entry.facts.filter(([label]) => !facts.some(([shown]) => shown === label)).map(([label]) => label),
     ...entry.sections.filter((f) => !show(f.label, f.text)).map((f) => f.label),
     ...(entry.kind === 'character' && !relations.length && !opened.includes('关系') ? ['关系'] : []),
   ]
@@ -602,6 +607,7 @@ function CharacterCard({ book, entry, nav, fresh }: { book: VBook; entry: VEntry
       <div className="flex flex-wrap items-center gap-3">
         <Title autoFocus={fresh} placeholder="起个名字">{entry.name}</Title>
         <Tags entry={entry} />
+        {entry.dead && <span className="rounded-full bg-ink/80 px-2.5 py-0.5 text-xs text-paper-2">已死</span>}
       </div>
       <Editable placeholder="一句话说清这是谁、这是什么" className="mt-3 font-serif text-lg leading-relaxed text-ink-2 2xl:text-xl">{entry.oneLine}</Editable>
       <MetaRow items={[
@@ -1060,27 +1066,27 @@ function BlurbPage({ book }: { book: VBook }) {
 function ChatBody() {
   return (
     <>
-      <div className="scroll-thin min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
+      <div className="scroll-thin min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
         {CHAT.map((msg, i) =>
           msg.who === '作者' ? (
             <div key={i} className="flex justify-end">
-              <p className="max-w-[85%] rounded-2xl rounded-br-md bg-author-bubble px-3.5 py-2 text-[14px] leading-relaxed text-ink">{msg.text}</p>
+              <p className="max-w-[80%] rounded-2xl rounded-br-md bg-author-bubble px-4 py-2.5 text-[15px] leading-relaxed text-ink">{msg.text}</p>
             </div>
           ) : (
-            <div key={i} className="flex gap-2.5">
-              <span className={clsx('flex size-7 shrink-0 items-center justify-center rounded-full font-serif text-[13px]', ROLE_STYLE[msg.who])}>{msg.who[0]}</span>
-              <div className="min-w-0">
-                <p className="mb-1 text-xs text-ink-3">{msg.who}</p>
-                <p className="rounded-2xl rounded-tl-md border border-line bg-card px-3.5 py-2 text-[14px] leading-relaxed text-ink">{msg.text}</p>
+            <div key={i} className="flex gap-3">
+              <span className={clsx('flex size-9 shrink-0 items-center justify-center rounded-full font-serif text-[15px]', ROLE_STYLE[msg.who])}>{msg.who[0]}</span>
+              <div className="min-w-0 max-w-[85%]">
+                <p className="mb-1 text-[13px] text-ink-3">{msg.who}</p>
+                <p className="rounded-2xl rounded-tl-md border border-line bg-card px-4 py-2.5 text-[15px] leading-relaxed text-ink">{msg.text}</p>
               </div>
             </div>
           ),
         )}
       </div>
-      <div className="border-t border-line p-3">
-        <div className="flex items-end gap-2 rounded-xl border border-line-2 bg-card px-3 py-2 focus-within:border-ink-3">
-          <textarea rows={1} placeholder="跟编辑部说点什么" className="max-h-28 min-h-6 flex-1 resize-none bg-transparent text-[14px] leading-6 text-ink [field-sizing:content] placeholder:text-ink-3 focus:outline-none" />
-          <button type="button" className="flex size-7 shrink-0 items-center justify-center rounded-full bg-ink text-paper-2 hover:bg-ink-2" aria-label="发送"><ArrowUp className="size-4" /></button>
+      <div className="border-t border-line p-4">
+        <div className="flex items-end gap-2 rounded-xl border border-line-2 bg-card px-4 py-2.5 focus-within:border-ink-3">
+          <textarea rows={1} placeholder="跟编辑部说点什么" className="max-h-32 min-h-6 flex-1 resize-none bg-transparent text-[15px] leading-6 text-ink [field-sizing:content] placeholder:text-ink-3 focus:outline-none" />
+          <button type="button" className="flex size-8 shrink-0 items-center justify-center rounded-full bg-ink text-paper-2 hover:bg-ink-2" aria-label="发送"><ArrowUp className="size-4" /></button>
         </div>
       </div>
     </>
@@ -1089,13 +1095,13 @@ function ChatBody() {
 
 function ChatHeader({ dock, setDock, onDragStart }: { dock: Dock; setDock: (dock: Dock) => void; onDragStart?: (e: ReactPointerEvent) => void }) {
   return (
-    <div onPointerDown={onDragStart} className={clsx('flex h-12 shrink-0 items-center gap-2 border-b border-line px-3', onDragStart && 'cursor-grab active:cursor-grabbing')}>
+    <div onPointerDown={onDragStart} className={clsx('flex h-14 shrink-0 items-center gap-2.5 border-b border-line px-4', onDragStart && 'cursor-grab active:cursor-grabbing')}>
       <div className="flex -space-x-1.5">
         {Object.keys(ROLE_STYLE).map((role) => (
-          <span key={role} className={clsx('flex size-6 items-center justify-center rounded-full font-serif text-[11px] ring-2 ring-card', ROLE_STYLE[role])}>{role[0]}</span>
+          <span key={role} className={clsx('flex size-8 items-center justify-center rounded-full font-serif text-[13px] ring-2 ring-paper', ROLE_STYLE[role])} title={role}>{role[0]}</span>
         ))}
       </div>
-      <span className="text-[14px] font-medium">编辑部</span>
+      <span className="text-[15px] font-medium">编辑部</span>
       <div className="ml-auto flex items-center gap-0.5">
         {dock === 'float' ? (
           <button type="button" onClick={() => setDock('side')} className="rounded-md p-1.5 text-ink-3 hover:bg-line/60 hover:text-ink" title="贴到右边" aria-label="贴到右边"><PanelRight className="size-4" /></button>
@@ -1256,8 +1262,7 @@ function blankEntry(category: VCategory): VEntry {
   const id = `new-${nextId++}`
   const base = { id, category: category.name, name: '', oneLine: '', tags: [], locked: false, facts: [] as VEntry['facts'], sections: [] as VField[], appears: [] }
   if (category.name === '角色列表') {
-    const labels = ['外貌', '性格与说话方式', '身世', '想要什么', '能力', '和主角的关系', '备注']
-    return { ...base, kind: 'character', role: '配角', facts: [['别名', ''], ['定位', '配角'], ['性别', ''], ['年龄', '']], sections: labels.map((label) => ({ label, text: '', placeholder: CHARACTER_PLACEHOLDERS[label] })) }
+    return { ...base, kind: 'character', role: '配角', facts: [['定位', '配角'], ['所属', ''], ['性别', ''], ['年龄', ''], ['别名', '']], sections: CHARACTER_FIELDS.map((label) => ({ label, text: '', placeholder: CHARACTER_PLACEHOLDERS[label] })) }
   }
   if (category.name === '金手指') {
     return {

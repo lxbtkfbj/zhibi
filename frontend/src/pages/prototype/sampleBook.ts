@@ -1,7 +1,7 @@
 /** 工作台原型用的两本假书：理想样子的示例书，和刚开的空书。只为看样子，不连后台。 */
 
 import {
-  CATEGORY_NAMES, CHARACTER_PLACEHOLDERS, GOLDFINGER_PLACEHOLDERS, emptyCategory, linkMentions, numberChapters,
+  CATEGORY_NAMES, CHARACTER_FIELDS, CHARACTER_PLACEHOLDERS, GOLDFINGER_PLACEHOLDERS, emptyCategory, linkMentions, numberChapters,
   type VBook, type VCategory, type VEntry, type VNode,
 } from './model'
 
@@ -14,20 +14,20 @@ interface CharacterInput {
   alias?: string
   gender?: string
   age?: string
-  long: Partial<Record<'外貌' | '性格与说话方式' | '身世' | '想要什么' | '能力' | '和主角的关系' | '备注', string>>
-  now?: { 想要?: string; 在哪?: string; 处境?: string; 活着?: string }
+  belongs?: string
+  long: Partial<Record<string, string>>
+  now?: { 想要?: string; 在哪?: string; 处境?: string; 实力?: string }
   relations?: VEntry['relations']
   secret?: string
   goldfinger?: string
 }
 
 function character(c: CharacterInput): VEntry {
-  const labels = ['外貌', '性格与说话方式', '身世', '想要什么', '能力', ...(c.role === '主角' ? [] : ['和主角的关系']), '备注'] as const
   return {
     id: c.id, kind: 'character', category: '角色列表', name: c.name, oneLine: c.oneLine, tags: c.tags ?? [], locked: false, role: c.role,
-    facts: [['别名', c.alias ?? ''], ['定位', c.role], ['性别', c.gender ?? ''], ['年龄', c.age ?? '']],
-    sections: labels.map((label) => ({ label, text: c.long[label] ?? '', placeholder: CHARACTER_PLACEHOLDERS[label] })),
-    now: c.now ? [['想要', c.now.想要 ?? ''], ['在哪', c.now.在哪 ?? ''], ['处境', c.now.处境 ?? ''], ['活着', c.now.活着 ?? '']] : undefined,
+    facts: [['定位', c.role], ['所属', c.belongs ?? '', '哪个宗门、家族、势力'], ['性别', c.gender ?? ''], ['年龄', c.age ?? ''], ['别名', c.alias ?? '']],
+    sections: CHARACTER_FIELDS.map((label) => ({ label, text: c.long[label] ?? '', placeholder: CHARACTER_PLACEHOLDERS[label] })),
+    now: c.now ? [['实力与地位', c.now.实力 ?? ''], ['在哪', c.now.在哪 ?? ''], ['处境', c.now.处境 ?? ''], ['想要', c.now.想要 ?? '']] : undefined,
     relations: c.relations, secret: c.secret, goldfinger: c.goldfinger, appears: [],
   }
 }
@@ -44,15 +44,17 @@ const categories: VCategory[] = [
     ...emptyCategory('角色列表'),
     entries: [
       character({
-        id: 'chenmo', name: '陈默', oneLine: '外门杂役，一睁眼就能看见所有人头顶剩下的寿命。', tags: ['主角'], role: '主角', alias: '小默子', gender: '男', age: '十七岁',
+        id: 'chenmo', name: '陈默', oneLine: '外门杂役，一睁眼就能看见所有人头顶剩下的寿命。', tags: ['主角'], role: '主角', alias: '小默子', gender: '男', age: '十七岁', belongs: '青冥宗外门杂役院',
         long: {
           外貌: '瘦，肤色偏黑，走路总低着头；右手少了半截小指。',
           性格与说话方式: '胆小是装的，记仇是真的。话少，开口先算账；被逼急了反而会笑。',
           身世: '山下猎户家的孩子，十二岁被卖进宗门做杂役。另有秘密。',
-          想要什么: '长远：活下去，弄清是谁在收割整座宗门。\n眼下：熬过三天后的外门考核。',
-          能力: '炼气一层，靠的是窥命之眼。',
+          想要什么: '活下去，弄清是谁在收割整座宗门。',
+          软肋: '怕死，更怕连累对他好的人——比如偷偷给他留馒头的孙婆婆。',
+          能力: '靠的是窥命之眼；修为只有炼气一层，打不过谁。',
+          成长与结局: '从只想活命的杂役，变成敢掀命簿的人；最后自己坐上了看守命簿的位置。',
         },
-        now: { 想要: '躲过那枚筑基丹', 在哪: '外门杂役院', 处境: '被传功执事盯上', 活着: '活着' },
+        now: { 实力: '炼气一层', 在哪: '外门杂役院', 处境: '被传功执事盯上', 想要: '躲过那枚筑基丹' },
         relations: [
           { to: 'zhao', kind: '上司', text: '正盯着他，要他吃下丹药' },
           { to: 'laozu', kind: '宿敌', text: '还没见过面，命数却连在一起' },
@@ -61,18 +63,19 @@ const categories: VCategory[] = [
         secret: 'origin', goldfinger: 'eye',
       }),
       character({
-        id: 'zhao', name: '赵长河', oneLine: '笑眯眯的传功执事，头顶只剩三天寿命，却还在给弟子发丹药。', tags: ['第一卷'], role: '对手', gender: '男', age: '看着五十，实际一百一十岁',
+        id: 'zhao', name: '赵长河', oneLine: '笑眯眯的传功执事，头顶只剩三天寿命，却还在给弟子发丹药。', tags: ['第一卷'], role: '对手', gender: '男', age: '看着五十，实际一百一十岁', belongs: '青冥宗传功堂',
         long: {
           外貌: '圆脸，总是笑，袖口永远干干净净。',
           性格与说话方式: '说话慢，爱拍人肩膀，从不发火；越客气越危险。',
           想要什么: '在死前把这一批“筑基丹”发完。',
+          软肋: '怕死。他知道自己只剩三天，所以急着把丹发完换老祖一句“饶你”。',
           能力: '筑基后期，掌管外门传功堂。',
-          和主角的关系: '陈默所在杂役院的上司。',
+          成长与结局: '第一卷末死在众目睽睽之下，化成一具枯骨。',
         },
-        now: { 想要: '让陈默吃下丹药', 在哪: '传功堂', 处境: '寿命只剩三天', 活着: '活着' },
+        now: { 实力: '筑基后期', 在哪: '传功堂', 处境: '寿命只剩三天', 想要: '让陈默吃下丹药' },
         relations: [{ to: 'chenmo', kind: '下属', text: '盯上了这个装傻的杂役' }, { to: 'laozu', kind: '主子', text: '替老祖发丹' }],
       }),
-      character({ id: 'laozu', name: '青冥老祖', oneLine: '号称与天地同寿的宗门老祖，头顶的数字只剩一个时辰。', role: '对手', gender: '男', long: {} }),
+      character({ id: 'laozu', name: '青冥老祖', oneLine: '号称与天地同寿的宗门老祖，头顶的数字只剩一个时辰。', role: '对手', gender: '男', belongs: '青冥宗', long: {} }),
       character({ id: 'sun', name: '孙婆婆', oneLine: '杂役院做饭的婆婆，头顶的数字从来不动。', role: '配角', gender: '女', age: '不知道', long: { 外貌: '矮，背驼，总系一条洗得发白的围裙。' } }),
     ],
   },
