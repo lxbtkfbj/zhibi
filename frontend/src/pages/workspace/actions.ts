@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useMemo, useState } from 'react'
 import {
-  CHARACTER_FIELDS, cn, findEntry, findNode, numberChapters, splitTitle,
+  CHARACTER_FIELDS, applyTemplate, cn, findEntry, findNode, numberChapters, splitTitle,
   type CardTemplate, type VBook, type VCategory, type VEntry, type VNode,
 } from './model'
 
@@ -17,6 +17,21 @@ export interface EntryChange {
   levels?: { name: string; text: string }[]
   locked?: boolean
 }
+
+/** 编辑部帮写的一条候选：values 的键是栏目的 key；阶梯类另有总说明（values.总说明）和各级。 */
+export interface DraftItem {
+  name: string
+  values: Record<string, string>
+  levels: { name: string; text: string }[]
+}
+
+/** 选中文字让编辑部改：直接改好的带回撤销用的版本；给几个写法的带回候选。 */
+export interface RewriteOutcome {
+  revertVersionId?: string | null
+  candidate?: { id: string; options: { label: string; text: string }[] }
+}
+
+export type RewriteMode = 'instruction' | 'options' | 'expand'
 
 export interface BookChange {
   title?: string
@@ -33,8 +48,8 @@ export interface WorkspaceActions {
   saveBook(change: BookChange): Promise<void>
   saveWorld(text: string): Promise<void>
   saveEntry(entry: VEntry, change: EntryChange): Promise<void>
-  /** 新建一条（draft 是作者在空卡片上写好的），返回新的 id */
-  createEntry(category: VCategory, draft: VEntry): Promise<string>
+  /** 新建一条（draft 是作者在空卡片上写好的，或从编辑部帮写的候选里收下的），返回新的 id */
+  createEntry(category: VCategory, draft: VEntry, options?: { fromCandidate?: boolean }): Promise<string>
   deleteEntry(entry: VEntry): Promise<void>
   saveRelation(entry: VEntry, relation: NonNullable<VEntry['relations']>[number], text: string): Promise<void>
   addRelation(entry: VEntry, to: string, kind: string, text: string): Promise<void>
@@ -50,6 +65,15 @@ export interface WorkspaceActions {
   canAdd(parent: VNode): boolean
   canEdit(node: VNode, part: 'name' | 'text'): boolean
   canDelete(node: VNode): boolean
+  /* 下面几样要叫编辑部，只有真书有；原型里不填，界面照旧给原型的样子 */
+  /** 编辑部帮写：在这一类里照这本书的栏目写几条候选，不存 */
+  draft?(category: VCategory, template: CardTemplate, request: string): Promise<{ entries: DraftItem[]; note: string }>
+  /** 选中文字让编辑部改。spot 是页面上那一栏的记号（见 Editable 的 spot），start/end 是选中的字在这一栏里的位置，quote 是选中的字（位置对不上时按它找） */
+  rewrite?(spot: string, start: number, end: number, mode: RewriteMode, instruction?: string, quote?: string): Promise<RewriteOutcome>
+  /** 从几个写法里挑一个换上，带回撤销用的版本 */
+  chooseOption?(candidateId: string, index: number): Promise<string | null>
+  /** 退回到某一版（撤销编辑部刚改的） */
+  revert?(versionId: string): Promise<void>
 }
 
 interface WorkspaceTools {
@@ -200,6 +224,14 @@ export function blankEntry(category: VCategory): VEntry {
   if (category.name === '金手指' && !category.custom) return { ...base, kind: 'goldfinger', tags: ['金手指'] }
   if ((category.name === '等级体系' && !category.custom) || category.custom?.style === 'ladder') return { ...base, kind: 'ladder', overview: '', levels: [{ name: '', text: '' }, { name: '', text: '' }] }
   return { ...base, kind: 'paragraph' }
+}
+
+/** 编辑部帮写的候选变成一条新卡片：照这一类的样子摆，按这本书的栏目放内容。 */
+export function draftToEntry(category: VCategory, template: CardTemplate, item: DraftItem): VEntry {
+  const blank = blankEntry(category)
+  if (blank.kind === 'ladder') return { ...blank, name: item.name, overview: item.values['总说明'] ?? '', levels: item.levels }
+  const filled = withFields({ ...applyTemplate(blank, template), name: item.name }, item.values)
+  return filled
 }
 
 /** 找一条：草稿也算。 */

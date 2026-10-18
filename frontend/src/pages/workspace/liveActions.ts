@@ -6,9 +6,9 @@ import { del, get, patch, post, put } from '../../api/client'
 import type { LibraryItem, LibrarySnapshot } from '../../api/library'
 import type { ChapterBrief } from '../../api/types'
 import type { OutlineTree } from '../../lib/outlineTree'
-import type { WorkspaceActions } from './actions'
+import type { RewriteOutcome, WorkspaceActions } from './actions'
 import { type ApiParts, CHARACTER_COLUMNS, ENTRY_CATEGORY, WORLD_OVERVIEW, bookFromApi, contentKey } from './fromApi'
-import type { VEntry } from './model'
+import { findEntry, findNode, type VBook, type VEntry } from './model'
 
 export const workspaceKey = (bookId: string) => ['workspace', bookId] as const
 
@@ -85,6 +85,8 @@ export function useLiveBook(bookId: string) {
   const book = useMemo(() => (query.data ? bookFromApi(query.data) : undefined), [query.data])
   const parts = useRef<ApiParts | undefined>(undefined)
   useEffect(() => { parts.current = query.data }, [query.data])
+  const bookRef = useRef<VBook | undefined>(undefined)
+  useEffect(() => { bookRef.current = book }, [book])
 
   const actions = useMemo<WorkspaceActions>(() => {
     const refresh = () => qc.invalidateQueries({ queryKey: workspaceKey(bookId) })
@@ -98,6 +100,34 @@ export function useLiveBook(bookId: string) {
     }
     const isCharacter = (entry: VEntry) => entry.kind === 'character'
     const concept = (value: Record<string, unknown>) => done(patch(`/books/${bookId}`, { concept: value, review_changes: false }))
+    /** 页面上那一栏的记号 → 设定库里哪一条的哪一处（和 Editable 的 spot 写法对应） */
+    const resolveSpot = (spot: string): { target_type: string; target_id: string; path: string } | null => {
+      const [kind, id, key] = spot.split('|')
+      const current = bookRef.current
+      if (kind === 'b') return { target_type: 'concept', target_id: bookId, path: 'story' }
+      if (kind === 'w') {
+        const row = parts.current?.library.entries.find((e) => e.category === '世界与地图' && e.name.trim() === WORLD_OVERVIEW)
+        return row ? { target_type: 'entry', target_id: row.id, path: 'content' } : null
+      }
+      if (kind === 'n') {
+        const node = current && findNode(current.outline, id)?.at(-1)
+        if (!node?.ref || node.later) return null
+        if (node.ref.type === 'segment' && node.kind === '篇') return { target_type: 'segment', target_id: node.ref.id, path: 'text' }
+        if (node.ref.type === 'volume' || node.ref.type === 'unit') return { target_type: node.ref.type, target_id: node.ref.id, path: 'summary' }
+        return null
+      }
+      const entry = current && findEntry(current, id)
+      if (!entry || entry.readonly || entry.id.startsWith('draft-')) return null
+      if (kind === 'l') return { target_type: 'entry', target_id: entry.id, path: `levels.${key}.text` }
+      if (key === '@oneLine') return { target_type: isCharacter(entry) ? 'character' : 'entry', target_id: entry.id, path: 'one_line' }
+      if (isCharacter(entry)) {
+        const column = CHARACTER_COLUMNS[key]
+        if (column === 'aliases' || column === 'role_type') return null
+        return { target_type: 'character', target_id: entry.id, path: column ?? `extra.${key}` }
+      }
+      if (key === '@overview' || key === contentKey(entry.category)) return { target_type: 'entry', target_id: entry.id, path: 'content' }
+      return { target_type: 'entry', target_id: entry.id, path: `fields.${key}` }
+    }
     return {
       live: true,
       saveBook: async (change) => {
@@ -131,10 +161,12 @@ export function useLiveBook(bookId: string) {
         Object.assign(body, entryBody(entry.category, change.fields ?? {}))
         await done(patch(`/world-entries/${entry.id}`, body))
       },
-      createEntry: async (category, draft) => {
+      createEntry: async (category, draft, options) => {
         const fields = fieldsOf(draft)
+        // 从编辑部帮写的候选里收下的，来源记成「从选择里挑的」
+        const source = options?.fromCandidate ? 'candidate' : 'author'
         if (isCharacter(draft)) {
-          const row = await done(post<LibraryItem>(`/books/${bookId}/characters`, { name: draft.name.trim(), one_line: draft.oneLine, ...characterBody(fields) }))
+          const row = await done(post<LibraryItem>(`/books/${bookId}/characters`, { name: draft.name.trim(), one_line: draft.oneLine, source, ...characterBody(fields) }))
           return row.id
         }
         const { content, field_values } = entryBody(draft.category, fields)
@@ -146,6 +178,7 @@ export function useLiveBook(bookId: string) {
           fields: Object.entries(field_values ?? {}).filter(([, v]) => v.trim()).map(([name, value]) => ({ name, value })),
           ...(draft.kind === 'ladder' ? { levels: draft.levels ?? [] } : {}),
           tags: draft.tags,
+          source,
         }))
         return row.id
       },
@@ -213,6 +246,19 @@ export function useLiveBook(bookId: string) {
         if (node.kind === '章') return part === 'name' || node.progress === '已规划'
         return true
       },
+      draft: (category, template, request) => post(`/books/${bookId}/drafts`, {
+        category: category.key, request, count: 3, facts: template.facts, sections: template.sections,
+      }),
+      rewrite: async (spot, start, end, mode, instruction, quote) => {
+        const target = resolveSpot(spot)
+        if (!target) throw new Error('这一处还不能让编辑部改')
+        const body = { ...target, path: `${target.path}@${start}:${end}`, mode, instruction: instruction ?? '', quote: quote ?? '', quiet: true }
+        type Reply = { revert_version_id?: string | null; candidate?: RewriteOutcome['candidate'] }
+        const reply = mode === 'options' ? await post<Reply>(`/books/${bookId}/library/rewrite`, body) : await done(post<Reply>(`/books/${bookId}/library/rewrite`, body))
+        return { revertVersionId: reply.revert_version_id, candidate: reply.candidate }
+      },
+      chooseOption: async (candidateId, index) => (await done(post<{ revert_version_id?: string | null }>(`/candidates/${candidateId}/choose`, { index }))).revert_version_id ?? null,
+      revert: (versionId) => done(post(`/versions/${versionId}/revert`)).then(() => undefined),
       canDelete: (node) => {
         if (node.ref?.type === 'volume' || node.ref?.type === 'unit') return true
         if (node.kind === '章') return !!node.ref && node.progress === '已规划'

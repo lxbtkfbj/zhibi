@@ -12,12 +12,17 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agents import schemas as s
+from app.agents.context import format_requirements
 from app.api.deps import SessionDep, ensure_idle, get_book
-from app.library_config import GOLDFINGER
+from app.api.library_ai import call_model
+from app.library_config import BUILTIN_CATEGORIES, CHARACTER_CATEGORY, GOLDFINGER, LEGACY_ROLE_TYPES, ROLE_TYPES
 from app.models import Book, Chapter, Character, PlotUnit, SettingCategory, StoryNode, Volume, WorldEntry
-from app.schemas import ArcCreate, CardLayoutIn, ChapterCreate
+from app.schemas import ArcCreate, CardLayoutIn, ChapterCreate, DraftRequest
 from app.services import outline_structure
 from app.services.library import lock_book
+from app.services.library_context import load_context
+from app.services.requirements import active_requirements, requirement_text
 from app.services.versions import record_version
 
 router = APIRouter(tags=["workspace"])
@@ -302,3 +307,110 @@ async def delete_chapter(index: int, book: Book = Depends(get_book), session: As
     volume.chapter_count = sum(row.chapter_count for row in state.own_units(volume.id))
     await outline_structure.finish_structure(session, book.id, state, "删掉一章", affected={unit.id, volume.id})
     await session.commit()
+
+
+# ---------- 编辑部帮写：在一类里写几条候选 ----------
+
+LADDER = "等级体系"
+# 地点这一类不要「第一条是世界概况」那句：世界概况在新书页上单独一页
+PLACE_HINT = "一个个地方：这是什么地方，给人什么感觉；属于哪里；谁说了算；有什么规矩或危险；主角在这里处境如何；这里能得到什么。用得上的写，用不上的不写。"
+SAME_KIND_BUDGET = 5000
+
+
+def same_kind_text(ctx, rows) -> str:
+    """这一类已经有的：先放全文，放不下的只列名字。"""
+    if not rows:
+        return "（还没有）"
+    full, names = [], []
+    for row in rows:
+        text = ctx.entry_full_text(row)
+        if not names and len("\n\n".join([*full, text])) <= SAME_KIND_BUDGET:
+            full.append(text)
+        else:
+            names.append(row.name)
+    return "\n\n".join(full) + (f"\n\n还有：{'、'.join(names)}" if names else "")
+
+
+@router.post("/books/{book_id}/drafts")
+async def draft_entries(body: DraftRequest, book: Book = Depends(get_book), session: AsyncSession = SessionDep) -> dict:
+    """编辑部帮写：写几条候选，不存。作者收下哪条，前端就按新增一条存进来（来源记成从候选里收下的）。"""
+    people = body.category == "角色列表"
+    ladder = body.category == LADDER
+    custom = None
+    if body.category.startswith("custom:"):
+        custom = await session.scalar(
+            select(SettingCategory).where(
+                SettingCategory.book_id == book.id, SettingCategory.key == body.category.removeprefix("custom:")
+            )
+        )
+        if custom is None:
+            raise HTTPException(404, "这个类别不属于这本书")
+        ladder = custom.style == "ladder"
+    elif not people and not ladder and body.category not in ENTRY_CATEGORIES:
+        raise HTTPException(422, "这一类不能帮写")
+
+    ctx = await load_context(session, book)
+    if people:
+        same, name, hint = ctx.characters, "角色", CHARACTER_CATEGORY["hint"]
+    elif custom is not None:
+        same, name, hint = await entry_rows(session, book.id, body.category), custom.name, custom.hint or "（作者没写说明）"
+    elif ladder:
+        same = [row for row in ctx.entries if row.category == LADDER]
+        name, hint = LADDER, next(c["hint"] for c in BUILTIN_CATEGORIES if c["key"] == LADDER)
+    else:
+        key = ENTRY_CATEGORIES[body.category]
+        same, name = await entry_rows(session, book.id, body.category), body.category
+        hint = PLACE_HINT if key == "世界与地图" else next(c["hint"] for c in BUILTIN_CATEGORIES if c["key"] == key)
+    if ladder:
+        fields = "一级一级往上排：values 只写一栏「总说明」，各级写在 levels 里。"
+    else:
+        facts = "、".join(f.label for f in body.facts)
+        sections = "、".join(f.label for f in body.sections) or "内容"
+        fields = (f"名字下面的短栏目：{facts}\n" if facts else "") + f"正文栏目：{sections}"
+    requirements = await active_requirements(session, book.id)
+    blocks = dict(
+        category=name,
+        concept=ctx.concept,
+        library=ctx.library,
+        same_kind=same_kind_text(ctx, same),
+        category_hint=hint,
+        fields=fields,
+        requirements=format_requirements([requirement_text(row) for row in requirements], [], book.settings),
+        request=body.request.strip() or "（作者没说，按定调和已有的设定来）",
+        count=f"{body.count} 条",
+    )
+    taken = {n for row in [*ctx.characters, *ctx.entries] for n in [row.name, *(row.aliases or [])] if n}
+    book_id = book.id
+    # 调模型时不占着数据库
+    await session.rollback()
+    result = await call_model(book_id, "lorekeeper", s.DraftSet, "library_draft", **blocks)
+
+    keys = {f.label.strip(): f.key for f in [*body.facts, *body.sections]}
+    entries = []
+    for item in result.entries:
+        title = item.name.strip()
+        if not title or title in taken:
+            continue
+        taken.add(title)
+        values = {}
+        for field in item.values:
+            label, value = field.name.strip(), field.value.strip()
+            if not value:
+                continue
+            if ladder and label == "总说明":
+                values[label] = value
+            elif label in keys:
+                values[keys[label]] = value
+        if people:
+            # 模型偶尔写成「明面上的对手」：认出里面的定位词，认不出算配角
+            role = values.get("定位", "")
+            names = [*ROLE_TYPES, *LEGACY_ROLE_TYPES]
+            found = next((name for name in names if name in role), "配角")
+            values["定位"] = LEGACY_ROLE_TYPES.get(found, found)
+        levels = [
+            {"name": level.name.strip(), "text": level.text.strip()} for level in item.levels if level.name.strip()
+        ]
+        entries.append({"name": title, "values": values, "levels": levels if ladder else []})
+        if len(entries) >= body.count:
+            break
+    return {"entries": entries, "note": result.note}

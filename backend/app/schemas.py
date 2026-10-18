@@ -523,8 +523,20 @@ class CardLayoutIn(BaseModel):
         return self
 
 
+class DraftRequest(BaseModel):
+    """编辑部帮写：在某一类里写几条候选。栏目照新书页上这一类现在的样子。"""
+
+    category: str = Field(min_length=1, max_length=60)
+    request: str = Field(default="", max_length=1000)
+    count: int = Field(default=3, ge=1, le=6)
+    facts: list[LayoutField] = Field(default_factory=list, max_length=30)
+    sections: list[LayoutField] = Field(default_factory=list, max_length=30)
+
+
 class CharacterBase(BaseModel):
     name: str = Field(min_length=1, max_length=100)
+    # 只认「candidate」（从编辑部帮写的候选里收下的），别的一律当作者自己写的
+    source: str = "author"
     aliases: list[str] = []
     role_type: str = "配角"
     gender: str = ""
@@ -601,6 +613,7 @@ class CharacterPatch(BaseModel):
 class WorldEntryBase(BaseModel):
     category: str = "其他"
     name: str = Field(min_length=1, max_length=100)
+    source: str = "author"
     content: str = ""
     style: SettingStyle | None = None
     status: SettingStatus = "must"

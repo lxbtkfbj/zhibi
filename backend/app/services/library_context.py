@@ -197,6 +197,8 @@ class LibraryContext:
             part = "一段话"
         elif field.startswith("fields."):
             part = field.removeprefix("fields.")
+        elif field.startswith("extra."):
+            part = field.removeprefix("extra.")
         elif match := re.fullmatch(r"levels\.(\d+)\.(name|text)", field):
             index = int(match[1])
             part = f"第 {index + 1} 级「{target.levels[index]['name']}」的{'名称' if match[2] == 'name' else '介绍'}"

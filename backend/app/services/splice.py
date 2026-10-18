@@ -6,7 +6,7 @@ from copy import deepcopy
 from typing import Any
 
 from app.library_config import STATUSES, STYLES
-from app.models import Book, StoryNode, WorldEntry
+from app.models import Book, Character, StoryNode, WorldEntry
 from app.services.versions import EDITABLE_FIELDS, target_type_of
 
 STALE_TEXT = "原文已经改过，没法只换这一段"
@@ -38,6 +38,12 @@ def _field(target: Any, path: str) -> tuple[str, Any]:
         if not name:
             raise ValueError("卡片字段名不能为空")
         return "card", name
+    if isinstance(target, Character) and path.startswith("extra."):
+        # 角色卡上没有专门一列的栏目（所属、软肋、作者自己加的……），按栏目名存在 extra
+        name = path.removeprefix("extra.")
+        if not name:
+            raise ValueError("栏目名不能为空")
+        return "extra", name
     if isinstance(target, WorldEntry) and path.startswith("levels."):
         match = _LEVEL.fullmatch(path)
         if match is None:
@@ -68,6 +74,8 @@ def _read(target: Any, field: tuple[str, Any]) -> Any:
     kind, key = field
     if kind == "card":
         return next((row.get("value", "") for row in target.fields or [] if row.get("name") == key), "")
+    if kind == "extra":
+        return (target.extra or {}).get(key, "")
     if kind == "level":
         return target.levels[key[0]].get(key[1], "")
     if kind in {"concept", "segment"}:
@@ -142,7 +150,7 @@ def _validate(name: str, value: Any) -> Any:
 
 def _write(target: Any, field: tuple[str, Any], value: Any) -> None:
     kind, key = field
-    if kind in {"card", "level", "segment"}:
+    if kind in {"card", "level", "segment", "extra"}:
         if not isinstance(value, str):
             raise ValueError("这一处只能填写文字")
         value = deepcopy(value)
@@ -156,6 +164,9 @@ def _write(target: Any, field: tuple[str, Any], value: Any) -> None:
         else:
             row["value"] = value
         target.fields = rows
+    elif kind == "extra":
+        extra = {name: text for name, text in (target.extra or {}).items() if name != key}
+        target.extra = {**extra, key: value} if value else extra
     elif kind == "level":
         levels = deepcopy(target.levels)
         levels[key[0]][key[1]] = value

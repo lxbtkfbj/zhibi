@@ -72,7 +72,7 @@ async def _create(session: AsyncSession, book_id: uuid.UUID, model: Any, body: B
     if model is WorldEntry:
         data = await validate_entry(session, book_id, data)
     if model in (Character, WorldEntry):
-        data["source"] = "author"
+        data["source"] = "candidate" if data.get("source") == "candidate" else "author"
     row = model(book_id=book_id, **data)
     if model in (Character, WorldEntry) and "status" not in data:
         row.status = infer_status(row)

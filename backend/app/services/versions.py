@@ -216,3 +216,16 @@ async def record_version(
     session.add(version)
     await session.flush()
     return version
+
+
+async def previous_version_id(session: AsyncSession, target_type: str, target_id: uuid.UUID) -> str | None:
+    """刚记了一版之后，改之前那一版的编号：撤销就是退回到它。"""
+    rows = list(
+        await session.scalars(
+            select(SettingVersion.id)
+            .where(SettingVersion.target_type == target_type, SettingVersion.target_id == target_id)
+            .order_by(SettingVersion.version.desc())
+            .limit(2)
+        )
+    )
+    return str(rows[1]) if len(rows) > 1 else None

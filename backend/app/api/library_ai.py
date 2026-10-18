@@ -26,8 +26,8 @@ from app.services.library_cascade import generate_cascade_suggestions, iter_text
 from app.services.library_context import load_context, rewrite_mode
 from app.services.meeting import post_message
 from app.services.requirements import active_requirements, requirement_text
-from app.services.splice import read_path, splice
-from app.services.versions import record_version, snapshot_of, target_type_of
+from app.services.splice import STALE_TEXT, read_path, splice
+from app.services.versions import previous_version_id, record_version, snapshot_of, target_type_of
 
 router = APIRouter(tags=["library"])
 TargetType = Literal["entry", "character", "concept", "segment", "volume", "unit"]
@@ -41,6 +41,10 @@ class RewriteIn(BaseModel):
     path: str
     mode: Literal["options", "instruction", "expand", "shorten"] = "options"
     instruction: str = ""
+    # 新书页上选中文字改：结果就地给作者看，不在群聊里再说一遍
+    quiet: bool = False
+    # 选中的原字：页面算的位置和存下的字对不上时（比如刚改完还没存好），按它重新找；找不到就不改
+    quote: str = ""
 
 
 class CheckIn(BaseModel):
@@ -105,6 +109,12 @@ async def rewrite_target(
         current = read_path(target, body.path)
         if not isinstance(current, str):
             raise ValueError("这一处不是文字，不能替换")
+        if body.quote and "@" in body.path and current != body.quote:
+            field = body.path.rsplit("@", 1)[0]
+            start = str(read_path(target, field)).find(body.quote)
+            if start < 0:
+                raise ValueError(STALE_TEXT)
+            body.path, current = f"{field}@{start}:{start + len(body.quote)}", body.quote
     except ValueError as exc:
         raise _splice_error(exc) from exc
     ctx = await load_context(session, book)
@@ -159,7 +169,10 @@ async def rewrite_target(
             options=[item.model_dump() for item in result.options],
         )
         session.add(candidate)
-        await say(session, redis, book_id, "lorekeeper", f"我给「{name}」的{part}出了三种写法，去设定库挑一个。")
+        if body.quiet:
+            await session.commit()
+        else:
+            await say(session, redis, book_id, "lorekeeper", f"我给「{name}」的{part}出了三种写法，去设定库挑一个。")
         return {"candidate": CandidateOut.model_validate(candidate)}
     before = snapshot_of(target)
     previous_source = getattr(target, "source", "ai")
@@ -188,7 +201,11 @@ async def rewrite_target(
             one_line=result.one_line,
         )
         verb = {"instruction": "照你的意思改了", "expand": "写细了", "shorten": "精简了"}[body.mode]
-        await say(session, redis, book_id, "lorekeeper", f"{verb}「{name}」的{part}。")
+        revert_version_id = await previous_version_id(session, body.target_type, target.id)
+        if body.quiet:
+            await session.commit()
+        else:
+            await say(session, redis, book_id, "lorekeeper", f"{verb}「{name}」的{part}。")
     except ValueError as exc:
         raise _splice_error(exc) from exc
     except IntegrityError as exc:
@@ -196,6 +213,7 @@ async def rewrite_target(
     response = {
         "applied": {"path": body.path, "before": old, "after": new},
         "version": version.version,
+        "revert_version_id": revert_version_id,
         "suggestions": [SuggestionOut.model_validate(row) for row in suggestions],
     }
     if isinstance(target, Book) and body.path.split("@", 1)[0] == "story":

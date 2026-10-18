@@ -825,6 +825,26 @@ def _library_options(user: str) -> s.RewriteOptions:
     return s.RewriteOptions(options=options, note="三种写法都备好了，推荐先看最贴近原意的稳妥写法。")
 
 
+def _library_draft(user: str) -> s.DraftSet:
+    """帮写几条：按提示里的栏目逐栏填演示文字。"""
+    category = (re.search(r"「(.+?)」这一类", user) or [None, "设定"])[1]
+    fields = _match(r"【这一类的栏目】\n(.*?)\n\n", user)
+    count = int(_match(r"【写几条】\n(\d+)", user) or 3)
+    labels = [label for line in fields.splitlines() if "：" in line for label in line.split("：", 1)[1].split("、") if label]
+    entries = []
+    for i in range(1, count + 1):
+        if "一级一级往上排" in fields:
+            values = [s.FieldValue(name="总说明", value="一级一级往上走，越级要付代价。")]
+            levels = [s.LevelDraft(name=f"第{i}套一阶", text="入门"), s.LevelDraft(name=f"第{i}套二阶", text="")]
+            entries.append(s.DraftEntry(name=f"演示{category}{i}", values=values, levels=levels))
+            continue
+        values = [
+            s.FieldValue(name=label, value="配角" if label == "定位" else f"（演示）第{i}条的{label}") for label in labels
+        ]
+        entries.append(s.DraftEntry(name=f"演示{category}{i}", values=values))
+    return s.DraftSet(entries=entries, note=f"（演示）写了 {count} 条{category}。")
+
+
 def _library_gaps(user: str) -> s.GapReport:
     library = _match(r"【设定库目录】\n(.*?)(?=\n\n要求：|\Z)", user)
     categories = []
@@ -1066,6 +1086,7 @@ async def respond(schema: type[BaseModel], system: str, user: str) -> BaseModel:
             text=f"{_library_current(user)}（已按要求修改）", note="已按要求修改这一处。"
         ),
         s.GapReport: lambda: _library_gaps(user),
+        s.DraftSet: lambda: _library_draft(user),
         s.LibraryReview: lambda: _library_review(user),
         s.LibraryIntent: lambda: _library_intent(user),
         s.ChatReply: lambda: _chat_reply(system, user),

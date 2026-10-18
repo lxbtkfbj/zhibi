@@ -55,7 +55,7 @@ from app.services.library_cascade import generate_cascade_suggestions
 from app.services.library_context import load_context
 from app.services.meeting import post_message
 from app.services.splice import read_path, set_field, splice
-from app.services.versions import apply_snapshot, record_version, snapshot_of
+from app.services.versions import apply_snapshot, previous_version_id, record_version, snapshot_of
 
 router = APIRouter(tags=["library"])
 TargetType = Literal["character", "entry", "concept", "segment", "volume", "unit"]
@@ -433,10 +433,12 @@ async def choose_candidate(
         raise _splice_error(exc) from exc
     except IntegrityError as exc:
         raise HTTPException(409, "候选修改后的名称重复或引用已不存在") from exc
+    revert_version_id = await previous_version_id(session, candidate.target_type, candidate.target_id)
     await session.refresh(target)
     result = {
         "candidate": CandidateOut.model_validate(candidate),
         "target": _target_out(target),
+        "revert_version_id": revert_version_id,
         "suggestions": [SuggestionOut.model_validate(suggestion) for suggestion in suggestions],
     }
     if isinstance(target, Book):

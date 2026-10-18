@@ -956,3 +956,18 @@ class TidyItem(Lenient):
 
 class RequirementsTidy(Lenient):
     items: list[TidyItem] = Field(description="清单里每一条都给一个判断，按序号排")
+
+
+class DraftEntry(Lenient):
+    name: str = Field(description="名称；角色写人名")
+    values: list[FieldValue] = Field(
+        default_factory=list, description="按【这一类的栏目】一栏一栏写，栏目名照抄；拿不准的栏目不写"
+    )
+    levels: list[LevelDraft] = Field(
+        default_factory=list, description="只有一级一级往上排的类别才写：各级从低到高；其余类别留空"
+    )
+
+
+class DraftSet(Lenient):
+    entries: list[DraftEntry] = Field(description="写出来的几条，条数照【写几条】，彼此要有实质差别")
+    note: str = Field(default="", description="给作者的一两句话：这几条各自是什么思路")

@@ -6,7 +6,8 @@ import { useBookMeta } from '../../api/newBook'
 import { CategoryPicker, LengthInput, Row, TagPicker } from '../../components/BookFields'
 import { BookCover } from '../../components/BookCover'
 import {
-  ActionsContext, type CategoryStyle, type EntryChange, type WorkspaceActions, blankEntry, childKind, entryIn, useSave, useWorkspace, withFields,
+  ActionsContext, type CategoryStyle, type DraftItem, type EntryChange, type RewriteMode, type RewriteOutcome, type WorkspaceActions,
+  blankEntry, childKind, draftToEntry, entryIn, useSave, useWorkspace, withFields,
 } from './actions'
 import {
   ROLE_ORDER, applyTemplate, cn, emptyCategory, findEntry, findNode, isLadder, nounOf, splitTitle, templateOf,
@@ -38,8 +39,10 @@ interface Nav {
 const readText = (el: HTMLElement) => el.innerText.replace(/ /g, ' ').replace(/\n+$/, '')
 
 /** 可以直接改的字：点上去就能改，不用先点「编辑」；离开就存；空着时显示该写什么。Esc 撤回这次改的。 */
-function Editable({ value, onSave, className, multiline, boxed, placeholder, autoFocus, readOnly }: {
+function Editable({ value, onSave, className, multiline, boxed, placeholder, autoFocus, readOnly, spot }: {
   value: string; onSave?: (text: string) => void; className?: string; multiline?: boolean; boxed?: boolean; placeholder?: string; autoFocus?: boolean; readOnly?: boolean
+  /** 这一栏在书里是哪一处：选中里面的字能让编辑部改（写法见 liveActions 的 resolveSpot） */
+  spot?: string
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const saved = useRef(value)
@@ -63,6 +66,7 @@ function Editable({ value, onSave, className, multiline, boxed, placeholder, aut
       aria-multiline={editable ? multiline : undefined}
       aria-label={editable ? placeholder : undefined}
       data-placeholder={placeholder}
+      data-spot={spot}
       onInput={(e) => { if (!e.currentTarget.textContent) e.currentTarget.innerHTML = '' }}
       onKeyDown={(e) => {
         if (e.key === 'Escape') {
@@ -96,13 +100,13 @@ function Editable({ value, onSave, className, multiline, boxed, placeholder, aut
 const LONG = 260
 
 /** 一段长文字：可以直接改；太长先折起来，点进去改就展开。 */
-function Prose({ value, onSave, placeholder, autoFocus, readOnly }: { value: string; onSave?: (text: string) => void; placeholder?: string; autoFocus?: boolean; readOnly?: boolean }) {
+function Prose({ value, onSave, placeholder, autoFocus, readOnly, spot }: { value: string; onSave?: (text: string) => void; placeholder?: string; autoFocus?: boolean; readOnly?: boolean; spot?: string }) {
   const long = value.length > LONG
   const [open, setOpen] = useState(false)
   return (
     <>
       <div className={clsx('relative', long && !open && 'max-h-[11.5em] overflow-hidden')} onFocus={() => setOpen(true)}>
-        <Editable multiline autoFocus={autoFocus} value={value} onSave={onSave} readOnly={readOnly} placeholder={placeholder ?? '还没写'} className="font-serif text-[17px] leading-[1.95] text-ink 2xl:text-lg" />
+        <Editable multiline autoFocus={autoFocus} value={value} onSave={onSave} readOnly={readOnly} spot={spot} placeholder={placeholder ?? '还没写'} className="font-serif text-[17px] leading-[1.95] text-ink 2xl:text-lg" />
         {long && !open && <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-card to-transparent" />}
       </div>
       {long && (
@@ -115,11 +119,11 @@ function Prose({ value, onSave, placeholder, autoFocus, readOnly }: { value: str
 }
 
 /** 正文里的一栏：小标题加一段字。 */
-function Section({ field, onSave, readOnly, children }: { field: VField; onSave?: (text: string) => void; readOnly?: boolean; children?: ReactNode }) {
+function Section({ field, onSave, readOnly, children, spot }: { field: VField; onSave?: (text: string) => void; readOnly?: boolean; children?: ReactNode; spot?: string }) {
   return (
     <section>
       <h3 className="mb-2 text-[13px] tracking-[0.15em] text-ink-3">{field.label}</h3>
-      <Prose value={field.text} onSave={onSave} readOnly={readOnly} placeholder={field.placeholder} />
+      <Prose value={field.text} onSave={onSave} readOnly={readOnly} placeholder={field.placeholder} spot={spot} />
       {children}
     </section>
   )
@@ -739,7 +743,7 @@ function CharacterCard({ book, entry, nav, fresh }: { book: VBook; entry: VEntry
       </div>
       <DraftNote entry={entry} />
       {readOnly && <p className="mt-2 text-[13px] text-ink-3">这一条从「{holder?.name}」的角色卡推出来，到角色卡上去改。</p>}
-      <Editable value={entry.oneLine} readOnly={readOnly} onSave={(oneLine) => saveEntry({ oneLine })} placeholder="一句话说清这是谁、这是什么" className="mt-3 font-serif text-lg leading-relaxed text-ink-2 2xl:text-xl" />
+      <Editable value={entry.oneLine} readOnly={readOnly} onSave={(oneLine) => saveEntry({ oneLine })} spot={`e|${entry.id}|@oneLine`} placeholder="一句话说清这是谁、这是什么" className="mt-3 font-serif text-lg leading-relaxed text-ink-2 2xl:text-xl" />
       <MetaRow readOnly={readOnly} items={[
         ...facts.map(([label, value, placeholder, key]) => ((key ?? label) === '定位' && people
           ? { label, value, picker: <RolePicker value={value || '配角'} readOnly={readOnly} onPick={(role) => saveEntry({ fields: { 定位: role } })} /> }
@@ -757,7 +761,7 @@ function CharacterCard({ book, entry, nav, fresh }: { book: VBook; entry: VEntry
       {(sections.length > 0 || (people && !draft)) && (
         <div className="mt-8 space-y-8 border-t border-line pt-8">
           {sections.map((f) => (
-            <Section key={f.key ?? f.label} field={f} readOnly={readOnly} onSave={field(f.key ?? f.label)}>
+            <Section key={f.key ?? f.label} field={f} readOnly={readOnly} onSave={field(f.key ?? f.label)} spot={`e|${entry.id}|${f.key ?? f.label}`}>
               {['身世', '来历'].includes(f.key ?? f.label) && secret && <div className="mt-2"><LinkChip icon={<Lock className="size-3" />} onClick={() => nav.openEntry(secret.id)}>另有秘密：{secret.name}</LinkChip></div>}
               {(f.key ?? f.label) === '能力' && goldfinger && <div className="mt-2"><LinkChip icon={<Sparkles className="size-3" />} onClick={() => nav.openEntry(goldfinger.id)}>金手指：{goldfinger.name}</LinkChip></div>}
             </Section>
@@ -799,7 +803,7 @@ function PlainCard({ book, entry, category, nav, fresh }: { book: VBook; entry: 
       <div className="mt-8 space-y-8 border-t border-line pt-8">
         {entry.kind === 'ladder' ? (
           <>
-            <Prose value={entry.overview ?? ''} onSave={(overview) => saveEntry({ overview })} placeholder="总的说一句：怎么往上升、越级多难、有什么代价" />
+            <Prose value={entry.overview ?? ''} onSave={(overview) => saveEntry({ overview })} spot={`e|${entry.id}|@overview`} placeholder="总的说一句：怎么往上升、越级多难、有什么代价" />
             <ol>
               {levels.map((level, i) => (
                 <li key={i} className="group/level relative flex gap-5 pb-7">
@@ -807,7 +811,7 @@ function PlainCard({ book, entry, category, nav, fresh }: { book: VBook; entry: 
                   <span className="relative flex size-9 shrink-0 items-center justify-center rounded-full border border-line-2 bg-card font-serif text-[15px] text-ink-2">{i + 1}</span>
                   <div className="min-w-0 flex-1 pt-1">
                     <Editable autoFocus={i === newLevel} value={level.name} onSave={(v) => setLevel(i, 'name', v)} placeholder="这一级叫什么" className="font-serif text-lg font-bold" />
-                    <Editable value={level.text} onSave={(v) => setLevel(i, 'text', v)} placeholder="这一级能做到什么，先空着也行" className="mt-1 font-serif text-[17px] leading-[1.9] text-ink-2" />
+                    <Editable value={level.text} onSave={(v) => setLevel(i, 'text', v)} spot={`l|${entry.id}|${i}`} placeholder="这一级能做到什么，先空着也行" className="mt-1 font-serif text-[17px] leading-[1.9] text-ink-2" />
                   </div>
                   <button type="button" onClick={() => saveEntry({ levels: levels.filter((_, j) => j !== i) })} aria-label="删掉这一级" title="删掉这一级"
                     className="mt-1.5 h-fit shrink-0 rounded p-1 text-ink-3 opacity-0 transition-opacity group-hover/level:opacity-100 hover:text-ink focus-visible:opacity-100">
@@ -828,9 +832,9 @@ function PlainCard({ book, entry, category, nav, fresh }: { book: VBook; entry: 
             </ol>
           </>
         ) : onlyContent ? (
-          <Prose value={entry.sections[0].text} onSave={(text) => saveEntry({ fields: { 内容: text } })} placeholder={example ? `比如：\n${example.text}` : '写这一条的内容，可以一条条列'} />
+          <Prose value={entry.sections[0].text} onSave={(text) => saveEntry({ fields: { 内容: text } })} spot={`e|${entry.id}|内容`} placeholder={example ? `比如：\n${example.text}` : '写这一条的内容，可以一条条列'} />
         ) : (
-          entry.sections.map((f) => <Section key={f.key ?? f.label} field={f} onSave={(text) => saveEntry({ fields: { [f.key ?? f.label]: text } })} />)
+          entry.sections.map((f) => <Section key={f.key ?? f.label} field={f} onSave={(text) => saveEntry({ fields: { [f.key ?? f.label]: text } })} spot={`e|${entry.id}|${f.key ?? f.label}`} />)
         )}
       </div>
       <AppearsRow items={entry.appears} nav={nav} />
@@ -847,39 +851,99 @@ function WorldPage({ book }: { book: VBook }) {
       <h1 className="font-serif text-[34px] font-bold 2xl:text-[38px]">世界概况</h1>
       <p className="mt-3 text-[15px] leading-relaxed text-ink-3">整个世界一段话说清：什么时代、超凡的力量公开还是藏着、钱用什么、普通人过得怎么样。一本书只有这一篇。</p>
       <div className="mt-8 border-t border-line pt-8">
-        <Prose value={book.world} onSave={(text) => save(actions.saveWorld(text))} placeholder={'比如：\n九天大陆，以武为尊，宗门、世家、王朝并立。钱用灵石，灵石也是修炼资源。凡人活不过百岁，武者靠境界续命。'} />
+        <Prose value={book.world} onSave={(text) => save(actions.saveWorld(text))} spot="w" placeholder={'比如：\n九天大陆，以武为尊，宗门、世家、王朝并立。钱用灵石，灵石也是修炼资源。凡人活不过百岁，武者靠境界续命。'} />
       </div>
     </Sheet>
   )
 }
 
-/** 让编辑部写几条：先说想要什么，写出来的每一条和自己写的一样，是「名字＋一段话」，挑着收下。 */
-function AskPanel({ category, onAccept, onClose }: { category: VCategory; onAccept: (items: { name: string; text: string }[]) => void; onClose: () => void }) {
-  const [want, setWant] = useState('')
-  const [state, setState] = useState<'ask' | 'writing' | 'done'>('ask')
-  const [results, setResults] = useState<{ name: string; text: string; taken?: boolean; dropped?: boolean }[]>([])
+type AskResult = { name: string; text?: string; item?: DraftItem; taken?: boolean; dropped?: boolean }
+type AskMemory = { want: string; state: 'ask' | 'writing' | 'done'; results: AskResult[]; note: string; error: string }
+/** 写出来的候选先记在这里：切到别的类再回来，还在 */
+const askMemory = new Map<string, AskMemory>()
+
+/** 一条候选：和自己写的卡片一样，名字、名字下面的小字、正文一栏一栏。 */
+function DraftPreview({ item, template }: { item: DraftItem; template: CardTemplate }) {
+  const facts = template.facts.filter((f) => item.values[f.key])
+  const sections = template.sections.filter((f) => item.values[f.key])
+  return (
+    <>
+      <p className="font-serif text-[17px] font-bold text-ink">{item.name}</p>
+      {facts.length > 0 && (
+        <p className="mt-1.5 flex flex-wrap gap-x-5 gap-y-1 text-[13px]">
+          {facts.map((f) => <span key={f.key}><span className="mr-1.5 text-ink-3">{f.label}</span><span className="text-ink-2">{item.values[f.key]}</span></span>)}
+        </p>
+      )}
+      {item.values['总说明'] && <p className="mt-1.5 font-serif text-[15px] leading-[1.9] whitespace-pre-line text-ink-2">{item.values['总说明']}</p>}
+      {item.levels.length > 0 && (
+        <ol className="mt-2 space-y-1 font-serif text-[15px] leading-[1.8] text-ink-2">
+          {item.levels.map((level, i) => <li key={i}><span className="mr-2 text-ink-3">{i + 1}</span><span className="font-bold text-ink">{level.name}</span>{level.text && `：${level.text}`}</li>)}
+        </ol>
+      )}
+      {sections.map((f) => (
+        <div key={f.key} className="mt-2.5">
+          {!(sections.length === 1 && f.key === '内容') && <p className="text-xs tracking-[0.15em] text-ink-3">{f.label}</p>}
+          <p className="mt-0.5 font-serif text-[15px] leading-[1.9] whitespace-pre-line text-ink-2">{item.values[f.key]}</p>
+        </div>
+      ))}
+    </>
+  )
+}
+
+/** 让编辑部写几条：先说想要什么，写出来的每一条和自己写的一样，挑着收下。 */
+function AskPanel({ book, category, onAccept, onClose }: { book: VBook; category: VCategory; onAccept: (items: { name: string; text: string }[]) => void; onClose: () => void }) {
+  const { actions, report } = useWorkspace()
+  const key = `${book.id}:${category.key}`
+  const template = templateOf(book, category)
+  const [memory, setMemory] = useState<AskMemory>(() => askMemory.get(key) ?? { want: '', state: 'ask', results: [], note: '', error: '' })
+  const update = (change: Partial<AskMemory>) => setMemory((m) => {
+    const next = { ...m, ...change }
+    askMemory.set(key, next)
+    return next
+  })
+  const { want, state, results, note, error } = memory
   const write = () => {
-    setState('writing')
-    setTimeout(() => {
-      setResults(fakeResults(category, want))
-      setState('done')
-    }, 1200)
+    update({ state: 'writing', error: '' })
+    if (!actions.draft) {
+      setTimeout(() => update({ results: fakeResults(category, want), state: 'done' }), 1200)
+      return
+    }
+    actions.draft(category, template, want.trim())
+      .then((reply) => update({ results: reply.entries.map((item) => ({ name: item.name, item })), note: reply.note, state: 'done' }))
+      .catch((err: unknown) => update({ state: 'ask', error: errorText(err) }))
+  }
+  const mark = (picked: AskResult[], change: Partial<AskResult>) => update({ results: results.map((r) => (picked.includes(r) ? { ...r, ...change } : r)) })
+  const take = (picked: AskResult[]) => {
+    mark(picked, { taken: true })
+    const real = picked.filter((r) => r.item)
+    if (!real.length) {
+      onAccept(picked.map((r) => ({ name: r.name, text: r.text ?? '' })))
+      return
+    }
+    // 收下一条就是新增一条，来源记成从候选里收下的
+    for (const r of real) {
+      actions.createEntry(category, draftToEntry(category, template, r.item!), { fromCandidate: true }).catch((err: unknown) => {
+        report(err)
+        update({ results: results.map((x) => (x.name === r.name ? { ...x, taken: false } : x)) })
+      })
+    }
   }
   const left = results.filter((r) => !r.taken && !r.dropped)
   return (
     <div className="rounded-2xl border border-line bg-subtle p-5">
       <div className="mb-3 flex items-center gap-2">
-        <span className="flex size-6 items-center justify-center rounded-full bg-chief font-serif text-xs text-on-role">编</span>
+        <span className="flex size-6 items-center justify-center rounded-full bg-lore font-serif text-xs text-on-role">设</span>
         <p className="text-[15px] text-ink">想让编辑部在「{category.name}」里写点什么？</p>
         <button type="button" onClick={onClose} className="ml-auto text-[13px] text-ink-3 hover:text-ink">收起</button>
       </div>
       {state !== 'done' && (
         <>
-          <textarea value={want} onChange={(e) => setWant(e.target.value)} rows={2} disabled={state === 'writing'}
+          <textarea value={want} onChange={(e) => update({ want: e.target.value })} rows={2} disabled={state === 'writing'}
             placeholder="说说你想要什么，比如：写三条跟寿命有关的规矩，要有代价。不写也行，编辑部按简介和已有的设定来。"
             className="w-full resize-none rounded-xl border border-line-2 bg-card px-4 py-3 text-[15px] leading-relaxed text-ink [field-sizing:content] placeholder:text-ink-3 focus:border-ink-3 focus:outline-none" />
+          {error && <p className="mt-2 text-[13px] text-seal">没写成：{error}</p>}
           <div className="mt-3 flex items-center justify-between gap-4">
-            <p className="text-xs text-ink-3">写出来的每一条和你自己新增的一样，你挑着收下。</p>
+            <p className="text-xs text-ink-3">写出来的每一条和你自己新增的一样，你挑着收下；不收的不会放进书里。</p>
             <button type="button" onClick={write} disabled={state === 'writing'}
               className="h-9 shrink-0 rounded-lg bg-ink px-5 text-sm text-paper-2 transition-colors hover:bg-ink-2 disabled:opacity-60">
               {state === 'writing' ? '编辑部在写…' : '写'}
@@ -889,28 +953,32 @@ function AskPanel({ category, onAccept, onClose }: { category: VCategory; onAcce
       )}
       {state === 'done' && (
         <div className="space-y-3">
+          {!results.length && <p className="text-[14px] text-ink-2">这一批写的都和书里已有的重名了，再写一批试试。</p>}
           {results.map((r, i) => (
             <div key={r.name + i} className={clsx('rounded-xl border bg-card px-5 py-4 transition-opacity', r.dropped ? 'opacity-40' : 'border-line')}>
-              <p className="font-serif text-[17px] font-bold text-ink">{r.name}</p>
-              <p className="mt-1.5 font-serif text-[15px] leading-[1.9] whitespace-pre-line text-ink-2">{r.text}</p>
+              {r.item ? <DraftPreview item={r.item} template={template} /> : (
+                <>
+                  <p className="font-serif text-[17px] font-bold text-ink">{r.name}</p>
+                  <p className="mt-1.5 font-serif text-[15px] leading-[1.9] whitespace-pre-line text-ink-2">{r.text}</p>
+                </>
+              )}
               <div className="mt-3 flex gap-2 text-[13px]">
                 {r.taken ? <span className="text-lore">已收下</span> : r.dropped ? <span className="text-ink-3">不要了</span> : (
                   <>
-                    <button type="button" onClick={() => { onAccept([r]); setResults(results.map((x, j) => (j === i ? { ...x, taken: true } : x))) }}
-                      className="rounded-md bg-ink px-3 py-1 text-paper-2 hover:bg-ink-2">收下</button>
-                    <button type="button" onClick={() => setResults(results.map((x, j) => (j === i ? { ...x, dropped: true } : x)))}
-                      className="rounded-md px-3 py-1 text-ink-2 hover:bg-subtle">不要</button>
+                    <button type="button" onClick={() => take([r])} className="rounded-md bg-ink px-3 py-1 text-paper-2 hover:bg-ink-2">收下</button>
+                    <button type="button" onClick={() => mark([r], { dropped: true })} className="rounded-md px-3 py-1 text-ink-2 hover:bg-subtle">不要</button>
                   </>
                 )}
               </div>
             </div>
           ))}
+          {note && <p className="text-[13px] leading-relaxed text-ink-3">{note}</p>}
           <div className="flex items-center gap-3">
             {left.length > 1 && (
-              <button type="button" onClick={() => { onAccept(left); setResults(results.map((x) => (x.taken || x.dropped ? x : { ...x, taken: true }))) }}
+              <button type="button" onClick={() => take(left)}
                 className="h-9 rounded-lg border border-line-2 bg-card px-4 text-sm text-ink hover:border-ink-3/50">剩下的全部收下</button>
             )}
-            <button type="button" onClick={() => { setState('ask'); setResults([]) }} className="text-[13px] text-ink-3 hover:text-ink">都不满意，再写一批</button>
+            <button type="button" onClick={() => update({ state: 'ask', results: [], note: '' })} className="text-[13px] text-ink-3 hover:text-ink">都不满意，再写一批</button>
           </div>
         </div>
       )}
@@ -1050,7 +1118,6 @@ function CategoryStream({ book, category, next, nav, fresh, scrollReq, onSpy, on
   /** 新建的一条存好以后换了 id，卡片还用原来的 key，正在打的字不丢 */
   cardKey: (id: string) => string
 }) {
-  const { actions } = useWorkspace()
   const [asking, setAsking] = useState(false)
   const [editing, setEditing] = useState(false)
   const pauseUntil = useRef(0)
@@ -1122,15 +1189,14 @@ function CategoryStream({ book, category, next, nav, fresh, scrollReq, onSpy, on
                 调整栏目
               </button>
             )}
-            {/* 编辑部帮写：第三步接上，现在真书上先不放 */}
-            {!actions.live && <AskButton onClick={() => setAsking(!asking)}>编辑部帮写</AskButton>}
+            <AskButton onClick={() => setAsking(!asking)}>编辑部帮写</AskButton>
             <button type="button" onClick={onNewEntry} className="h-9 rounded-lg bg-ink px-4 text-sm text-paper-2 transition-colors hover:bg-ink-2">
               新增{nounOf(category.name)}
             </button>
           </div>
         </div>
         {!ladder && editing && <div className="mt-5"><CardTemplateEditor category={category} template={templateOf(book, category)} counts={counts} onClose={() => setEditing(false)} /></div>}
-        {asking && <div className="mt-5"><AskPanel category={category} onAccept={onAccept} onClose={() => setAsking(false)} /></div>}
+        {asking && <div className="mt-5"><AskPanel book={book} category={category} onAccept={onAccept} onClose={() => setAsking(false)} /></div>}
       </header>
 
       <div className="space-y-6">
@@ -1268,7 +1334,7 @@ function OutlinePage({ book, outline, id, nav, onAdd, fresh }: { book: VBook; ou
             <Section key={field.label} field={field} readOnly={!actions.canEdit(node, 'text')}
               onSave={(text) => save(actions.saveNode(node, { sections: { [field.label]: text } }))} />
           ))
-          : <Prose value={node.text} readOnly={!actions.canEdit(node, 'text')} placeholder={NODE_PLACEHOLDER[node.kind]}
+          : <Prose value={node.text} readOnly={!actions.canEdit(node, 'text')} spot={`n|${node.id}`} placeholder={NODE_PLACEHOLDER[node.kind]}
             onSave={(text) => save(actions.saveNode(node, { text }))} />}
         {child && (canAdd || !!node.children?.length) && (
           <section>
@@ -1341,7 +1407,7 @@ function BlurbPage({ book }: { book: VBook }) {
           <Editable value={book.title} placeholder="书名" className="font-serif text-[34px] font-bold"
             onSave={(title) => save(actions.saveBook({ title: title.trim() }))} />
           <p className="mt-7 mb-2.5 text-sm text-ink-3">简介</p>
-          <Editable multiline boxed value={book.blurb} placeholder="写给读者看的那段话" className="rounded-xl bg-paper/45 px-5 py-4 font-serif text-[17px] leading-[1.95]"
+          <Editable multiline boxed value={book.blurb} spot="b" placeholder="写给读者看的那段话" className="rounded-xl bg-paper/45 px-5 py-4 font-serif text-[17px] leading-[1.95]"
             onSave={(blurb) => save(actions.saveBook({ blurb }))} />
           <div className="mt-5 divide-y divide-line border-y border-line">
             <Row label="类别">
@@ -1509,35 +1575,169 @@ function DockedEditorial({ setDock, children, initial }: { setDock: (dock: Dock)
 
 /* ---------------- 选中文字后冒出的小按钮 ---------------- */
 
-function SelectionActions({ pageRef, onToast }: { pageRef: React.RefObject<HTMLElement | null>; onToast: (text: string) => void }) {
-  const [at, setAt] = useState<{ x: number; y: number } | null>(null)
+type Picked = { x: number; top: number; bottom: number; spot?: string; start: number; end: number; text: string }
+
+/** 选中的字在这一栏里从第几个字起：同样的字出现好几次时，挑离光标最近的那一处。 */
+function locate(host: HTMLElement, range: Range, picked: string): [number, number] | null {
+  const value = readText(host)
+  const before = document.createRange()
+  before.selectNodeContents(host)
+  before.setEnd(range.startContainer, range.startOffset)
+  const guess = before.toString().length
+  let best = -1
+  for (let at = value.indexOf(picked); at >= 0; at = value.indexOf(picked, at + 1)) {
+    if (best < 0 || Math.abs(at - guess) < Math.abs(best - guess)) best = at
+  }
+  return best < 0 ? null : [best, best + picked.length]
+}
+
+/** 选中一栏里的几个字，旁边冒出三个按钮：改这一句（先说怎么改）、给我几个写法（挑一个换上）、写细一点。改好可以撤销。 */
+function SelectionActions({ pageRef, onToast, onUndo }: {
+  pageRef: React.RefObject<HTMLElement | null>; onToast: (text: string) => void; onUndo: (text: string, versionId?: string | null) => void
+}) {
+  const { actions } = useWorkspace()
+  const live = !!actions.rewrite
+  const [at, setAt] = useState<Picked | null>(null)
+  const [step, setStep] = useState<'menu' | 'ask' | 'busy' | 'options'>('menu')
+  const [instruction, setInstruction] = useState('')
+  const [candidate, setCandidate] = useState<NonNullable<RewriteOutcome['candidate']> | null>(null)
+  const boxRef = useRef<HTMLDivElement>(null)
+  const stepRef = useRef(step)
+  useEffect(() => { stepRef.current = step }, [step])
+  const close = useCallback(() => {
+    setAt(null)
+    setStep('menu')
+    setInstruction('')
+    setCandidate(null)
+  }, [])
   useEffect(() => {
-    const up = () => setTimeout(() => {
+    const up = (e: MouseEvent) => setTimeout(() => {
+      // 正在说怎么改、在改、在挑写法：别处点一下不打断，点到外面由 mousedown 收起
+      if (boxRef.current?.contains(e.target as Node) || stepRef.current !== 'menu') return
       const sel = window.getSelection()
-      if (!sel || sel.isCollapsed || !sel.toString().trim() || !pageRef.current?.contains(sel.anchorNode)) return setAt(null)
-      const rect = sel.getRangeAt(0).getBoundingClientRect()
-      setAt({ x: rect.left + rect.width / 2, y: rect.top })
+      const text = sel?.toString() ?? ''
+      if (!sel || sel.isCollapsed || !text.trim() || !pageRef.current?.contains(sel.anchorNode)) return setAt(null)
+      const range = sel.getRangeAt(0)
+      const rect = range.getBoundingClientRect()
+      const common = range.commonAncestorContainer
+      const host = (common instanceof Element ? common : common.parentElement)?.closest<HTMLElement>('[data-spot]')
+      const where = { x: rect.left + rect.width / 2, top: rect.top, bottom: rect.bottom, text }
+      if (!live) return setAt({ ...where, start: 0, end: 0 })
+      // 只认一栏里的字：跨了几栏、或者这一处编辑部改不了，就不冒按钮
+      const found = host && locate(host, range, text)
+      if (!host || !found) return setAt(null)
+      setAt({ ...where, spot: host.dataset.spot, start: found[0], end: found[1] })
     }, 0)
-    const hide = () => setAt(null)
+    const down = (e: MouseEvent) => {
+      if (stepRef.current !== 'menu' && stepRef.current !== 'busy' && !boxRef.current?.contains(e.target as Node)) close()
+    }
+    const hide = () => { if (stepRef.current === 'menu') setAt(null) }
     document.addEventListener('mouseup', up)
+    document.addEventListener('mousedown', down)
     const page = pageRef.current
     page?.addEventListener('scroll', hide)
     return () => {
       document.removeEventListener('mouseup', up)
+      document.removeEventListener('mousedown', down)
       page?.removeEventListener('scroll', hide)
     }
-  }, [pageRef])
+  }, [pageRef, live, close])
   if (!at) return null
+
+  const run = async (mode: RewriteMode) => {
+    if (!at.spot || !actions.rewrite || (mode === 'instruction' && !instruction.trim())) return
+    // 正在改的那一栏先存下来，编辑部按存好的字改
+    const active = document.activeElement
+    if (active instanceof HTMLElement && active.closest('[data-spot]')) active.blur()
+    setStep('busy')
+    try {
+      const outcome = await actions.rewrite(at.spot, at.start, at.end, mode, instruction.trim(), at.text)
+      if (outcome.candidate) {
+        setCandidate(outcome.candidate)
+        setStep('options')
+        return
+      }
+      close()
+      window.getSelection()?.removeAllRanges()
+      onUndo(mode === 'expand' ? '写细了' : '照你说的改好了', outcome.revertVersionId)
+    } catch (error) {
+      setStep(mode === 'instruction' ? 'ask' : 'menu')
+      onToast(`编辑部没改成：${errorText(error)}`)
+    }
+  }
+  const choose = async (index: number) => {
+    if (!candidate || !actions.chooseOption) return
+    setStep('busy')
+    try {
+      const versionId = await actions.chooseOption(candidate.id, index)
+      close()
+      window.getSelection()?.removeAllRanges()
+      onUndo('换上了', versionId)
+    } catch (error) {
+      setStep('options')
+      onToast(`没换上：${errorText(error)}`)
+    }
+  }
+  const labels = ['改这一句', '给我几个写法', '写细一点']
+  const menuButton = 'rounded-lg px-2.5 py-1 text-[13px] text-ink-2 transition-colors hover:bg-subtle hover:text-ink'
+  const panel = 'rounded-xl border border-line bg-card shadow-[var(--shadow-lift)]'
+  // 宽的面板放在选中的字下面，别跑出屏幕
+  const left = Math.min(Math.max(at.x, 240), window.innerWidth - 240)
   return (
-    <div className="fixed z-50 flex -translate-x-1/2 items-center gap-0.5 rounded-xl border border-line bg-card p-1 shadow-[var(--shadow-lift)]" style={{ left: at.x, top: at.y - 46 }}
-      onMouseDown={(e) => e.preventDefault()}>
-      <span className="ml-1 flex size-6 items-center justify-center rounded-full bg-chief font-serif text-[11px] text-on-role">编</span>
-      {['改这一句', '给我几个写法', '写细一点'].map((label) => (
-        <button key={label} type="button" onClick={() => { setAt(null); onToast(`原型：「${label}」会让编辑部只改你选中的这几个字，改好在原地给你挑`) }}
-          className="rounded-lg px-2.5 py-1 text-[13px] text-ink-2 transition-colors hover:bg-subtle hover:text-ink">
-          {label}
-        </button>
-      ))}
+    <div ref={boxRef} className="fixed z-50 -translate-x-1/2"
+      style={step === 'menu' ? { left: at.x, top: at.top - 46 } : { left, top: Math.min(at.bottom + 10, window.innerHeight - 120) }}
+      onMouseDown={(e) => { if (step === 'menu') e.preventDefault() }}>
+      {step === 'menu' && (
+        <div className={clsx(panel, 'flex items-center gap-0.5 p-1')}>
+          <span className="ml-1 flex size-6 items-center justify-center rounded-full bg-lore font-serif text-[11px] text-on-role">设</span>
+          {labels.map((label, i) => (
+            <button key={label} type="button" className={menuButton} onClick={() => {
+              if (!live) {
+                setAt(null)
+                onToast(`原型：「${label}」会让编辑部只改你选中的这几个字，改好在原地给你挑`)
+              } else if (i === 0) setStep('ask')
+              else void run(i === 1 ? 'options' : 'expand')
+            }}>
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+      {step === 'ask' && (
+        <div className={clsx(panel, 'w-[380px] p-3')}>
+          <p className="mb-2 line-clamp-2 text-[13px] text-ink-3">改「{at.text}」</p>
+          <input autoFocus value={instruction} onChange={(e) => setInstruction(e.target.value)} maxLength={200}
+            placeholder="想怎么改？比如：更狠一点、换个说法、加个代价"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.nativeEvent.isComposing) void run('instruction')
+              if (e.key === 'Escape') close()
+            }}
+            className="h-9 w-full rounded-lg border border-line-2 bg-card px-3 text-sm text-ink placeholder:text-ink-3 focus:border-ink-3 focus:outline-none" />
+          <div className="mt-2.5 flex justify-end gap-2">
+            <button type="button" onClick={close} className="h-8 rounded-lg px-3 text-[13px] text-ink-2 hover:bg-subtle">取消</button>
+            <button type="button" onClick={() => void run('instruction')} disabled={!instruction.trim()}
+              className="h-8 rounded-lg bg-ink px-4 text-[13px] text-paper-2 hover:bg-ink-2 disabled:opacity-40">改</button>
+          </div>
+        </div>
+      )}
+      {step === 'busy' && <div className={clsx(panel, 'px-4 py-2 text-[13px] text-ink-2')}>编辑部在改…</div>}
+      {step === 'options' && candidate && (
+        <div className={clsx(panel, 'max-h-[60vh] w-[440px] overflow-y-auto p-3')}>
+          <p className="mb-2 text-[13px] text-ink-3">挑一个换上「{at.text.length > 20 ? `${at.text.slice(0, 20)}…` : at.text}」</p>
+          <div className="space-y-2">
+            {candidate.options.map((option, i) => (
+              <div key={option.label} className="rounded-lg border border-line px-3.5 py-2.5">
+                <div className="flex items-center gap-2">
+                  <span className="rounded-full bg-line/70 px-2 py-px text-xs text-ink-2">{option.label}</span>
+                  <button type="button" onClick={() => void choose(i)} className="ml-auto rounded-md bg-ink px-3 py-1 text-[13px] text-paper-2 hover:bg-ink-2">用这个</button>
+                </div>
+                <p className="mt-1.5 font-serif text-[15px] leading-[1.85] whitespace-pre-line text-ink">{option.text}</p>
+              </div>
+            ))}
+          </div>
+          <button type="button" onClick={close} className="mt-2 text-[13px] text-ink-3 hover:text-ink">都不要</button>
+        </div>
+      )}
     </div>
   )
 }
@@ -1620,6 +1820,17 @@ export function Workspace({ book: base, actions, right, chat, chatBadge, openCha
   }, [openChat])
 
   const report = useCallback((error: unknown) => setToast(`没存上：${errorText(error)}`), [])
+  // 编辑部刚改了一处：底下一条「改好了 · 撤销」，过一会儿自己收起
+  const [undo, setUndo] = useState<{ text: string; versionId: string } | null>(null)
+  useEffect(() => {
+    if (!undo) return
+    const timer = setTimeout(() => setUndo(null), 15000)
+    return () => clearTimeout(timer)
+  }, [undo])
+  const onUndo = useCallback((text: string, versionId?: string | null) => {
+    if (versionId) setUndo({ text, versionId })
+    else setToast(text)
+  }, [])
 
   // 新建的一条：起名字之前改的都记在草稿上；起了名字就建到书里
   const tools = useMemo(() => {
@@ -1791,9 +2002,18 @@ export function Workspace({ book: base, actions, right, chat, chatBadge, openCha
           </button>
         )}
 
-        {/* 选中文字让编辑部改：第三步接上 */}
-        {!live && <SelectionActions pageRef={pageRef} onToast={setToast} />}
-        {toast && (
+        <SelectionActions pageRef={pageRef} onToast={setToast} onUndo={onUndo} />
+        {undo && (
+          <div className="fixed bottom-8 left-1/2 z-50 flex max-w-[min(640px,90vw)] -translate-x-1/2 items-center gap-3 rounded-full bg-ink px-5 py-2.5 text-[13px] text-paper-2 shadow-[var(--shadow-lift)]">
+            <Wand2 className="size-3.5 shrink-0" />{undo.text}
+            <button type="button" className="underline underline-offset-4 hover:text-white" onClick={() => {
+              const versionId = undo.versionId
+              setUndo(null)
+              actions.revert?.(versionId).then(() => setToast('撤销了，换回了原来的')).catch(report)
+            }}>撤销</button>
+          </div>
+        )}
+        {toast && !undo && (
           <div className="fixed bottom-8 left-1/2 z-50 flex max-w-[min(640px,90vw)] -translate-x-1/2 items-center gap-2 rounded-full bg-ink px-5 py-2.5 text-[13px] text-paper-2 shadow-[var(--shadow-lift)]">
             <Wand2 className="size-3.5 shrink-0" />{toast}
           </div>
