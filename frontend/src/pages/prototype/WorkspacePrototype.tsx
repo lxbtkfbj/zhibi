@@ -164,55 +164,12 @@ function Section({ field, children }: { field: VField; children?: ReactNode }) {
   )
 }
 
-/** 右边资料卡里的一块。 */
-function Side({ title, note, children }: { title: string; note?: string; children: ReactNode }) {
-  return (
-    <section>
-      <div className="mb-2.5 flex items-baseline justify-between gap-2">
-        <h3 className="text-[13px] tracking-[0.15em] text-ink-3">{title}</h3>
-        {note && <span className="text-[11px] text-ink-3/80">{note}</span>}
-      </div>
-      {children}
-    </section>
-  )
-}
-
-function FactRows({ rows }: { rows: [string, string, string?][] }) {
-  if (!rows.length) return null
-  return (
-    <dl className="divide-y divide-line/70 rounded-xl border border-line bg-card/70">
-      {rows.map(([label, value, placeholder]) => (
-        // 内容长的：名称放上面、内容占满一行，别挤在窄栏里
-        <div key={label} className={clsx('px-4 py-2.5', value.length > 18 ? 'space-y-1' : 'grid grid-cols-[4rem_minmax(0,1fr)] items-baseline gap-3')}>
-          <dt className="text-[13px] text-ink-3">{label}</dt>
-          <dd className="min-w-0"><Editable placeholder={placeholder ?? '—'} className="text-[15px] leading-relaxed break-words text-ink">{value}</Editable></dd>
-        </div>
-      ))}
-    </dl>
-  )
-}
-
 function LinkChip({ icon, children, onClick }: { icon?: ReactNode; children: ReactNode; onClick: () => void }) {
   return (
     <button type="button" onClick={onClick}
       className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-subtle px-3 py-1 text-[13px] text-ink-2 transition-colors hover:bg-line/60 hover:text-ink">
       {icon}<span className="truncate">{children}</span>
     </button>
-  )
-}
-
-function Appears({ items, nav }: { items: VEntry['appears']; nav: Nav }) {
-  if (!items.length) return <p className="text-[13px] leading-relaxed text-ink-3">大纲里还没用到。</p>
-  return (
-    <div className="space-y-1">
-      {items.map((item) => (
-        <button key={item.node} type="button" onClick={() => nav.openNode(item.node)}
-          className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[14px] text-ink-2 transition-colors hover:bg-subtle hover:text-ink">
-          <BookOpen className="size-3.5 shrink-0 text-ink-3" />
-          <span className="truncate">{item.label}</span>
-        </button>
-      ))}
-    </div>
   )
 }
 
@@ -581,21 +538,65 @@ function Tags({ entry }: { entry: VEntry }) {
   )
 }
 
-function Body({ children, side }: { children: ReactNode; side: ReactNode }) {
+/** 卡片底部一排：空着的栏目先收在这里，点哪个展开哪个，不让一堆灰字把卡片撑满。 */
+function MoreToWrite({ labels, onOpen }: { labels: string[]; onOpen: (label: string) => void }) {
+  if (!labels.length) return null
   return (
-    <div className="mt-10 grid gap-x-12 gap-y-10 border-t border-line pt-9 lg:grid-cols-[minmax(0,1fr)_17rem] 2xl:grid-cols-[minmax(0,1fr)_19rem]">
-      <div className="min-w-0 space-y-8">{children}</div>
-      <aside className="min-w-0 space-y-8">{side}</aside>
+    <div className="mt-8 flex flex-wrap items-center gap-2 text-[13px]">
+      <span className="mr-1 text-ink-3">还可以写</span>
+      {labels.map((label) => (
+        <button key={label} type="button" onClick={() => onOpen(label)}
+          className="flex items-center gap-1 rounded-full border border-dashed border-line-2 px-3 py-1 text-ink-2 transition-colors hover:border-ink-3/60 hover:text-ink">
+          <Plus className="size-3" />{label}
+        </button>
+      ))}
     </div>
   )
 }
 
-/** 角色卡、金手指的一张卡：一栏一栏的正文＋右边资料卡。 */
+/** 名字下面一行小字：定位、性别、年龄这类短的。 */
+function MetaRow({ items }: { items: { label: string; value?: string; placeholder?: string; link?: () => void }[] }) {
+  if (!items.length) return null
+  return (
+    <div className="mt-5 flex flex-wrap items-baseline gap-x-7 gap-y-2">
+      {items.map((item) => (
+        <span key={item.label} className="flex items-baseline gap-2">
+          <span className="text-[13px] text-ink-3">{item.label}</span>
+          {item.link
+            ? <button type="button" onClick={item.link} className="font-serif text-[16px] text-chief hover:underline">{item.value}</button>
+            : <Editable placeholder={item.placeholder ?? '写一下'} className="font-serif text-[16px] text-ink">{item.value}</Editable>}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+function AppearsRow({ items, nav }: { items: VEntry['appears']; nav: Nav }) {
+  if (!items.length) return null
+  return (
+    <div className="mt-8 flex flex-wrap items-center gap-2 border-t border-line pt-5 text-[13px] text-ink-3">
+      <span className="mr-1">出现在</span>
+      {items.map((a) => <LinkChip key={a.node} icon={<BookOpen className="size-3" />} onClick={() => nav.openNode(a.node)}>{a.label}</LinkChip>)}
+    </div>
+  )
+}
+
+/** 角色卡、金手指的一张卡：一栏到底。短字段在名字下面，长字段一段段往下，空的收在「还可以写」。 */
 function CharacterCard({ book, entry, nav, fresh }: { book: VBook; entry: VEntry; nav: Nav; fresh: boolean }) {
+  const [opened, setOpened] = useState<string[]>([])
   const secret = entry.secret ? findEntry(book, entry.secret) : undefined
   const goldfinger = entry.goldfinger ? findEntry(book, entry.goldfinger) : undefined
   const holder = entry.holder ? findEntry(book, entry.holder) : undefined
-  const secretChip = secret && <div className="mt-2"><LinkChip icon={<Lock className="size-3" />} onClick={() => nav.openEntry(secret.id)}>另有秘密：{secret.name}</LinkChip></div>
+  const show = (label: string, value: string) => !!value || opened.includes(label)
+  const facts = entry.facts.filter(([label, value]) => show(label, value))
+  const sections = entry.sections.filter((f) => show(f.label, f.text))
+  const now = entry.now?.filter(([, value]) => value) ?? []
+  const relations = entry.relations ?? []
+  const more = [
+    ...entry.facts.filter(([label, value]) => !show(label, value)).map(([label]) => label),
+    ...entry.sections.filter((f) => !show(f.label, f.text)).map((f) => f.label),
+    ...(entry.kind === 'character' && !relations.length && !opened.includes('关系') ? ['关系'] : []),
+  ]
   return (
     <section id={`entry-${entry.id}`} data-entry={entry.id} className={clsx(paperCard, 'scroll-mt-6')}>
       <div className="flex flex-wrap items-center gap-3">
@@ -603,41 +604,45 @@ function CharacterCard({ book, entry, nav, fresh }: { book: VBook; entry: VEntry
         <Tags entry={entry} />
       </div>
       <Editable placeholder="一句话说清这是谁、这是什么" className="mt-3 font-serif text-lg leading-relaxed text-ink-2 2xl:text-xl">{entry.oneLine}</Editable>
-      <Body
-        side={
-          <>
-            <FactRows rows={entry.facts} />
-            {holder && <Side title="谁在用"><LinkChip onClick={() => nav.openEntry(holder.id)}>{holder.name}</LinkChip></Side>}
-            {entry.now && <Side title="此刻" note="设定师每写完一章更新"><FactRows rows={entry.now} /></Side>}
-            {entry.kind === 'character' && (
-              <Side title="关系">
-                {entry.relations?.length ? (
-                  <div className="space-y-1">
-                    {entry.relations.map((rel) => (
-                      <button key={rel.to + rel.kind} type="button" onClick={() => nav.openEntry(rel.to)} className="block w-full rounded-lg px-2 py-2 text-left transition-colors hover:bg-subtle" title={rel.text}>
-                        <span className="flex items-center gap-2">
-                          <span className="truncate font-serif text-[15px] font-bold text-ink">{findEntry(book, rel.to)?.name}</span>
-                          <span className="shrink-0 rounded-full bg-line/70 px-2 py-px text-[11px] text-ink-2">{rel.kind}</span>
-                        </span>
-                        <span className="mt-0.5 line-clamp-2 text-[13px] leading-relaxed text-ink-3">{rel.text}</span>
-                      </button>
-                    ))}
-                  </div>
-                ) : <p className="px-2 text-[13px] text-ink-3">还没写。</p>}
-                <button type="button" className="mt-1 flex items-center gap-1 px-2 text-[13px] text-ink-3 hover:text-ink"><Plus className="size-3.5" />加一个关系</button>
-              </Side>
-            )}
-            <Side title="出现在"><Appears items={entry.appears} nav={nav} /></Side>
-          </>
-        }
-      >
-        {entry.sections.map((field) => (
-          <Section key={field.label} field={field}>
-            {(field.label === '身世' || field.label === '来历') && secretChip}
-            {field.label === '能力' && goldfinger && <div className="mt-2"><LinkChip icon={<Sparkles className="size-3" />} onClick={() => nav.openEntry(goldfinger.id)}>金手指：{goldfinger.name}</LinkChip></div>}
-          </Section>
-        ))}
-      </Body>
+      <MetaRow items={[
+        ...facts.map(([label, value, placeholder]) => ({ label, value, placeholder })),
+        ...(holder ? [{ label: '谁在用', value: holder.name, link: () => nav.openEntry(holder.id) }] : []),
+      ]} />
+      {now.length > 0 && (
+        <div className="mt-6 rounded-xl bg-subtle px-5 py-3.5">
+          <p className="text-xs text-ink-3">此刻 · 设定师每写完一章更新</p>
+          <p className="mt-1.5 flex flex-wrap gap-x-6 gap-y-1 text-[15px] text-ink">
+            {now.map(([label, value]) => <span key={label}><span className="mr-1.5 text-ink-3">{label}</span>{value}</span>)}
+          </p>
+        </div>
+      )}
+      {(sections.length > 0 || relations.length > 0 || opened.includes('关系')) && (
+        <div className="mt-8 space-y-8 border-t border-line pt-8">
+          {sections.map((field) => (
+            <Section key={field.label} field={field}>
+              {(field.label === '身世' || field.label === '来历') && secret && <div className="mt-2"><LinkChip icon={<Lock className="size-3" />} onClick={() => nav.openEntry(secret.id)}>另有秘密：{secret.name}</LinkChip></div>}
+              {field.label === '能力' && goldfinger && <div className="mt-2"><LinkChip icon={<Sparkles className="size-3" />} onClick={() => nav.openEntry(goldfinger.id)}>金手指：{goldfinger.name}</LinkChip></div>}
+            </Section>
+          ))}
+          {entry.kind === 'character' && (relations.length > 0 || opened.includes('关系')) && (
+            <section>
+              <h3 className="mb-2 text-[13px] tracking-[0.15em] text-ink-3">关系</h3>
+              <div className="divide-y divide-line/70">
+                {relations.map((rel) => (
+                  <button key={rel.to + rel.kind} type="button" onClick={() => nav.openEntry(rel.to)} className="flex w-full items-baseline gap-4 py-2.5 text-left">
+                    <span className="w-24 shrink-0 truncate font-serif text-[16px] font-bold text-ink hover:text-seal">{findEntry(book, rel.to)?.name}</span>
+                    <span className="shrink-0 rounded-full bg-line/70 px-2 py-px text-xs text-ink-2">{rel.kind}</span>
+                    <span className="min-w-0 flex-1 text-[15px] leading-relaxed text-ink-2">{rel.text}</span>
+                  </button>
+                ))}
+              </div>
+              <button type="button" className="mt-2 flex items-center gap-1 text-[13px] text-ink-3 hover:text-ink"><Plus className="size-3.5" />加一个关系</button>
+            </section>
+          )}
+        </div>
+      )}
+      <MoreToWrite labels={more} onOpen={(label) => setOpened([...opened, label])} />
+      <AppearsRow items={entry.appears} nav={nav} />
     </section>
   )
 }
@@ -646,48 +651,56 @@ function CharacterCard({ book, entry, nav, fresh }: { book: VBook; entry: VEntry
 function PlainCard({ book, entry, category, nav, fresh }: { book: VBook; entry: VEntry; category?: VCategory; nav: Nav; fresh: boolean }) {
   const parent = entry.parent ? findEntry(book, entry.parent) : undefined
   const example = category?.example
+  const [levels, setLevels] = useState(entry.levels ?? [])
+  const [newLevel, setNewLevel] = useState(-1)
+  const [opened, setOpened] = useState<string[]>([])
+  const sections = entry.sections.filter((f) => f.text || opened.includes(f.label))
+  const more = entry.sections.filter((f) => !f.text && !opened.includes(f.label)).map((f) => f.label)
   return (
     <section id={`entry-${entry.id}`} data-entry={entry.id} className={clsx(paperCard, 'scroll-mt-6')}>
       <div className="flex flex-wrap items-center gap-3">
         <Title autoFocus={fresh} placeholder={example ? `起个名字，比如「${example.name}」` : '起个名字'}>{entry.name}</Title>
         <Tags entry={entry} />
       </div>
-      {(parent || entry.knownBy) && (
-        <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-[13px] text-ink-3">
-          {parent && <span className="flex items-center gap-2">属于 <LinkChip onClick={() => nav.openEntry(parent.id)}>{parent.name}</LinkChip></span>}
-          {entry.knownBy && <span className="flex items-center gap-1.5"><Lock className="size-3" />谁知道：{entry.knownBy}</span>}
-        </div>
-      )}
+      <MetaRow items={[
+        ...(parent ? [{ label: '属于', value: parent.name, link: () => nav.openEntry(parent.id) }] : []),
+        ...(entry.knownBy ? [{ label: '谁知道', value: entry.knownBy }] : []),
+      ]} />
       <div className="mt-8 space-y-8 border-t border-line pt-8">
         {entry.kind === 'ladder' ? (
           <>
             <Prose text={entry.overview ?? ''} placeholder="总的说一句：怎么往上升、越级多难、有什么代价" />
             <ol>
-              {(entry.levels ?? []).map((level, i, levels) => (
-                <li key={level.name + i} className="relative flex gap-5 pb-7 last:pb-0">
-                  {i < levels.length - 1 && <span className="absolute top-9 bottom-1 left-[17px] w-px bg-line-2" />}
+              {levels.map((level, i) => (
+                <li key={i} className="relative flex gap-5 pb-7">
+                  <span className="absolute top-9 bottom-0 left-[17px] w-px bg-line-2" />
                   <span className="relative flex size-9 shrink-0 items-center justify-center rounded-full border border-line-2 bg-card font-serif text-[15px] text-ink-2">{i + 1}</span>
                   <div className="min-w-0 flex-1 pt-1">
-                    <Editable placeholder="这一级叫什么" className="font-serif text-lg font-bold">{level.name}</Editable>
+                    <Editable autoFocus={i === newLevel} placeholder="这一级叫什么" className="font-serif text-lg font-bold">{level.name}</Editable>
                     <Editable placeholder="这一级能做到什么，先空着也行" className="mt-1 font-serif text-[17px] leading-[1.9] text-ink-2">{level.text}</Editable>
                   </div>
                 </li>
               ))}
+              {/* 加一级：就是阶梯上虚线画的下一级 */}
+              <li>
+                <button type="button" onClick={() => { setNewLevel(levels.length); setLevels([...levels, { name: '', text: '' }]) }}
+                  className="group flex items-center gap-5 text-left">
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-full border border-dashed border-line-2 text-ink-3 transition-colors group-hover:border-ink-3 group-hover:text-ink">
+                    <Plus className="size-4" />
+                  </span>
+                  <span className="font-serif text-[17px] text-ink-3 transition-colors group-hover:text-ink">再往上加一级</span>
+                </button>
+              </li>
             </ol>
-            <button type="button" className="ml-14 flex items-center gap-1 text-[13px] text-ink-3 hover:text-ink"><Plus className="size-3.5" />加一级</button>
           </>
         ) : entry.sections.length ? (
-          entry.sections.map((field) => <Section key={field.label} field={field} />)
+          sections.map((field) => <Section key={field.label} field={field} />)
         ) : (
-          <Prose text={entry.body ?? ''} autoFocus={false} placeholder={example ? `比如：\n${example.text}` : '写这一条的内容，可以一条条列'} />
+          <Prose text={entry.body ?? ''} placeholder={example ? `比如：\n${example.text}` : '写这一条的内容，可以一条条列'} />
         )}
       </div>
-      {entry.appears.length > 0 && (
-        <div className="mt-10 flex flex-wrap items-center gap-2 border-t border-line pt-5 text-[13px] text-ink-3">
-          <span className="mr-1">出现在</span>
-          {entry.appears.map((a) => <LinkChip key={a.node} icon={<BookOpen className="size-3" />} onClick={() => nav.openNode(a.node)}>{a.label}</LinkChip>)}
-        </div>
-      )}
+      <MoreToWrite labels={more} onOpen={(label) => setOpened([...opened, label])} />
+      <AppearsRow items={entry.appears} nav={nav} />
     </section>
   )
 }
@@ -793,7 +806,6 @@ function CategoryStream({ book, category, next, nav, fresh, scrollReq, onSpy, on
   const pauseUntil = useRef(0)
   const spy = useRef(onSpy)
   spy.current = onSpy
-  const wide = category.name === '角色列表' || category.name === '金手指' || category.entries.some((e) => e.kind === 'character' || e.kind === 'goldfinger')
 
   // 点了左边的某一条：滚到那张卡；点的是类别就回到顶上
   useEffect(() => {
@@ -833,7 +845,7 @@ function CategoryStream({ book, category, next, nav, fresh, scrollReq, onSpy, on
   }, [category.name, pageRef])
 
   return (
-    <div className={clsx('mx-auto w-full px-8 pt-10 pb-[40vh] 2xl:pt-12', wide ? 'max-w-[1080px] 2xl:max-w-[1180px]' : 'max-w-[880px] 2xl:max-w-[940px]')}>
+    <div className="mx-auto w-full max-w-[880px] px-8 pt-10 pb-[40vh] 2xl:max-w-[940px] 2xl:pt-12">
       <header className="mb-8 px-2">
         <Crumb items={['设定']} />
         <div className="flex flex-wrap items-end justify-between gap-4">
@@ -950,45 +962,27 @@ function OutlinePage({ book, outline, id, nav, onAdd }: { book: VBook; outline: 
   const path = findNode(outline, id) ?? [outline]
   const node = path[path.length - 1]
   const child = childKind(node)
-  const rows: [string, string][] = []
-  if (node.range) rows.push(['章数', `${node.range[1] - node.range[0] + 1} 章 · 第 ${node.range[0]}–${node.range[1]} 章`])
-  else if (node.chapters) rows.push(['章数', `${node.chapters} 章`])
-  if (node.progress && node.progress !== '已规划') rows.push(['写到', node.progress])
+  const meta: { label: string; value: string }[] = []
+  if (node.range) meta.push({ label: '章数', value: `${node.range[1] - node.range[0] + 1} 章 · 第 ${node.range[0]}–${node.range[1]} 章` })
+  else if (node.chapters) meta.push({ label: '章数', value: `${node.chapters} 章` })
+  if (node.progress && node.progress !== '已规划') meta.push({ label: '写到', value: node.progress })
   return (
-    <Sheet>
-      <div className="flex items-start justify-between gap-6">
-        <Crumb items={['大纲', ...path.slice(0, -1).map((n) => n.title)]} />
-        {node.locked && <span className="flex shrink-0 items-center gap-1 rounded-full bg-line/70 px-2.5 py-0.5 text-xs text-ink-2"><Lock className="size-3" />锁住，AI 规划时不改</span>}
-      </div>
-      <div className="flex flex-wrap items-baseline gap-3">
+    <Sheet narrow>
+      <Crumb items={['大纲', ...path.slice(0, -1).map((n) => n.title)]} />
+      <div className="flex flex-wrap items-center gap-3">
         <Title placeholder={`给${ONE[node.kind]}起个名字`}>{node.title}</Title>
         {node.later && <span className="rounded-full bg-line/70 px-2.5 py-0.5 text-xs text-ink-2">写到再定</span>}
+        {node.locked && <span className="flex items-center gap-1 rounded-full bg-line/70 px-2.5 py-0.5 text-xs text-ink-2"><Lock className="size-3" />锁住，AI 规划时不改</span>}
       </div>
-      <Body
-        side={
-          <>
-            {rows.length > 0 && <FactRows rows={rows} />}
-            <Side title="用到的设定">
-              {node.uses.length ? (
-                <div className="flex flex-wrap gap-1.5">
-                  {node.uses.map((entryId) => {
-                    const entry = findEntry(book, entryId)
-                    return entry && (
-                      <button key={entryId} type="button" onClick={() => nav.openEntry(entryId)}
-                        className="max-w-full truncate rounded-full border border-line bg-card px-3 py-1 font-serif text-[14px] text-ink-2 transition-colors hover:border-line-2 hover:text-ink">
-                        {entry.name}
-                      </button>
-                    )
-                  })}
-                </div>
-              ) : <p className="text-[13px] text-ink-3">文字里提到设定里的人和地方，会自动挂上。</p>}
-            </Side>
-          </>
-        }
-      >
+      {meta.length > 0 && (
+        <div className="mt-4 flex flex-wrap gap-x-7 gap-y-2">
+          {meta.map((m) => <span key={m.label} className="flex items-baseline gap-2"><span className="text-[13px] text-ink-3">{m.label}</span><span className="text-[15px] text-ink">{m.value}</span></span>)}
+        </div>
+      )}
+      <div className="mt-8 space-y-8 border-t border-line pt-8">
         {node.sections
           ? node.sections.map((field) => <Section key={field.label} field={field} />)
-          : <Section field={{ label: node.kind === '全书' ? '结局' : '一段话', text: node.text, placeholder: NODE_PLACEHOLDER[node.kind] }} />}
+          : <Prose text={node.text} placeholder={NODE_PLACEHOLDER[node.kind]} />}
         {child && (
           <section>
             <h3 className="mb-1 text-[13px] tracking-[0.15em] text-ink-3">下面的{child}{node.children?.length ? ` · ${node.children.length} 个` : ''}</h3>
@@ -997,7 +991,7 @@ function OutlinePage({ book, outline, id, nav, onAdd }: { book: VBook; outline: 
               <div className="divide-y divide-line border-y border-line">
                 {node.children.map((c) => (
                   <button key={c.id} type="button" onClick={() => nav.openNode(c.id)} className="group flex w-full items-baseline gap-5 py-3.5 text-left">
-                    <span className={clsx('w-52 shrink-0 truncate font-serif text-[16px] font-bold group-hover:text-seal', c.later ? 'text-ink-3' : 'text-ink')}>{c.title}</span>
+                    <span className={clsx('w-44 shrink-0 truncate font-serif text-[16px] font-bold group-hover:text-seal', c.later ? 'text-ink-3' : 'text-ink')}>{c.title}</span>
                     <span className="line-clamp-1 flex-1 text-[14px] text-ink-3">{(c.text || c.sections?.[0]?.text || '').split('\n')[0] || '还没写'}</span>
                     {c.range && c.kind !== '章' && <span className="text-xs text-ink-3 tabular-nums">{c.range[1] - c.range[0] + 1} 章</span>}
                   </button>
@@ -1012,7 +1006,16 @@ function OutlinePage({ book, outline, id, nav, onAdd }: { book: VBook; outline: 
             </div>
           </section>
         )}
-      </Body>
+      </div>
+      {node.uses.length > 0 && (
+        <div className="mt-8 flex flex-wrap items-center gap-2 border-t border-line pt-5 text-[13px] text-ink-3">
+          <span className="mr-1">用到的设定</span>
+          {node.uses.map((entryId) => {
+            const entry = findEntry(book, entryId)
+            return entry && <LinkChip key={entryId} onClick={() => nav.openEntry(entryId)}>{entry.name}</LinkChip>
+          })}
+        </div>
+      )}
     </Sheet>
   )
 }
@@ -1153,6 +1156,46 @@ function FloatingEditorial({ setDock }: { setDock: (dock: Dock) => void }) {
         <ChatBody />
       </div>
     </>
+  )
+}
+
+const SIDE_KEY = 'zhibi-prototype-chat-width'
+
+/** 贴在右边的编辑部：左边缘可以拖宽拖窄，记住上次的宽度。 */
+function DockedEditorial({ setDock }: { setDock: (dock: Dock) => void }) {
+  const [width, setWidth] = useState(() => {
+    try {
+      return Number(localStorage.getItem(SIDE_KEY)) || 460
+    } catch {
+      return 460
+    }
+  })
+  const [dragging, setDragging] = useState(false)
+  useEffect(() => {
+    if (!dragging) return
+    const move = (e: PointerEvent) => setWidth(Math.min(Math.max(320, window.innerWidth - e.clientX), Math.min(820, window.innerWidth * 0.55)))
+    const up = () => setDragging(false)
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    return () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+    }
+  }, [dragging])
+  useEffect(() => {
+    if (dragging) return
+    try {
+      localStorage.setItem(SIDE_KEY, String(Math.round(width)))
+    } catch { /* 存不了就只管这一次 */ }
+  }, [dragging, width])
+  return (
+    <aside className="relative flex shrink-0 flex-col border-l border-line bg-paper" style={{ width }}>
+      <div onPointerDown={(e) => { e.preventDefault(); setDragging(true) }} title="拖动调宽窄"
+        className={clsx('absolute inset-y-0 -left-1.5 z-10 w-3 cursor-col-resize after:absolute after:inset-y-0 after:left-1.5 after:w-0.5 after:transition-colors', dragging ? 'after:bg-chief/60' : 'hover:after:bg-chief/40')} />
+      {dragging && <div className="fixed inset-0 z-50 cursor-col-resize" />}
+      <ChatHeader dock="side" setDock={setDock} />
+      <ChatBody />
+    </aside>
   )
 }
 
@@ -1363,12 +1406,7 @@ function Workspace({ book: base, switcher }: { book: VBook; switcher: ReactNode 
           )}
           {tab === '大纲' && <OutlinePage key={node} book={book} outline={outline} id={node} nav={nav} onAdd={addNode} />}
         </main>
-        {dock === 'side' && (
-          <aside className="flex w-[380px] shrink-0 flex-col border-l border-line bg-paper">
-            <ChatHeader dock="side" setDock={setDock} />
-            <ChatBody />
-          </aside>
-        )}
+        {dock === 'side' && <DockedEditorial setDock={setDock} />}
       </div>
 
       {dock === 'float' && <FloatingEditorial setDock={setDock} />}
