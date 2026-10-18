@@ -533,9 +533,10 @@ function OutlineTreeView({ node, depth, selected, onSelect, open, toggle, onAdd 
 
 function Sheet({ children, narrow }: { children: ReactNode; narrow?: boolean }) {
   return (
-    <div className={clsx('mx-auto w-full px-8 py-10 2xl:py-12', narrow ? 'max-w-[880px] 2xl:max-w-[940px]' : 'max-w-[1080px] 2xl:max-w-[1180px]')}>
-      <article className="rounded-xl border border-line bg-manuscript px-12 py-11 shadow-[var(--shadow-paper)] 2xl:px-16 2xl:py-14">{children}</article>
-    </div>
+    // 不再是一张浮在背景上的卡片：整块中间区域就是纸，字在里面居中
+    <article className={clsx('mx-auto w-full px-12 pt-12 pb-24 2xl:px-16 2xl:pt-16', narrow ? 'max-w-[860px] 2xl:max-w-[920px]' : 'max-w-[1080px] 2xl:max-w-[1180px]')}>
+      {children}
+    </article>
   )
 }
 
@@ -1238,8 +1239,6 @@ function Workspace({ book: base, switcher }: { book: VBook; switcher: ReactNode 
     { label: `新建${ONE[childKind(outline) ?? '篇']}`, onClick: () => addNode('book') },
     ...(selectedNode && selectedNode.id !== 'book' && childKind(selectedNode) ? [{ label: `在「${selectedNode.title.trim()}」下面加${ONE[childKind(selectedNode)!]}`, onClick: () => addNode(selectedNode.id) }] : []),
   ]
-  // 宽屏时让一页纸在整个屏幕居中，而不是在目录右边那一块居中
-  const centerOnScreen = tab !== '简介' && dock !== 'side'
 
   return (
     <div className="flex h-dvh flex-col bg-paper text-ink">
@@ -1258,7 +1257,7 @@ function Workspace({ book: base, switcher }: { book: VBook; switcher: ReactNode 
               toggle={(id) => setOpen(open.includes(id) ? open.filter((x) => x !== id) : [...open, id])} />
           </DirectoryShell>
         )}
-        <main ref={pageRef} className={clsx('scroll-thin min-w-0 flex-1 overflow-y-auto', centerOnScreen && 'min-[1720px]:pr-80')}>
+        <main ref={pageRef} className={clsx('scroll-thin min-w-0 flex-1 overflow-y-auto', tab === '简介' ? 'bg-paper' : 'bg-manuscript')}>
           {tab === '简介' && <BlurbPage book={book} />}
           {tab === '设定' && (
             current ? (current.kind === 'character' || current.kind === 'goldfinger'
