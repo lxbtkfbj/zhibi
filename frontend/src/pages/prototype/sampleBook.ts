@@ -32,10 +32,10 @@ function character(c: CharacterInput): VEntry {
   }
 }
 
-function paragraph(category: string, e: { id: string; name: string; oneLine: string; body: string; tags?: string[]; locked?: boolean; parent?: string; knownBy?: string }): VEntry {
+function paragraph(category: string, e: { id: string; name: string; oneLine: string; body: string; tags?: string[]; locked?: boolean; parent?: string; facts?: Record<string, string> }): VEntry {
   return {
     id: e.id, kind: 'paragraph', category, name: e.name, oneLine: '', tags: e.tags ?? [], locked: !!e.locked, parent: e.parent,
-    facts: [], sections: [], body: [e.oneLine, e.body].filter(Boolean).join(''), knownBy: e.knownBy, appears: [],
+    facts: Object.entries(e.facts ?? {}), sections: [{ label: '内容', text: [e.oneLine, e.body].filter(Boolean).join('') }], appears: [],
   }
 }
 
@@ -116,24 +116,24 @@ const categories: VCategory[] = [
     ...emptyCategory('地点列表'),
     entries: [
       paragraph('地点列表', { id: 'outer', name: '青冥宗外门', oneLine: '青冥宗山脚的一圈院落，三千外门弟子。', body: '' }),
-      paragraph('地点列表', { id: 'yard', name: '外门杂役院', oneLine: '青冥宗最底下的地方，三百杂役挤在一座山坳里。', parent: 'outer', body: '每月初一发一次丹药，每年一次外门考核。考不过的人就“下山”了，再没人见过。杂役之间互相盯着，谁多领了一口饭，第二天全院都知道。' }),
+      paragraph('地点列表', { id: 'yard', name: '外门杂役院', oneLine: '青冥宗最底下的地方，三百杂役挤在一座山坳里。', parent: 'outer', facts: { 归谁管: '外门传功堂' }, body: '每月初一发一次丹药，每年一次外门考核。考不过的人就“下山”了，再没人见过。杂役之间互相盯着，谁多领了一口饭，第二天全院都知道。' }),
     ],
   },
   {
     ...emptyCategory('势力列表'),
-    entries: [paragraph('势力列表', { id: 'sect', name: '青冥宗', oneLine: '东洲第一宗，表面仙风道骨，暗地敲骨吸髓。', body: '' })],
+    entries: [paragraph('势力列表', { id: 'sect', name: '青冥宗', oneLine: '东洲第一宗，表面仙风道骨，暗地敲骨吸髓。', facts: { 领头的: '青冥老祖', 对主角: '敌——想收走他的命', 地盘: '东洲七山之首' }, body: '' })],
   },
   {
     ...emptyCategory('物品功法'),
     entries: [
-      paragraph('物品功法', { id: 'pill', name: '筑基丹', oneLine: '宗门每年发给外门弟子的“恩赐”，吃过的人寿命都停在同一天。', tags: ['第一卷'], body: '丹房出的，每年初一由传功执事亲手发。吃下去当场破境，三年之内却都会在同一个日子“坐化”。现在陈默手里有一枚没吃的。' }),
+      paragraph('物品功法', { id: 'pill', name: '筑基丹', oneLine: '宗门每年发给外门弟子的“恩赐”，吃过的人寿命都停在同一天。', tags: ['第一卷'], facts: { 品阶: '三品', 在谁手里: '陈默手里有一枚没吃的' }, body: '丹房出的，每年初一由传功执事亲手发。吃下去当场破境，三年之内却都会在同一个日子“坐化”。现在陈默手里有一枚没吃的。' }),
     ],
   },
   {
     ...emptyCategory('往事秘密'),
     entries: [
-      paragraph('往事秘密', { id: 'secret', name: '老祖的寿命', oneLine: '老祖靠“筑基丹”把弟子的寿命收到自己身上。', tags: ['底牌'], locked: true, knownBy: '只有你和编辑部', body: '三百年来，每一枚筑基丹都是一张“借命契”。吃丹的人破境越快，被收走的寿命越多。老祖头顶只剩一个时辰，是因为今年的丹还没收回来。' }),
-      paragraph('往事秘密', { id: 'origin', name: '陈默的来历', oneLine: '陈默是老祖当年收命时漏下的一个孩子，所以他的眼睛看得见寿命。', knownBy: '只有你和编辑部；打算第二篇揭开', body: '' }),
+      paragraph('往事秘密', { id: 'secret', name: '老祖的寿命', oneLine: '老祖靠“筑基丹”把弟子的寿命收到自己身上。', tags: ['底牌'], locked: true, facts: { 谁知道: '只有你和编辑部', 打算何时揭开: '全书结尾' }, body: '三百年来，每一枚筑基丹都是一张“借命契”。吃丹的人破境越快，被收走的寿命越多。老祖头顶只剩一个时辰，是因为今年的丹还没收回来。' }),
+      paragraph('往事秘密', { id: 'origin', name: '陈默的来历', oneLine: '陈默是老祖当年收命时漏下的一个孩子，所以他的眼睛看得见寿命。', facts: { 谁知道: '只有你和编辑部', 打算何时揭开: '第二篇' }, body: '' }),
     ],
   },
   emptyCategory('特殊规则'),

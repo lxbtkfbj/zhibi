@@ -57,8 +57,10 @@ function settingEntry(item: LibraryItem, category: string): VEntry {
     return { ...base, kind: 'ladder', overview: text(item.content) || text(item.one_line), levels: (item.levels ?? []).map((l) => ({ name: l.name, text: l.text })) }
   }
   const fields = (item.fields ?? []).filter((f) => f.name)
+  const content = text(item.content) || text(item.one_line)
+  if (category === '金手指') return { ...base, kind: 'goldfinger', oneLine: text(item.one_line), sections: [{ label: '能做什么', text: text(item.content) }] }
   if (fields.length) return { ...base, kind: 'paragraph', sections: fields.map((f) => ({ label: f.name, text: text(f.value) })) }
-  return { ...base, kind: 'paragraph', body: text(item.content) || text(item.one_line) }
+  return { ...base, kind: 'paragraph', sections: [{ label: '内容', text: content }] }
 }
 
 function outlineNodes(tree: OutlineTree, chapters: ChapterBrief[]): VNode {

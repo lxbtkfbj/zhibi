@@ -25,10 +25,8 @@ export interface VEntry {
   dead?: boolean
   /** 右边资料卡里的短字段：名称、内容、空着时的提示 */
   facts: [string, string, string?][]
-  /** 一栏一栏的长字段（角色卡、金手指、自定栏目的卡片） */
+  /** 一栏一栏的长字段；段落类只有一栏「内容」 */
   sections: VField[]
-  /** 段落类的那一段话 */
-  body?: string
   /** 角色此刻的状态，设定师每章更新；全空就不显示 */
   now?: [string, string][]
   relations?: { to: string; kind: string; text: string }[]
@@ -41,8 +39,6 @@ export interface VEntry {
   levels?: { name: string; text: string }[]
   /** 地点属于哪里：父条目 id */
   parent?: string
-  /** 秘密：谁知道 */
-  knownBy?: string
   appears: { node: string; label: string }[]
 }
 
@@ -143,6 +139,35 @@ export const CHARACTER_PLACEHOLDERS: Record<string, string> = {
   能力: '会什么本事，有什么限制',
   成长与结局: '在书里会怎么变，最后怎么收场',
   备注: '随手记',
+}
+
+/** 每一类默认有哪几栏：facts 是名字下面的小字，sections 是正文栏目。作者可以按书改。 */
+export const DEFAULT_FIELDS: Record<string, { facts: string[]; sections: string[] }> = {
+  角色列表: { facts: ['定位', '所属', '性别', '年龄', '别名'], sections: CHARACTER_FIELDS },
+  金手指: { facts: ['是什么', '谁知道'], sections: ['能做什么', '规矩和限制', '代价', '怎么变强', '来历'] },
+  地点列表: { facts: ['归谁管'], sections: ['内容'] },
+  势力列表: { facts: ['领头的', '对主角', '地盘'], sections: ['内容'] },
+  物品功法: { facts: ['品阶', '在谁手里'], sections: ['内容'] },
+  往事秘密: { facts: ['谁知道', '打算何时揭开'], sections: ['内容'] },
+  特殊规则: { facts: [], sections: ['内容'] },
+}
+
+export const FACT_PLACEHOLDERS: Record<string, string> = {
+  所属: '哪个宗门、家族、势力',
+  归谁管: '哪个势力说了算',
+  领头的: '谁说了算',
+  对主角: '敌、友、中立，还是想利用他',
+  地盘: '在哪些地方',
+  品阶: '几品、什么级别',
+  在谁手里: '现在归谁',
+  谁知道: '哪些人知道，读者知不知道',
+  打算何时揭开: '比如第二卷末',
+  是什么: '系统、物品、体质、功法、重生记忆……',
+}
+
+/** 新增按钮上的叫法：新增人物、新增地点…… */
+export function nounOf(category: string): string {
+  return ({ 角色列表: '人物', 金手指: '金手指', 等级体系: '一套等级', 地点列表: '地点', 势力列表: '势力', 物品功法: '物品', 往事秘密: '往事', 特殊规则: '规则' } as Record<string, string>)[category] ?? category
 }
 
 export const GOLDFINGER_PLACEHOLDERS: Record<string, string> = {
