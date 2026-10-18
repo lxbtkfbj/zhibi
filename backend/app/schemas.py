@@ -81,11 +81,37 @@ class ModelListOut(BaseModel):
 
 class BookCreate(BaseModel):
     prefill: bool = False
-    idea: str = Field(min_length=4, max_length=5000)
+    idea: str = Field("", max_length=5000)
     style_reference: str = Field("", max_length=20000)
     # 动笔前让主编先问几个关键问题（篇幅、主角、金手指、结局……）
     ask: bool = False
     mode: Literal["puzzle", "oneshot"] | None = None
+    # 新建页：false 时只建书、存作者填的内容，编辑部不开工
+    start_setup: bool = True
+    title: str = Field("", max_length=200)
+    blurb: str = Field("", max_length=5000)
+    genre: str = Field("", max_length=100)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+    target_length: Literal[50, 100, 200, 300, 500] | None = None
+
+    @field_validator("title", "blurb", "genre")
+    @classmethod
+    def strip_text(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("tags")
+    @classmethod
+    def clean_tags(cls, value: list[str]) -> list[str]:
+        tags = [tag.strip() for tag in value if tag.strip()]
+        if any(len(tag) > 20 for tag in tags):
+            raise ValueError("每个标签不超过 20 个字")
+        return list(dict.fromkeys(tags))
+
+    @model_validator(mode="after")
+    def idea_needed_to_start(self) -> "BookCreate":
+        if self.start_setup and len(self.idea.strip()) < 4:
+            raise ValueError("点子至少写 4 个字")
+        return self
 
 
 class BookPatch(BaseModel):
@@ -163,7 +189,8 @@ class BookDetail(BookSummary):
 
 class BookCreated(BaseModel):
     book: BookDetail
-    job: JobOut
+    # 新建页建的书编辑部不开工，没有任务
+    job: JobOut | None = None
 
 
 # ---------- 大纲 ----------

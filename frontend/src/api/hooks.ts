@@ -90,6 +90,26 @@ export function useCreateBook() {
   })
 }
 
+/** 新建页：只建书、存作者填的几项，编辑部不开工。 */
+export interface NewBookBody {
+  title: string
+  blurb: string
+  genre: string
+  tags: string[]
+  target_length: number | null
+}
+
+export function useCreateBlankBook() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: NewBookBody) => post<{ book: BookDetail; job: null }>('/books', { ...body, start_setup: false }),
+    onSuccess: (data) => {
+      qc.setQueryData(keys.book(data.book.id), data.book)
+      qc.invalidateQueries({ queryKey: keys.books })
+    },
+  })
+}
+
 export function useDeleteBook() {
   const qc = useQueryClient()
   return useMutation({

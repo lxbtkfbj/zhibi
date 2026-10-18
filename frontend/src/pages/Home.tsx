@@ -1,13 +1,12 @@
-import clsx from 'clsx'
 import { ArrowRight, Feather, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { motion, useReducedMotion } from 'motion/react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useBooks, useCreateBook, useDeleteBook, useProfiles } from '../api/hooks'
 import type { BookSummary } from '../api/types'
 import { BookCover } from '../components/BookCover'
 import { Cloud, Diamond, FretDivider, InkMountains } from '../components/decor'
-import { Badge, Button, ErrorText, Modal, Reveal, Skeleton, Spinner } from '../components/ui'
+import { Badge, Button, ErrorText, Reveal, Skeleton, Spinner } from '../components/ui'
 import { cleanTitle, displayStatus, greeting } from '../lib/status'
 
 const IDEAS = [
@@ -18,24 +17,19 @@ const IDEAS = [
   '重生回高考前一晚，这次我只想安安静静当个学渣',
 ]
 
-function Composer({ autoFocus, flat }: { autoFocus?: boolean; flat?: boolean }) {
+function Composer() {
   const [idea, setIdea] = useState('')
   const [placeholder, setPlaceholder] = useState(0)
   const create = useCreateBook()
   const navigate = useNavigate()
   const { data: profiles } = useProfiles()
   const demoOnly = profiles !== undefined && profiles.every((p) => p.provider === 'demo')
-  const ref = useRef<HTMLTextAreaElement>(null)
   const ready = idea.trim().length >= 4
 
   useEffect(() => {
     const timer = setInterval(() => setPlaceholder((i) => (i + 1) % IDEAS.length), 4000)
     return () => clearInterval(timer)
   }, [])
-
-  useEffect(() => {
-    if (autoFocus) ref.current?.focus()
-  }, [autoFocus])
 
   const submit = async () => {
     // 快捷键会绕过按钮的禁用状态，这里再拦一次，避免重复建书
@@ -48,14 +42,8 @@ function Composer({ autoFocus, flat }: { autoFocus?: boolean; flat?: boolean }) 
   }
 
   return (
-    <div
-      className={clsx(
-        'relative overflow-hidden p-2',
-        flat ? 'rounded-2xl bg-card ring-1 ring-line' : 'paper transition-shadow focus-within:shadow-[var(--shadow-lift)]',
-      )}
-    >
+    <div className="paper relative overflow-hidden p-2 transition-shadow focus-within:shadow-[var(--shadow-lift)]">
       <textarea
-        ref={ref}
         value={idea}
         onChange={(e) => setIdea(e.target.value)}
         rows={3}
@@ -86,20 +74,6 @@ function Composer({ autoFocus, flat }: { autoFocus?: boolean; flat?: boolean }) 
         <ErrorText error={create.error} />
       </div>
     </div>
-  )
-}
-
-function NewBookDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  return (
-    <Modal open={open} onClose={onClose} title="开一本新书" wide>
-      <p className="mb-4 text-sm leading-relaxed text-ink-2">
-        写下你的点子，一句话就够。先挑故事方向，再一起完成定调、设定库和大纲。
-      </p>
-      <Composer autoFocus flat />
-      <p className="mt-3 text-xs leading-relaxed text-ink-3">
-        每一步做完都会停下来给你看。编辑部工作时，你也可以随时在讨论里插话。
-      </p>
-    </Modal>
   )
 }
 
@@ -170,7 +144,6 @@ function ShelfBook({ book, index }: { book: BookSummary; index: number }) {
 
 export function Home() {
   const { data: books, isLoading, error } = useBooks()
-  const [creating, setCreating] = useState(false)
   const latest = books?.[0]
 
   return (
@@ -223,14 +196,14 @@ export function Home() {
               {books.map((book, i) => (
                 <ShelfBook key={book.id} book={book} index={i} />
               ))}
-              <button onClick={() => setCreating(true)} className="group flex flex-col items-center">
+              <Link to="/new" className="group flex flex-col items-center">
                 <div className="flex justify-center px-4 pt-6 pb-4">
                   <div className="flex aspect-[3/4] w-[150px] flex-col items-center justify-center gap-2 rounded-[4px] border-2 border-dashed border-line-2 text-ink-3 transition-all duration-300 group-hover:-translate-y-2 group-hover:border-seal/50 group-hover:text-seal">
                     <Plus className="size-7" />
                     <span className="text-sm">开新书</span>
                   </div>
                 </div>
-              </button>
+              </Link>
             </div>
           </section>
         )}
@@ -242,7 +215,6 @@ export function Home() {
           </div>
         )}
       </div>
-      <NewBookDialog open={creating} onClose={() => setCreating(false)} />
     </div>
   )
 }

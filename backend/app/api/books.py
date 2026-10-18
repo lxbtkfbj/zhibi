@@ -84,6 +84,8 @@ async def list_books(session: AsyncSession = SessionDep) -> list[BookSummary]:
 async def create_book(
     body: BookCreate, session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)
 ) -> BookCreated:
+    if not body.start_setup:
+        return await create_blank_book(body, session)
     book = Book(idea=body.idea.strip(), style_reference=body.style_reference.strip(), source="new", status="setting_up")
     book.settings = await new_book_defaults(session)
     mode = body.mode or book.settings.get("setup_mode", "puzzle")
@@ -106,6 +108,30 @@ async def create_book(
     )
     jobs.enqueue(job.id)
     return BookCreated(book=await detail(session, book), job=JobOut.model_validate(job))
+
+
+async def create_blank_book(body: BookCreate, session: AsyncSession) -> BookCreated:
+    """新建页：只存作者填了的几项，编辑部等作者叫了再动。简介先放在定调的一段话里。"""
+    filled = {
+        "title": body.title,
+        "story": body.blurb,
+        "genre": body.genre,
+        "tags": body.tags,
+        "target_length": body.target_length,
+    }
+    book = Book(
+        title=body.title or "未命名",
+        idea=body.blurb,
+        genre=body.genre,
+        source="new",
+        status="setting_up",
+        concept={key: value for key, value in filled.items() if value},
+    )
+    book.settings = await new_book_defaults(session)
+    session.add(book)
+    await session.commit()
+    await session.refresh(book)
+    return BookCreated(book=await detail(session, book), job=None)
 
 
 @router.get("/books/{book_id}", response_model=BookDetail)

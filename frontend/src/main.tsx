@@ -11,6 +11,7 @@ import { LibraryPage } from './pages/book/sections/LibraryPage'
 import { OutlinePage } from './pages/book/sections/OutlinePage'
 import { LegacyBookRoute } from './pages/book/LegacyBookRoute'
 import { Home } from './pages/Home'
+import { NewBookPage } from './pages/NewBook'
 import { BookSettingsPage } from './pages/BookSettingsPage'
 import { AppearanceProvider } from './lib/appearance'
 import { SettingsHost } from './lib/settingsModal'
@@ -25,6 +26,7 @@ const router = createBrowserRouter([
     element: <SiteLayout />,
     children: [
       { path: '/', element: <Home /> },
+      { path: '/new', element: <NewBookPage /> },
       { path: '/settings', element: <Navigate to="/" replace state={{ openSettings: true }} /> },
       { path: '/prompts', lazy: async () => ({ Component: (await import('./pages/PromptsPage')).PromptsPage }) },
     ],
