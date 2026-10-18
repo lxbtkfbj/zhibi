@@ -2,18 +2,19 @@
 
 import { useQuery } from '@tanstack/react-query'
 import clsx from 'clsx'
-import { ChevronUp, Library, Settings } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { ChevronUp, Library, PenLine, Settings } from 'lucide-react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { get } from '../../api/client'
 import type { LibrarySnapshot } from '../../api/library'
-import type { BookSummary, ChapterBrief } from '../../api/types'
+import type { BookSummary, Chapter, ChapterBrief } from '../../api/types'
 import type { OutlineTree } from '../../lib/outlineTree'
 import { useLocalBook } from './actions'
 import { type ApiParts, bookFromApi } from './fromApi'
-import type { VBook } from './model'
+import type { VBook, VNode } from './model'
 import { SAMPLE_BOOK, emptyBook } from './sampleBook'
 import { SampleChat, SampleInbox, Workspace } from './Workspace'
+import { DEMOS, type DemoKind, useWritingSim } from './writingSim'
 
 const SNAPSHOTS = [
   { key: 'nisu', title: '逆溯邮差', note: '以前用真模型写的，字段长、关系多' },
@@ -82,8 +83,43 @@ function BookSwitcher({ source, onSource, inline }: { source: string; onSource: 
   )
 }
 
-function PrototypeDesk({ book: initial, switcher }: { book: VBook; switcher: React.ReactNode }) {
-  const [book, actions] = useLocalBook(initial)
+/** 原型左下角：直接跳到写作的几种样子，不用干等编辑部写到那一步。 */
+function DemoMenu({ onPick }: { onPick: (kind: DemoKind) => void }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="fixed bottom-4 left-4 z-30">
+      {open && (
+        <div className="absolute bottom-[calc(100%+8px)] left-0 w-64 rounded-xl border border-line bg-card p-2 shadow-[var(--shadow-lift)]">
+          <p className="px-3 pt-1 pb-1.5 text-xs tracking-wider text-ink-3">原型 · 直接看写作的几种样子</p>
+          {DEMOS.map((d) => (
+            <button key={d.key} type="button" onClick={() => { onPick(d.key); setOpen(false) }}
+              className="block w-full rounded-lg px-3 py-2 text-left text-[14px] text-ink-2 transition-colors hover:bg-subtle hover:text-ink">
+              {d.label}
+            </button>
+          ))}
+        </div>
+      )}
+      <button type="button" onClick={() => setOpen(!open)}
+        className="flex items-center gap-2 rounded-full border border-writer/30 bg-writer-soft py-1.5 pr-3 pl-3.5 text-xs text-writer shadow-[var(--shadow-paper)] transition-colors hover:border-writer/60">
+        <PenLine className="size-3.5" />
+        原型 · 演示写作
+        <ChevronUp className={clsx('size-3.5 transition-transform', !open && 'rotate-180')} />
+      </button>
+    </div>
+  )
+}
+
+function PrototypeDesk({ book: initial, switcher, source }: { book: VBook; switcher: React.ReactNode; source: string }) {
+  const [book, actions, setBook] = useLocalBook(initial)
+  const sim = useWritingSim(book, setBook, initial)
+  const openRef = useRef<((type: string, id: string) => void) | null>(null)
+  // 书架上的真书：点开一章才去读正文；快照的正文已经在书里
+  const live = source.startsWith('live:') ? source.slice(5) : ''
+  const loadText = useCallback(async (node: VNode) => {
+    if (!live || !node.ref) return ''
+    return (await get<Chapter>(`/books/${live}/chapters/${node.ref.id}`)).content
+  }, [live])
+  const writing = useMemo(() => (live ? { ...sim, loadText } : sim), [sim, live, loadText])
   const right = (
     <>
       <div className="mr-3">{switcher}</div>
@@ -93,7 +129,19 @@ function PrototypeDesk({ book: initial, switcher }: { book: VBook; switcher: Rea
       </button>
     </>
   )
-  return <Workspace book={book} actions={actions} right={right} chat={<SampleChat />} />
+  return (
+    <>
+      <Workspace book={book} actions={actions} right={right} chat={<SampleChat />} writing={writing} openRef={openRef} />
+      {initial.id === 'sample' && (
+        <DemoMenu onPick={(kind) => {
+          const go = sim.demo(kind)
+          if (!go) return
+          // 等书换好了再跳过去
+          setTimeout(() => (go.startsWith('node:') ? openRef.current?.('node', go.slice(5)) : openRef.current?.('manuscript', go)), 60)
+        }} />
+      )}
+    </>
+  )
 }
 
 export function WorkspacePrototype() {
@@ -101,7 +149,7 @@ export function WorkspacePrototype() {
   const source = params.get('book') ?? 'sample'
   const { book, loading, error } = useBookSource(source)
   const choose = (next: string) => setParams(next === 'sample' ? {} : { book: next })
-  if (book) return <PrototypeDesk key={source} book={book} switcher={<BookSwitcher inline source={source} onSource={choose} />} />
+  if (book) return <PrototypeDesk key={source} book={book} source={source} switcher={<BookSwitcher inline source={source} onSource={choose} />} />
   return (
     <>
       <div className="flex h-dvh items-center justify-center bg-paper text-[15px] text-ink-3">

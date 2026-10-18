@@ -1,9 +1,10 @@
 /** 工作台原型用的两本假书：理想样子的示例书，和刚开的空书。只为看样子，不连后台。 */
 
 import {
-  CATEGORY_NAMES, CHARACTER_FIELDS, CHARACTER_PLACEHOLDERS, GOLDFINGER_PLACEHOLDERS, emptyCategory, linkMentions, numberChapters,
+  CATEGORY_NAMES, CHARACTER_FIELDS, CHARACTER_PLACEHOLDERS, GOLDFINGER_PLACEHOLDERS, chapterNodes, countWords, emptyCategory, linkMentions, numberChapters,
   type VBook, type VCategory, type VEntry, type VNode,
 } from './model'
+import { SAMPLE_CHANGES, SAMPLE_REVIEWS, SAMPLE_TEXTS } from './sampleChapters'
 
 interface CharacterInput {
   id: string
@@ -188,6 +189,13 @@ export const SAMPLE_BOOK: VBook = {
 }
 numberChapters(SAMPLE_BOOK.outline)
 linkMentions(SAMPLE_BOOK)
+// 前两章写好了，第 3、4 章只有章纲
+for (const node of chapterNodes(SAMPLE_BOOK.outline)) {
+  const text = ['c1', 'c2'].includes(node.id) ? SAMPLE_TEXTS[node.id] : ''
+  node.body = text
+    ? { status: 'done', words: countWords(text), text, changes: SAMPLE_CHANGES[node.id], review: SAMPLE_REVIEWS[node.id] }
+    : { status: 'planned', words: 0 }
+}
 
 /** 刚点完「下一步」的书：只有新建页填的几项。 */
 export function emptyBook(): VBook {

@@ -1,6 +1,6 @@
 /** 工作台上的每一次改动都走这里：真书存到服务器，原型只改这一页里的那份。界面只管调，不管存到哪。 */
 
-import { createContext, useContext, useMemo, useState } from 'react'
+import { type Dispatch, type SetStateAction, createContext, useContext, useMemo, useState } from 'react'
 import {
   CHARACTER_FIELDS, applyTemplate, cn, findEntry, findNode, numberChapters, splitTitle,
   type CardTemplate, type VBook, type VCategory, type VEntry, type VNode,
@@ -142,8 +142,8 @@ export function withFields(entry: VEntry, fields: Record<string, string>): VEntr
   return { ...entry, facts, sections, ...(role !== undefined && entry.kind === 'character' ? { role: role || '配角' } : {}) }
 }
 
-/** 原型用：书放在这一页的状态里，改动直接改这份。 */
-export function useLocalBook(initial: VBook): [VBook, WorkspaceActions] {
+/** 原型用：书放在这一页的状态里，改动直接改这份。第三个是直接换书的办法（演示写作用）。 */
+export function useLocalBook(initial: VBook): [VBook, WorkspaceActions, Dispatch<SetStateAction<VBook>>] {
   const [book, setBook] = useState(initial)
   const actions = useMemo<WorkspaceActions>(() => {
     const update = (change: (book: VBook) => VBook) => { setBook(change); return Promise.resolve() }
@@ -233,7 +233,7 @@ export function useLocalBook(initial: VBook): [VBook, WorkspaceActions] {
       canDelete: (node) => node.kind !== '全书',
     }
   }, [book.outline])
-  return [book, actions]
+  return [book, actions, setBook]
 }
 
 /** 在节点下面加一个下一层，返回新的大纲树和新节点 id。 */

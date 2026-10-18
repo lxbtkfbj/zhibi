@@ -59,11 +59,28 @@ export interface VCategory {
   custom?: { style: 'paragraph' | 'card' | 'ladder'; fields: string[] }
 }
 
+/** 正文里的一章：大纲上的章节点带着它。 */
+export interface VChapterBody {
+  /** 只有章纲 / 写手在写 / 写完了 */
+  status: 'planned' | 'writing' | 'done'
+  words: number
+  /** 正文；真书点开才去读，读之前是 undefined */
+  text?: string
+  /** 审稿退回重写过几次 */
+  attempts?: number
+  /** 这一章写完，设定师记下的变化，一行一条 */
+  changes?: string[]
+  /** 审稿：说好的、还可以更好的 */
+  review?: { good: string[]; issues: string[] }
+}
+
 export interface VNode {
   id: string
   kind: '全书' | '篇' | '卷' | '单元' | '章'
   title: string
   text: string
+  /** 章才有：正文 */
+  body?: VChapterBody
   /** 章纲：发生什么、看点、结尾钩子 */
   sections?: VField[]
   chapters?: number
@@ -101,6 +118,64 @@ export interface VBook {
   pending: number
   /** 这本书每一类设定有哪几栏，键是类别的 key；没存的按默认 */
   layouts: Record<string, CardTemplate>
+}
+
+/* ---------------- 写作：开写、正文、拍板 ---------------- */
+
+/** 要作者拍板的五种：下一篇怎么走、卷纲、章纲、试读前 3 章、一章重写两次还过不了 */
+export type GateKind = 'segment' | 'volume' | 'chapters' | 'trial' | 'stuck'
+
+export interface VGate {
+  kind: GateKind
+  /** 在哪一页拍板：篇、卷、单元是大纲节点 id，试读、卡住是章的 id */
+  node: string
+  /** 第一卷的卷纲 */
+  title: string
+  /** 白话说清要作者看什么、点了会怎样 */
+  hint: string
+  /** 审稿的提醒、卡住的原因 */
+  issues?: string[]
+  /** 主编正在按作者的意见改 */
+  revising?: boolean
+}
+
+export interface VWriting {
+  /** 空闲 / 在干活 / 等作者拍板 / 停下了 / 出错停下了 / 这一轮写完了 */
+  state: 'idle' | 'working' | 'waiting' | 'stopped' | 'failed' | 'finished'
+  who?: '主编' | '写手' | '审稿' | '设定师'
+  /** 正在做什么：主编在给单元二出章纲 */
+  doing?: string
+  /** 写手正在写的章 */
+  chapter?: string
+  /** 写手已经写出来的字 */
+  live?: string
+  gate?: VGate
+  error?: string
+  /** 停下、写完时的一句交代 */
+  note?: string
+  /** 点了停下，等手上这一章写完 */
+  stopping?: boolean
+}
+
+/** 写作中停下来请作者看的地方（本书设置里的四个开关） */
+export interface WritingGates { segment: boolean; volume: boolean; chapters: boolean; trial: boolean }
+
+export type WritePlan = '1' | '3' | 'unit' | 'volume' | 'book'
+
+/** 全书所有的章，按顺序。 */
+export function chapterNodes(root: VNode): VNode[] {
+  const out: VNode[] = []
+  const walk = (node: VNode) => {
+    if (node.kind === '章') out.push(node)
+    node.children?.forEach(walk)
+  }
+  walk(root)
+  return out
+}
+
+/** 一章写了多少字：不算空白。 */
+export function countWords(text: string): number {
+  return text.replace(/\s/g, '').length
 }
 
 /** 一栏：key 是存内容时认的名字，label 是现在显示的名字（改了名 key 不变）。 */

@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { ArrowLeft, ArrowUp, BookOpen, ChevronDown, ChevronRight, ChevronUp, Globe, Inbox, Lock, Minus, MoreHorizontal, PanelRight, PictureInPicture2, Plus, Search, Sparkles, Wand2, X } from 'lucide-react'
+import { ArrowLeft, ArrowUp, BookOpen, ChevronDown, ChevronRight, ChevronUp, Globe, Inbox, Lock, Minus, PanelRight, PictureInPicture2, Plus, Sparkles, Wand2, X } from 'lucide-react'
 import { type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { ChatViewing } from '../../api/types'
@@ -12,11 +12,17 @@ import {
 } from './actions'
 import {
   ROLE_ORDER, applyTemplate, cn, emptyCategory, findEntry, findNode, isLadder, nounOf, splitTitle, templateOf,
-  type CardTemplate, type FieldItem, type VBook, type VCategory, type VEntry, type VField, type VNode,
+  type CardTemplate, type FieldItem, type VBook, type VCategory, type VEntry, type VNode,
 } from './model'
 import { CHAT, PENDING } from './sampleBook'
+import { ChapterPage, GateCard, ManuscriptDirectory, ManuscriptHome, WritingStrip } from './Manuscript'
+import { type WritingControl, gateTarget } from './writing'
+import {
+  AskButton, CardMenu, Crumb, DirectoryShell, Editable, LinkChip, Menu, Prose, Section, Sheet,
+} from './widgets'
+import { menuItem, paperCard, readText, rowSelected, smallButton, titleClass } from './styles'
 
-type Tab = '简介' | '设定' | '大纲'
+type Tab = '简介' | '设定' | '大纲' | '正文'
 type Dock = 'ball' | 'float' | 'side'
 /** 点了左边：滚到哪一张；同一类里平滑滚，换类直接跳 */
 interface ScrollReq { id: string; smooth: boolean; n: number }
@@ -32,185 +38,9 @@ const ROLE_STYLE: Record<string, string> = {
 interface Nav {
   openEntry: (id: string) => void
   openNode: (id: string) => void
+  /** 正文里的某一章；home 是正文首页（开写） */
+  openChapter: (id: string) => void
   toast: (text: string) => void
-}
-
-/* ---------------- 小部件 ---------------- */
-
-const readText = (el: HTMLElement) => el.innerText.replace(/ /g, ' ').replace(/\n+$/, '')
-
-/** 可以直接改的字：点上去就能改，不用先点「编辑」；离开就存；空着时显示该写什么。Esc 撤回这次改的。 */
-function Editable({ value, onSave, className, multiline, boxed, placeholder, autoFocus, readOnly, spot }: {
-  value: string; onSave?: (text: string) => void; className?: string; multiline?: boolean; boxed?: boolean; placeholder?: string; autoFocus?: boolean; readOnly?: boolean
-  /** 这一栏在书里是哪一处：选中里面的字能让编辑部改（写法见 liveActions 的 resolveSpot） */
-  spot?: string
-}) {
-  const ref = useRef<HTMLDivElement>(null)
-  const saved = useRef(value)
-  // 外面的值变了（存好了、别处改了）：不在改的时候才换上，正在打的字不动
-  useLayoutEffect(() => {
-    const el = ref.current
-    saved.current = value
-    if (el && document.activeElement !== el && readText(el) !== value) el.innerText = value
-  }, [value])
-  useEffect(() => {
-    if (autoFocus) ref.current?.focus()
-  }, [autoFocus])
-  const editable = !!onSave && !readOnly
-  return (
-    <div
-      ref={ref}
-      contentEditable={editable ? 'plaintext-only' : false}
-      suppressContentEditableWarning
-      spellCheck={false}
-      role={editable ? 'textbox' : undefined}
-      aria-multiline={editable ? multiline : undefined}
-      aria-label={editable ? placeholder : undefined}
-      data-placeholder={placeholder}
-      data-spot={spot}
-      onInput={(e) => { if (!e.currentTarget.textContent) e.currentTarget.innerHTML = '' }}
-      onKeyDown={(e) => {
-        if (e.key === 'Escape') {
-          e.currentTarget.innerText = saved.current
-          e.currentTarget.blur()
-        } else if (e.key === 'Enter' && !multiline && !e.nativeEvent.isComposing) {
-          e.preventDefault()
-          e.currentTarget.blur()
-        }
-      }}
-      onBlur={(e) => {
-        const text = readText(e.currentTarget)
-        if (!e.currentTarget.textContent) e.currentTarget.innerHTML = ''
-        if (onSave && text !== saved.current) {
-          saved.current = text
-          onSave(text)
-        }
-      }}
-      className={clsx(
-        'outline-none transition-colors',
-        editable && (boxed ? 'focus:ring-1 focus:ring-line-2' : '-mx-2 rounded-md px-2 hover:bg-subtle focus:bg-subtle'),
-        !editable && !boxed && '-mx-2 px-2',
-        multiline && 'whitespace-pre-line',
-        placeholder && 'empty:before:text-ink-3/60 empty:before:content-[attr(data-placeholder)]',
-        className,
-      )}
-    />
-  )
-}
-
-const LONG = 260
-
-/** 一段长文字：可以直接改；太长先折起来，点进去改就展开。 */
-function Prose({ value, onSave, placeholder, autoFocus, readOnly, spot }: { value: string; onSave?: (text: string) => void; placeholder?: string; autoFocus?: boolean; readOnly?: boolean; spot?: string }) {
-  const long = value.length > LONG
-  const [open, setOpen] = useState(false)
-  return (
-    <>
-      <div className={clsx('relative', long && !open && 'max-h-[11.5em] overflow-hidden')} onFocus={() => setOpen(true)}>
-        <Editable multiline autoFocus={autoFocus} value={value} onSave={onSave} readOnly={readOnly} spot={spot} placeholder={placeholder ?? '还没写'} className="font-serif text-[17px] leading-[1.95] text-ink 2xl:text-lg" />
-        {long && !open && <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-card to-transparent" />}
-      </div>
-      {long && (
-        <button type="button" onClick={() => setOpen(!open)} className="mt-1 text-[13px] text-chief hover:underline">
-          {open ? '收起' : `展开全文（${value.length} 字）`}
-        </button>
-      )}
-    </>
-  )
-}
-
-/** 正文里的一栏：小标题加一段字。 */
-function Section({ field, onSave, readOnly, children, spot }: { field: VField; onSave?: (text: string) => void; readOnly?: boolean; children?: ReactNode; spot?: string }) {
-  return (
-    <section>
-      <h3 className="mb-2 text-[13px] tracking-[0.15em] text-ink-3">{field.label}</h3>
-      <Prose value={field.text} onSave={onSave} readOnly={readOnly} placeholder={field.placeholder} spot={spot} />
-      {children}
-    </section>
-  )
-}
-
-function LinkChip({ icon, children, onClick }: { icon?: ReactNode; children: ReactNode; onClick: () => void }) {
-  return (
-    <button type="button" onClick={onClick}
-      className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-subtle px-3 py-1 text-[13px] text-ink-2 transition-colors hover:bg-line/60 hover:text-ink">
-      {icon}<span className="truncate">{children}</span>
-    </button>
-  )
-}
-
-/** 卡片里的小按钮（新增关系、加上一栏）：白底细框，和「编辑部帮写」同一种，小一号，不带加号。 */
-const smallButton = 'h-8 rounded-lg border border-line-2 bg-card px-3.5 text-[13px] text-ink-2 transition-colors hover:border-ink-3/50 hover:text-ink disabled:opacity-40 disabled:hover:border-line-2 disabled:hover:text-ink-2'
-
-function AskButton({ children, onClick }: { children: ReactNode; onClick: () => void }) {
-  return (
-    <button type="button" onClick={onClick} className="h-9 rounded-lg border border-line-2 bg-card px-4 text-sm text-ink-2 transition-colors hover:border-ink-3/50 hover:text-ink">
-      {children}
-    </button>
-  )
-}
-
-/** 点一下弹出的小菜单：点外面或按 Esc 收起。 */
-function Menu({ trigger, children, align = 'right', className }: { trigger: (open: boolean, toggle: () => void) => ReactNode; children: (close: () => void) => ReactNode; align?: 'left' | 'right'; className?: string }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!open) return
-    const down = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false) }
-    const key = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
-    document.addEventListener('mousedown', down)
-    document.addEventListener('keydown', key)
-    return () => {
-      document.removeEventListener('mousedown', down)
-      document.removeEventListener('keydown', key)
-    }
-  }, [open])
-  return (
-    <div ref={ref} className={clsx('relative', className)}>
-      {trigger(open, () => setOpen(!open))}
-      {open && (
-        <div className={clsx('absolute top-[calc(100%+4px)] z-30 min-w-44 rounded-xl border border-line bg-card p-1 shadow-[var(--shadow-lift)]', align === 'right' ? 'right-0' : 'left-0')}>
-          {children(() => setOpen(false))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-const menuItem = 'block w-full rounded-lg px-3 py-2 text-left text-sm text-ink-2 hover:bg-subtle hover:text-ink'
-
-/** 卡片右上角的「⋯」：锁住、删掉。删要点两次。 */
-function CardMenu({ locked, onLock, onDelete, deleteLabel = '删掉这一条', onFill, items = [] }: {
-  locked?: boolean; onLock?: () => void; onDelete?: () => void; deleteLabel?: string; onFill?: () => void
-  /** 再多几项：大纲上的在前面插、在后面插、上移、下移 */
-  items?: { label: string; onClick: () => void }[]
-}) {
-  const [sure, setSure] = useState(false)
-  return (
-    <div className="absolute top-5 right-5 z-10">
-    <Menu
-      trigger={(open, toggle) => (
-        <button type="button" onClick={() => { setSure(false); toggle() }} aria-label="更多" title="更多"
-          className={clsx('rounded-md p-1.5 text-ink-3 transition-opacity hover:bg-line/60 hover:text-ink', open ? 'opacity-100' : 'opacity-0 group-hover/card:opacity-100 focus-visible:opacity-100')}>
-          <MoreHorizontal className="size-4" />
-        </button>
-      )}>
-      {(close) => (
-        <>
-          {items.map((item) => <button key={item.label} type="button" className={menuItem} onClick={() => { close(); item.onClick() }}>{item.label}</button>)}
-          {onFill && <button type="button" className={menuItem} onClick={() => { close(); onFill() }}>让编辑部补齐空着的栏目</button>}
-          {onLock && <button type="button" className={menuItem} onClick={() => { close(); onLock() }}>{locked ? '解锁，AI 可以改' : '锁住，AI 不改'}</button>}
-          {onDelete && (
-            <button type="button" className={clsx(menuItem, sure && 'text-seal hover:text-seal')}
-              onClick={() => { if (!sure) return setSure(true); close(); onDelete() }}>
-              {sure ? '再点一次，真删了' : deleteLabel}
-            </button>
-          )}
-        </>
-      )}
-    </Menu>
-    </div>
-  )
 }
 
 /* ---------------- 顶栏 ---------------- */
@@ -250,7 +80,7 @@ export function SampleInbox({ book }: { book: VBook }) {
   )
 }
 
-function TopBar({ book, tab, onTab, right, manuscriptHref }: { book: VBook; tab: Tab; onTab: (tab: Tab) => void; right: ReactNode; manuscriptHref?: string }) {
+function TopBar({ book, tab, onTab, right, manuscriptHref, manuscript }: { book: VBook; tab: Tab; onTab: (tab: Tab) => void; right: ReactNode; manuscriptHref?: string; manuscript?: boolean }) {
   return (
     <header className="relative z-20 flex h-14 shrink-0 items-center gap-3 border-b border-line bg-paper px-4 2xl:h-16 2xl:px-6">
       <Link to="/" className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm text-ink-3 transition-colors hover:bg-line/50 hover:text-ink">
@@ -263,14 +93,14 @@ function TopBar({ book, tab, onTab, right, manuscriptHref }: { book: VBook; tab:
 
       {/* 四个入口放在整条顶栏正中 */}
       <nav className="absolute inset-y-0 left-1/2 flex -translate-x-1/2 items-stretch">
-        {(['简介', '设定', '大纲'] as const).map((key) => (
+        {(manuscript ? ['简介', '设定', '大纲', '正文'] as const : ['简介', '设定', '大纲'] as const).map((key) => (
           <button key={key} type="button" onClick={() => onTab(key)}
             className={clsx('relative px-5 text-[15px] transition-colors 2xl:px-6 2xl:text-base', tab === key ? 'font-medium text-ink' : 'text-ink-3 hover:text-ink')}>
             {key}
             {tab === key && <span className="absolute inset-x-4 bottom-0 h-0.5 rounded-full bg-seal" />}
           </button>
         ))}
-        {manuscriptHref
+        {manuscript ? null : manuscriptHref
           ? <Link to={manuscriptHref} title="正文还没搬到新书页，先在旧版里看" className="flex items-center px-5 text-[15px] text-ink-3 transition-colors hover:text-ink 2xl:px-6 2xl:text-base">正文</Link>
           : <span className="flex cursor-not-allowed items-center px-5 text-[15px] text-ink-3/50 2xl:px-6 2xl:text-base" title="开写以后才有">正文</span>}
       </nav>
@@ -281,41 +111,6 @@ function TopBar({ book, tab, onTab, right, manuscriptHref }: { book: VBook; tab:
 }
 
 /* ---------------- 左边目录 ---------------- */
-
-function DirectoryShell({ title, search, query, onQuery, onTitle, children, footer, addMenu }: {
-  title: string; search: string; query: string; onQuery: (query: string) => void; onTitle?: () => void
-  children: ReactNode; footer?: ReactNode; addMenu?: { label: string; onClick: () => void }[]
-}) {
-  return (
-    <aside className="flex w-72 shrink-0 flex-col border-r border-line bg-paper-2 2xl:w-80">
-      <div className="flex items-center justify-between px-5 pt-5 pb-3">
-        <button type="button" onClick={onTitle} className="text-xs tracking-[0.25em] text-ink-3 hover:text-ink">{title}</button>
-        {!!addMenu?.length && (
-          <Menu trigger={(_, toggle) => (
-            <button type="button" onClick={toggle} className="rounded-md p-1 text-ink-3 transition-colors hover:bg-line/60 hover:text-ink" aria-label="新建" title="新建">
-              <Plus className="size-4" />
-            </button>
-          )}>
-            {(close) => addMenu.map((item) => (
-              <button key={item.label} type="button" onClick={() => { close(); item.onClick() }} className={menuItem}>{item.label}</button>
-            ))}
-          </Menu>
-        )}
-      </div>
-      <label className="mx-4 mb-3 flex h-9 items-center gap-2 rounded-lg border border-line bg-card/70 px-3 text-sm text-ink-3 focus-within:border-line-2">
-        <Search className="size-4 shrink-0" />
-        <input value={query} onChange={(e) => onQuery(e.target.value)} placeholder={search} className="min-w-0 flex-1 bg-transparent text-ink placeholder:text-ink-3 focus:outline-none" />
-        {query && <button type="button" onClick={() => onQuery('')} aria-label="清掉" className="text-ink-3 hover:text-ink"><X className="size-3.5" /></button>}
-      </label>
-      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-3 pb-20">
-        {children}
-        {footer}
-      </div>
-    </aside>
-  )
-}
-
-const rowSelected = 'bg-card shadow-[0_1px_2px_rgb(60_40_20/0.08)]'
 
 function EntryButton({ entry, selected, depth = 0, onSelect }: { entry: VEntry; selected: string; depth?: number; onSelect: (id: string) => void }) {
   const ref = useRef<HTMLButtonElement>(null)
@@ -581,21 +376,6 @@ function OutlineTreeView({ node, depth, selected, onSelect, open, toggle, onAdd,
 }
 
 /* ---------------- 中间一页纸 ---------------- */
-
-const paperCard = 'rounded-xl border border-line bg-card px-12 py-11 shadow-[var(--shadow-paper)] 2xl:px-16 2xl:py-14'
-const titleClass = 'font-serif text-[34px] leading-tight font-bold break-all 2xl:text-[38px]'
-
-function Sheet({ children, narrow }: { children: ReactNode; narrow?: boolean }) {
-  return (
-    <div className={clsx('mx-auto w-full px-8 py-10 2xl:py-12', narrow ? 'max-w-[880px] 2xl:max-w-[940px]' : 'max-w-[1080px] 2xl:max-w-[1180px]')}>
-      <article className={clsx(paperCard, 'group/card relative')}>{children}</article>
-    </div>
-  )
-}
-
-function Crumb({ items }: { items: string[] }) {
-  return <p className="mb-4 text-[13px] tracking-wider text-ink-3">{items.join('  /  ')}</p>
-}
 
 function Tags({ entry }: { entry: VEntry }) {
   return (
@@ -1410,9 +1190,11 @@ function WriteHelp({ node }: { node: VNode }) {
   )
 }
 
-function OutlinePage({ book, outline, id, nav, onAdd, onInsert, onMove, fresh }: {
+function OutlinePage({ book, outline, id, nav, onAdd, onInsert, onMove, fresh, writing }: {
   book: VBook; outline: VNode; id: string; nav: Nav; onAdd: (id: string) => void
   onInsert: (node: VNode, where: 'before' | 'after') => void; onMove: (node: VNode, direction: 'up' | 'down') => void; fresh: boolean
+  /** 写作：这一页上有要拍板的就放拍板卡；写过的章能去读正文 */
+  writing?: WritingControl
 }) {
   const { actions } = useWorkspace()
   const save = useSave()
@@ -1427,6 +1209,14 @@ function OutlinePage({ book, outline, id, nav, onAdd, onInsert, onMove, fresh }:
   else if (node.kind !== '章' && node.range) meta.push({ label: '章数', value: `${node.range[1] - node.range[0] + 1} 章 · 第 ${node.range[0]}–${node.range[1]} 章` })
   else if (node.kind === '卷' || node.kind === '单元') meta.push({ label: '章数', value: '还没定' })
   if (node.progress && node.progress !== '已规划') meta.push({ label: '写到', value: node.progress })
+  if (writing && node.kind === '章' && node.body && node.body.status !== 'planned') {
+    meta.push({
+      label: '正文',
+      value: <button type="button" onClick={() => nav.openChapter(node.id)} className="text-chief hover:underline">{node.body.status === 'done' ? `${node.body.words.toLocaleString()} 字 · 去读` : '写手在写 · 去看'}</button>,
+    })
+  }
+  const status = writing?.status
+  const gate = status?.state === 'waiting' && status.gate && gateTarget(status.gate).node === node.id ? status.gate : undefined
   const one = ONE[node.kind]
   const arrange = actions.canArrange(node) ? [
     { label: `在前面插${one}`, onClick: () => onInsert(node, 'before') },
@@ -1454,6 +1244,7 @@ function OutlinePage({ book, outline, id, nav, onAdd, onInsert, onMove, fresh }:
         </div>
       )}
       <div className="mt-8 space-y-8 border-t border-line pt-8">
+        {gate && writing && <GateCard gate={gate} writing={writing} nav={nav} />}
         {node.sections
           ? node.sections.map((field) => (
             <Section key={field.label} field={field} readOnly={!actions.canEdit(node, 'text')}
@@ -1904,9 +1695,11 @@ export interface WorkspaceProps {
   openRef?: React.MutableRefObject<((type: string, id: string) => void) | null>
   /** 作者正在看哪一页：群聊发话时带上 */
   viewingRef?: React.MutableRefObject<(() => ChatViewing | null) | null>
+  /** 写作：开写、停下、拍板。给了就有正文页签；真书还没接，先不给 */
+  writing?: WritingControl
 }
 
-export function Workspace({ book: base, actions, right, chat, chatBadge, openChat, notice, manuscriptHref, openRef, viewingRef }: WorkspaceProps) {
+export function Workspace({ book: base, actions, right, chat, chatBadge, openChat, notice, manuscriptHref, openRef, viewingRef, writing }: WorkspaceProps) {
   // 新增了还没起名字的条目：只在这一页，起了名字才存
   const [drafts, setDrafts] = useState<VEntry[]>([])
   const draftsRef = useRef(drafts)
@@ -1936,6 +1729,8 @@ export function Workspace({ book: base, actions, right, chat, chatBadge, openCha
     return ['book', ...path.map((n) => n.id)]
   })
   const [outlineQuery, setOutlineQuery] = useState('')
+  // 正文里看的是哪一章；home 是正文首页（开写）
+  const [chapter, setChapter] = useState('home')
   const [dock, setDock] = useState<Dock>('ball')
   const [toast, setToast] = useState('')
   // 一打开就滚到选中的那一条
@@ -1950,6 +1745,10 @@ export function Workspace({ book: base, actions, right, chat, chatBadge, openCha
   useEffect(() => {
     if (openChat) setDock((d) => (d === 'ball' ? 'float' : d))
   }, [openChat])
+  // 换到正文页签：从最上面看起
+  useEffect(() => {
+    if (tab === '正文') pageRef.current?.scrollTo({ top: 0 })
+  }, [tab, chapter])
 
   const report = useCallback((error: unknown) => setToast(`没存上：${errorText(error)}`), [])
   // 编辑部刚改了一处：底下一条「改好了 · 撤销」，过一会儿自己收起
@@ -2031,6 +1830,12 @@ export function Workspace({ book: base, actions, right, chat, chatBadge, openCha
       if (path) setOpen((list) => [...new Set([...list, ...path.slice(0, -1).map((n) => n.id)])])
       pageRef.current?.scrollTo({ top: 0 })
     },
+    openChapter: (id) => {
+      if (!writing) return
+      setTab('正文')
+      setChapter(id)
+      pageRef.current?.scrollTo({ top: 0 })
+    },
     toast: setToast,
   }
   useEffect(() => {
@@ -2043,12 +1848,18 @@ export function Workspace({ book: base, actions, right, chat, chatBadge, openCha
       else if (type === 'chapter') nav.openNode(`c${id}`)
       else if (type === 'book') nav.openNode('book')
       else if (type === 'concept') setTab('简介')
+      else if (type === 'node') nav.openNode(id)
+      else if (type === 'manuscript') nav.openChapter(id)
     }
   })
   useEffect(() => {
     if (!viewingRef) return
     viewingRef.current = () => {
       if (tab === '简介') return { target_type: 'concept', target_id: base.id, label: '简介' }
+      if (tab === '正文') {
+        const here = findNode(base.outline, chapter)?.at(-1)
+        return here?.ref ? { target_type: here.ref.type, target_id: here.ref.id, label: `正文 · ${here.title.replace('　', ' ')}` } : null
+      }
       if (tab === '大纲') {
         const path = findNode(base.outline, node)
         const here = path?.at(-1)
@@ -2130,8 +1941,9 @@ export function Workspace({ book: base, actions, right, chat, chatBadge, openCha
   return (
     <ActionsContext.Provider value={tools}>
       <div className="flex h-dvh flex-col bg-paper text-ink">
-        <TopBar book={book} tab={tab} onTab={setTab} right={right} manuscriptHref={manuscriptHref} />
+        <TopBar book={book} tab={tab} onTab={setTab} right={right} manuscriptHref={manuscriptHref} manuscript={!!writing} />
         {notice}
+        {writing && <WritingStrip writing={writing} nav={nav} />}
         <div className="flex min-h-0 flex-1">
           {tab === '设定' && (
             <SettingsDirectory book={book} selected={entry} onSelect={nav.openEntry} onNewEntry={newEntry}
@@ -2146,6 +1958,10 @@ export function Workspace({ book: base, actions, right, chat, chatBadge, openCha
               {outlineOnly && outlineOnly.size === 0 && <p className="px-2.5 py-2 text-[13px] text-ink-3">没找到「{outlineQuery.trim()}」</p>}
             </DirectoryShell>
           )}
+          {tab === '正文' && writing && (
+            <ManuscriptDirectory book={book} selected={chapter} onSelect={nav.openChapter} writing={writing}
+              onExport={() => setToast('原型：会把写好的章按卷、按章导出成一个 TXT 文件')} />
+          )}
           <main ref={pageRef} className="scroll-thin min-w-0 flex-1 overflow-y-auto">
             {tab === '简介' && <BlurbPage book={book} />}
             {tab === '设定' && (
@@ -2158,7 +1974,10 @@ export function Workspace({ book: base, actions, right, chat, chatBadge, openCha
                 )
                   : <SettingsOverview book={book} nav={nav} onSelect={nav.openEntry} />
             )}
-            {tab === '大纲' && <OutlinePage key={`${node}:${nodeNonce}`} book={book} outline={base.outline} id={node} nav={nav} onAdd={addNode} onInsert={insertNode} onMove={moveNode} fresh={freshNode === node} />}
+            {tab === '大纲' && <OutlinePage key={`${node}:${nodeNonce}`} book={book} outline={base.outline} id={node} nav={nav} onAdd={addNode} onInsert={insertNode} onMove={moveNode} fresh={freshNode === node} writing={writing} />}
+            {tab === '正文' && writing && (chapter === 'home'
+              ? <ManuscriptHome book={book} writing={writing} nav={nav} />
+              : <ChapterPage key={chapter} book={book} id={chapter} writing={writing} nav={nav} />)}
           </main>
           {dock === 'side' && <DockedEditorial setDock={setDock} initial={live ? 520 : 460}>{chat}</DockedEditorial>}
         </div>
@@ -2168,6 +1987,7 @@ export function Workspace({ book: base, actions, right, chat, chatBadge, openCha
           <button type="button" onClick={() => setDock('float')} title="编辑部"
             className="press fixed right-6 bottom-6 z-40 flex size-14 items-center justify-center rounded-full bg-chief font-serif text-xl text-on-role shadow-[0_14px_30px_-10px_rgb(40_50_90/0.6)] transition-transform hover:-translate-y-0.5">
             编
+            {writing?.status.state === 'working' && <span aria-hidden className="absolute -inset-1 rounded-full border-2 border-chief/25 border-t-chief motion-safe:animate-spin" />}
             {chatBadge === undefined
               ? <span className="absolute top-1 right-1 size-3 rounded-full bg-seal ring-2 ring-paper" />
               : chatBadge > 0 && <span className="absolute -top-0.5 -right-0.5 flex min-w-5 items-center justify-center rounded-full bg-seal px-1 text-[11px] leading-5 text-on-role ring-2 ring-paper">{chatBadge > 99 ? '99+' : chatBadge}</span>}

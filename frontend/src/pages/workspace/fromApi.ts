@@ -5,7 +5,7 @@ import type { ChapterBrief, Relationship } from '../../api/types'
 import { arcText, isLaterEnding, outlineStatusText, unitStatus, type OutlineTree } from '../../lib/outlineTree'
 import {
   CATEGORY_DEFS, CHARACTER_FIELDS, CHARACTER_PLACEHOLDERS, LEGACY_ROLES, cn, emptyCategory, linkMentions, numberChapters,
-  type CardTemplate, type VBook, type VCategory, type VEntry, type VField, type VNode,
+  type CardTemplate, type VBook, type VCategory, type VChapterBody, type VEntry, type VField, type VNode,
 } from './model'
 
 export interface ApiParts {
@@ -97,6 +97,9 @@ function settingEntry(item: LibraryItem, category: string): VEntry {
   return { ...base, kind: goldfinger ? 'goldfinger' : 'paragraph', oneLine: goldfinger ? text(item.one_line) : '', sections }
 }
 
+/** 原型快照里一章多存的几样（真书的章节列表里没有） */
+interface SnapshotChapter { content?: string; changes?: string[]; review_view?: { good: string[]; issues: string[] } }
+
 function outlineNodes(tree: OutlineTree, chapters: ChapterBrief[], ending?: string): VNode {
   const byIndex = new Map(chapters.map((c) => [c.index, c]))
   const chapterNode = (index: number, title: string, status: string): VNode => {
@@ -108,8 +111,18 @@ function outlineNodes(tree: OutlineTree, chapters: ChapterBrief[], ending?: stri
     const sections: VField[] = outline
       ? [['发生什么', happen], ['看点', text(o?.cool_point)], ['结尾钩子', text(o?.hook)]].map(([label, value]) => ({ label, text: value, placeholder: CHAPTER_HINTS[label] }))
       : [{ label: '这一章写了什么', text: text(brief?.summary) }]
+    // 快照里存了正文、设定的变化和审稿；真书点开一章才去读
+    const extra = brief as (ChapterBrief & SnapshotChapter) | undefined
+    const body: VChapterBody = {
+      status: status === 'final' ? 'done' : status === 'drafting' ? 'writing' : 'planned',
+      words: brief?.word_count ?? 0,
+      attempts: brief?.attempts || undefined,
+      ...(extra?.content !== undefined ? { text: extra.content } : {}),
+      ...(extra?.changes ? { changes: extra.changes } : {}),
+      ...(extra?.review_view ? { review: extra.review_view } : {}),
+    }
     return {
-      id: `c${index}`, kind: '章', title: `第${index}章　${title}`, text: '', sections, progress: outlineStatusText(status), uses: [],
+      id: `c${index}`, kind: '章', title: `第${index}章　${title}`, text: '', sections, progress: outlineStatusText(status), uses: [], body,
       ...(brief ? { ref: { type: 'chapter' as const, id: String(index) } } : {}),
     }
   }
