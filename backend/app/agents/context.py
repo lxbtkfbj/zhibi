@@ -73,6 +73,9 @@ def format_character(ch: dict[str, Any]) -> str:
     ):
         if ch.get(key):
             parts.append(f"{label}：{ch[key]}")
+    for label, value in (ch.get("extra") or {}).items():
+        if value:
+            parts.append(f"{label}：{value}")
     state = "，".join(x for x in (ch.get("location"), ch.get("condition")) if x)
     if state:
         parts.append(f"当前：{state}")

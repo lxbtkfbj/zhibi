@@ -78,6 +78,24 @@ async def _create(session: AsyncSession, book_id: uuid.UUID, model: Any, body: B
     return row
 
 
+def merge_partial(row: Any, data: dict) -> dict:
+    """角色的 extra、条目的 field_values 只改给出的几栏：合进原来的，空字符串就清掉。"""
+    if isinstance(row, Character) and "extra" in data:
+        merged = {**(row.extra or {}), **data["extra"]}
+        data["extra"] = {key: value for key, value in merged.items() if value}
+    if isinstance(row, WorldEntry) and "field_values" in data:
+        values = data.pop("field_values")
+        fields = [dict(f) for f in data.get("fields", row.fields or [])]
+        for name, value in values.items():
+            hit = next((f for f in fields if f.get("name") == name), None)
+            if hit is not None:
+                hit["value"] = value
+            elif value:
+                fields.append({"name": name, "value": value})
+        data["fields"] = [f for f in fields if f.get("value")]
+    return data
+
+
 async def _update(session: AsyncSession, model: Any, row_id: uuid.UUID, body: BaseModel) -> Any:
     row = await session.get(model, row_id)
     if row is None:
@@ -92,7 +110,7 @@ async def _update(session: AsyncSession, model: Any, row_id: uuid.UUID, body: Ba
     versioned = model in (Character, WorldEntry)
     before = snapshot_of(row) if versioned else None
     previous_source = row.source if versioned else None
-    data = body.model_dump(exclude_unset=True)
+    data = merge_partial(row, body.model_dump(exclude_unset=True))
     if model is WorldEntry:
         data = await validate_entry(session, row.book_id, data, current=row)
     if model is Foreshadowing:

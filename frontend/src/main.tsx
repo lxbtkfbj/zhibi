@@ -31,8 +31,10 @@ const router = createBrowserRouter([
       { path: '/prompts', lazy: async () => ({ Component: (await import('./pages/PromptsPage')).PromptsPage }) },
     ],
   },
-  // 工作台原型：只看样子，内容是假的
-  { path: '/prototype/workspace', lazy: async () => ({ Component: (await import('./pages/prototype/WorkspacePrototype')).WorkspacePrototype }) },
+  // 新书页：简介、设定、大纲；没搬过来的功能还在旧版 /books/:bookId 里
+  { path: '/desk/:bookId', lazy: async () => ({ Component: (await import('./pages/workspace/BookDesk')).BookDesk }) },
+  // 工作台原型：同一套界面，示例书和快照，改了不存
+  { path: '/prototype/workspace', lazy: async () => ({ Component: (await import('./pages/workspace/WorkspacePrototype')).WorkspacePrototype }) },
   {
     path: '/books/:bookId',
     element: <BookLayout />,

@@ -1,23 +1,21 @@
-import { useQuery } from '@tanstack/react-query'
 import clsx from 'clsx'
-import { ArrowLeft, ArrowUp, BookOpen, ChevronDown, ChevronRight, ChevronUp, Globe, Inbox, Library, Lock, Minus, PanelRight, PictureInPicture2, Plus, Search, Settings, Sparkles, Wand2 } from 'lucide-react'
-import { type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
-import { get } from '../../api/client'
-import type { LibrarySnapshot } from '../../api/library'
-import type { BookSummary, ChapterBrief } from '../../api/types'
+import { ArrowLeft, ArrowUp, BookOpen, ChevronDown, ChevronRight, ChevronUp, Globe, Inbox, Lock, Minus, MoreHorizontal, PanelRight, PictureInPicture2, Plus, Search, Sparkles, Wand2, X } from 'lucide-react'
+import { type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { useBookMeta } from '../../api/newBook'
+import { CategoryPicker, LengthInput, Row, TagPicker } from '../../components/BookFields'
 import { BookCover } from '../../components/BookCover'
-import type { OutlineTree } from '../../lib/outlineTree'
-import { type ApiParts, bookFromApi } from './fromApi'
 import {
-  CHARACTER_PLACEHOLDERS, DEFAULT_FIELDS, FACT_PLACEHOLDERS, GOLDFINGER_PLACEHOLDERS, nounOf, ROLE_ORDER, cn, emptyCategory, findEntry, findNode, numberChapters,
-  type VBook, type VCategory, type VEntry, type VField, type VNode,
+  ActionsContext, type CategoryStyle, type EntryChange, type WorkspaceActions, blankEntry, childKind, entryIn, useSave, useWorkspace, withFields,
+} from './actions'
+import {
+  ROLE_ORDER, applyTemplate, cn, emptyCategory, findEntry, findNode, isLadder, nounOf, splitTitle, templateOf,
+  type CardTemplate, type FieldItem, type VBook, type VCategory, type VEntry, type VField, type VNode,
 } from './model'
-import { CHAT, PENDING, SAMPLE_BOOK, emptyBook } from './sampleBook'
+import { CHAT, PENDING } from './sampleBook'
 
 type Tab = '简介' | '设定' | '大纲'
 type Dock = 'ball' | 'float' | 'side'
-type CategoryStyle = NonNullable<VCategory['custom']>['style']
 /** 点了左边：滚到哪一张；同一类里平滑滚，换类直接跳 */
 interface ScrollReq { id: string; smooth: boolean; n: number }
 
@@ -35,100 +33,63 @@ interface Nav {
   toast: (text: string) => void
 }
 
-/* ---------------- 读哪本书 ---------------- */
-
-const SNAPSHOTS = [
-  { key: 'nisu', title: '逆溯邮差', note: '以前用真模型写的，字段长、关系多' },
-  { key: 'nishi', title: '逆世帝尊', note: '演示模型写的，地点有 62 条' },
-]
-
-function useBookSource(source: string): { book?: VBook; loading: boolean; error?: string } {
-  const live = source.startsWith('live:') ? source.slice(5) : ''
-  const snap = source.startsWith('snap:') ? source.slice(5) : ''
-  const query = useQuery({
-    queryKey: ['prototype-book', source],
-    enabled: !!(live || snap),
-    staleTime: 60_000,
-    queryFn: async (): Promise<VBook> => {
-      if (snap) return bookFromApi((await (await fetch(`/prototype-data/${snap}.json`)).json()) as ApiParts)
-      const [book, library, outline, bible, chapters] = await Promise.all([
-        get<ApiParts['book']>(`/books/${live}`),
-        get<LibrarySnapshot>(`/books/${live}/library`),
-        get<OutlineTree>(`/books/${live}/outline-tree`),
-        get<{ relationships: ApiParts['relationships'] }>(`/books/${live}/bible`),
-        get<ChapterBrief[]>(`/books/${live}/chapters`),
-      ])
-      return bookFromApi({ book, library, outline, relationships: bible.relationships ?? [], chapters })
-    },
-  })
-  const empty = useMemo(() => emptyBook(), [])
-  if (source === 'empty') return { book: empty, loading: false }
-  if (!live && !snap) return { book: SAMPLE_BOOK, loading: false }
-  return { book: query.data, loading: query.isPending, error: query.error ? String(query.error) : undefined }
-}
-
-function BookSwitcher({ source, onSource, inline }: { source: string; onSource: (source: string) => void; inline?: boolean }) {
-  const [open, setOpen] = useState(false)
-  const shelf = useQuery({ queryKey: ['books'], queryFn: () => get<BookSummary[]>('/books') })
-  const label = source === 'empty' ? '刚开的空书'
-    : source.startsWith('snap:') ? SNAPSHOTS.find((s) => `snap:${s.key}` === source)?.title
-      : source.startsWith('live:') ? shelf.data?.find((b) => `live:${b.id}` === source)?.title ?? '书架上的书' : '示例书'
-  const item = (key: string, title: string, note: string) => (
-    <button key={key} type="button" onClick={() => { onSource(key); setOpen(false) }}
-      className={clsx('block w-full rounded-lg px-3 py-2 text-left transition-colors hover:bg-subtle', source === key && 'bg-subtle')}>
-      <span className="block font-serif text-[15px] text-ink">{title}</span>
-      <span className="block text-xs text-ink-3">{note}</span>
-    </button>
-  )
-  return (
-    <div className={inline ? 'relative' : 'fixed bottom-4 left-4 z-30'}>
-      {open && (
-        <div className={clsx('scroll-thin absolute z-40 max-h-[70vh] w-80 overflow-y-auto rounded-xl border border-line bg-card p-2 shadow-[var(--shadow-lift)]', inline ? 'top-[calc(100%+8px)] right-0' : 'bottom-[calc(100%+8px)] left-0')}>
-          {item('sample', '示例书 · 窥命长生', '我挑过的理想内容')}
-          {item('empty', '刚开的空书', '点完「下一步」看到的样子')}
-          <p className="mt-2 px-3 pb-1 text-xs tracking-wider text-ink-3">你书架上的书 · 只读</p>
-          {shelf.isPending && <p className="px-3 py-2 text-[13px] text-ink-3">正在读书架…</p>}
-          {shelf.data?.map((b) => item(`live:${b.id}`, b.title || '未命名', [b.genre, b.idea].filter(Boolean).join(' · ').slice(0, 40) || '没有简介'))}
-          {shelf.data?.length === 0 && <p className="px-3 py-2 text-[13px] text-ink-3">书架是空的</p>}
-          <p className="mt-2 px-3 pb-1 text-xs tracking-wider text-ink-3">以前的书 · 快照，只读</p>
-          {SNAPSHOTS.map((s) => item(`snap:${s.key}`, s.title, s.note))}
-        </div>
-      )}
-      <button type="button" onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 rounded-full border border-writer/30 bg-writer-soft py-1.5 pr-3 pl-3.5 text-xs text-writer shadow-[var(--shadow-paper)] transition-colors hover:border-writer/60">
-        <Library className="size-3.5" />
-        原型 · 正在看：{label}
-        <ChevronUp className={clsx('size-3.5 transition-transform', inline ? !open && 'rotate-180' : open || 'rotate-180')} />
-      </button>
-    </div>
-  )
-}
-
 /* ---------------- 小部件 ---------------- */
 
-/** 可以直接改的字：点上去就是输入框，不用先点「编辑」；空着时显示该写什么。 */
-function Editable({ children, className, multiline, boxed, placeholder, autoFocus }: { children?: ReactNode; className?: string; multiline?: boolean; boxed?: boolean; placeholder?: string; autoFocus?: boolean }) {
+const readText = (el: HTMLElement) => el.innerText.replace(/ /g, ' ').replace(/\n+$/, '')
+
+/** 可以直接改的字：点上去就能改，不用先点「编辑」；离开就存；空着时显示该写什么。Esc 撤回这次改的。 */
+function Editable({ value, onSave, className, multiline, boxed, placeholder, autoFocus, readOnly }: {
+  value: string; onSave?: (text: string) => void; className?: string; multiline?: boolean; boxed?: boolean; placeholder?: string; autoFocus?: boolean; readOnly?: boolean
+}) {
   const ref = useRef<HTMLDivElement>(null)
+  const saved = useRef(value)
+  // 外面的值变了（存好了、别处改了）：不在改的时候才换上，正在打的字不动
+  useLayoutEffect(() => {
+    const el = ref.current
+    saved.current = value
+    if (el && document.activeElement !== el && readText(el) !== value) el.innerText = value
+  }, [value])
   useEffect(() => {
     if (autoFocus) ref.current?.focus()
   }, [autoFocus])
+  const editable = !!onSave && !readOnly
   return (
     <div
       ref={ref}
-      contentEditable
+      contentEditable={editable ? 'plaintext-only' : false}
       suppressContentEditableWarning
       spellCheck={false}
+      role={editable ? 'textbox' : undefined}
+      aria-multiline={editable ? multiline : undefined}
+      aria-label={editable ? placeholder : undefined}
       data-placeholder={placeholder}
+      onInput={(e) => { if (!e.currentTarget.textContent) e.currentTarget.innerHTML = '' }}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') {
+          e.currentTarget.innerText = saved.current
+          e.currentTarget.blur()
+        } else if (e.key === 'Enter' && !multiline && !e.nativeEvent.isComposing) {
+          e.preventDefault()
+          e.currentTarget.blur()
+        }
+      }}
+      onBlur={(e) => {
+        const text = readText(e.currentTarget)
+        if (!e.currentTarget.textContent) e.currentTarget.innerHTML = ''
+        if (onSave && text !== saved.current) {
+          saved.current = text
+          onSave(text)
+        }
+      }}
       className={clsx(
         'outline-none transition-colors',
-        boxed ? 'focus:ring-1 focus:ring-line-2' : '-mx-2 rounded-md px-2 hover:bg-subtle focus:bg-subtle',
+        editable && (boxed ? 'focus:ring-1 focus:ring-line-2' : '-mx-2 rounded-md px-2 hover:bg-subtle focus:bg-subtle'),
+        !editable && !boxed && '-mx-2 px-2',
         multiline && 'whitespace-pre-line',
         placeholder && 'empty:before:text-ink-3/60 empty:before:content-[attr(data-placeholder)]',
         className,
       )}
-    >
-      {children}
-    </div>
+    />
   )
 }
 
@@ -136,19 +97,19 @@ const LONG = 260
 /** 这些定位的角色栏目全摆出来；配角写两三笔就够 */
 const MAJOR_ROLES = ['主角', '女主', '男主', '班底', '对手', '导师']
 
-/** 一段长文字：可以直接改；太长先折起来。 */
-function Prose({ text, placeholder, autoFocus }: { text: string; placeholder?: string; autoFocus?: boolean }) {
-  const long = text.length > LONG
+/** 一段长文字：可以直接改；太长先折起来，点进去改就展开。 */
+function Prose({ value, onSave, placeholder, autoFocus, readOnly }: { value: string; onSave?: (text: string) => void; placeholder?: string; autoFocus?: boolean; readOnly?: boolean }) {
+  const long = value.length > LONG
   const [open, setOpen] = useState(false)
   return (
     <>
-      <div className={clsx('relative', long && !open && 'max-h-[11.5em] overflow-hidden')}>
-        <Editable multiline autoFocus={autoFocus} placeholder={placeholder ?? '还没写'} className="font-serif text-[17px] leading-[1.95] text-ink 2xl:text-lg">{text}</Editable>
+      <div className={clsx('relative', long && !open && 'max-h-[11.5em] overflow-hidden')} onFocus={() => setOpen(true)}>
+        <Editable multiline autoFocus={autoFocus} value={value} onSave={onSave} readOnly={readOnly} placeholder={placeholder ?? '还没写'} className="font-serif text-[17px] leading-[1.95] text-ink 2xl:text-lg" />
         {long && !open && <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-card to-transparent" />}
       </div>
       {long && (
         <button type="button" onClick={() => setOpen(!open)} className="mt-1 text-[13px] text-chief hover:underline">
-          {open ? '收起' : `展开全文（${text.length} 字）`}
+          {open ? '收起' : `展开全文（${value.length} 字）`}
         </button>
       )}
     </>
@@ -156,11 +117,11 @@ function Prose({ text, placeholder, autoFocus }: { text: string; placeholder?: s
 }
 
 /** 正文里的一栏：小标题加一段字。 */
-function Section({ field, children }: { field: VField; children?: ReactNode }) {
+function Section({ field, onSave, readOnly, children }: { field: VField; onSave?: (text: string) => void; readOnly?: boolean; children?: ReactNode }) {
   return (
     <section>
       <h3 className="mb-2 text-[13px] tracking-[0.15em] text-ink-3">{field.label}</h3>
-      <Prose text={field.text} placeholder={field.placeholder} />
+      <Prose value={field.text} onSave={onSave} readOnly={readOnly} placeholder={field.placeholder} />
       {children}
     </section>
   )
@@ -183,10 +144,97 @@ function AskButton({ children, onClick }: { children: ReactNode; onClick: () => 
   )
 }
 
+/** 点一下弹出的小菜单：点外面或按 Esc 收起。 */
+function Menu({ trigger, children, align = 'right', className }: { trigger: (open: boolean, toggle: () => void) => ReactNode; children: (close: () => void) => ReactNode; align?: 'left' | 'right'; className?: string }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const down = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false) }
+    const key = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
+    document.addEventListener('mousedown', down)
+    document.addEventListener('keydown', key)
+    return () => {
+      document.removeEventListener('mousedown', down)
+      document.removeEventListener('keydown', key)
+    }
+  }, [open])
+  return (
+    <div ref={ref} className={clsx('relative', className)}>
+      {trigger(open, () => setOpen(!open))}
+      {open && (
+        <div className={clsx('absolute top-[calc(100%+4px)] z-30 min-w-44 rounded-xl border border-line bg-card p-1 shadow-[var(--shadow-lift)]', align === 'right' ? 'right-0' : 'left-0')}>
+          {children(() => setOpen(false))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+const menuItem = 'block w-full rounded-lg px-3 py-2 text-left text-sm text-ink-2 hover:bg-subtle hover:text-ink'
+
+/** 卡片右上角的「⋯」：锁住、删掉。删要点两次。 */
+function CardMenu({ locked, onLock, onDelete, deleteLabel = '删掉这一条' }: { locked?: boolean; onLock?: () => void; onDelete: () => void; deleteLabel?: string }) {
+  const [sure, setSure] = useState(false)
+  return (
+    <Menu className="absolute top-5 right-5"
+      trigger={(open, toggle) => (
+        <button type="button" onClick={() => { setSure(false); toggle() }} aria-label="更多" title="更多"
+          className={clsx('rounded-md p-1.5 text-ink-3 transition-opacity hover:bg-line/60 hover:text-ink', open ? 'opacity-100' : 'opacity-0 group-hover/card:opacity-100 focus-visible:opacity-100')}>
+          <MoreHorizontal className="size-4" />
+        </button>
+      )}>
+      {(close) => (
+        <>
+          {onLock && <button type="button" className={menuItem} onClick={() => { close(); onLock() }}>{locked ? '解锁，AI 可以改' : '锁住，AI 不改'}</button>}
+          <button type="button" className={clsx(menuItem, sure && 'text-seal hover:text-seal')}
+            onClick={() => { if (!sure) return setSure(true); close(); onDelete() }}>
+            {sure ? '再点一次，真删了' : deleteLabel}
+          </button>
+        </>
+      )}
+    </Menu>
+  )
+}
+
 /* ---------------- 顶栏 ---------------- */
 
-function TopBar({ book, tab, onTab, switcher }: { book: VBook; tab: Tab; onTab: (tab: Tab) => void; switcher: ReactNode }) {
-  const [inbox, setInbox] = useState(false)
+/** 待处理：编辑部挂着的建议。 */
+export function InboxButton({ count, children }: { count: number; children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  if (!count) return null
+  return (
+    <div className="relative">
+      <button type="button" onClick={() => setOpen(!open)} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm text-ink-2 transition-colors hover:bg-line/50 hover:text-ink">
+        <Inbox className="size-4" />
+        待处理
+        <span className="flex min-w-5 items-center justify-center rounded-full bg-seal px-1.5 text-[11px] leading-5 text-on-role">{count}</span>
+      </button>
+      {open && <div className="absolute top-[calc(100%+6px)] right-0 z-30 w-80 rounded-xl border border-line bg-card p-2 shadow-[var(--shadow-lift)]">{children}</div>}
+    </div>
+  )
+}
+
+/** 原型里待处理的样子。 */
+export function SampleInbox({ book }: { book: VBook }) {
+  return (
+    <InboxButton count={book.pending}>
+      {(book.id === 'sample' ? PENDING : [{ id: 'x', text: `这本书有 ${book.pending} 条编辑部挂着的建议，原型里先不展开。` }]).map((item) => (
+        <div key={item.id} className="rounded-lg px-3 py-2.5 hover:bg-subtle">
+          <p className="text-[13px] leading-relaxed text-ink">{item.text}</p>
+          {book.id === 'sample' && (
+            <div className="mt-1.5 flex gap-3 text-xs">
+              <button type="button" className="text-chief hover:underline">去看看</button>
+              <button type="button" className="text-ink-3 hover:text-ink">不用</button>
+            </div>
+          )}
+        </div>
+      ))}
+    </InboxButton>
+  )
+}
+
+function TopBar({ book, tab, onTab, right, manuscriptHref }: { book: VBook; tab: Tab; onTab: (tab: Tab) => void; right: ReactNode; manuscriptHref?: string }) {
   return (
     <header className="relative z-20 flex h-14 shrink-0 items-center gap-3 border-b border-line bg-paper px-4 2xl:h-16 2xl:px-6">
       <Link to="/" className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm text-ink-3 transition-colors hover:bg-line/50 hover:text-ink">
@@ -206,68 +254,42 @@ function TopBar({ book, tab, onTab, switcher }: { book: VBook; tab: Tab; onTab: 
             {tab === key && <span className="absolute inset-x-4 bottom-0 h-0.5 rounded-full bg-seal" />}
           </button>
         ))}
-        <span className="flex cursor-not-allowed items-center px-5 text-[15px] text-ink-3/50 2xl:px-6 2xl:text-base" title="开写以后才有">正文</span>
+        {manuscriptHref
+          ? <Link to={manuscriptHref} title="正文还没搬到新书页，先在旧版里看" className="flex items-center px-5 text-[15px] text-ink-3 transition-colors hover:text-ink 2xl:px-6 2xl:text-base">正文</Link>
+          : <span className="flex cursor-not-allowed items-center px-5 text-[15px] text-ink-3/50 2xl:px-6 2xl:text-base" title="开写以后才有">正文</span>}
       </nav>
 
-      <div className="ml-auto flex items-center gap-1">
-        <div className="mr-3">{switcher}</div>
-        {book.pending > 0 && (
-          <div className="relative">
-            <button type="button" onClick={() => setInbox(!inbox)} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm text-ink-2 transition-colors hover:bg-line/50 hover:text-ink">
-              <Inbox className="size-4" />
-              待处理
-              <span className="flex min-w-5 items-center justify-center rounded-full bg-seal px-1.5 text-[11px] leading-5 text-on-role">{book.pending}</span>
-            </button>
-            {inbox && (
-              <div className="absolute top-[calc(100%+6px)] right-0 w-80 rounded-xl border border-line bg-card p-2 shadow-[var(--shadow-lift)]">
-                {(book.id === 'sample' ? PENDING : [{ id: 'x', text: `这本书有 ${book.pending} 条编辑部挂着的建议，原型里先不展开。` }]).map((item) => (
-                  <div key={item.id} className="rounded-lg px-3 py-2.5 hover:bg-subtle">
-                    <p className="text-[13px] leading-relaxed text-ink">{item.text}</p>
-                    {book.id === 'sample' && (
-                      <div className="mt-1.5 flex gap-3 text-xs">
-                        <button type="button" className="text-chief hover:underline">去看看</button>
-                        <button type="button" className="text-ink-3 hover:text-ink">不用</button>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-        <button type="button" className="rounded-lg p-2 text-ink-3 transition-colors hover:bg-line/50 hover:text-ink" aria-label="本书设置" title="本书设置">
-          <Settings className="size-4" />
-        </button>
-      </div>
+      <div className="ml-auto flex items-center gap-1">{right}</div>
     </header>
   )
 }
 
 /* ---------------- 左边目录 ---------------- */
 
-function DirectoryShell({ title, search, onTitle, children, footer, addMenu }: { title: string; search: string; onTitle?: () => void; children: ReactNode; footer?: ReactNode; addMenu?: { label: string; onClick: () => void }[] }) {
-  const [menu, setMenu] = useState(false)
+function DirectoryShell({ title, search, query, onQuery, onTitle, children, footer, addMenu }: {
+  title: string; search: string; query: string; onQuery: (query: string) => void; onTitle?: () => void
+  children: ReactNode; footer?: ReactNode; addMenu?: { label: string; onClick: () => void }[]
+}) {
   return (
     <aside className="flex w-72 shrink-0 flex-col border-r border-line bg-paper-2 2xl:w-80">
-      <div className="relative flex items-center justify-between px-5 pt-5 pb-3">
+      <div className="flex items-center justify-between px-5 pt-5 pb-3">
         <button type="button" onClick={onTitle} className="text-xs tracking-[0.25em] text-ink-3 hover:text-ink">{title}</button>
-        <button type="button" onClick={() => setMenu(!menu)} className="rounded-md p-1 text-ink-3 transition-colors hover:bg-line/60 hover:text-ink" aria-label="新建" title="新建">
-          <Plus className="size-4" />
-        </button>
-        {menu && addMenu && (
-          <div className="absolute top-[calc(100%-4px)] right-4 z-30 w-48 rounded-xl border border-line bg-card p-1 shadow-[var(--shadow-lift)]">
-            {addMenu.map((item) => (
-              <button key={item.label} type="button" onClick={() => { setMenu(false); item.onClick() }}
-                className="block w-full rounded-lg px-3 py-2 text-left text-sm text-ink-2 hover:bg-subtle hover:text-ink">
-                {item.label}
-              </button>
+        {!!addMenu?.length && (
+          <Menu trigger={(_, toggle) => (
+            <button type="button" onClick={toggle} className="rounded-md p-1 text-ink-3 transition-colors hover:bg-line/60 hover:text-ink" aria-label="新建" title="新建">
+              <Plus className="size-4" />
+            </button>
+          )}>
+            {(close) => addMenu.map((item) => (
+              <button key={item.label} type="button" onClick={() => { close(); item.onClick() }} className={menuItem}>{item.label}</button>
             ))}
-          </div>
+          </Menu>
         )}
       </div>
       <label className="mx-4 mb-3 flex h-9 items-center gap-2 rounded-lg border border-line bg-card/70 px-3 text-sm text-ink-3 focus-within:border-line-2">
         <Search className="size-4 shrink-0" />
-        <input placeholder={search} className="min-w-0 flex-1 bg-transparent text-ink placeholder:text-ink-3 focus:outline-none" />
+        <input value={query} onChange={(e) => onQuery(e.target.value)} placeholder={search} className="min-w-0 flex-1 bg-transparent text-ink placeholder:text-ink-3 focus:outline-none" />
+        {query && <button type="button" onClick={() => onQuery('')} aria-label="清掉" className="text-ink-3 hover:text-ink"><X className="size-3.5" /></button>}
       </label>
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-3 pb-20">
         {children}
@@ -319,7 +341,7 @@ function roleOrder(entries: VEntry[]): string[] {
 
 /** 右边连着排的顺序和左边目录一样：角色按定位分组，地点按树。 */
 function orderEntries(category: VCategory): VEntry[] {
-  if (category.name === '角色列表') return roleOrder(category.entries).flatMap((role) => category.entries.filter((e) => (e.role ?? '配角') === role))
+  if (category.name === '角色列表' && !category.custom) return roleOrder(category.entries).flatMap((role) => category.entries.filter((e) => (e.role ?? '配角') === role))
   return treeRows(category.entries).map((r) => r.entry)
 }
 
@@ -380,7 +402,7 @@ function NewCategoryForm({ taken, onCreate, onCancel }: { taken: string[]; onCre
   const clean = name.trim()
   const error = taken.includes(clean) ? '已经有这一类了' : ''
   const create = () => {
-    if (clean && !error) onCreate(clean, style, fields.split(/[、,，;；\s]+/).map((f) => f.trim()).filter(Boolean))
+    if (clean && !error) onCreate(clean, style, [...new Set(fields.split(/[、,，;；\s]+/).map((f) => f.trim()).filter(Boolean))])
   }
   return (
     <div className="mt-3 rounded-xl border border-line bg-card p-3.5 shadow-[var(--shadow-paper)]">
@@ -421,14 +443,16 @@ function SettingsDirectory({ book, selected, onSelect, onCreateCategory, onNewEn
 }) {
   const [closed, setClosed] = useState<string[]>([])
   const [creating, setCreating] = useState(false)
+  const [query, setQuery] = useState('')
+  const q = query.trim()
   const current = selected.startsWith('cat:') ? selected.slice(4) : findEntry(book, selected)?.category
   return (
-    <DirectoryShell title="设定" search="找人物、地方、规矩……" onTitle={() => onSelect('overview')}
+    <DirectoryShell title="设定" search="找人物、地方、规矩……" query={query} onQuery={setQuery} onTitle={() => onSelect('overview')}
       addMenu={[
         ...(current ? [{ label: `新增${nounOf(current)}`, onClick: () => onNewEntry(current) }] : []),
         { label: '新建一类', onClick: () => setCreating(true) },
       ]}
-      footer={creating ? (
+      footer={q ? null : creating ? (
         <NewCategoryForm taken={book.categories.map((c) => c.name)} onCancel={() => setCreating(false)}
           onCreate={(name, style, fields) => { setCreating(false); onCreateCategory(name, style, fields) }} />
       ) : (
@@ -437,49 +461,80 @@ function SettingsDirectory({ book, selected, onSelect, onCreateCategory, onNewEn
           <Plus className="size-3.5" />新建一类
         </button>
       )}>
-      {selected === 'overview' && <div className={clsx('mb-1 rounded-md px-3 py-1.5 text-sm font-medium text-ink', rowSelected)}>设定总览</div>}
-      <button type="button" onClick={() => onSelect('world')}
-        className={clsx('mb-1 flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors', selected === 'world' ? `${rowSelected} font-medium text-ink` : 'text-ink-2 hover:bg-line/50')}>
-        <Globe className="size-3.5 text-ink-3" />
-        世界概况
-        {!book.world && <span className="ml-auto pr-0.5 text-xs text-ink-3">空</span>}
-      </button>
-      {book.categories.map((cat) => {
-        const open = !closed.includes(cat.name)
-        const catId = `cat:${cat.name}`
-        return (
-          <div key={cat.name} className="mt-1.5">
-            <div className={clsx('group flex items-center rounded-md transition-colors', selected === catId ? rowSelected : 'hover:bg-line/50')}>
-              <button type="button" onClick={() => setClosed(open ? [...closed, cat.name] : closed.filter((n) => n !== cat.name))}
-                className={clsx('flex size-7 items-center justify-center text-ink-3', !cat.entries.length && 'invisible')} aria-label={open ? '收起' : '展开'}>
-                {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-              </button>
-              <button type="button" onClick={() => onSelect(catId)} className={clsx('flex-1 py-1.5 text-left text-sm', selected === catId ? 'font-medium text-ink' : cat.entries.length ? 'text-ink-2' : 'text-ink-3')}>
-                {cat.name}
-                {cat.custom && <span className="ml-1.5 text-[11px] text-ink-3">自建</span>}
-              </button>
-              <span className="pr-3 text-xs text-ink-3 tabular-nums">{cat.entries.length || '空'}</span>
+      {q ? (
+        // 找东西：只列名字对得上的
+        (() => {
+          const hits = book.categories.flatMap((c) => c.entries.filter((e) => e.name.includes(q)).map((e) => ({ e, c })))
+          return hits.length ? hits.map(({ e, c }) => (
+            <div key={e.id} className="flex items-center">
+              <div className="min-w-0 flex-1"><EntryButton entry={e} selected={selected} onSelect={onSelect} /></div>
+              <span className="shrink-0 pr-2 text-xs text-ink-3">{c.name}</span>
             </div>
-            {open && cat.entries.length > 0 && (
-              <div className="mt-0.5 mb-1 ml-[17px] border-l border-line pl-1.5">
-                {cat.name === '角色列表' ? <CharacterGroups entries={cat.entries} selected={selected} onSelect={onSelect} />
-                  : <EntryList entries={cat.entries} selected={selected} onSelect={onSelect} />}
+          )) : <p className="px-2.5 py-2 text-[13px] text-ink-3">没找到「{q}」</p>
+        })()
+      ) : (
+        <>
+          {selected === 'overview' && <div className={clsx('mb-1 rounded-md px-3 py-1.5 text-sm font-medium text-ink', rowSelected)}>设定总览</div>}
+          <button type="button" onClick={() => onSelect('world')}
+            className={clsx('mb-1 flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors', selected === 'world' ? `${rowSelected} font-medium text-ink` : 'text-ink-2 hover:bg-line/50')}>
+            <Globe className="size-3.5 text-ink-3" />
+            世界概况
+            {!book.world && <span className="ml-auto pr-0.5 text-xs text-ink-3">空</span>}
+          </button>
+          {book.categories.map((cat) => {
+            const open = !closed.includes(cat.name)
+            const catId = `cat:${cat.name}`
+            return (
+              <div key={cat.key} className="mt-1.5">
+                <div className={clsx('group flex items-center rounded-md transition-colors', selected === catId ? rowSelected : 'hover:bg-line/50')}>
+                  <button type="button" onClick={() => setClosed(open ? [...closed, cat.name] : closed.filter((n) => n !== cat.name))}
+                    className={clsx('flex size-7 items-center justify-center text-ink-3', !cat.entries.length && 'invisible')} aria-label={open ? '收起' : '展开'}>
+                    {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+                  </button>
+                  <button type="button" onClick={() => onSelect(catId)} className={clsx('flex-1 py-1.5 text-left text-sm', selected === catId ? 'font-medium text-ink' : cat.entries.length ? 'text-ink-2' : 'text-ink-3')}>
+                    {cat.name}
+                    {cat.custom && <span className="ml-1.5 text-[11px] text-ink-3">自建</span>}
+                  </button>
+                  <span className="pr-3 text-xs text-ink-3 tabular-nums">{cat.entries.length || '空'}</span>
+                </div>
+                {open && cat.entries.length > 0 && (
+                  <div className="mt-0.5 mb-1 ml-[17px] border-l border-line pl-1.5">
+                    {cat.name === '角色列表' && !cat.custom ? <CharacterGroups entries={cat.entries} selected={selected} onSelect={onSelect} />
+                      : <EntryList entries={cat.entries} selected={selected} onSelect={onSelect} />}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        )
-      })}
+            )
+          })}
+        </>
+      )}
     </DirectoryShell>
   )
 }
 
+/** 树上显示的名字：还没起名的写「未命名」。 */
+function shownTitle(node: VNode): string {
+  const [prefix, name] = splitTitle(node.title)
+  return node.title.includes('　') && !name.trim() ? `${prefix}　未命名` : node.title
+}
+
+/** 找大纲：名字对得上的节点，连同它上面的几层。 */
+function matchingIds(node: VNode, q: string, out = new Set<string>()): boolean {
+  let hit = node.kind !== '全书' && node.title.includes(q)
+  for (const child of node.children ?? []) if (matchingIds(child, q, out)) hit = true
+  if (hit) out.add(node.id)
+  return hit
+}
+
 /** 大纲树的一行：鼠标移上去出现「+」，在这一层下面加一个。 */
-function OutlineTreeView({ node, depth, selected, onSelect, open, toggle, onAdd }: {
-  node: VNode; depth: number; selected: string; onSelect: (id: string) => void; open: string[]; toggle: (id: string) => void; onAdd: (id: string) => void
+function OutlineTreeView({ node, depth, selected, onSelect, open, toggle, onAdd, only }: {
+  node: VNode; depth: number; selected: string; onSelect: (id: string) => void; open: string[]; toggle: (id: string) => void; onAdd: (id: string) => void; only?: Set<string>
 }) {
-  const expandable = !!node.children?.length
-  const expanded = open.includes(node.id)
-  const child = childKind(node)
+  const { actions } = useWorkspace()
+  const children = (node.children ?? []).filter((c) => !only || only.has(c.id))
+  const expandable = !!children.length
+  const expanded = !!only || open.includes(node.id)
+  const child = actions.canAdd(node) ? childKind(node) : undefined
   return (
     <div>
       <div className={clsx('group flex items-center rounded-md transition-colors', selected === node.id ? rowSelected : 'hover:bg-line/40')}
@@ -491,11 +546,11 @@ function OutlineTreeView({ node, depth, selected, onSelect, open, toggle, onAdd 
           className={clsx('min-w-0 flex-1 truncate py-[7px] pr-2 text-left',
             node.kind === '章' ? 'text-sm' : 'font-serif text-[15px] 2xl:text-base',
             node.later ? 'text-ink-3' : selected === node.id ? 'font-bold text-ink' : 'text-ink-2 group-hover:text-ink')}>
-          {node.title}
+          {shownTitle(node)}
           {node.later && <span className="ml-1.5 text-xs font-normal">· 写到再定</span>}
         </button>
-        {node.locked && <Lock className="mr-1.5 size-3 shrink-0 text-ink-3 group-hover:hidden" />}
-        {node.chapters && <span className="pr-3 text-xs text-ink-3 tabular-nums group-hover:hidden">{node.chapters} 章</span>}
+        {node.locked && <Lock className={clsx('mr-1.5 size-3 shrink-0 text-ink-3', child && 'group-hover:hidden')} />}
+        {node.chapters && <span className={clsx('pr-3 text-xs text-ink-3 tabular-nums', child && 'group-hover:hidden')}>{node.chapters} 章</span>}
         {child && (
           <button type="button" onClick={() => onAdd(node.id)} title={`在下面加${ONE[child]}`} aria-label={`在下面加${ONE[child]}`}
             className="mr-1.5 hidden rounded p-1 text-ink-3 hover:bg-line/70 hover:text-ink group-hover:block">
@@ -503,8 +558,8 @@ function OutlineTreeView({ node, depth, selected, onSelect, open, toggle, onAdd 
           </button>
         )}
       </div>
-      {expandable && expanded && node.children!.map((c) => (
-        <OutlineTreeView key={c.id} node={c} depth={depth + 1} selected={selected} onSelect={onSelect} open={open} toggle={toggle} onAdd={onAdd} />
+      {expandable && expanded && children.map((c) => (
+        <OutlineTreeView key={c.id} node={c} depth={depth + 1} selected={selected} onSelect={onSelect} open={open} toggle={toggle} onAdd={onAdd} only={only} />
       ))}
     </div>
   )
@@ -513,21 +568,18 @@ function OutlineTreeView({ node, depth, selected, onSelect, open, toggle, onAdd 
 /* ---------------- 中间一页纸 ---------------- */
 
 const paperCard = 'rounded-xl border border-line bg-card px-12 py-11 shadow-[var(--shadow-paper)] 2xl:px-16 2xl:py-14'
+const titleClass = 'font-serif text-[34px] leading-tight font-bold break-all 2xl:text-[38px]'
 
 function Sheet({ children, narrow }: { children: ReactNode; narrow?: boolean }) {
   return (
     <div className={clsx('mx-auto w-full px-8 py-10 2xl:py-12', narrow ? 'max-w-[880px] 2xl:max-w-[940px]' : 'max-w-[1080px] 2xl:max-w-[1180px]')}>
-      <article className={paperCard}>{children}</article>
+      <article className={clsx(paperCard, 'group/card relative')}>{children}</article>
     </div>
   )
 }
 
 function Crumb({ items }: { items: string[] }) {
   return <p className="mb-4 text-[13px] tracking-wider text-ink-3">{items.join('  /  ')}</p>
-}
-
-function Title({ children, placeholder, autoFocus }: { children?: ReactNode; placeholder?: string; autoFocus?: boolean }) {
-  return <Editable autoFocus={autoFocus} placeholder={placeholder} className="font-serif text-[34px] leading-tight font-bold break-all 2xl:text-[38px]">{children}</Editable>
 }
 
 function Tags({ entry }: { entry: VEntry }) {
@@ -555,20 +607,38 @@ function MoreToWrite({ labels, onOpen }: { labels: string[]; onOpen: (label: str
   )
 }
 
+interface MetaItem { label: string; value?: string; placeholder?: string; link?: () => void; onSave?: (text: string) => void; picker?: ReactNode }
+
 /** 名字下面一行小字：定位、性别、年龄这类短的。 */
-function MetaRow({ items }: { items: { label: string; value?: string; placeholder?: string; link?: () => void }[] }) {
+function MetaRow({ items, readOnly }: { items: MetaItem[]; readOnly?: boolean }) {
   if (!items.length) return null
   return (
     <div className="mt-5 flex flex-wrap items-baseline gap-x-7 gap-y-2">
       {items.map((item) => (
         <span key={item.label} className="flex items-baseline gap-2">
           <span className="text-[13px] text-ink-3">{item.label}</span>
-          {item.link
+          {item.picker ?? (item.link
             ? <button type="button" onClick={item.link} className="font-serif text-[16px] text-chief hover:underline">{item.value}</button>
-            : <Editable placeholder={item.placeholder ?? '写一下'} className="font-serif text-[16px] text-ink">{item.value}</Editable>}
+            : <Editable value={item.value ?? ''} onSave={item.onSave} readOnly={readOnly} placeholder={item.placeholder ?? '写一下'} className="font-serif text-[16px] text-ink" />)}
         </span>
       ))}
     </div>
+  )
+}
+
+/** 角色的定位：从几种里挑，按它分组。 */
+function RolePicker({ value, onPick, readOnly }: { value: string; onPick: (role: string) => void; readOnly?: boolean }) {
+  if (readOnly) return <span className="font-serif text-[16px] text-ink">{value}</span>
+  return (
+    <Menu align="left" trigger={(_, toggle) => (
+      <button type="button" onClick={toggle} className="-mx-2 flex items-center gap-1 rounded-md px-2 font-serif text-[16px] text-ink hover:bg-subtle">
+        {value}<ChevronDown className="size-3.5 text-ink-3" />
+      </button>
+    )}>
+      {(close) => ROLE_ORDER.map((role) => (
+        <button key={role} type="button" onClick={() => { close(); if (role !== value) onPick(role) }} className={clsx(menuItem, role === value && 'font-medium text-ink')}>{role}</button>
+      ))}
+    </Menu>
   )
 }
 
@@ -582,9 +652,84 @@ function AppearsRow({ items, nav }: { items: VEntry['appears']; nav: Nav }) {
   )
 }
 
+/** 卡片上的几处改动都走这里：存哪一栏由工作台决定。 */
+function useEntrySaver(entry: VEntry) {
+  const { actions } = useWorkspace()
+  const save = useSave()
+  return (change: EntryChange) => save(actions.saveEntry(entry, change))
+}
+
+/** 关系：点名字去那个人，后面那句话可以直接改；能加能删。 */
+function Relations({ book, entry, nav, readOnly }: { book: VBook; entry: VEntry; nav: Nav; readOnly?: boolean }) {
+  const { actions } = useWorkspace()
+  const save = useSave()
+  const [adding, setAdding] = useState(false)
+  const [to, setTo] = useState('')
+  const [kind, setKind] = useState('')
+  const [text, setText] = useState('')
+  const people = (book.categories.find((c) => c.name === '角色列表' && !c.custom)?.entries ?? []).filter((p) => p.id !== entry.id && !p.id.startsWith('draft-'))
+  const add = () => {
+    if (!to || !kind.trim()) return
+    save(actions.addRelation(entry, to, kind.trim(), text.trim()))
+    setAdding(false)
+    setTo('')
+    setKind('')
+    setText('')
+  }
+  const field = 'h-9 rounded-lg border border-line-2 bg-card px-3 text-sm text-ink placeholder:text-ink-3 focus:border-ink-3 focus:outline-none'
+  return (
+    <section>
+      <h3 className="mb-2 text-[13px] tracking-[0.15em] text-ink-3">关系</h3>
+      <div className="divide-y divide-line/70">
+        {(entry.relations ?? []).map((rel) => (
+          <div key={rel.id ?? rel.to + rel.kind} className="group/rel flex items-baseline gap-4 py-2.5">
+            <button type="button" onClick={() => nav.openEntry(rel.to)} className="w-24 shrink-0 truncate text-left font-serif text-[16px] font-bold text-ink hover:text-seal">{findEntry(book, rel.to)?.name}</button>
+            <span className="shrink-0 rounded-full bg-line/70 px-2 py-px text-xs text-ink-2">{rel.kind}</span>
+            <Editable value={rel.text} readOnly={readOnly} placeholder="怎么个关系，一句话" onSave={(value) => save(actions.saveRelation(entry, rel, value))}
+              className="min-w-0 flex-1 text-[15px] leading-relaxed text-ink-2" />
+            {!readOnly && (
+              <button type="button" onClick={() => save(actions.deleteRelation(entry, rel))} aria-label="删掉这条关系" title="删掉这条关系"
+                className="shrink-0 self-center rounded p-1 text-ink-3 opacity-0 transition-opacity group-hover/rel:opacity-100 hover:text-ink focus-visible:opacity-100">
+                <X className="size-3.5" />
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      {!readOnly && (adding ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <select value={to} onChange={(e) => setTo(e.target.value)} className={clsx(field, 'w-36', !to && 'text-ink-3')} aria-label="和谁">
+            <option value="">和谁</option>
+            {people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+          <input value={kind} onChange={(e) => setKind(e.target.value)} maxLength={20} placeholder="什么关系：师父、仇人" className={clsx(field, 'w-40')} />
+          <input value={text} onChange={(e) => setText(e.target.value)} maxLength={200} placeholder="一句话说说（可以不写）" className={clsx(field, 'min-w-0 flex-1')}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) add() }} />
+          <button type="button" onClick={add} disabled={!to || !kind.trim()} className="h-9 rounded-lg bg-ink px-4 text-sm text-paper-2 hover:bg-ink-2 disabled:opacity-40">加上</button>
+          <button type="button" onClick={() => setAdding(false)} className="h-9 rounded-lg px-3 text-sm text-ink-2 hover:bg-subtle">取消</button>
+        </div>
+      ) : (
+        <button type="button" onClick={() => setAdding(true)} disabled={!people.length} title={people.length ? undefined : '先建别的人物'}
+          className="mt-2 flex items-center gap-1 text-[13px] text-ink-3 hover:text-ink disabled:opacity-50"><Plus className="size-3.5" />加一个关系</button>
+      ))}
+    </section>
+  )
+}
+
+/** 新建的一条还没起名字：说一声，免得以为已经存了。 */
+function DraftNote({ entry }: { entry: VEntry }) {
+  if (!entry.id.startsWith('draft-')) return null
+  return <p className="mt-2 text-[13px] text-ink-3">起好名字才会存下来</p>
+}
+
 /** 角色卡、金手指的一张卡：一栏到底。短字段在名字下面，长字段一段段往下，空的收在「还可以写」。 */
 function CharacterCard({ book, entry, nav, fresh }: { book: VBook; entry: VEntry; nav: Nav; fresh: boolean }) {
+  const { actions } = useWorkspace()
+  const save = useSave()
+  const saveEntry = useEntrySaver(entry)
   const [opened, setOpened] = useState<string[]>([])
+  const readOnly = entry.readonly
+  const draft = entry.id.startsWith('draft-')
   const secret = entry.secret ? findEntry(book, entry.secret) : undefined
   const goldfinger = entry.goldfinger ? findEntry(book, entry.goldfinger) : undefined
   const holder = entry.holder ? findEntry(book, entry.holder) : undefined
@@ -592,25 +737,36 @@ function CharacterCard({ book, entry, nav, fresh }: { book: VBook; entry: VEntry
   const major = entry.kind === 'goldfinger' || MAJOR_ROLES.includes(entry.role ?? '')
   const always = major ? entry.sections.map((f) => f.label) : entry.sections.filter((f) => ['外貌', '性格与说话方式'].includes(f.key ?? f.label)).map((f) => f.label)
   const show = (label: string, value: string) => !!value || opened.includes(label) || always.includes(label)
-  const facts = entry.facts.filter(([label, value]) => !!value || opened.includes(label) || major)
+  const facts = entry.facts.filter(([label, value]) => !!value || opened.includes(label) || major || label === '定位')
   const sections = entry.sections.filter((f) => show(f.label, f.text))
   const now = entry.now?.filter(([, value]) => value) ?? []
   const relations = entry.relations ?? []
+  const people = entry.kind === 'character'
   const more = [
     ...entry.facts.filter(([label]) => !facts.some(([shown]) => shown === label)).map(([label]) => label),
     ...entry.sections.filter((f) => !show(f.label, f.text)).map((f) => f.label),
-    ...(entry.kind === 'character' && !relations.length && !opened.includes('关系') ? ['关系'] : []),
+    ...(people && !draft && !readOnly && !relations.length && !opened.includes('关系') ? ['关系'] : []),
   ]
+  const field = (key: string) => (text: string) => saveEntry({ fields: { [key]: text } })
   return (
-    <section id={`entry-${entry.id}`} data-entry={entry.id} className={clsx(paperCard, 'scroll-mt-6')}>
-      <div className="flex flex-wrap items-center gap-3">
-        <Title autoFocus={fresh} placeholder="起个名字">{entry.name}</Title>
+    <section id={`entry-${entry.id}`} data-entry={entry.id} className={clsx(paperCard, 'group/card relative scroll-mt-6')}>
+      {!readOnly && (
+        <CardMenu locked={entry.locked} onLock={draft ? undefined : () => saveEntry({ locked: !entry.locked })}
+          onDelete={() => save(actions.deleteEntry(entry))} deleteLabel={draft ? '不要这一条了' : '删掉这一条'} />
+      )}
+      <div className="flex flex-wrap items-center gap-3 pr-8">
+        <Editable autoFocus={fresh} value={entry.name} readOnly={readOnly} placeholder="起个名字" className={titleClass}
+          onSave={(name) => { if (name.trim()) saveEntry({ name }) }} />
         <Tags entry={entry} />
         {entry.dead && <span className="rounded-full bg-ink/80 px-2.5 py-0.5 text-xs text-paper-2">已死</span>}
       </div>
-      <Editable placeholder="一句话说清这是谁、这是什么" className="mt-3 font-serif text-lg leading-relaxed text-ink-2 2xl:text-xl">{entry.oneLine}</Editable>
-      <MetaRow items={[
-        ...facts.map(([label, value, placeholder]) => ({ label, value, placeholder })),
+      <DraftNote entry={entry} />
+      {readOnly && <p className="mt-2 text-[13px] text-ink-3">这一条从「{holder?.name}」的角色卡推出来，到角色卡上去改。</p>}
+      <Editable value={entry.oneLine} readOnly={readOnly} onSave={(oneLine) => saveEntry({ oneLine })} placeholder="一句话说清这是谁、这是什么" className="mt-3 font-serif text-lg leading-relaxed text-ink-2 2xl:text-xl" />
+      <MetaRow readOnly={readOnly} items={[
+        ...facts.map(([label, value, placeholder, key]) => ((key ?? label) === '定位' && people
+          ? { label, value, picker: <RolePicker value={value || '配角'} readOnly={readOnly} onPick={(role) => saveEntry({ fields: { 定位: role } })} /> }
+          : { label, value, placeholder, onSave: field(key ?? label) })),
         ...(holder ? [{ label: '谁在用', value: holder.name, link: () => nav.openEntry(holder.id) }] : []),
       ]} />
       {now.length > 0 && (
@@ -623,27 +779,13 @@ function CharacterCard({ book, entry, nav, fresh }: { book: VBook; entry: VEntry
       )}
       {(sections.length > 0 || relations.length > 0 || opened.includes('关系')) && (
         <div className="mt-8 space-y-8 border-t border-line pt-8">
-          {sections.map((field) => (
-            <Section key={field.label} field={field}>
-              {['身世', '来历'].includes(field.key ?? field.label) && secret && <div className="mt-2"><LinkChip icon={<Lock className="size-3" />} onClick={() => nav.openEntry(secret.id)}>另有秘密：{secret.name}</LinkChip></div>}
-              {(field.key ?? field.label) === '能力' && goldfinger && <div className="mt-2"><LinkChip icon={<Sparkles className="size-3" />} onClick={() => nav.openEntry(goldfinger.id)}>金手指：{goldfinger.name}</LinkChip></div>}
+          {sections.map((f) => (
+            <Section key={f.key ?? f.label} field={f} readOnly={readOnly} onSave={field(f.key ?? f.label)}>
+              {['身世', '来历'].includes(f.key ?? f.label) && secret && <div className="mt-2"><LinkChip icon={<Lock className="size-3" />} onClick={() => nav.openEntry(secret.id)}>另有秘密：{secret.name}</LinkChip></div>}
+              {(f.key ?? f.label) === '能力' && goldfinger && <div className="mt-2"><LinkChip icon={<Sparkles className="size-3" />} onClick={() => nav.openEntry(goldfinger.id)}>金手指：{goldfinger.name}</LinkChip></div>}
             </Section>
           ))}
-          {entry.kind === 'character' && (relations.length > 0 || opened.includes('关系')) && (
-            <section>
-              <h3 className="mb-2 text-[13px] tracking-[0.15em] text-ink-3">关系</h3>
-              <div className="divide-y divide-line/70">
-                {relations.map((rel) => (
-                  <button key={rel.to + rel.kind} type="button" onClick={() => nav.openEntry(rel.to)} className="flex w-full items-baseline gap-4 py-2.5 text-left">
-                    <span className="w-24 shrink-0 truncate font-serif text-[16px] font-bold text-ink hover:text-seal">{findEntry(book, rel.to)?.name}</span>
-                    <span className="shrink-0 rounded-full bg-line/70 px-2 py-px text-xs text-ink-2">{rel.kind}</span>
-                    <span className="min-w-0 flex-1 text-[15px] leading-relaxed text-ink-2">{rel.text}</span>
-                  </button>
-                ))}
-              </div>
-              <button type="button" className="mt-2 flex items-center gap-1 text-[13px] text-ink-3 hover:text-ink"><Plus className="size-3.5" />加一个关系</button>
-            </section>
-          )}
+          {people && !draft && (relations.length > 0 || opened.includes('关系')) && <Relations book={book} entry={entry} nav={nav} readOnly={readOnly} />}
         </div>
       )}
       <MoreToWrite labels={more} onOpen={(label) => setOpened([...opened, label])} />
@@ -654,39 +796,52 @@ function CharacterCard({ book, entry, nav, fresh }: { book: VBook; entry: VEntry
 
 /** 段落类和阶梯的一张卡：一个名字加一段话（或一级一级）。 */
 function PlainCard({ book, entry, category, nav, fresh }: { book: VBook; entry: VEntry; category?: VCategory; nav: Nav; fresh: boolean }) {
+  const { actions } = useWorkspace()
+  const save = useSave()
+  const saveEntry = useEntrySaver(entry)
   const parent = entry.parent ? findEntry(book, entry.parent) : undefined
   const example = category?.example
-  const [levels, setLevels] = useState(entry.levels ?? [])
+  const draft = entry.id.startsWith('draft-')
+  const levels = entry.levels ?? []
   const [newLevel, setNewLevel] = useState(-1)
   const onlyContent = entry.sections.length === 1 && (entry.sections[0].key ?? entry.sections[0].label) === '内容'
+  const setLevel = (i: number, part: 'name' | 'text', value: string) => saveEntry({ levels: levels.map((l, j) => (j === i ? { ...l, [part]: value } : l)) })
   return (
-    <section id={`entry-${entry.id}`} data-entry={entry.id} className={clsx(paperCard, 'scroll-mt-6')}>
-      <div className="flex flex-wrap items-center gap-3">
-        <Title autoFocus={fresh} placeholder={example ? `起个名字，比如「${example.name}」` : '起个名字'}>{entry.name}</Title>
+    <section id={`entry-${entry.id}`} data-entry={entry.id} className={clsx(paperCard, 'group/card relative scroll-mt-6')}>
+      <CardMenu locked={entry.locked} onLock={draft ? undefined : () => saveEntry({ locked: !entry.locked })}
+        onDelete={() => save(actions.deleteEntry(entry))} deleteLabel={draft ? '不要这一条了' : '删掉这一条'} />
+      <div className="flex flex-wrap items-center gap-3 pr-8">
+        <Editable autoFocus={fresh} value={entry.name} placeholder={example ? `起个名字，比如「${example.name}」` : '起个名字'} className={titleClass}
+          onSave={(name) => { if (name.trim()) saveEntry({ name }) }} />
         <Tags entry={entry} />
       </div>
+      <DraftNote entry={entry} />
       <MetaRow items={[
         ...(parent ? [{ label: '属于', value: parent.name, link: () => nav.openEntry(parent.id) }] : []),
-        ...entry.facts.map(([label, value, placeholder]) => ({ label, value, placeholder })),
+        ...entry.facts.map(([label, value, placeholder, key]) => ({ label, value, placeholder, onSave: (text: string) => saveEntry({ fields: { [key ?? label]: text } }) })),
       ]} />
       <div className="mt-8 space-y-8 border-t border-line pt-8">
         {entry.kind === 'ladder' ? (
           <>
-            <Prose text={entry.overview ?? ''} placeholder="总的说一句：怎么往上升、越级多难、有什么代价" />
+            <Prose value={entry.overview ?? ''} onSave={(overview) => saveEntry({ overview })} placeholder="总的说一句：怎么往上升、越级多难、有什么代价" />
             <ol>
               {levels.map((level, i) => (
-                <li key={i} className="relative flex gap-5 pb-7">
+                <li key={i} className="group/level relative flex gap-5 pb-7">
                   <span className="absolute top-9 bottom-0 left-[17px] w-px bg-line-2" />
                   <span className="relative flex size-9 shrink-0 items-center justify-center rounded-full border border-line-2 bg-card font-serif text-[15px] text-ink-2">{i + 1}</span>
                   <div className="min-w-0 flex-1 pt-1">
-                    <Editable autoFocus={i === newLevel} placeholder="这一级叫什么" className="font-serif text-lg font-bold">{level.name}</Editable>
-                    <Editable placeholder="这一级能做到什么，先空着也行" className="mt-1 font-serif text-[17px] leading-[1.9] text-ink-2">{level.text}</Editable>
+                    <Editable autoFocus={i === newLevel} value={level.name} onSave={(v) => setLevel(i, 'name', v)} placeholder="这一级叫什么" className="font-serif text-lg font-bold" />
+                    <Editable value={level.text} onSave={(v) => setLevel(i, 'text', v)} placeholder="这一级能做到什么，先空着也行" className="mt-1 font-serif text-[17px] leading-[1.9] text-ink-2" />
                   </div>
+                  <button type="button" onClick={() => saveEntry({ levels: levels.filter((_, j) => j !== i) })} aria-label="删掉这一级" title="删掉这一级"
+                    className="mt-1.5 h-fit shrink-0 rounded p-1 text-ink-3 opacity-0 transition-opacity group-hover/level:opacity-100 hover:text-ink focus-visible:opacity-100">
+                    <X className="size-4" />
+                  </button>
                 </li>
               ))}
               {/* 加一级：就是阶梯上虚线画的下一级 */}
               <li>
-                <button type="button" onClick={() => { setNewLevel(levels.length); setLevels([...levels, { name: '', text: '' }]) }}
+                <button type="button" onClick={() => { setNewLevel(levels.length); saveEntry({ levels: [...levels, { name: '', text: '' }] }) }}
                   className="group flex items-center gap-5 text-left">
                   <span className="flex size-9 shrink-0 items-center justify-center rounded-full border border-dashed border-line-2 text-ink-3 transition-colors group-hover:border-ink-3 group-hover:text-ink">
                     <Plus className="size-4" />
@@ -697,9 +852,9 @@ function PlainCard({ book, entry, category, nav, fresh }: { book: VBook; entry: 
             </ol>
           </>
         ) : onlyContent ? (
-          <Prose text={entry.sections[0].text} placeholder={example ? `比如：\n${example.text}` : '写这一条的内容，可以一条条列'} />
+          <Prose value={entry.sections[0].text} onSave={(text) => saveEntry({ fields: { 内容: text } })} placeholder={example ? `比如：\n${example.text}` : '写这一条的内容，可以一条条列'} />
         ) : (
-          entry.sections.map((field) => <Section key={field.key ?? field.label} field={field} />)
+          entry.sections.map((f) => <Section key={f.key ?? f.label} field={f} onSave={(text) => saveEntry({ fields: { [f.key ?? f.label]: text } })} />)
         )}
       </div>
       <AppearsRow items={entry.appears} nav={nav} />
@@ -708,13 +863,15 @@ function PlainCard({ book, entry, category, nav, fresh }: { book: VBook; entry: 
 }
 
 function WorldPage({ book }: { book: VBook }) {
+  const { actions } = useWorkspace()
+  const save = useSave()
   return (
     <Sheet narrow>
       <Crumb items={['设定']} />
       <h1 className="font-serif text-[34px] font-bold 2xl:text-[38px]">世界概况</h1>
       <p className="mt-3 text-[15px] leading-relaxed text-ink-3">整个世界一段话说清：什么时代、超凡的力量公开还是藏着、钱用什么、普通人过得怎么样。一本书只有这一篇。</p>
       <div className="mt-8 border-t border-line pt-8">
-        <Prose text={book.world} placeholder={'比如：\n九天大陆，以武为尊，宗门、世家、王朝并立。钱用灵石，灵石也是修炼资源。凡人活不过百岁，武者靠境界续命。'} />
+        <Prose value={book.world} onSave={(text) => save(actions.saveWorld(text))} placeholder={'比如：\n九天大陆，以武为尊，宗门、世家、王朝并立。钱用灵石，灵石也是修炼资源。凡人活不过百岁，武者靠境界续命。'} />
       </div>
     </Sheet>
   )
@@ -798,16 +955,10 @@ function fakeResults(category: VCategory, want: string): { name: string; text: s
   return [1, 2].map((i) => ({ name: `${base}（候选${cn(i)}）`, text: `原型里的假内容。真用时，编辑部会按你说的「${want || '按简介补'}」，照简介和已有设定写一条「${category.name}」。` }))
 }
 
-/** 这本书角色卡的一栏：key 是原来的名字（内容跟着它走），label 是现在显示的名字。 */
-interface FieldItem { key: string; label: string }
-interface CardTemplate { facts: FieldItem[]; sections: FieldItem[] }
-
-let nextField = 1
-
-/** 一组栏目：每一栏能改名、上下挪、删掉；最下面能加一栏。 */
-function FieldList({ title, note, items, counts, locked, onChange, addPlaceholder }: {
+/** 一组栏目：每一栏能改名、上下挪、删掉；最下面能加一栏。改名在离开输入框时存，其余点了就存。 */
+function FieldList({ title, note, items, counts, locked, onEdit, onCommit, addPlaceholder }: {
   title: string; note: string; items: FieldItem[]; counts: Record<string, number>; locked: string[]
-  onChange: (items: FieldItem[]) => void; addPlaceholder: string
+  onEdit: (items: FieldItem[]) => void; onCommit: (items: FieldItem[], dropped?: string[]) => void; addPlaceholder: string
 }) {
   const [draft, setDraft] = useState('')
   const [confirming, setConfirming] = useState('')
@@ -815,12 +966,12 @@ function FieldList({ title, note, items, counts, locked, onChange, addPlaceholde
     if (to < 0 || to >= items.length) return
     const next = [...items]
     ;[next[i], next[to]] = [next[to], next[i]]
-    onChange(next)
+    onCommit(next)
   }
   const add = () => {
     const label = draft.trim()
     if (!label || items.some((f) => f.label === label)) return
-    onChange([...items, { key: `field-${nextField++}`, label }])
+    onCommit([...items, { key: label, label }])
     setDraft('')
   }
   return (
@@ -838,15 +989,17 @@ function FieldList({ title, note, items, counts, locked, onChange, addPlaceholde
                 <button type="button" onClick={() => move(i, i + 1)} disabled={i === items.length - 1} className="rounded text-ink-3 hover:text-ink disabled:opacity-25" aria-label="往下挪"><ChevronDown className="size-3.5" /></button>
               </div>
               <input value={item.label} disabled={fixed} maxLength={12}
-                onChange={(e) => onChange(items.map((f) => (f.key === item.key ? { ...f, label: e.target.value } : f)))}
+                onChange={(e) => onEdit(items.map((f) => (f.key === item.key ? { ...f, label: e.target.value } : f)))}
+                onBlur={() => onCommit(items)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) e.currentTarget.blur() }}
                 className="h-8 min-w-0 flex-1 rounded-md bg-transparent px-2 font-serif text-[15px] text-ink hover:bg-subtle focus:bg-subtle focus:outline-none disabled:text-ink-2" />
-              <span className="w-16 shrink-0 text-right text-xs text-ink-3 tabular-nums">{used ? `${used} 人写了` : ''}</span>
+              <span className="w-16 shrink-0 text-right text-xs text-ink-3 tabular-nums">{used ? `${used} 条写了` : ''}</span>
               {fixed ? <span className="w-20 shrink-0 text-right text-xs text-ink-3">按它分组</span> : (
                 <button type="button"
                   onClick={() => {
                     if (used && confirming !== item.key) return setConfirming(item.key)
                     setConfirming('')
-                    onChange(items.filter((f) => f.key !== item.key))
+                    onCommit(items.filter((f) => f.key !== item.key), [item.key])
                   }}
                   className={clsx('w-20 shrink-0 rounded-md px-2 py-1 text-right text-xs transition-colors', confirming === item.key ? 'text-seal' : 'text-ink-3 hover:text-ink')}>
                   {confirming === item.key ? '再点一次删' : '删掉'}
@@ -867,70 +1020,68 @@ function FieldList({ title, note, items, counts, locked, onChange, addPlaceholde
   )
 }
 
-/** 这本书的角色卡有哪几栏：自己增删、改名、挪顺序，对这本书所有角色生效。 */
-function CardTemplateEditor({ category, template, defaults, counts, onChange, onClose }: {
-  category: string; template: CardTemplate; defaults: CardTemplate; counts: Record<string, number>
-  onChange: (template: CardTemplate) => void; onClose: () => void
+/** 这本书这一类有哪几栏：自己增删、改名、挪顺序，对这一类每一条都生效。 */
+function CardTemplateEditor({ category, template, counts, onClose }: {
+  category: VCategory; template: CardTemplate; counts: Record<string, number>; onClose: () => void
 }) {
-  const people = category === '角色列表'
+  const { actions } = useWorkspace()
+  const save = useSave()
+  const people = category.name === '角色列表' && !category.custom
+  const [draft, setDraft] = useState(template)
+  const synced = useRef(JSON.stringify(template))
+  // 存好以后服务器给回来的栏目（改名的栏目 key 会跟着换）
+  useEffect(() => {
+    const text = JSON.stringify(template)
+    if (text !== synced.current) {
+      synced.current = text
+      setDraft(template)
+    }
+  }, [template])
+  const commit = (next: CardTemplate, dropped: string[] = []) => {
+    // 名字删空了就用回原来的
+    const fix = (items: FieldItem[]) => items.map((f) => ({ ...f, label: f.label.trim() || f.key }))
+    const clean = { facts: fix(next.facts), sections: fix(next.sections) }
+    setDraft(clean)
+    if (JSON.stringify(clean) === synced.current && !dropped.length) return
+    synced.current = JSON.stringify(clean)
+    save(actions.saveTemplate(category, clean, dropped))
+  }
   return (
     <div className="rounded-2xl border border-line bg-card p-6 shadow-[var(--shadow-paper)]">
       <div className="mb-1 flex items-center gap-3">
-        <p className="text-[15px] font-medium text-ink">{people ? '这本书的角色卡有哪几栏' : `这本书的「${category}」每一条有哪几栏`}</p>
-        <button type="button" onClick={() => onChange(defaults)} className="ml-auto text-[13px] text-ink-3 hover:text-ink">恢复默认</button>
+        <p className="text-[15px] font-medium text-ink">{people ? '这本书的角色卡有哪几栏' : `这本书的「${category.name}」每一条有哪几栏`}</p>
+        <button type="button" onClick={() => save(actions.resetTemplate(category))} className="ml-auto text-[13px] text-ink-3 hover:text-ink">恢复默认</button>
         <button type="button" onClick={onClose} className="text-[13px] text-ink-3 hover:text-ink">收起</button>
       </div>
       <p className="mb-5 text-[13px] leading-relaxed text-ink-3">改了对这本书这一类的每一条都生效；改名不丢已经写的内容。删掉的栏目，写了的内容会一起删掉。只剩一栏「内容」时，卡片上就是名字加一段话。</p>
       <div className="grid gap-6 md:grid-cols-2">
-        <FieldList title="名字下面的小字" note="短的，一两个词能说完的" items={template.facts} counts={counts} locked={people ? ['定位'] : []}
-          onChange={(facts) => onChange({ ...template, facts })} addPlaceholder={people ? '加一栏，比如：武器、坐骑、职业' : '加一栏，比如：品阶、产地'} />
-        <FieldList title="正文栏目" note="要写一段话的" items={template.sections} counts={counts} locked={[]}
-          onChange={(sections) => onChange({ ...template, sections })} addPlaceholder={people ? '加一栏，比如：口头禅、名场面' : '加一栏，比如：用法、来历'} />
+        <FieldList title="名字下面的小字" note="短的，一两个词能说完的" items={draft.facts} counts={counts} locked={people ? ['定位'] : []}
+          onEdit={(facts) => setDraft({ ...draft, facts })} onCommit={(facts, dropped) => commit({ ...draft, facts }, dropped)}
+          addPlaceholder={people ? '加一栏，比如：武器、坐骑、职业' : '加一栏，比如：品阶、产地'} />
+        <FieldList title="正文栏目" note="要写一段话的" items={draft.sections} counts={counts} locked={[]}
+          onEdit={(sections) => setDraft({ ...draft, sections })} onCommit={(sections, dropped) => commit({ ...draft, sections }, dropped)}
+          addPlaceholder={people ? '加一栏，比如：口头禅、名场面' : '加一栏，比如：用法、来历'} />
       </div>
       {people && <p className="mt-4 text-xs text-ink-3">「此刻」那几栏（实力与地位、在哪、处境、眼下想要）由设定师每写完一章更新，不在这里改。</p>}
     </div>
   )
 }
 
-/** 按这本书的栏目重新摆一个角色：内容按原来的名字找，改了名也跟着走。 */
-function applyTemplate(entry: VEntry, template: CardTemplate): VEntry {
-  if (entry.kind === 'ladder') return entry
-  const hint = (key: string) => CHARACTER_PLACEHOLDERS[key] ?? GOLDFINGER_PLACEHOLDERS[key] ?? FACT_PLACEHOLDERS[key]
-  return {
-    ...entry,
-    facts: template.facts.map((f) => {
-      const old = entry.facts.find(([label]) => label === f.key)
-      return [f.label, old?.[1] ?? '', f.label === f.key ? old?.[2] ?? hint(f.key) : undefined] as [string, string, string?]
-    }),
-    sections: template.sections.map((f) => {
-      const old = entry.sections.find((s) => (s.key ?? s.label) === f.key)
-      return { key: f.key, label: f.label, text: old?.text ?? '', placeholder: f.label === f.key ? old?.placeholder ?? hint(f.key) : undefined }
-    }),
-  }
-}
-
-/** 一类默认有哪几栏：内置的照 DEFAULT_FIELDS，自建的照建的时候选的。 */
-function defaultTemplateFor(category: VCategory): CardTemplate {
-  const item = (key: string): FieldItem => ({ key, label: key })
-  const preset = DEFAULT_FIELDS[category.name]
-  if (preset) return { facts: preset.facts.map(item), sections: preset.sections.map(item) }
-  if (category.custom?.style === 'card') return { facts: [], sections: category.custom.fields.map(item) }
-  return { facts: [], sections: [item('内容')] }
-}
-
 /** 一类的设定连成一页：每条一张白卡片往下排；点左边滚过去，往下滚左边跟着选中。 */
-function CategoryStream({ book, category, next, nav, fresh, scrollReq, onSpy, onNewEntry, onAccept, pageRef, fields }: {
+function CategoryStream({ book, category, next, nav, fresh, scrollReq, onSpy, onNewEntry, onAccept, pageRef, cardKey }: {
   book: VBook; category: VCategory; next?: VCategory; nav: Nav; fresh: string
   scrollReq: ScrollReq | null; onSpy: (id: string) => void; onNewEntry: () => void
   onAccept: (items: { name: string; text: string }[]) => void; pageRef: React.RefObject<HTMLElement | null>
-  /** 角色列表才有：这本书的角色卡栏目 */
-  fields?: { template: CardTemplate; defaults: CardTemplate; counts: Record<string, number>; onChange: (template: CardTemplate) => void }
+  /** 新建的一条存好以后换了 id，卡片还用原来的 key，正在打的字不丢 */
+  cardKey: (id: string) => string
 }) {
+  const { actions } = useWorkspace()
   const [asking, setAsking] = useState(false)
   const [editing, setEditing] = useState(false)
   const pauseUntil = useRef(0)
   const spy = useRef(onSpy)
   spy.current = onSpy
+  const ladder = isLadder(category)
 
   // 点了左边的某一条：滚到那张卡；点的是类别就回到顶上
   useEffect(() => {
@@ -969,6 +1120,15 @@ function CategoryStream({ book, category, next, nav, fresh, scrollReq, onSpy, on
     }
   }, [category.name, pageRef])
 
+  const counts = useMemo(() => {
+    const out: Record<string, number> = {}
+    for (const e of category.entries) {
+      for (const f of e.facts) if (f[1]) out[f[3] ?? f[0]] = (out[f[3] ?? f[0]] ?? 0) + 1
+      for (const s of e.sections) if (s.text) out[s.key ?? s.label] = (out[s.key ?? s.label] ?? 0) + 1
+    }
+    return out
+  }, [category.entries])
+
   return (
     <div className="mx-auto w-full max-w-[880px] px-8 pt-10 pb-[40vh] 2xl:max-w-[940px] 2xl:pt-12">
       <header className="mb-8 px-2">
@@ -982,25 +1142,26 @@ function CategoryStream({ book, category, next, nav, fresh, scrollReq, onSpy, on
             <p className="mt-2 text-[15px] leading-relaxed text-ink-3">{category.about}</p>
           </div>
           <div className="flex shrink-0 gap-2">
-            {fields && (
+            {!ladder && (
               <button type="button" onClick={() => setEditing(!editing)} className={clsx('h-9 rounded-lg px-3 text-sm transition-colors', editing ? 'bg-line/60 text-ink' : 'text-ink-3 hover:text-ink')}>
                 调整栏目
               </button>
             )}
-            <AskButton onClick={() => setAsking(!asking)}>编辑部帮写</AskButton>
+            {/* 编辑部帮写：第三步接上，现在真书上先不放 */}
+            {!actions.live && <AskButton onClick={() => setAsking(!asking)}>编辑部帮写</AskButton>}
             <button type="button" onClick={onNewEntry} className="h-9 rounded-lg bg-ink px-4 text-sm text-paper-2 transition-colors hover:bg-ink-2">
               新增{nounOf(category.name)}
             </button>
           </div>
         </div>
-        {fields && editing && <div className="mt-5"><CardTemplateEditor category={category.name} {...fields} onClose={() => setEditing(false)} /></div>}
+        {!ladder && editing && <div className="mt-5"><CardTemplateEditor category={category} template={templateOf(book, category)} counts={counts} onClose={() => setEditing(false)} /></div>}
         {asking && <div className="mt-5"><AskPanel category={category} onAccept={onAccept} onClose={() => setAsking(false)} /></div>}
       </header>
 
       <div className="space-y-6">
         {orderEntries(category).map((entry) => (entry.kind === 'character' || entry.kind === 'goldfinger'
-          ? <CharacterCard key={entry.id} book={book} entry={entry} nav={nav} fresh={fresh === entry.id} />
-          : <PlainCard key={entry.id} book={book} entry={entry} category={category} nav={nav} fresh={fresh === entry.id} />))}
+          ? <CharacterCard key={cardKey(entry.id)} book={book} entry={entry} nav={nav} fresh={fresh === entry.id} />
+          : <PlainCard key={cardKey(entry.id)} book={book} entry={entry} category={category} nav={nav} fresh={fresh === entry.id} />))}
         {!category.entries.length && category.example && (
           <div className="rounded-xl border border-dashed border-line-2 px-12 py-10">
             <p className="mb-3 text-xs tracking-wider text-ink-3">比如这样写一条</p>
@@ -1022,6 +1183,7 @@ function CategoryStream({ book, category, next, nav, fresh, scrollReq, onSpy, on
 
 /** 设定总览：空书点完「下一步」先看到这里；有内容的书点目录上的「设定」也到这里。 */
 function SettingsOverview({ book, nav, onSelect }: { book: VBook; nav: Nav; onSelect: (id: string) => void }) {
+  const { actions } = useWorkspace()
   const total = book.categories.reduce((sum, c) => sum + c.entries.length, 0)
   const first = ['角色列表', '金手指']
   return (
@@ -1033,7 +1195,7 @@ function SettingsOverview({ book, nav, onSelect }: { book: VBook; nav: Nav; onSe
           ? `已经写了 ${total} 条。点一类进去看，或者在左边目录里直接挑。`
           : '这本书的设定还空着。不用一次写全，先写最要紧的两样：主角和金手指；其余的写到哪补到哪。'}
       </p>
-      {!total && (
+      {!total && !actions.live && (
         <div className="mt-8 flex flex-wrap items-center gap-5 rounded-2xl bg-subtle px-6 py-5">
           <div className="min-w-0 flex-1">
             <p className="text-[15px] text-ink">想省事，可以让编辑部按简介先补一版。</p>
@@ -1044,7 +1206,7 @@ function SettingsOverview({ book, nav, onSelect }: { book: VBook; nav: Nav; onSe
       )}
       <div className="mt-8 grid gap-3 md:grid-cols-2">
         {book.categories.map((cat) => (
-          <button key={cat.name} type="button" onClick={() => onSelect(cat.entries[0]?.id ?? `cat:${cat.name}`)}
+          <button key={cat.key} type="button" onClick={() => onSelect(cat.entries[0]?.id ?? `cat:${cat.name}`)}
             className="group rounded-xl border border-line bg-card/70 px-5 py-4 text-left transition-colors hover:border-line-2 hover:bg-card">
             <span className="flex items-center gap-2">
               <span className="font-serif text-lg font-bold text-ink">{cat.name}</span>
@@ -1063,14 +1225,8 @@ function SettingsOverview({ book, nav, onSelect }: { book: VBook; nav: Nav; onSe
 
 /* ---------------- 大纲 ---------------- */
 
-const NEXT_KIND: Partial<Record<VNode['kind'], VNode['kind']>> = { 全书: '篇', 篇: '卷', 卷: '单元', 单元: '章' }
 /** 一篇、一卷、一个单元、一章 */
 const ONE: Record<VNode['kind'], string> = { 全书: '全书', 篇: '一篇', 卷: '一卷', 单元: '一个单元', 章: '一章' }
-
-/** 在这个节点下面加的是哪一层：已经有下一层就照着它，没有就按默认。 */
-function childKind(node: VNode): VNode['kind'] | undefined {
-  return node.children?.[0]?.kind ?? NEXT_KIND[node.kind]
-}
 
 const NODE_PLACEHOLDER: Record<VNode['kind'], string> = {
   全书: '结局往哪走，一句话',
@@ -1084,19 +1240,44 @@ const KIND_NOTE: Partial<Record<VNode['kind'], string>> = {
   单元: '一个单元是一个完整的小故事，几章到十几章，给读者一次爽点。',
 }
 
-function OutlinePage({ book, outline, id, nav, onAdd }: { book: VBook; outline: VNode; id: string; nav: Nav; onAdd: (id: string) => void }) {
+/** 节点的名字：前缀（第一卷）程序排，后面的名字作者起。 */
+function NodeTitle({ node, fresh }: { node: VNode; fresh: boolean }) {
+  const { actions } = useWorkspace()
+  const save = useSave()
+  if (node.kind === '全书') return <h1 className={titleClass}>全书</h1>
+  const [prefix, name] = splitTitle(node.title)
+  if (!node.title.includes('　')) return <h1 className={titleClass}>{prefix}</h1>
+  return (
+    <div className="flex min-w-0 flex-wrap items-baseline gap-x-3">
+      <span className={clsx(titleClass, 'shrink-0')}>{prefix}</span>
+      <Editable value={name} autoFocus={fresh} readOnly={!actions.canEdit(node, 'name')} placeholder={`给${ONE[node.kind]}起个名字`} className={clsx(titleClass, 'min-w-24')}
+        onSave={(text) => { if (node.kind !== '章' || text.trim()) save(actions.saveNode(node, { name: text.trim() })) }} />
+    </div>
+  )
+}
+
+function OutlinePage({ book, outline, id, nav, onAdd, fresh }: { book: VBook; outline: VNode; id: string; nav: Nav; onAdd: (id: string) => void; fresh: boolean }) {
+  const { actions } = useWorkspace()
+  const save = useSave()
   const path = findNode(outline, id) ?? [outline]
   const node = path[path.length - 1]
   const child = childKind(node)
+  const canAdd = actions.canAdd(node)
   const meta: { label: string; value: string }[] = []
   if (node.range) meta.push({ label: '章数', value: `${node.range[1] - node.range[0] + 1} 章 · 第 ${node.range[0]}–${node.range[1]} 章` })
   else if (node.chapters) meta.push({ label: '章数', value: `${node.chapters} 章` })
   if (node.progress && node.progress !== '已规划') meta.push({ label: '写到', value: node.progress })
   return (
     <Sheet narrow>
-      <Crumb items={['大纲', ...path.slice(0, -1).map((n) => n.title)]} />
-      <div className="flex flex-wrap items-center gap-3">
-        <Title placeholder={`给${ONE[node.kind]}起个名字`}>{node.title}</Title>
+      {actions.canDelete(node) && (
+        <CardMenu onDelete={() => {
+          nav.openNode(path.at(-2)?.id ?? 'book')
+          save(actions.deleteNode(node))
+        }} deleteLabel={`删掉这${ONE[node.kind].slice(1)}`} />
+      )}
+      <Crumb items={['大纲', ...path.slice(0, -1).map(shownTitle)]} />
+      <div className="flex flex-wrap items-center gap-3 pr-8">
+        <NodeTitle node={node} fresh={fresh} />
         {node.later && <span className="rounded-full bg-line/70 px-2.5 py-0.5 text-xs text-ink-2">写到再定</span>}
         {node.locked && <span className="flex items-center gap-1 rounded-full bg-line/70 px-2.5 py-0.5 text-xs text-ink-2"><Lock className="size-3" />锁住，AI 规划时不改</span>}
       </div>
@@ -1107,9 +1288,10 @@ function OutlinePage({ book, outline, id, nav, onAdd }: { book: VBook; outline: 
       )}
       <div className="mt-8 space-y-8 border-t border-line pt-8">
         {node.sections
-          ? node.sections.map((field) => <Section key={field.label} field={field} />)
-          : <Prose text={node.text} placeholder={NODE_PLACEHOLDER[node.kind]} />}
-        {child && (
+          ? node.sections.map((field) => <Section key={field.label} field={field} readOnly={actions.live} onSave={() => undefined} />)
+          : <Prose value={node.text} readOnly={!actions.canEdit(node, 'text')} placeholder={NODE_PLACEHOLDER[node.kind]}
+            onSave={(text) => save(actions.saveNode(node, { text }))} />}
+        {child && (canAdd || !!node.children?.length) && (
           <section>
             <h3 className="mb-1 text-[13px] tracking-[0.15em] text-ink-3">下面的{child}{node.children?.length ? ` · ${node.children.length} 个` : ''}</h3>
             {KIND_NOTE[child] && <p className="mb-2 text-xs text-ink-3">{KIND_NOTE[child]}</p>}
@@ -1117,7 +1299,7 @@ function OutlinePage({ book, outline, id, nav, onAdd }: { book: VBook; outline: 
               <div className="divide-y divide-line border-y border-line">
                 {node.children.map((c) => (
                   <button key={c.id} type="button" onClick={() => nav.openNode(c.id)} className="group flex w-full items-baseline gap-5 py-3.5 text-left">
-                    <span className={clsx('w-44 shrink-0 truncate font-serif text-[16px] font-bold group-hover:text-seal', c.later ? 'text-ink-3' : 'text-ink')}>{c.title}</span>
+                    <span className={clsx('w-44 shrink-0 truncate font-serif text-[16px] font-bold group-hover:text-seal', c.later ? 'text-ink-3' : 'text-ink')}>{shownTitle(c)}</span>
                     <span className="line-clamp-1 flex-1 text-[14px] text-ink-3">{(c.text || c.sections?.[0]?.text || '').split('\n')[0] || '还没写'}</span>
                     {c.range && c.kind !== '章' && <span className="text-xs text-ink-3 tabular-nums">{c.range[1] - c.range[0] + 1} 章</span>}
                   </button>
@@ -1125,10 +1307,13 @@ function OutlinePage({ book, outline, id, nav, onAdd }: { book: VBook; outline: 
               </div>
             )}
             <div className="mt-4 flex flex-wrap gap-3">
-              <button type="button" onClick={() => onAdd(node.id)} className="h-9 rounded-lg bg-ink px-4 text-sm text-paper-2 transition-colors hover:bg-ink-2">
-                新增{child}
-              </button>
-              <AskButton onClick={() => nav.toast(`原型：编辑部会按上面这段话和设定，拆出几个${child}给你挑`)}>编辑部帮拆</AskButton>
+              {canAdd && (
+                <button type="button" onClick={() => onAdd(node.id)} className="h-9 rounded-lg bg-ink px-4 text-sm text-paper-2 transition-colors hover:bg-ink-2">
+                  新增{child}
+                </button>
+              )}
+              {/* 编辑部帮拆：第三步接上 */}
+              {!actions.live && <AskButton onClick={() => nav.toast(`原型：编辑部会按上面这段话和设定，拆出几个${child}给你挑`)}>编辑部帮拆</AskButton>}
             </div>
           </section>
         )}
@@ -1146,7 +1331,22 @@ function OutlinePage({ book, outline, id, nav, onAdd }: { book: VBook; outline: 
   )
 }
 
+/** 篇幅：打字时只改输入框，离开才存。存好以后书上的篇幅变了，换一个新的输入框。 */
+function LengthField({ book, onSave }: { book: VBook; onSave: (length: number | null) => void }) {
+  const [text, setText] = useState(book.length ? String(book.length) : '')
+  return (
+    <LengthInput text={text} chapterWords={book.chapterWords} onChange={(next) => setText(next)}
+      onBlur={() => {
+        const value = text ? Number(text) : null
+        if (value !== (book.length ?? null)) onSave(value)
+      }} />
+  )
+}
+
 function BlurbPage({ book }: { book: VBook }) {
+  const { actions } = useWorkspace()
+  const save = useSave()
+  const meta = useBookMeta()
   const chapters = book.length ? Math.round((book.length * 10000) / book.chapterWords) : null
   const facts = [book.genre, ...book.tags].filter(Boolean).join(' · ')
   return (
@@ -1159,20 +1359,22 @@ function BlurbPage({ book }: { book: VBook }) {
           {chapters && <p className="mt-0.5 text-[13px] text-ink-3">{book.length} 万字 · 约 {chapters} 章</p>}
         </aside>
         <div className="px-12 py-10">
-          <Editable className="font-serif text-[34px] font-bold">{book.title}</Editable>
+          <Editable value={book.title} placeholder="书名" className="font-serif text-[34px] font-bold"
+            onSave={(title) => save(actions.saveBook({ title: title.trim() }))} />
           <p className="mt-7 mb-2.5 text-sm text-ink-3">简介</p>
-          <Editable multiline boxed placeholder="写给读者看的那段话" className="rounded-xl bg-paper/45 px-5 py-4 font-serif text-[17px] leading-[1.95]">{book.blurb}</Editable>
-          <div className="mt-5 divide-y divide-line border-y border-line text-sm">
-            {[
-              ['类别', [book.channel, book.genre].filter(Boolean).join(' · ')],
-              ['标签', book.tags.join('、')],
-              ['篇幅', book.length ? `${book.length} 万字 · 约 ${chapters} 章` : ''],
-            ].map(([label, value]) => (
-              <div key={label} className="grid grid-cols-[64px_minmax(0,1fr)] gap-4 py-3.5">
-                <span className="text-ink-3">{label}</span>
-                <span className={value ? 'text-ink' : 'text-ink-3'}>{value || '还没填'}</span>
-              </div>
-            ))}
+          <Editable multiline boxed value={book.blurb} placeholder="写给读者看的那段话" className="rounded-xl bg-paper/45 px-5 py-4 font-serif text-[17px] leading-[1.95]"
+            onSave={(blurb) => save(actions.saveBook({ blurb }))} />
+          <div className="mt-5 divide-y divide-line border-y border-line">
+            <Row label="类别">
+              <CategoryPicker meta={meta} value={{ channel: book.channel as '男频' | '女频' | '', genre: book.genre }}
+                onChange={(next) => save(actions.saveBook({ channel: next.channel, genre: next.genre }))} />
+            </Row>
+            <Row label="标签">
+              <TagPicker meta={meta} channel={book.channel as '男频' | '女频' | ''} value={book.tags} onChange={(tags) => save(actions.saveBook({ tags }))} />
+            </Row>
+            <Row label="篇幅">
+              <LengthField key={book.length ?? 'none'} book={book} onSave={(length) => save(actions.saveBook({ length }))} />
+            </Row>
           </div>
           <p className="mt-5 text-[13px] text-ink-3">点哪改哪，改了就存。</p>
         </div>
@@ -1183,7 +1385,8 @@ function BlurbPage({ book }: { book: VBook }) {
 
 /* ---------------- 编辑部 ---------------- */
 
-function ChatBody() {
+/** 原型里的聊天：假的几句话。 */
+export function SampleChat() {
   return (
     <>
       <div className="scroll-thin min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
@@ -1234,7 +1437,7 @@ function ChatHeader({ dock, setDock, onDragStart }: { dock: Dock; setDock: (dock
   )
 }
 
-function FloatingEditorial({ setDock }: { setDock: (dock: Dock) => void }) {
+function FloatingEditorial({ setDock, children, size }: { setDock: (dock: Dock) => void; children: ReactNode; size: { width: number; height: number } }) {
   const ref = useRef<HTMLDivElement>(null)
   const drag = useRef<{ dx: number; dy: number } | null>(null)
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
@@ -1277,9 +1480,9 @@ function FloatingEditorial({ setDock }: { setDock: (dock: Dock) => void }) {
       {nearEdge && <div className="pointer-events-none fixed top-14 right-0 bottom-0 z-30 w-[380px] border-l-2 border-chief/40 bg-chief-soft/40" />}
       <div ref={ref}
         className="fixed z-40 flex flex-col overflow-hidden rounded-2xl border border-line bg-paper shadow-[0_24px_60px_-20px_rgb(40_25_10/0.45),0_2px_6px_rgb(40_25_10/0.08)]"
-        style={{ ...(pos ? { left: pos.x, top: pos.y } : { right: 24, bottom: 24 }), width: 380, height: 520, resize: 'both', minWidth: 320, minHeight: 360, maxWidth: 680, maxHeight: '85vh' }}>
+        style={{ ...(pos ? { left: pos.x, top: pos.y } : { right: 24, bottom: 24 }), width: size.width, height: size.height, resize: 'both', minWidth: 320, minHeight: 360, maxWidth: 820, maxHeight: '85vh' }}>
         <ChatHeader dock="float" setDock={setDock} onDragStart={start} />
-        <ChatBody />
+        {children}
       </div>
     </>
   )
@@ -1288,12 +1491,12 @@ function FloatingEditorial({ setDock }: { setDock: (dock: Dock) => void }) {
 const SIDE_KEY = 'zhibi-prototype-chat-width'
 
 /** 贴在右边的编辑部：左边缘可以拖宽拖窄，记住上次的宽度。 */
-function DockedEditorial({ setDock }: { setDock: (dock: Dock) => void }) {
+function DockedEditorial({ setDock, children, initial }: { setDock: (dock: Dock) => void; children: ReactNode; initial: number }) {
   const [width, setWidth] = useState(() => {
     try {
-      return Number(localStorage.getItem(SIDE_KEY)) || 460
+      return Number(localStorage.getItem(SIDE_KEY)) || initial
     } catch {
-      return 460
+      return initial
     }
   })
   const [dragging, setDragging] = useState(false)
@@ -1320,7 +1523,7 @@ function DockedEditorial({ setDock }: { setDock: (dock: Dock) => void }) {
         className={clsx('absolute inset-y-0 -left-1.5 z-10 w-3 cursor-col-resize after:absolute after:inset-y-0 after:left-1.5 after:w-0.5 after:transition-colors', dragging ? 'after:bg-chief/60' : 'hover:after:bg-chief/40')} />
       {dragging && <div className="fixed inset-0 z-50 cursor-col-resize" />}
       <ChatHeader dock="side" setDock={setDock} />
-      <ChatBody />
+      {children}
     </aside>
   )
 }
@@ -1375,74 +1578,53 @@ function customAbout(style: CategoryStyle, fields: string[]): string {
   return '一个名字加一段话。'
 }
 
-let nextId = 1
+const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
-/** 在某一类里新建一条空的：照这一类的样子。 */
-function blankEntry(category: VCategory): VEntry {
-  const id = `new-${nextId++}`
-  const base = { id, category: category.name, name: '', oneLine: '', tags: [], locked: false, facts: [] as VEntry['facts'], sections: [] as VField[], appears: [] }
-  // 栏目由这本书这一类的模板去摆，这里只定是哪种卡
-  if (category.name === '角色列表') return { ...base, kind: 'character', role: '配角', facts: [['定位', '配角']] }
-  if (category.name === '金手指') return { ...base, kind: 'goldfinger' }
-  if (category.name === '等级体系' || category.custom?.style === 'ladder') return { ...base, kind: 'ladder', overview: '', levels: [{ name: '', text: '' }, { name: '', text: '' }] }
-  return { ...base, kind: 'paragraph' }
+export interface WorkspaceProps {
+  book: VBook
+  actions: WorkspaceActions
+  /** 顶栏右边：原型放换书的按钮，真书放回旧版、设置 */
+  right: ReactNode
+  /** 编辑部窗口里放什么 */
+  chat: ReactNode
+  /** 收起成小球时右上角的数字；不给就只是一个红点 */
+  chatBadge?: number
+  /** 外面要打开编辑部（比如点了某条消息）：每次加一 */
+  openChat?: number
+  /** 顶栏下面的一行提醒 */
+  notice?: ReactNode
+  /** 正文还没做：有正文时先链到旧版 */
+  manuscriptHref?: string
 }
 
-/** 在节点下面加一个下一层，返回新的大纲树和新节点 id。 */
-function addOutlineChild(root: VNode, parentId: string): { root: VNode; id: string } | null {
-  const copy: VNode = structuredClone(root)
-  const parent = findNode(copy, parentId)?.at(-1)
-  const kind = parent && childKind(parent)
-  if (!parent || !kind) return null
-  const siblings = parent.children ?? []
-  const all = (k: VNode['kind']) => {
-    let n = 0
-    const walk = (x: VNode) => { if (x.kind === k) n++; x.children?.forEach(walk) }
-    walk(copy)
-    return n
-  }
-  const title = kind === '篇' ? `第${cn(siblings.length + 1)}篇　` : kind === '卷' ? `第${cn(all('卷') + 1)}卷　` : kind === '单元' ? `单元${cn(siblings.length + 1)}　` : '新的一章'
-  const id = `added-${nextId++}`
-  parent.children = [...siblings, { id, kind, title, text: '', uses: [], ...(kind === '章' ? { sections: [{ label: '发生什么', text: '' }, { label: '看点', text: '' }, { label: '结尾钩子', text: '' }] } : {}) }]
-  numberChapters(copy)
-  return { root: copy, id }
-}
+export function Workspace({ book: base, actions, right, chat, chatBadge, openChat, notice, manuscriptHref }: WorkspaceProps) {
+  // 新增了还没起名字的条目：只在这一页，起了名字才存
+  const [drafts, setDrafts] = useState<VEntry[]>([])
+  const draftsRef = useRef(drafts)
+  useLayoutEffect(() => { draftsRef.current = drafts }, [drafts])
+  // 草稿存好以后换成了真 id：卡片还用草稿的 key
+  const [aliases, setAliases] = useState<Record<string, string>>({})
+  const creating = useRef(new Map<string, EntryChange[]>())
 
-function Workspace({ book: base, switcher }: { book: VBook; switcher: ReactNode }) {
-  // 原型里新建的类别、条目、大纲节点只放在这一页，不存
-  const [customCats, setCustomCats] = useState<VCategory[]>([])
-  const [added, setAdded] = useState<Record<string, VEntry[]>>({})
-  const [outline, setOutline] = useState(base.outline)
-  // 这本书每一类有哪几栏：默认照 DEFAULT_FIELDS，作者可以改（原型里只放在这一页）
-  const [templates, setTemplates] = useState<Record<string, CardTemplate>>({})
-  const allCategories = useMemo(() => [...base.categories, ...customCats], [base, customCats])
-  const templateOf = (c: VCategory) => templates[c.name] ?? defaultTemplateFor(c)
-  const book = useMemo(() => ({
+  const book = useMemo<VBook>(() => ({
     ...base,
-    categories: allCategories.map((c) => ({
+    categories: base.categories.map((c) => ({
       ...c,
-      entries: [...c.entries, ...(added[c.name] ?? [])].map((e) => applyTemplate(e, templates[c.name] ?? defaultTemplateFor(c))),
+      entries: [...c.entries, ...drafts.filter((d) => d.category === c.name)].map((e) => applyTemplate(e, templateOf(base, c))),
     })),
-  }), [base, allCategories, added, templates])
-  // 每一栏有几条写了：删之前提醒
-  const countsOf = (name: string) => {
-    const counts: Record<string, number> = {}
-    const entries = [...(allCategories.find((c) => c.name === name)?.entries ?? []), ...(added[name] ?? [])]
-    for (const e of entries) {
-      for (const [label, value] of e.facts) if (value) counts[label] = (counts[label] ?? 0) + 1
-      for (const field of e.sections) if (field.text) counts[field.key ?? field.label] = (counts[field.key ?? field.label] ?? 0) + 1
-    }
-    return counts
-  }
+  }), [base, drafts])
+
   const [tab, setTab] = useState<Tab>('设定')
   const [entry, setEntry] = useState(() => (base.categories.some((c) => c.entries.length) ? firstSelection(base) : 'overview'))
   const [fresh, setFresh] = useState('')
   const firstChild = base.outline.children?.[0]
   const [node, setNode] = useState(firstChild?.children?.[0]?.id ?? firstChild?.id ?? 'book')
+  const [freshNode, setFreshNode] = useState('')
   const [open, setOpen] = useState(() => {
     const path = findNode(base.outline, firstChild?.children?.[0]?.id ?? 'book') ?? []
     return ['book', ...path.map((n) => n.id)]
   })
+  const [outlineQuery, setOutlineQuery] = useState('')
   const [dock, setDock] = useState<Dock>('ball')
   const [toast, setToast] = useState('')
   // 一打开就滚到选中的那一条
@@ -1451,9 +1633,63 @@ function Workspace({ book: base, switcher }: { book: VBook; switcher: ReactNode 
 
   useEffect(() => {
     if (!toast) return
-    const timer = setTimeout(() => setToast(''), 3200)
+    const timer = setTimeout(() => setToast(''), 3600)
     return () => clearTimeout(timer)
   }, [toast])
+  useEffect(() => {
+    if (openChat) setDock((d) => (d === 'ball' ? 'float' : d))
+  }, [openChat])
+
+  const report = useCallback((error: unknown) => setToast(`没存上：${errorText(error)}`), [])
+
+  // 新建的一条：起名字之前改的都记在草稿上；起了名字就建到书里
+  const tools = useMemo(() => {
+    const finish = async (draft: VEntry) => {
+      const category = book.categories.find((c) => c.name === draft.category)
+      if (!category || creating.current.has(draft.id)) return
+      creating.current.set(draft.id, [])
+      try {
+        const id = await actions.createEntry(category, draft)
+        const later = creating.current.get(draft.id) ?? []
+        setAliases((a) => ({ ...a, [id]: a[draft.id] ?? draft.id }))
+        setDrafts((ds) => ds.filter((d) => d.id !== draft.id))
+        setEntry((now) => (now === draft.id ? id : now))
+        setFresh((now) => (now === draft.id ? '' : now))
+        // 建的时候又改了几处：建好以后补上
+        for (const change of later) await actions.saveEntry({ ...draft, id }, change)
+      } catch (error) {
+        report(error)
+      } finally {
+        creating.current.delete(draft.id)
+      }
+    }
+    const wrapped: WorkspaceActions = {
+      ...actions,
+      saveEntry: async (target, change) => {
+        if (!target.id.startsWith('draft-')) return actions.saveEntry(target, change)
+        const queued = creating.current.get(target.id)
+        if (queued) {
+          queued.push(change)
+          return
+        }
+        let next = draftsRef.current.find((d) => d.id === target.id) ?? target
+        if (change.fields) next = withFields(next, change.fields)
+        if (change.name !== undefined) next = { ...next, name: change.name }
+        if (change.oneLine !== undefined) next = { ...next, oneLine: change.oneLine }
+        if (change.overview !== undefined) next = { ...next, overview: change.overview }
+        if (change.levels !== undefined) next = { ...next, levels: change.levels }
+        const updated = next
+        setDrafts((ds) => ds.map((d) => (d.id === updated.id ? updated : d)))
+        draftsRef.current = draftsRef.current.map((d) => (d.id === updated.id ? updated : d))
+        if (updated.name.trim()) await finish(updated)
+      },
+      deleteEntry: async (target) => {
+        if (target.id.startsWith('draft-')) setDrafts((ds) => ds.filter((d) => d.id !== target.id))
+        else await actions.deleteEntry(target)
+      },
+    }
+    return { actions: wrapped, report }
+  }, [actions, book.categories, report])
 
   const nav: Nav = {
     openEntry: (id) => {
@@ -1467,7 +1703,8 @@ function Workspace({ book: base, switcher }: { book: VBook; switcher: ReactNode 
     openNode: (id) => {
       setTab('大纲')
       setNode(id)
-      const path = findNode(outline, id)
+      setFreshNode('')
+      const path = findNode(base.outline, id)
       if (path) setOpen((list) => [...new Set([...list, ...path.slice(0, -1).map((n) => n.id)])])
       pageRef.current?.scrollTo({ top: 0 })
     },
@@ -1480,106 +1717,110 @@ function Workspace({ book: base, switcher }: { book: VBook; switcher: ReactNode 
 
   function categoryOf(id: string): string {
     if (id.startsWith('cat:')) return id.slice(4)
-    return findEntry(book, id)?.category ?? ''
+    return entryIn(book, drafts, id)?.category ?? ''
   }
 
   const newEntry = (name: string) => {
     const cat = book.categories.find((c) => c.name === name)
     if (!cat) return
     const blank = blankEntry(cat)
-    setAdded({ ...added, [name]: [...(added[name] ?? []), blank] })
+    setDrafts((ds) => [...ds, blank])
     setTab('设定')
     setEntry(blank.id)
     setFresh(blank.id)
     setScrollReq({ id: blank.id, smooth: true, n: Date.now() })
   }
+  // 原型里编辑部写的几条收下来
   const accept = (name: string, items: { name: string; text: string }[]) => {
-    const made = items.map((item): VEntry => {
-      const blank = blankEntry(book.categories.find((c) => c.name === name) ?? emptyCategory(name))
-      return blank.kind === 'paragraph' ? { ...blank, name: item.name, sections: [{ label: '内容', text: item.text }] } : { ...blank, name: item.name, oneLine: item.text }
-    })
-    setAdded((prev) => ({ ...prev, [name]: [...(prev[name] ?? []), ...made] }))
+    const cat = book.categories.find((c) => c.name === name) ?? emptyCategory(name)
+    for (const item of items) {
+      const blank = blankEntry(cat)
+      const filled = blank.kind === 'paragraph' ? withFields({ ...blank, name: item.name }, { 内容: item.text }) : { ...blank, name: item.name, oneLine: item.text }
+      void tools.actions.createEntry(cat, applyTemplate(filled, templateOf(book, cat))).catch(report)
+    }
   }
   const addNode = (parentId: string) => {
-    const result = addOutlineChild(outline, parentId)
-    if (!result) return
-    setOutline(result.root)
-    setOpen((list) => [...new Set([...list, parentId])])
-    setNode(result.id)
-    setTab('大纲')
+    const parent = findNode(base.outline, parentId)?.at(-1)
+    if (!parent || !tools.actions.canAdd(parent)) return
+    tools.actions.addNode(parent).then((id) => {
+      if (!id) return
+      setOpen((list) => [...new Set([...list, parentId])])
+      setNode(id)
+      setFreshNode(id)
+      setTab('大纲')
+    }).catch(report)
   }
-  const selectedNode = findNode(outline, node)?.at(-1)
+  const selectedNode = findNode(base.outline, node)?.at(-1)
   const outlineAdd = [
-    { label: `新建${ONE[childKind(outline) ?? '篇']}`, onClick: () => addNode('book') },
-    ...(selectedNode && selectedNode.id !== 'book' && childKind(selectedNode) ? [{ label: `在「${selectedNode.title.trim()}」下面加${ONE[childKind(selectedNode)!]}`, onClick: () => addNode(selectedNode.id) }] : []),
+    ...(actions.canAdd(base.outline) ? [{ label: `新建${ONE[childKind(base.outline) ?? '篇']}`, onClick: () => addNode('book') }] : []),
+    ...(selectedNode && selectedNode.id !== 'book' && actions.canAdd(selectedNode) && childKind(selectedNode) ? [{ label: `在「${shownTitle(selectedNode).trim()}」下面加${ONE[childKind(selectedNode)!]}`, onClick: () => addNode(selectedNode.id) }] : []),
   ]
+  const outlineOnly = useMemo(() => {
+    const q = outlineQuery.trim()
+    if (!q) return undefined
+    const ids = new Set<string>()
+    matchingIds(base.outline, q, ids)
+    return ids
+  }, [base.outline, outlineQuery])
+  const live = actions.live
+  const chatSize = live ? { width: 520, height: 640 } : { width: 380, height: 520 }
 
   return (
-    <div className="flex h-dvh flex-col bg-paper text-ink">
-      <TopBar book={book} tab={tab} onTab={setTab} switcher={switcher} />
-      <div className="flex min-h-0 flex-1">
-        {tab === '设定' && (
-          <SettingsDirectory book={book} selected={entry} onSelect={nav.openEntry} onNewEntry={newEntry}
-            onCreateCategory={(name, style, fields) => {
-              setCustomCats([...customCats, { name, about: customAbout(style, fields), entries: [], custom: { style, fields } }])
-              nav.openEntry(`cat:${name}`)
-            }} />
-        )}
-        {tab === '大纲' && (
-          <DirectoryShell title="大纲" search="找篇、卷、单元、章……" addMenu={outlineAdd}>
-            <OutlineTreeView node={outline} depth={0} selected={node} onSelect={nav.openNode} open={open} onAdd={addNode}
-              toggle={(id) => setOpen(open.includes(id) ? open.filter((x) => x !== id) : [...open, id])} />
-          </DirectoryShell>
-        )}
-        <main ref={pageRef} className="scroll-thin min-w-0 flex-1 overflow-y-auto">
-          {tab === '简介' && <BlurbPage book={book} />}
+    <ActionsContext.Provider value={tools}>
+      <div className="flex h-dvh flex-col bg-paper text-ink">
+        <TopBar book={book} tab={tab} onTab={setTab} right={right} manuscriptHref={manuscriptHref} />
+        {notice}
+        <div className="flex min-h-0 flex-1">
           {tab === '设定' && (
-            entry === 'world' ? <WorldPage book={book} />
-              : category ? (
-                <CategoryStream key={category.name} book={book} category={category} next={book.categories[categoryIndex + 1]} nav={nav} fresh={fresh}
-                  scrollReq={scrollReq} pageRef={pageRef} onSpy={(id) => setEntry((now) => (now === id ? now : id))}
-                  fields={category.name === '等级体系' || category.custom?.style === 'ladder' ? undefined
-                    : { template: templateOf(category), defaults: defaultTemplateFor(category), counts: countsOf(category.name), onChange: (t) => setTemplates({ ...templates, [category.name]: t }) }}
-                  onNewEntry={() => newEntry(category.name)} onAccept={(items) => accept(category.name, items)} />
-              )
-                : <SettingsOverview book={book} nav={nav} onSelect={nav.openEntry} />
+            <SettingsDirectory book={book} selected={entry} onSelect={nav.openEntry} onNewEntry={newEntry}
+              onCreateCategory={(name, style, fields) => {
+                tools.actions.createCategory(name, style, fields, customAbout(style, fields)).then(() => nav.openEntry(`cat:${name}`)).catch(report)
+              }} />
           )}
-          {tab === '大纲' && <OutlinePage key={node} book={book} outline={outline} id={node} nav={nav} onAdd={addNode} />}
-        </main>
-        {dock === 'side' && <DockedEditorial setDock={setDock} />}
-      </div>
-
-      {dock === 'float' && <FloatingEditorial setDock={setDock} />}
-      {dock === 'ball' && (
-        <button type="button" onClick={() => setDock('float')} title="编辑部"
-          className="press fixed right-6 bottom-6 z-40 flex size-14 items-center justify-center rounded-full bg-chief font-serif text-xl text-on-role shadow-[0_14px_30px_-10px_rgb(40_50_90/0.6)] transition-transform hover:-translate-y-0.5">
-          编
-          <span className="absolute top-1 right-1 size-3 rounded-full bg-seal ring-2 ring-paper" />
-        </button>
-      )}
-
-      <SelectionActions pageRef={pageRef} onToast={setToast} />
-      {toast && (
-        <div className="fixed bottom-8 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full bg-ink px-5 py-2.5 text-[13px] text-paper-2 shadow-[var(--shadow-lift)]">
-          <Wand2 className="size-3.5" />{toast}
+          {tab === '大纲' && (
+            <DirectoryShell title="大纲" search="找篇、卷、单元、章……" query={outlineQuery} onQuery={setOutlineQuery} addMenu={outlineAdd}>
+              <OutlineTreeView node={base.outline} depth={0} selected={node} onSelect={nav.openNode} open={open} onAdd={addNode} only={outlineOnly}
+                toggle={(id) => setOpen(open.includes(id) ? open.filter((x) => x !== id) : [...open, id])} />
+              {outlineOnly && outlineOnly.size === 0 && <p className="px-2.5 py-2 text-[13px] text-ink-3">没找到「{outlineQuery.trim()}」</p>}
+            </DirectoryShell>
+          )}
+          <main ref={pageRef} className="scroll-thin min-w-0 flex-1 overflow-y-auto">
+            {tab === '简介' && <BlurbPage book={book} />}
+            {tab === '设定' && (
+              entry === 'world' ? <WorldPage book={book} />
+                : category ? (
+                  <CategoryStream key={category.key} book={book} category={category} next={book.categories[categoryIndex + 1]} nav={nav} fresh={fresh}
+                    scrollReq={scrollReq} pageRef={pageRef} onSpy={(id) => setEntry((now) => (now === id ? now : id))}
+                    cardKey={(id) => aliases[id] ?? id}
+                    onNewEntry={() => newEntry(category.name)} onAccept={(items) => accept(category.name, items)} />
+                )
+                  : <SettingsOverview book={book} nav={nav} onSelect={nav.openEntry} />
+            )}
+            {tab === '大纲' && <OutlinePage key={node} book={book} outline={base.outline} id={node} nav={nav} onAdd={addNode} fresh={freshNode === node} />}
+          </main>
+          {dock === 'side' && <DockedEditorial setDock={setDock} initial={live ? 520 : 460}>{chat}</DockedEditorial>}
         </div>
-      )}
-    </div>
+
+        {dock === 'float' && <FloatingEditorial setDock={setDock} size={chatSize}>{chat}</FloatingEditorial>}
+        {dock === 'ball' && (
+          <button type="button" onClick={() => setDock('float')} title="编辑部"
+            className="press fixed right-6 bottom-6 z-40 flex size-14 items-center justify-center rounded-full bg-chief font-serif text-xl text-on-role shadow-[0_14px_30px_-10px_rgb(40_50_90/0.6)] transition-transform hover:-translate-y-0.5">
+            编
+            {chatBadge === undefined
+              ? <span className="absolute top-1 right-1 size-3 rounded-full bg-seal ring-2 ring-paper" />
+              : chatBadge > 0 && <span className="absolute -top-0.5 -right-0.5 flex min-w-5 items-center justify-center rounded-full bg-seal px-1 text-[11px] leading-5 text-on-role ring-2 ring-paper">{chatBadge > 99 ? '99+' : chatBadge}</span>}
+          </button>
+        )}
+
+        {/* 选中文字让编辑部改：第三步接上 */}
+        {!live && <SelectionActions pageRef={pageRef} onToast={setToast} />}
+        {toast && (
+          <div className="fixed bottom-8 left-1/2 z-50 flex max-w-[min(640px,90vw)] -translate-x-1/2 items-center gap-2 rounded-full bg-ink px-5 py-2.5 text-[13px] text-paper-2 shadow-[var(--shadow-lift)]">
+            <Wand2 className="size-3.5 shrink-0" />{toast}
+          </div>
+        )}
+      </div>
+    </ActionsContext.Provider>
   )
 }
 
-export function WorkspacePrototype() {
-  const [params, setParams] = useSearchParams()
-  const source = params.get('book') ?? 'sample'
-  const { book, loading, error } = useBookSource(source)
-  const choose = (next: string) => setParams(next === 'sample' ? {} : { book: next })
-  if (book) return <Workspace key={source} book={book} switcher={<BookSwitcher inline source={source} onSource={choose} />} />
-  return (
-    <>
-      <div className="flex h-dvh items-center justify-center bg-paper text-[15px] text-ink-3">
-        {loading ? '正在读这本书…' : `这本书没读出来：${error ?? ''}`}
-      </div>
-      <BookSwitcher source={source} onSource={choose} />
-    </>
-  )
-}

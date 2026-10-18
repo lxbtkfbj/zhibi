@@ -177,7 +177,7 @@ async def update_book(
             setattr(book, field, {**(getattr(book, field) or {}), **card.model_dump(exclude_unset=True)})
     if body.concept is not None or body.title is not None:
         await record_version(session, book.id, "concept", book, "author", before=before)
-    if body.concept is not None and "story" in body.concept:
+    if body.concept is not None and "story" in body.concept and body.review_changes:
         from app.api.library_ai import review_concept_change
 
         await review_concept_change(session, redis, book.id, before.get("story", ""))
@@ -308,12 +308,13 @@ def _insert_after(rows: list, row, after_id: uuid.UUID | None, message: str) -> 
 async def create_unit(volume_id: uuid.UUID, body: UnitCreate, session: AsyncSession = SessionDep) -> UnitOut:
     volume, state = await _structure_target(session, Volume, volume_id)
     units = state.own_units(volume.id)
-    if not units:
-        raise HTTPException(409, "这一卷还没拆成单元，不能单独加")
+    # 还没拆单元的卷：没写过的可以加第一个单元，从此按单元算章数
+    if not units and state.own_chapters(volume):
+        raise HTTPException(409, "这一卷已经有章节了，先拆成单元再加")
     unit = PlotUnit(
         book_id=volume.book_id,
         volume_id=volume.id,
-        index=max(u.index for u in units) + 1,
+        index=max((u.index for u in units), default=0) + 1,
         **body.model_dump(exclude={"after_unit_id"}),
     )
     ordered = _insert_after(units, unit, body.after_unit_id, "指定单元不属于这一卷")

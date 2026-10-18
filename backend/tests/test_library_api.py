@@ -144,7 +144,7 @@ async def test_custom_category_crud_preserves_removed_fields(client, sessionmake
     assert (await client.delete(f"/api/setting-categories/{category['id']}")).status_code == 204
     assert (await client.get(f"/api/books/{book_id}/setting-categories")).json() == []
     assert (
-        await client.post(f"/api/books/{book_id}/setting-categories", json={"name": "非法", "style": "ladder"})
+        await client.post(f"/api/books/{book_id}/setting-categories", json={"name": "非法", "style": "表格"})
     ).status_code == 422
 
 

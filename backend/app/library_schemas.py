@@ -16,7 +16,7 @@ def validate_fields(value: list[str]) -> list[str]:
 class CategoryCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=40)
-    style: Literal["card", "paragraph"]
+    style: Literal["card", "paragraph", "ladder"]
     fields: list[str] = []
     hint: str = ""
 

@@ -68,7 +68,7 @@ function Composer() {
 function ContinueCard({ book }: { book: BookSummary }) {
   const status = displayStatus(book.status, book.job_status)
   return (
-    <Link to={`/books/${book.id}`} className="paper lift group flex items-center gap-6 overflow-hidden p-5 sm:p-6">
+    <Link to={`/desk/${book.id}`} className="paper lift group flex items-center gap-6 overflow-hidden p-5 sm:p-6">
       <BookCover title={book.title} seed={book.id} size="sm" className="transition-transform duration-500 group-hover:-rotate-3" />
       <div className="min-w-0 flex-1">
         <p className="mb-1 flex items-center gap-2 text-xs tracking-wider text-ink-3">
@@ -103,7 +103,7 @@ function ShelfBook({ book, index }: { book: BookSummary; index: number }) {
       transition={{ duration: 0.5, delay: 0.05 * index, ease: [0.22, 1, 0.36, 1] }}
       className="group relative"
     >
-      <Link to={`/books/${book.id}`} className="block">
+      <Link to={`/desk/${book.id}`} className="block">
         <div className="flex justify-center rounded-2xl px-4 pt-6 pb-4 transition-colors duration-300 group-hover:bg-card/70">
           <div className="transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:-translate-y-2 group-hover:-rotate-2">
             <BookCover title={book.title} seed={book.id} size="md" className="shadow-[0_14px_24px_-14px_rgb(40_25_10/0.6)]" />

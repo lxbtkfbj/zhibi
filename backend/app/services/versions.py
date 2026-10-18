@@ -43,7 +43,7 @@ EDITABLE_FIELDS = {
         "position",
     ),
     "character": tuple(column for _, column in CHARACTER_CATEGORY["fields"])
-    + ("one_line", "status", "tags", "locked", "position"),
+    + ("one_line", "status", "tags", "locked", "position", "extra"),
     "segment": ("title", "event", "status", "segment"),
     "volume": (
         "title",

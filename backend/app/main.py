@@ -21,6 +21,7 @@ from app.api import (
     outline_tree,
     prompt_tools,
     story_map,
+    workspace,
 )
 from app.config import get_settings
 from app.crypto import encrypt
@@ -79,6 +80,7 @@ def create_app() -> FastAPI:
         outline_tree,
         outline_expand,
         new_book,
+        workspace,
     ):
         application.include_router(module.router, prefix="/api")
     return application

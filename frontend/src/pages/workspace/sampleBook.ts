@@ -184,6 +184,7 @@ export const SAMPLE_BOOK: VBook = {
   categories,
   outline,
   pending: 2,
+  layouts: {},
 }
 numberChapters(SAMPLE_BOOK.outline)
 linkMentions(SAMPLE_BOOK)
@@ -203,6 +204,7 @@ export function emptyBook(): VBook {
     categories: CATEGORY_NAMES.map(emptyCategory),
     outline: { id: 'book', kind: '全书', title: '全书', text: '', uses: [] },
     pending: 0,
+    layouts: {},
   }
 }
 

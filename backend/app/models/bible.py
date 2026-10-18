@@ -40,6 +40,8 @@ class Character(UUIDPk, Timestamps, Base):
     locked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     source: Mapped[str] = mapped_column(String(20), default="ai", server_default="ai")
     position: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # 没有专门一列的栏目：所属、软肋、成长与结局、实力与地位，和作者自己加的栏目；键是栏目名
+    extra: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
 
 
 class Relationship(UUIDPk, Timestamps, Base):

@@ -1,4 +1,4 @@
-/** 工作台原型的数据形状：示例书、空书、旧书快照、书架上的真书，都先转成这个样子再画。 */
+/** 书工作台的数据形状：书架上的真书、示例书、空书、旧书快照，都先转成这个样子再画。 */
 
 export interface VField {
   /** 原来的栏目名：作者改了名，程序还按它认（比如身世后面挂「另有秘密」） */
@@ -23,13 +23,14 @@ export interface VEntry {
   role?: string
   /** 角色已经死了：名字旁边标一下，不用「此刻」里写「活着」 */
   dead?: boolean
-  /** 右边资料卡里的短字段：名称、内容、空着时的提示 */
-  facts: [string, string, string?][]
+  /** 名字下面的短字段：显示名、内容、空着时的提示、存内容时认的名字（不写就是显示名） */
+  facts: [string, string, string?, string?][]
   /** 一栏一栏的长字段；段落类只有一栏「内容」 */
   sections: VField[]
   /** 角色此刻的状态，设定师每章更新；全空就不显示 */
   now?: [string, string][]
-  relations?: { to: string; kind: string; text: string }[]
+  /** id 是真书里关系那一行；toLead 是旧数据「和主角的关系」那一栏 */
+  relations?: { id?: string; to: string; kind: string; text: string; toLead?: boolean }[]
   /** 身世里「另有秘密」指向的条目 */
   secret?: string
   /** 角色的金手指条目 / 金手指的主人 */
@@ -40,9 +41,15 @@ export interface VEntry {
   /** 地点属于哪里：父条目 id */
   parent?: string
   appears: { node: string; label: string }[]
+  /** 从别处推出来的（比如带金手指标签的角色），这里不能改 */
+  readonly?: boolean
 }
 
 export interface VCategory {
+  /** 存栏目时认的名字：内置类别就是显示名，自建的是 custom:xxx */
+  key: string
+  /** 自建类别在真书里那一行的 id */
+  id?: string
   name: string
   /** 一句话说清这一类放什么 */
   about: string
@@ -68,6 +75,10 @@ export interface VNode {
   locked?: boolean
   uses: string[]
   children?: VNode[]
+  /** 下面一层是什么：还没有孩子时用（没分篇的书，全书下面直接是卷） */
+  childKind?: VNode['kind']
+  /** 真书里对应的那一行 */
+  ref?: { type: 'book' | 'segment' | 'volume' | 'unit' | 'chapter'; id: string }
 }
 
 export interface VBook {
@@ -84,7 +95,14 @@ export interface VBook {
   categories: VCategory[]
   outline: VNode
   pending: number
+  /** 这本书每一类设定有哪几栏，键是类别的 key；没存的按默认 */
+  layouts: Record<string, CardTemplate>
 }
+
+/** 一栏：key 是存内容时认的名字，label 是现在显示的名字（改了名 key 不变）。 */
+export interface FieldItem { key: string; label: string }
+/** 一类设定每一条有哪几栏：facts 是名字下面的小字，sections 是正文栏目。 */
+export interface CardTemplate { facts: FieldItem[]; sections: FieldItem[] }
 
 /** 八个默认类别。名字三到五个字；from 是真实设定库里对应的类别。 */
 export const CATEGORY_DEFS: { name: string; from: string[]; about: string; example?: { name: string; text: string } }[] = [
@@ -120,7 +138,7 @@ export const CATEGORY_NAMES = CATEGORY_DEFS.map((c) => c.name)
 
 export function emptyCategory(name: string): VCategory {
   const def = CATEGORY_DEFS.find((c) => c.name === name)
-  return { name, about: def?.about ?? '', example: def?.example, entries: [] }
+  return { key: name, name, about: def?.about ?? '', example: def?.example, entries: [] }
 }
 
 /** 角色卡的字段（照真实设定库），定位按这个顺序分组。 */
@@ -240,4 +258,61 @@ export function linkMentions(book: VBook): void {
     node.children?.forEach(visit)
   }
   visit(book.outline)
+}
+
+/** 「第一卷」加全角空格加「杂役院」：拆成前缀和名字，前缀程序排，名字作者起。 */
+export function splitTitle(title: string): [string, string] {
+  const at = title.indexOf('　')
+  return at < 0 ? [title, ''] : [title.slice(0, at), title.slice(at + 1)]
+}
+
+/** 等级体系、自建的阶梯类没有栏目可调。 */
+export function isLadder(category: VCategory): boolean {
+  return category.name === '等级体系' || category.custom?.style === 'ladder'
+}
+
+/** 一类默认有哪几栏：内置的照 DEFAULT_FIELDS，自建的照建的时候选的。 */
+export function defaultTemplateFor(category: VCategory): CardTemplate {
+  const item = (key: string): FieldItem => ({ key, label: key })
+  const preset = DEFAULT_FIELDS[category.name]
+  if (preset && !category.custom) return { facts: preset.facts.map(item), sections: preset.sections.map(item) }
+  if (category.custom?.style === 'card') return { facts: [], sections: category.custom.fields.map(item) }
+  return { facts: [], sections: [item('内容')] }
+}
+
+export function templateOf(book: VBook, category: VCategory): CardTemplate {
+  return book.layouts[category.key] ?? defaultTemplateFor(category)
+}
+
+function hintOf(key: string): string | undefined {
+  return CHARACTER_PLACEHOLDERS[key] ?? GOLDFINGER_PLACEHOLDERS[key] ?? FACT_PLACEHOLDERS[key]
+}
+
+/** 这一条某一栏写的内容：小字和正文栏目里都找。 */
+export function valueOf(entry: VEntry, key: string): string {
+  const fact = entry.facts.find(([label]) => label === key)
+  if (fact) return fact[1]
+  return entry.sections.find((s) => (s.key ?? s.label) === key)?.text ?? ''
+}
+
+/** 按这本书的栏目重新摆一条：内容按 key 找，改了名也跟着走；栏目里没有、但写了内容的，接在最后，不藏起来。 */
+export function applyTemplate(entry: VEntry, template: CardTemplate): VEntry {
+  if (entry.kind === 'ladder') return entry
+  const keys = new Set([...template.facts, ...template.sections].map((f) => f.key))
+  const placeholder = (f: FieldItem) => (f.label === f.key ? entry.sections.find((s) => (s.key ?? s.label) === f.key)?.placeholder ?? hintOf(f.key) : undefined)
+  const leftovers: VField[] = [
+    ...entry.facts.filter(([label, value]) => value && !keys.has(label)).map(([label, value]) => ({ key: label, label, text: value })),
+    ...entry.sections.filter((s) => s.text && !keys.has(s.key ?? s.label)),
+  ]
+  return {
+    ...entry,
+    facts: template.facts.map((f) => {
+      const old = entry.facts.find(([label]) => label === f.key)
+      return [f.label, valueOf(entry, f.key), f.label === f.key ? old?.[2] ?? hintOf(f.key) : undefined, f.key] as VEntry['facts'][number]
+    }),
+    sections: [
+      ...template.sections.map((f) => ({ key: f.key, label: f.label, text: valueOf(entry, f.key), placeholder: placeholder(f) })),
+      ...leftovers,
+    ],
+  }
 }

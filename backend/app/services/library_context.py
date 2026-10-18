@@ -148,6 +148,7 @@ class LibraryContext:
                 value = getattr(target, column, "")
                 if value:
                     lines.append(f"{label}：{'、'.join(value) if isinstance(value, list) else value}")
+            lines.extend(f"{label}：{value}" for label, value in (target.extra or {}).items() if value)
             if target.want:
                 lines.append(f"此刻想要：{target.want}")
         elif target.style == "ladder":
@@ -156,7 +157,9 @@ class LibraryContext:
         elif target.style == "card":
             lines.extend(f"{field['name']}：{field['value']}" for field in target.fields or [])
         else:
-            lines.extend([f"一句话：{target.one_line or ''}", target.content or ""])
+            lines.append(f"一句话：{target.one_line or ''}")
+            lines.extend(f"{field['name']}：{field['value']}" for field in target.fields or [] if field.get("value"))
+            lines.append(target.content or "")
         return "\n".join(lines)
 
     @property

@@ -185,8 +185,8 @@ async def test_add_delete_volume_and_foreign_references(client, sessionmaker):
     assert volume["index"] == 2 and volume["units"] == []
     after = await indices(sessionmaker, book.id)
     assert [after[c.id] for c in chapters] == [1, 2, 3, 4, 8, 9, 10, 11]
-    response = await client.post(f"/api/volumes/{volume['id']}/units", json={"title": "不能单独加"})
-    assert response.status_code == 409 and response.json()["detail"] == "这一卷还没拆成单元，不能单独加"
+    response = await client.post(f"/api/volumes/{volume['id']}/units", json={"title": "空卷的第一个单元"})
+    assert response.status_code == 201, response.text
     assert (await client.delete(f"/api/volumes/{volume['id']}")).status_code == 204
     assert list((await indices(sessionmaker, book.id)).values()) == list(range(1, 9))
     assert (await client.delete(f"/api/volumes/{volumes[0].id}")).status_code == 204

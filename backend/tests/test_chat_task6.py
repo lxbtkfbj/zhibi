@@ -509,6 +509,8 @@ def test_migration_roundtrip_and_unique_thread():
     command.upgrade(cfg, "0015")
     with psycopg.connect(dsn) as conn:
         assert conn.execute("SELECT text,scope FROM author_requirements").fetchone() == ("旧要求", "always")
+    # 后面的测试要用最新的表
+    command.upgrade(cfg, "head")
 
 
 async def test_related_all_blocks_role_extras_pending_and_dialogue_filters(sessionmaker):

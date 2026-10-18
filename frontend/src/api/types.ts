@@ -301,6 +301,8 @@ export interface BookDetail extends BookSummary {
   active_job: Job | null
   chapters_final: number
   words_final: number
+  /** 新工作台：这本书每一类设定有哪几栏 */
+  card_layouts?: Record<string, { facts: { key: string; label: string }[]; sections: { key: string; label: string }[] }>
 }
 
 /** 线索在某一段（卷或单元）里走到哪一步。 */

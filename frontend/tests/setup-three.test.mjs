@@ -36,7 +36,8 @@ test('正式页面使用后端类别和候选接口，不复制类别配置，�
   // 页面只负责点选，提交在书稿底部的操作条里。
   const actionBar = readFileSync(new URL('../src/pages/book/ActionBar.tsx', import.meta.url), 'utf8')
   assert.ok(!home.includes('先问我几个问题'))
-  assert.ok(home.includes('定调和设定库做完不停，停在大纲给你看'))
+  // 首页只剩「开新书」，进新建页；开书方式那一排已经去掉
+  assert.ok(home.includes("navigate('/new'"))
   assert.ok(page.includes('useLibraryConfig'))
   assert.ok(page.includes('SetupGate'))
   assert.ok(actionBar.includes('index: picked.index + 1'))

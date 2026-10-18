@@ -277,6 +277,7 @@ def _char_dict(c: Character) -> dict[str, Any]:
             "location",
             "condition",
             "is_alive",
+            "extra",
         )
     }
 

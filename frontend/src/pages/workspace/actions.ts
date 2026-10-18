@@ -1,0 +1,206 @@
+/** 工作台上的每一次改动都走这里：真书存到服务器，原型只改这一页里的那份。界面只管调，不管存到哪。 */
+
+import { createContext, useContext, useMemo, useState } from 'react'
+import {
+  CHARACTER_FIELDS, cn, findEntry, findNode, numberChapters, splitTitle,
+  type CardTemplate, type VBook, type VCategory, type VEntry, type VNode,
+} from './model'
+
+export type CategoryStyle = NonNullable<VCategory['custom']>['style']
+
+/** 一条设定改了什么。fields 的键是栏目的 key（改了名也不变）。 */
+export interface EntryChange {
+  name?: string
+  oneLine?: string
+  fields?: Record<string, string>
+  overview?: string
+  levels?: { name: string; text: string }[]
+  locked?: boolean
+}
+
+export interface BookChange {
+  title?: string
+  blurb?: string
+  channel?: string
+  genre?: string
+  tags?: string[]
+  length?: number | null
+}
+
+export interface WorkspaceActions {
+  /** 真书：改了就存到服务器 */
+  live: boolean
+  saveBook(change: BookChange): Promise<void>
+  saveWorld(text: string): Promise<void>
+  saveEntry(entry: VEntry, change: EntryChange): Promise<void>
+  /** 新建一条（draft 是作者在空卡片上写好的），返回新的 id */
+  createEntry(category: VCategory, draft: VEntry): Promise<string>
+  deleteEntry(entry: VEntry): Promise<void>
+  saveRelation(entry: VEntry, relation: NonNullable<VEntry['relations']>[number], text: string): Promise<void>
+  addRelation(entry: VEntry, to: string, kind: string, text: string): Promise<void>
+  deleteRelation(entry: VEntry, relation: NonNullable<VEntry['relations']>[number]): Promise<void>
+  saveTemplate(category: VCategory, template: CardTemplate, dropped: string[]): Promise<void>
+  resetTemplate(category: VCategory): Promise<void>
+  createCategory(name: string, style: CategoryStyle, fields: string[], about: string): Promise<void>
+  saveNode(node: VNode, change: { name?: string; text?: string }): Promise<void>
+  /** 在这个节点下面加一个下一层，返回新节点的 id */
+  addNode(parent: VNode): Promise<string | undefined>
+  deleteNode(node: VNode): Promise<void>
+  canAdd(parent: VNode): boolean
+  canEdit(node: VNode, part: 'name' | 'text'): boolean
+  canDelete(node: VNode): boolean
+}
+
+interface WorkspaceTools {
+  actions: WorkspaceActions
+  /** 存不上时在页面底下说一声 */
+  report: (error: unknown) => void
+}
+
+export const ActionsContext = createContext<WorkspaceTools | null>(null)
+
+export function useWorkspace(): WorkspaceTools {
+  const value = useContext(ActionsContext)
+  if (!value) throw new Error('useWorkspace 必须在工作台里用')
+  return value
+}
+
+/** 存一下：失败了报出来，不打断作者。 */
+export function useSave() {
+  const { report } = useWorkspace()
+  return (task: Promise<unknown>) => { task.catch(report) }
+}
+
+/* ---------------- 原型：改的都只在这一页 ---------------- */
+
+const NEXT_KIND: Partial<Record<VNode['kind'], VNode['kind']>> = { 全书: '篇', 篇: '卷', 卷: '单元', 单元: '章' }
+
+/** 在这个节点下面加的是哪一层：已经有下一层就照着它，没有就按默认。 */
+export function childKind(node: VNode): VNode['kind'] | undefined {
+  return node.children?.[0]?.kind ?? node.childKind ?? NEXT_KIND[node.kind]
+}
+
+let nextLocal = 1
+
+function patchEntry(book: VBook, id: string, change: (entry: VEntry) => VEntry): VBook {
+  return { ...book, categories: book.categories.map((c) => ({ ...c, entries: c.entries.map((e) => (e.id === id ? change(e) : e)) })) }
+}
+
+export function withFields(entry: VEntry, fields: Record<string, string>): VEntry {
+  const facts = entry.facts.map((f) => {
+    const key = f[3] ?? f[0]
+    return key in fields ? ([f[0], fields[key], f[2], key] as VEntry['facts'][number]) : f
+  })
+  const known = new Set([...facts.map((f) => f[3] ?? f[0]), ...entry.sections.map((s) => s.key ?? s.label)])
+  const sections = [
+    ...entry.sections.map((s) => ((s.key ?? s.label) in fields ? { ...s, text: fields[s.key ?? s.label] } : s)),
+    ...Object.entries(fields).filter(([key]) => !known.has(key)).map(([key, text]) => ({ key, label: key, text })),
+  ]
+  const role = fields['定位']
+  return { ...entry, facts, sections, ...(role !== undefined && entry.kind === 'character' ? { role: role || '配角' } : {}) }
+}
+
+/** 原型用：书放在这一页的状态里，改动直接改这份。 */
+export function useLocalBook(initial: VBook): [VBook, WorkspaceActions] {
+  const [book, setBook] = useState(initial)
+  const actions = useMemo<WorkspaceActions>(() => {
+    const update = (change: (book: VBook) => VBook) => { setBook(change); return Promise.resolve() }
+    return {
+      live: false,
+      saveBook: (change) => update((b) => ({ ...b, ...change, length: change.length === undefined ? b.length : change.length ?? undefined })),
+      saveWorld: (text) => update((b) => ({ ...b, world: text })),
+      saveEntry: (entry, change) => update((b) => patchEntry(b, entry.id, (e) => {
+        let next = change.fields ? withFields(e, change.fields) : e
+        if (change.name !== undefined) next = { ...next, name: change.name }
+        if (change.oneLine !== undefined) next = { ...next, oneLine: change.oneLine }
+        if (change.overview !== undefined) next = { ...next, overview: change.overview }
+        if (change.levels !== undefined) next = { ...next, levels: change.levels }
+        if (change.locked !== undefined) next = { ...next, locked: change.locked }
+        return next
+      })),
+      createEntry: async (category, draft) => {
+        const id = `local-${nextLocal++}`
+        setBook((b) => ({ ...b, categories: b.categories.map((c) => (c.key === category.key ? { ...c, entries: [...c.entries, { ...draft, id }] } : c)) }))
+        return id
+      },
+      deleteEntry: (entry) => update((b) => ({ ...b, categories: b.categories.map((c) => ({ ...c, entries: c.entries.filter((e) => e.id !== entry.id) })) })),
+      saveRelation: (entry, relation, text) => update((b) => patchEntry(b, entry.id, (e) => ({ ...e, relations: e.relations?.map((r) => (r === relation || (r.to === relation.to && r.kind === relation.kind) ? { ...r, text } : r)) }))),
+      addRelation: (entry, to, kind, text) => update((b) => patchEntry(b, entry.id, (e) => ({ ...e, relations: [...(e.relations ?? []), { to, kind, text }] }))),
+      deleteRelation: (entry, relation) => update((b) => patchEntry(b, entry.id, (e) => ({ ...e, relations: e.relations?.filter((r) => !(r.to === relation.to && r.kind === relation.kind)) }))),
+      saveTemplate: (category, template) => update((b) => ({ ...b, layouts: { ...b.layouts, [category.key]: template } })),
+      resetTemplate: (category) => update((b) => {
+        const layouts = { ...b.layouts }
+        delete layouts[category.key]
+        return { ...b, layouts }
+      }),
+      createCategory: (name, style, fields, about) => update((b) => ({
+        ...b, categories: [...b.categories, { key: `custom:${name}`, name, about, entries: [], custom: { style, fields } }],
+      })),
+      saveNode: (node, change) => update((b) => {
+        const outline = structuredClone(b.outline)
+        const target = findNode(outline, node.id)?.at(-1)
+        if (!target) return b
+        if (change.text !== undefined) target.text = change.text
+        if (change.name !== undefined) target.title = `${splitTitle(target.title)[0]}　${change.name}`
+        return { ...b, outline }
+      }),
+      addNode: async (parent) => {
+        const result = addOutlineChild(book.outline, parent.id)
+        if (!result) return undefined
+        setBook((b) => ({ ...b, outline: result.root }))
+        return result.id
+      },
+      deleteNode: (node) => update((b) => {
+        const outline = structuredClone(b.outline)
+        const path = findNode(outline, node.id)
+        const parent = path?.at(-2)
+        if (!parent?.children) return b
+        parent.children = parent.children.filter((c) => c.id !== node.id)
+        numberChapters(outline)
+        return { ...b, outline }
+      }),
+      canAdd: (parent) => !!childKind(parent),
+      canEdit: () => true,
+      canDelete: (node) => node.kind !== '全书',
+    }
+  }, [book.outline])
+  return [book, actions]
+}
+
+/** 在节点下面加一个下一层，返回新的大纲树和新节点 id。 */
+function addOutlineChild(root: VNode, parentId: string): { root: VNode; id: string } | null {
+  const copy: VNode = structuredClone(root)
+  const parent = findNode(copy, parentId)?.at(-1)
+  const kind = parent && childKind(parent)
+  if (!parent || !kind) return null
+  const siblings = parent.children ?? []
+  const all = (k: VNode['kind']) => {
+    let n = 0
+    const walk = (x: VNode) => { if (x.kind === k) n++; x.children?.forEach(walk) }
+    walk(copy)
+    return n
+  }
+  const title = kind === '篇' ? `第${cn(siblings.length + 1)}篇　` : kind === '卷' ? `第${cn(all('卷') + 1)}卷　` : kind === '单元' ? `单元${cn(siblings.length + 1)}　` : '新的一章'
+  const id = `added-${nextLocal++}`
+  parent.children = [...siblings, { id, kind, title, text: '', uses: [], ...(kind === '章' ? { sections: [{ label: '发生什么', text: '' }, { label: '看点', text: '' }, { label: '结尾钩子', text: '' }] } : {}) }]
+  numberChapters(copy)
+  return { root: copy, id }
+}
+
+/** 在某一类里新建一条空的：照这一类的样子。 */
+export function blankEntry(category: VCategory): VEntry {
+  const id = `draft-${nextLocal++}`
+  const base = { id, category: category.name, name: '', oneLine: '', tags: [], locked: false, facts: [] as VEntry['facts'], sections: [] as VEntry['sections'], appears: [] }
+  // 栏目由这本书这一类的栏目去摆，这里只定是哪种卡
+  if (category.name === '角色列表' && !category.custom) {
+    return { ...base, kind: 'character', role: '配角', facts: [['定位', '配角']], sections: CHARACTER_FIELDS.map((key) => ({ key, label: key, text: '' })) }
+  }
+  if (category.name === '金手指' && !category.custom) return { ...base, kind: 'goldfinger', tags: ['金手指'] }
+  if ((category.name === '等级体系' && !category.custom) || category.custom?.style === 'ladder') return { ...base, kind: 'ladder', overview: '', levels: [{ name: '', text: '' }, { name: '', text: '' }] }
+  return { ...base, kind: 'paragraph' }
+}
+
+/** 找一条：草稿也算。 */
+export function entryIn(book: VBook, drafts: VEntry[], id: string): VEntry | undefined {
+  return findEntry(book, id) ?? drafts.find((d) => d.id === id)
+}

@@ -38,6 +38,8 @@ export interface LibraryItem {
   location?: string
   condition?: string
   is_alive?: boolean
+  /** 角色没有专门一列的栏目：所属、软肋、作者自己加的…… */
+  extra?: Record<string, string>
 }
 export interface LibraryCategory {
   id?: string

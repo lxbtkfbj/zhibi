@@ -163,6 +163,8 @@ class BookPatch(BaseModel):
     spine: dict | None = None
     protagonist: ProtagonistPatch | None = None
     world: WorldPatch | None = None
+    # 改了简介要不要让编辑部顺带查设定库；新工作台不叫编辑部就不查
+    review_changes: bool = True
 
     @field_validator("protagonist", "world")
     @classmethod
@@ -223,6 +225,7 @@ class BookDetail(BookSummary):
     setup_progress: dict = {}
     requirements: list[str] = []
     trial_read_done: bool = False
+    card_layouts: dict = {}
     active_job: JobOut | None = None
     # 写作进度：已定稿章数、总字数
     chapters_final: int = 0
@@ -305,7 +308,7 @@ class UnitPatch(BaseModel):
 
 
 class UnitCreate(BaseModel):
-    title: str = Field(min_length=1, max_length=200)
+    title: str = Field(default="", max_length=200)
     summary: str = ""
     chapter_count: int = Field(8, ge=1, le=50)
     after_unit_id: uuid.UUID | None = None
@@ -316,7 +319,7 @@ class UnitOrder(BaseModel):
 
 
 class VolumeCreate(BaseModel):
-    title: str = Field(min_length=1, max_length=200)
+    title: str = Field(default="", max_length=200)
     summary: str = ""
     chapter_count: int = Field(60, ge=1, le=1000)
     target_node_id: uuid.UUID | None = None
@@ -465,6 +468,40 @@ class SettingLevel(BaseModel):
     text: str = ""
 
 
+def clean_extra(value: dict[str, str] | None, keep_empty: bool = False) -> dict[str, str] | None:
+    """栏目名去空白、不超过 20 字；内容去首尾空白。"""
+    if value is None:
+        return None
+    out: dict[str, str] = {}
+    for key, text in value.items():
+        name = key.strip()
+        if not name or len(name) > 20:
+            raise ValueError("栏目名要 1 到 20 个字")
+        text = text.strip()
+        if text or keep_empty:
+            out[name] = text
+    return out
+
+
+class LayoutField(BaseModel):
+    key: str = Field(min_length=1, max_length=20)
+    label: str = Field(min_length=1, max_length=20)
+
+
+class CardLayoutIn(BaseModel):
+    facts: list[LayoutField] = Field(default_factory=list, max_length=30)
+    sections: list[LayoutField] = Field(default_factory=list, max_length=30)
+    # 删掉的栏目：这一类每一条里写的内容一起清掉
+    dropped: list[str] = Field(default_factory=list, max_length=60)
+
+    @model_validator(mode="after")
+    def unique_labels(self):
+        labels = [f.label.strip() for f in [*self.facts, *self.sections]]
+        if len(labels) != len(set(labels)):
+            raise ValueError("栏目名不能重复")
+        return self
+
+
 class CharacterBase(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     aliases: list[str] = []
@@ -487,6 +524,13 @@ class CharacterBase(BaseModel):
     tags: list[str] = []
     locked: bool = False
     position: int = 0
+    # 没有专门一列的栏目，键是栏目名
+    extra: dict[str, str] = {}
+
+    @field_validator("extra")
+    @classmethod
+    def extra_keys(cls, value):
+        return clean_extra(value)
 
 
 class CharacterOut(CharacterBase, ORM):
@@ -517,6 +561,13 @@ class CharacterPatch(BaseModel):
     tags: list[str] | None = None
     locked: bool | None = None
     position: int | None = None
+    # 只改给出的几栏，空字符串表示清掉这一栏
+    extra: dict[str, str] | None = None
+
+    @field_validator("extra")
+    @classmethod
+    def extra_keys(cls, value):
+        return clean_extra(value, keep_empty=True)
 
     @field_validator("*")
     @classmethod
@@ -580,6 +631,13 @@ class WorldEntryPatch(BaseModel):
     secret_id: uuid.UUID | None = None
     locked: bool | None = None
     position: int | None = None
+    # 只改给出的几栏（按栏目名合进 fields），空字符串表示清掉这一栏
+    field_values: dict[str, str] | None = None
+
+    @field_validator("field_values")
+    @classmethod
+    def field_value_keys(cls, value):
+        return clean_extra(value, keep_empty=True)
 
     @field_validator("*")
     @classmethod

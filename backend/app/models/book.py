@@ -31,6 +31,8 @@ class Book(UUIDPk, Timestamps, Base):
     # 主线骨架：核心矛盾、主题、主角成长弧；关键节点以 story_nodes 为准
     spine: Mapped[dict] = mapped_column(JSONB, default=dict)
     setup_progress: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+    # 这本书每一类设定有哪几栏：{类别: {facts: [{key, label}], sections: [{key, label}]}}；没存的按默认
+    card_layouts: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     settings: Mapped[dict] = mapped_column(JSONB, default=default_settings)
     author_requirements: Mapped[list["AuthorRequirement"]] = relationship(
         back_populates="book",
