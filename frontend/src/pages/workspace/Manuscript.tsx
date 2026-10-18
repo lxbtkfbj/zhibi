@@ -454,7 +454,6 @@ export function ChapterPage({ book, id, writing, nav }: { book: VBook; id: strin
     ? `写手在写 · 已写 ${countWords(live)} 字`
     : status === 'done' ? `${(body?.words ?? 0).toLocaleString()} 字`
       : status === 'writing' ? (gate?.kind === 'stuck' ? `写好了 ${(body?.words ?? 0).toLocaleString()} 字，审稿没过` : '写到一半') : '还没写'
-  const outline = node.sections?.filter((f) => f.text.trim()) ?? []
   const review = body?.review
   const menu = status === 'done' && text ? [
     { label: '按意见重写这一章', onClick: () => (busy ? nav.toast('编辑部手上还有活，停下或写完以后再重写') : writing.blocked ? nav.toast(writing.blocked) : setRewriting(true)) },
@@ -509,21 +508,15 @@ export function ChapterPage({ book, id, writing, nav }: { book: VBook; id: strin
           <div className="rounded-xl border border-dashed border-line-2 px-6 py-8 text-center">
             <p className="font-serif text-lg text-ink-2">这一章还没写</p>
             <p className="mt-2 text-[14px] leading-relaxed text-ink-3">
-              {nextToWrite?.id === id ? '接着写就从这一章开始。' : '写到这里时，正文会在这里一句句出来。'}章纲在下面，想改先去大纲里改。
+              {nextToWrite?.id === id ? '接着写就从这一章开始。' : '写到这里时，正文会在这里一句句出来。'}章纲在大纲里，想改去那里改。
             </p>
             {nextToWrite?.id === id && !busy && <button type="button" className={clsx(primaryButton, 'mt-4')} onClick={() => nav.openChapter('home')}>去开写</button>}
           </div>
         )}
       </div>
 
+      {(!!body?.changes?.length || !!review?.good.length || !!review?.issues.length || cast.length > 0) && (
       <div className="mt-10 border-t border-line pt-3">
-        <Fold title="章纲" defaultOpen={status === 'planned'}>
-          {outline.length ? (
-            <dl className="space-y-3 text-[15px] leading-relaxed text-ink-2">
-              {outline.map((f) => <div key={f.label}><dt className="text-[13px] text-ink-3">{f.label}</dt><dd className="whitespace-pre-line">{f.text}</dd></div>)}
-            </dl>
-          ) : <p className="text-[14px] text-ink-3">这一章没有章纲。</p>}
-        </Fold>
         {!!body?.changes?.length && (
           <Fold title="设定师记下的变化" count={`${body.changes.length} 处`}>
             <ul className="space-y-1.5 text-[14px] leading-relaxed text-ink-2">{body.changes.map((c) => <li key={c} className="flex gap-2"><span className="text-lore">·</span>{c}</li>)}</ul>
@@ -544,6 +537,7 @@ export function ChapterPage({ book, id, writing, nav }: { book: VBook; id: strin
           </div>
         )}
       </div>
+      )}
 
       <nav className="mt-6 flex items-center justify-between border-t border-line pt-5 text-[14px] text-ink-2" aria-label="翻章">
         {prev ? <button type="button" onClick={() => nav.openChapter(prev.id)} className="flex items-center gap-1 hover:text-seal"><ChevronLeft className="size-4" />{prev.title.replace('　', ' ')}</button> : <span />}
