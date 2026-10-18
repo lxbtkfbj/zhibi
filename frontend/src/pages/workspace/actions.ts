@@ -2,7 +2,7 @@
 
 import { type Dispatch, type SetStateAction, createContext, useContext, useMemo, useState } from 'react'
 import {
-  CHARACTER_FIELDS, applyTemplate, cn, findEntry, findNode, numberChapters, splitTitle,
+  CHARACTER_FIELDS, applyTemplate, chapterNumberOf, cn, findEntry, findNode, numberChapters, splitTitle,
   type CardTemplate, type VBook, type VCategory, type VEntry, type VNode,
 } from './model'
 import { sampleSplit } from './sampleChapters'
@@ -207,7 +207,7 @@ export function useLocalBook(initial: VBook): [VBook, WorkspaceActions, Dispatch
         if (change.chapters !== undefined) {
           target.count = change.chapters
           target.chapters = Math.max(change.chapters, target.children?.length ?? 0) || undefined
-          numberChapters(outline)
+          numberChapters(outline, true)
         }
         return { ...b, outline }
       }),
@@ -223,7 +223,7 @@ export function useLocalBook(initial: VBook): [VBook, WorkspaceActions, Dispatch
         const parent = path?.at(-2)
         if (!parent?.children) return b
         parent.children = parent.children.filter((c) => c.id !== node.id)
-        numberChapters(outline)
+        numberChapters(outline, true)
         return { ...b, outline }
       }),
       insertNode: async (sibling, where) => {
@@ -241,7 +241,7 @@ export function useLocalBook(initial: VBook): [VBook, WorkspaceActions, Dispatch
           const j = i + (direction === 'up' ? -1 : 1)
           if (!list || i < 0 || j < 0 || j >= list.length) return b
           ;[list[i], list[j]] = [list[j], list[i]]
-          numberChapters(outline)
+          numberChapters(outline, true)
           return { ...b, outline }
         })
         return node.id
@@ -258,7 +258,7 @@ export function useLocalBook(initial: VBook): [VBook, WorkspaceActions, Dispatch
         const chapters = node.children ?? []
         const kept = chapters.filter((c) => c.body && c.body.status !== 'planned')
         const last = kept.at(-1)
-        const first = last ? chapterNumber(last) + 1 : node.range?.[0] ?? lastChapterBefore(book.outline, node.id) + 1
+        const first = last ? chapterNumberOf(last) + 1 : node.range?.[0] ?? lastChapterBefore(book.outline, node.id) + 1
         return { ...plan, first, keeps: kept.map((c) => c.title), replaces: chapters.filter((c) => !kept.includes(c)).map((c) => c.title) }
       },
       acceptSplit: async (node, drafts) => {
@@ -269,12 +269,12 @@ export function useLocalBook(initial: VBook): [VBook, WorkspaceActions, Dispatch
           const target = findNode(outline, node.id)?.at(-1)
           if (!target) return b
           if (target.kind === '单元') {
-            numberChapters(outline)
+            numberChapters(outline, true)
             const kept = (target.children ?? []).filter((c) => c.body && c.body.status !== 'planned')
             const last = kept.at(-1)
-            const first = last ? chapterNumber(last) + 1 : target.range?.[0] ?? lastChapterBefore(outline, target.id) + 1
+            const first = last ? chapterNumberOf(last) + 1 : target.range?.[0] ?? lastChapterBefore(outline, target.id) + 1
             target.children = [...kept, ...drafts.map((d, i): VNode => ({
-              id: `c${first + i}`, kind: '章', title: `第${first + i}章　${d.name}`, text: '', uses: [],
+              id: `split-${nextLocal++}`, kind: '章', title: `第${first + i}章　${d.name}`, text: '', uses: [],
               sections: ['发生什么', '看点', '结尾钩子'].map((label) => ({ label, text: d.sections?.[label] ?? '' })),
               body: { status: 'planned', words: 0 },
             }))]
@@ -286,7 +286,7 @@ export function useLocalBook(initial: VBook): [VBook, WorkspaceActions, Dispatch
               chapters: d.chapters || undefined, count: d.chapters ?? 0, children: [],
             }))
           }
-          numberChapters(outline)
+          numberChapters(outline, true)
           return { ...b, outline }
         })
         return async () => {
@@ -296,7 +296,7 @@ export function useLocalBook(initial: VBook): [VBook, WorkspaceActions, Dispatch
             const target = findNode(outline, node.id)?.at(-1)
             if (!target) return b
             Object.assign(target, structuredClone(snapshot))
-            numberChapters(outline)
+            numberChapters(outline, true)
             return { ...b, outline }
           })
         }
@@ -304,11 +304,6 @@ export function useLocalBook(initial: VBook): [VBook, WorkspaceActions, Dispatch
     }
   }, [book.outline])
   return [book, actions, setBook]
-}
-
-/** 章标题里的章号：「第5章 井边的老刘」是 5。 */
-function chapterNumber(node: VNode): number {
-  return Number(/第(\d+)章/.exec(node.title)?.[1] ?? node.range?.[0] ?? 0)
 }
 
 /** 某个节点前面最后一章的章号：前面还没有章就是 0。 */
@@ -321,7 +316,7 @@ function lastChapterBefore(root: VNode, id: string): number {
       found = true
       return
     }
-    if (node.kind === '章') last = node.range?.[1] ?? chapterNumber(node)
+    if (node.kind === '章') last = node.range?.[1] ?? chapterNumberOf(node)
     else if (node.range && !node.children?.length) last = Math.max(last, node.range[1])
     node.children?.forEach(walk)
   }
@@ -345,7 +340,7 @@ function addOutlineChild(root: VNode, parentId: string): { root: VNode; id: stri
   const title = kind === '篇' ? `第${cn(siblings.length + 1)}篇　` : kind === '卷' ? `第${cn(all('卷') + 1)}卷　` : kind === '单元' ? `单元${cn(siblings.length + 1)}　` : '新的一章'
   const id = `added-${nextLocal++}`
   parent.children = [...siblings, { id, kind, title, text: '', uses: [], ...(kind === '章' ? { sections: [{ label: '发生什么', text: '' }, { label: '看点', text: '' }, { label: '结尾钩子', text: '' }] } : {}) }]
-  numberChapters(copy)
+  numberChapters(copy, true)
   return { root: copy, id }
 }
 
@@ -362,7 +357,7 @@ function insertOutlineSibling(root: VNode, siblingId: string, where: 'before' | 
   const node: VNode = { id, kind, title, text: '', uses: [], ...(kind === '章' ? { sections: [{ label: '发生什么', text: '' }, { label: '看点', text: '' }, { label: '结尾钩子', text: '' }] } : {}) }
   const at = parent.children.indexOf(sibling) + (where === 'after' ? 1 : 0)
   parent.children = [...parent.children.slice(0, at), node, ...parent.children.slice(at)]
-  numberChapters(copy)
+  numberChapters(copy, true)
   return { root: copy, id }
 }
 

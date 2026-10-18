@@ -2,7 +2,7 @@
 
 import { type Dispatch, type SetStateAction, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
-  chapterNodes, countWords, findNode, numberChapters,
+  chapterNodes, chapterNumberOf, countWords, findNode, numberChapters,
   type VBook, type VChapterBody, type VGate, type VNode, type VWriting, type WritePlan, type WritingGates,
 } from './model'
 import {
@@ -54,6 +54,9 @@ const GATES: Record<'trial' | 'chapters' | 'volume' | 'segment' | 'stuck', VGate
 
 const FALLBACK = '（原型：真书在这里一句句写出正文。）'
 
+/** 示例书的正文按第几章找：第 5 章找 c5 */
+const textKey = (node: VNode) => `c${chapterNumberOf(node)}`
+
 function cutShort(text: string): string {
   const one = text.trim().replace(/\s+/g, ' ')
   return one.length > 24 ? `${one.slice(0, 24)}…` : one
@@ -98,7 +101,7 @@ export function useWritingSim(book: VBook, setBook: Dispatch<SetStateAction<VBoo
     setBook((b) => {
       const outline = structuredClone(b.outline)
       change(outline)
-      numberChapters(outline)
+      numberChapters(outline, true)
       return { ...b, outline }
     })
   }, [setBook])
@@ -117,7 +120,8 @@ export function useWritingSim(book: VBook, setBook: Dispatch<SetStateAction<VBoo
       setStatus({ state: 'working', who: '设定师', doing: `设定师在给${label}备资料` })
       if (!await sleep(1100, token)) return false
     }
-    const text = SAMPLE_TEXTS[node.id] ?? FALLBACK
+    const key = textKey(node)
+    const text = SAMPLE_TEXTS[key] ?? FALLBACK
     setBody(node.id, { status: 'writing' })
     setStatus({ state: 'working', who: '写手', doing: rewrite ? `写手在按你的意见重写${label}` : `写手在写${label}`, chapter: node.id, live: '' })
     for (let at = 0; at < text.length;) {
@@ -131,7 +135,7 @@ export function useWritingSim(book: VBook, setBook: Dispatch<SetStateAction<VBoo
     setStatus((s) => ({ ...s, who: '设定师', doing: `设定师在记${label}让设定变了什么` }))
     if (!await sleep(1000, token)) return false
     setBody(node.id, {
-      status: 'done', text, words: countWords(text), changes: SAMPLE_CHANGES[node.id], review: SAMPLE_REVIEWS[node.id],
+      status: 'done', text, words: countWords(text), changes: SAMPLE_CHANGES[key], review: SAMPLE_REVIEWS[key],
       attempts: rewrite ? (node.body?.attempts ?? 0) + 1 : node.body?.attempts,
     })
     setStatus((s) => ({ ...s, chapter: undefined, live: undefined }))
@@ -183,7 +187,7 @@ export function useWritingSim(book: VBook, setBook: Dispatch<SetStateAction<VBoo
         setStatus({ state: 'finished', note: '原型就演示到这里。真书会接着写：写完第一卷，开写第二卷前，按你的设置停下来请你看卷纲。' })
         return
       }
-      if (!next.body?.text && !SAMPLE_TEXTS[next.id] && r.wrote.length) {
+      if (!next.body?.text && !SAMPLE_TEXTS[textKey(next)] && r.wrote.length) {
         setStatus({ state: 'finished', note: `这一轮写完了：第 ${r.wrote[0]}–${r.wrote.at(-1)} 章。原型只有前 5 章的正文，真书会接着往下写。` })
         return
       }
@@ -298,7 +302,7 @@ export function useWritingSim(book: VBook, setBook: Dispatch<SetStateAction<VBoo
         return '好，主编在改'
       },
       rewrite: (node, request) => {
-        if (blocked || !SAMPLE_TEXTS[node.id] || !request.trim()) return undefined
+        if (blocked || !SAMPLE_TEXTS[textKey(node)] || !request.trim()) return undefined
         const before = node.body?.text ?? ''
         const token = ++run.current
         round.current = null

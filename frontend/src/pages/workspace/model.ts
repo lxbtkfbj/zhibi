@@ -162,6 +162,23 @@ export interface WritingGates { segment: boolean; volume: boolean; chapters: boo
 
 export type WritePlan = '1' | '3' | 'unit' | 'volume' | 'book'
 
+/** 「第5章 井边的老刘」是第 5 章 */
+export function chapterNumberOf(node: VNode): number {
+  return Number(/第(\d+)章/.exec(node.title)?.[1] ?? node.range?.[0] ?? 0)
+}
+
+/** 下面还有哪些单元（或没拆单元的卷）章数还没定、也还没有章 */
+export function undecidedParts(node: VNode): VNode[] {
+  const out: VNode[] = []
+  const walk = (n: VNode) => {
+    const leaf = n.kind === '单元' || (n.kind === '卷' && !n.children?.length)
+    if (leaf && !n.count && !n.children?.length && !n.later) out.push(n)
+    else n.children?.forEach(walk)
+  }
+  node.children?.forEach(walk)
+  return out
+}
+
 /** 全书所有的章，按顺序。 */
 export function chapterNodes(root: VNode): VNode[] {
   const out: VNode[] = []
@@ -304,13 +321,15 @@ export function findNode(node: VNode, id: string, path: VNode[] = []): VNode[] |
 }
 
 /** 按顺序给每个卷、单元、章算出「第几章到第几章」。和后台一样：单元（或没拆单元的卷）定了章数、
- *  章纲还没出全的，给没出的章留着号；章数没定的有几章算几章。 */
-export function numberChapters(root: VNode): void {
+ *  章纲还没出全的，给没出的章留着号；章数没定的有几章算几章。
+ *  retitle：原型里改了大纲，章号一律按顺序重排，标题前面的「第几章」跟着改；真书照后台给的章号。 */
+export function numberChapters(root: VNode, retitle = false): void {
   let next = 1
   const visit = (node: VNode) => {
     node.range = undefined
     if (node.kind === '章') {
-      const n = Number(/第(\d+)章/.exec(node.title)?.[1] ?? next)
+      const n = retitle ? next : Number(/第(\d+)章/.exec(node.title)?.[1] ?? next)
+      if (retitle && /^第\d+章/.test(node.title)) node.title = node.title.replace(/^第\d+章/, `第${n}章`)
       node.range = [n, n]
       next = n + 1
       return

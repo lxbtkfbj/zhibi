@@ -11,7 +11,7 @@ import {
   blankEntry, childKind, draftToEntry, entryIn, useSave, useWorkspace, withFields,
 } from './actions'
 import {
-  ROLE_ORDER, applyTemplate, cn, emptyCategory, findEntry, findNode, isLadder, nounOf, splitTitle, templateOf,
+  ROLE_ORDER, applyTemplate, cn, emptyCategory, findEntry, findNode, isLadder, nounOf, splitTitle, templateOf, undecidedParts,
   type CardTemplate, type FieldItem, type VBook, type VCategory, type VEntry, type VNode,
 } from './model'
 import { CHAT, PENDING } from './sampleBook'
@@ -353,6 +353,8 @@ function OutlineTreeView({ node, depth, selected, onSelect, open, toggle, onAdd,
   const expandable = !!children.length
   const expanded = !!only || open.includes(node.id)
   const child = actions.canAdd(node) ? childKind(node) : undefined
+  // 有几章就写几章：章数没定的单元不写
+  const count = node.kind === '章' ? 0 : node.range ? node.range[1] - node.range[0] + 1 : node.chapters ?? 0
   return (
     <div>
       <div className={clsx('group flex items-center rounded-md transition-colors', selected === node.id ? rowSelected : 'hover:bg-line/40')}
@@ -368,7 +370,7 @@ function OutlineTreeView({ node, depth, selected, onSelect, open, toggle, onAdd,
           {node.later && <span className="ml-1.5 text-xs font-normal">· 写到再定</span>}
         </button>
         {node.locked && <Lock className={clsx('mr-1.5 size-3 shrink-0 text-ink-3', child && 'group-hover:hidden')} />}
-        {node.chapters && <span className={clsx('pr-3 text-xs text-ink-3 tabular-nums', child && 'group-hover:hidden')}>{node.chapters} 章</span>}
+        {count > 0 && <span className={clsx('pr-3 text-xs text-ink-3 tabular-nums', child && 'group-hover:hidden')}>{count} 章</span>}
         {child && (
           <button type="button" onClick={() => onAdd(node.id)} title={`在下面加${ONE[child]}`} aria-label={`在下面加${ONE[child]}`}
             className="mr-1.5 hidden rounded p-1 text-ink-3 hover:bg-line/70 hover:text-ink group-hover:block">
@@ -1214,8 +1216,14 @@ function OutlinePage({ book, outline, id, nav, onAdd, onInsert, onMove, fresh, w
   const editableCount = node.count !== undefined && actions.canEdit(node, 'name') && (node.kind === '单元' || node.kind === '卷')
   // 章号已经在章的标题里，不再列章数
   if (editableCount) meta.push({ label: '章数', value: <CountField node={node} /> })
-  else if (node.kind !== '章' && node.range) meta.push({ label: '章数', value: `${node.range[1] - node.range[0] + 1} 章 · 第 ${node.range[0]}–${node.range[1]} 章` })
-  else if (node.kind === '卷' || node.kind === '单元') meta.push({ label: '章数', value: '还没定' })
+  else if (node.kind !== '章') {
+    // 下面还有单元章数没定：照实说，不让人以为整卷的章数已经定死
+    const open = undecidedParts(node)
+    const later = open.length ? `${open.length > 2 ? `还有 ${open.length} 个单元` : open.map((n) => splitTitle(n.title)[1] || splitTitle(n.title)[0]).join('、')}章数还没定，写到那里按剧情定` : ''
+    const have = node.range ? `已有 ${node.range[1] - node.range[0] + 1} 章 · 第 ${node.range[0]}–${node.range[1]} 章` : ''
+    if (have || later) meta.push({ label: '章数', value: [open.length ? have : have.replace('已有 ', ''), later].filter(Boolean).join('；') })
+    else if (node.kind === '卷' || node.kind === '单元') meta.push({ label: '章数', value: '还没定' })
+  }
   if (node.progress && node.progress !== '已规划') meta.push({ label: '写到', value: node.progress })
   if (writing && node.kind === '章' && node.body && node.body.status !== 'planned') {
     meta.push({

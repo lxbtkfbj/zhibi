@@ -148,11 +148,11 @@ const outline: VNode = {
       text: '舞台是青冥宗外门。陈默想在外门考核前活下来，挡路的是给弟子发“筑基丹”的传功执事。这一篇以陈默揭穿丹药的真相、借执事之死换来进内门的名额收尾。读者一直在等：头顶数字归零的人，到底是怎么死的。',
       children: [
         {
-          id: 'v1', kind: '卷', title: '第一卷　杂役院', chapters: 12, locked: true, uses: [],
+          id: 'v1', kind: '卷', title: '第一卷　杂役院', locked: true, uses: [],
           text: '这一卷陈默要做成一件事：在不暴露眼睛的前提下，活过赵长河发丹的那一天。卷首他还是任人使唤的杂役；卷末，他看着赵长河在众目睽睽之下化成一具枯骨，而自己手里多了一枚没吃的筑基丹。',
           children: [
             {
-              id: 'u1', kind: '单元', title: '单元一　递丹之局', chapters: 4, uses: [],
+              id: 'u1', kind: '单元', title: '单元一　递丹之局', chapters: 4, count: 4, uses: [],
               text: '赵长河当众点名，要把一枚筑基丹赏给陈默。陈默看见执事头顶只剩三天，也看见吃过丹的师兄寿命全停在同一天。他装病躲丹，被逼到墙角时，借一场意外把丹换了出去。',
               children: [
                 { id: 'c1', kind: '章', title: '第1章　三天', text: '', uses: [], sections: [{ label: '发生什么', text: '陈默第一次看见所有人头顶的数字，最长的那个属于传功执事赵长河——只剩三天。' }, { label: '看点', text: '一个杂役看穿了整个宗门的死期。' }, { label: '结尾钩子', text: '执事笑着朝他招手：“陈默，过来领丹。”' }] },
@@ -161,8 +161,8 @@ const outline: VNode = {
                 { id: 'c4', kind: '章', title: '第4章　执事的数字', text: '', uses: [], sections: [{ label: '发生什么', text: '陈默发现赵长河的寿命不是在减，而是在被“收走”。' }, { label: '看点', text: '真相露出一角。' }, { label: '结尾钩子', text: '收走寿命的那只手，来自后山的青冥老祖。' }] },
               ],
             },
-            { id: 'u2', kind: '单元', title: '单元二　外门考核', chapters: 5, uses: [], text: '考核前夜，外门杂役院死了第一个人。陈默要在考核里不出头、不垫底，还得弄清谁动的手。' },
-            { id: 'u3', kind: '单元', title: '单元三　借命', chapters: 3, uses: [], text: '赵长河死期到了。陈默把那枚没吃的筑基丹，换成了进内门的门票。' },
+            { id: 'u2', kind: '单元', title: '单元二　外门考核', count: 0, uses: [], text: '考核前夜，外门杂役院死了第一个人。陈默要在考核里不出头、不垫底，还得弄清谁动的手。' },
+            { id: 'u3', kind: '单元', title: '单元三　借命', count: 0, uses: [], text: '赵长河死期到了。陈默把那枚没吃的筑基丹，换成了进内门的门票。' },
           ],
         },
         { id: 'v2', kind: '卷', title: '第二卷　内门试炼', later: true, uses: [], text: '暂定：进了内门，陈默发现内门弟子头顶的数字，全都指向同一个时辰。' },
@@ -187,7 +187,7 @@ export const SAMPLE_BOOK: VBook = {
   pending: 2,
   layouts: {},
 }
-numberChapters(SAMPLE_BOOK.outline)
+numberChapters(SAMPLE_BOOK.outline, true)
 linkMentions(SAMPLE_BOOK)
 // 前两章写好了，第 3、4 章只有章纲
 for (const node of chapterNodes(SAMPLE_BOOK.outline)) {

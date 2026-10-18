@@ -20,9 +20,10 @@ const memory = new Map<string, SplitState>()
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
-/** 这一页能不能让编辑部帮拆：单元出章纲，卷拆成单元。 */
+/** 这一页能不能让编辑部帮拆：单元出章纲（写好的章不动，只换没写的）；卷还没有单元时拆成单元（已经有单元的卷不整个重拆）。 */
 export function splitLabel(node: VNode): string | undefined {
-  return node.kind === '单元' ? '编辑部出章纲' : node.kind === '卷' ? '编辑部拆成单元' : undefined
+  if (node.kind === '单元') return '编辑部出章纲'
+  return node.kind === '卷' && !node.children?.length ? '编辑部拆成单元' : undefined
 }
 
 export function useSplit(node: VNode) {
