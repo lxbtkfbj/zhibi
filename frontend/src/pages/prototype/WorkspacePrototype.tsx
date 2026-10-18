@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import clsx from 'clsx'
-import { ArrowLeft, ArrowUp, BookOpen, ChevronDown, ChevronRight, ChevronUp, Globe, Inbox, Library, Lock, Minus, PanelRight, PictureInPicture2, Plus, Search, Settings, Sparkles, Wand2 } from 'lucide-react'
+import { ArrowLeft, ArrowUp, BookOpen, SlidersHorizontal, ChevronDown, ChevronRight, ChevronUp, Globe, Inbox, Library, Lock, Minus, PanelRight, PictureInPicture2, Plus, Search, Settings, Sparkles, Wand2 } from 'lucide-react'
 import { type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { get } from '../../api/client'
@@ -591,7 +591,7 @@ function CharacterCard({ book, entry, nav, fresh }: { book: VBook; entry: VEntry
   const holder = entry.holder ? findEntry(book, entry.holder) : undefined
   // 重要角色和金手指：栏目一打开就全摆着；配角只摆外貌、性格，其余收在「还可以写」
   const major = entry.kind === 'goldfinger' || MAJOR_ROLES.includes(entry.role ?? '')
-  const always = major ? entry.sections.map((f) => f.label) : ['外貌', '性格与说话方式']
+  const always = major ? entry.sections.map((f) => f.label) : entry.sections.filter((f) => ['外貌', '性格与说话方式'].includes(f.key ?? f.label)).map((f) => f.label)
   const show = (label: string, value: string) => !!value || opened.includes(label) || always.includes(label)
   const facts = entry.facts.filter(([label, value]) => !!value || opened.includes(label) || major)
   const sections = entry.sections.filter((f) => show(f.label, f.text))
@@ -626,8 +626,8 @@ function CharacterCard({ book, entry, nav, fresh }: { book: VBook; entry: VEntry
         <div className="mt-8 space-y-8 border-t border-line pt-8">
           {sections.map((field) => (
             <Section key={field.label} field={field}>
-              {(field.label === '身世' || field.label === '来历') && secret && <div className="mt-2"><LinkChip icon={<Lock className="size-3" />} onClick={() => nav.openEntry(secret.id)}>另有秘密：{secret.name}</LinkChip></div>}
-              {field.label === '能力' && goldfinger && <div className="mt-2"><LinkChip icon={<Sparkles className="size-3" />} onClick={() => nav.openEntry(goldfinger.id)}>金手指：{goldfinger.name}</LinkChip></div>}
+              {['身世', '来历'].includes(field.key ?? field.label) && secret && <div className="mt-2"><LinkChip icon={<Lock className="size-3" />} onClick={() => nav.openEntry(secret.id)}>另有秘密：{secret.name}</LinkChip></div>}
+              {(field.key ?? field.label) === '能力' && goldfinger && <div className="mt-2"><LinkChip icon={<Sparkles className="size-3" />} onClick={() => nav.openEntry(goldfinger.id)}>金手指：{goldfinger.name}</LinkChip></div>}
             </Section>
           ))}
           {entry.kind === 'character' && (relations.length > 0 || opened.includes('关系')) && (
@@ -802,13 +802,125 @@ function fakeResults(category: VCategory, want: string): { name: string; text: s
   return [1, 2].map((i) => ({ name: `${base}（候选${cn(i)}）`, text: `原型里的假内容。真用时，编辑部会按你说的「${want || '按简介补'}」，照简介和已有设定写一条「${category.name}」。` }))
 }
 
+/** 这本书角色卡的一栏：key 是原来的名字（内容跟着它走），label 是现在显示的名字。 */
+interface FieldItem { key: string; label: string }
+interface CardTemplate { facts: FieldItem[]; sections: FieldItem[] }
+
+let nextField = 1
+
+/** 一组栏目：每一栏能改名、上下挪、删掉；最下面能加一栏。 */
+function FieldList({ title, note, items, counts, locked, onChange, addPlaceholder }: {
+  title: string; note: string; items: FieldItem[]; counts: Record<string, number>; locked: string[]
+  onChange: (items: FieldItem[]) => void; addPlaceholder: string
+}) {
+  const [draft, setDraft] = useState('')
+  const [confirming, setConfirming] = useState('')
+  const move = (i: number, to: number) => {
+    if (to < 0 || to >= items.length) return
+    const next = [...items]
+    ;[next[i], next[to]] = [next[to], next[i]]
+    onChange(next)
+  }
+  const add = () => {
+    const label = draft.trim()
+    if (!label || items.some((f) => f.label === label)) return
+    onChange([...items, { key: `field-${nextField++}`, label }])
+    setDraft('')
+  }
+  return (
+    <section>
+      <h4 className="text-sm font-medium text-ink">{title}</h4>
+      <p className="mt-0.5 mb-2.5 text-xs text-ink-3">{note}</p>
+      <div className="divide-y divide-line/70 rounded-xl border border-line">
+        {items.map((item, i) => {
+          const used = counts[item.key] ?? 0
+          const fixed = locked.includes(item.key)
+          return (
+            <div key={item.key} className="flex items-center gap-2 px-3 py-1.5">
+              <div className="flex flex-col">
+                <button type="button" onClick={() => move(i, i - 1)} disabled={i === 0} className="rounded text-ink-3 hover:text-ink disabled:opacity-25" aria-label="往上挪"><ChevronUp className="size-3.5" /></button>
+                <button type="button" onClick={() => move(i, i + 1)} disabled={i === items.length - 1} className="rounded text-ink-3 hover:text-ink disabled:opacity-25" aria-label="往下挪"><ChevronDown className="size-3.5" /></button>
+              </div>
+              <input value={item.label} disabled={fixed} maxLength={12}
+                onChange={(e) => onChange(items.map((f) => (f.key === item.key ? { ...f, label: e.target.value } : f)))}
+                className="h-8 min-w-0 flex-1 rounded-md bg-transparent px-2 font-serif text-[15px] text-ink hover:bg-subtle focus:bg-subtle focus:outline-none disabled:text-ink-2" />
+              <span className="w-16 shrink-0 text-right text-xs text-ink-3 tabular-nums">{used ? `${used} 人写了` : ''}</span>
+              {fixed ? <span className="w-20 shrink-0 text-right text-xs text-ink-3">按它分组</span> : (
+                <button type="button"
+                  onClick={() => {
+                    if (used && confirming !== item.key) return setConfirming(item.key)
+                    setConfirming('')
+                    onChange(items.filter((f) => f.key !== item.key))
+                  }}
+                  className={clsx('w-20 shrink-0 rounded-md px-2 py-1 text-right text-xs transition-colors', confirming === item.key ? 'text-seal' : 'text-ink-3 hover:text-ink')}>
+                  {confirming === item.key ? '再点一次删' : '删掉'}
+                </button>
+              )}
+            </div>
+          )
+        })}
+        <div className="flex items-center gap-2 px-3 py-2">
+          <Plus className="ml-1 size-3.5 shrink-0 text-ink-3" />
+          <input value={draft} onChange={(e) => setDraft(e.target.value)} maxLength={12} placeholder={addPlaceholder}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) add() }}
+            className="h-8 min-w-0 flex-1 bg-transparent px-1 text-[15px] text-ink placeholder:text-ink-3 focus:outline-none" />
+          <button type="button" onClick={add} disabled={!draft.trim()} className="rounded-md px-3 py-1 text-sm text-ink-2 hover:bg-subtle hover:text-ink disabled:opacity-40">加上</button>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+/** 这本书的角色卡有哪几栏：自己增删、改名、挪顺序，对这本书所有角色生效。 */
+function CardTemplateEditor({ template, defaults, counts, onChange, onClose }: {
+  template: CardTemplate; defaults: CardTemplate; counts: Record<string, number>
+  onChange: (template: CardTemplate) => void; onClose: () => void
+}) {
+  return (
+    <div className="rounded-2xl border border-line bg-card p-6 shadow-[var(--shadow-paper)]">
+      <div className="mb-1 flex items-center gap-3">
+        <p className="text-[15px] font-medium text-ink">这本书的角色卡有哪几栏</p>
+        <button type="button" onClick={() => onChange(defaults)} className="ml-auto text-[13px] text-ink-3 hover:text-ink">恢复默认</button>
+        <button type="button" onClick={onClose} className="text-[13px] text-ink-3 hover:text-ink">收起</button>
+      </div>
+      <p className="mb-5 text-[13px] leading-relaxed text-ink-3">改了对这本书所有角色都生效；改名不丢已经写的内容。删掉的栏目，写了的内容会一起删掉。</p>
+      <div className="grid gap-6 md:grid-cols-2">
+        <FieldList title="名字下面的小字" note="短的，一两个词能说完的" items={template.facts} counts={counts} locked={['定位']}
+          onChange={(facts) => onChange({ ...template, facts })} addPlaceholder="加一栏，比如：武器、坐骑、职业" />
+        <FieldList title="正文栏目" note="要写一段话的" items={template.sections} counts={counts} locked={[]}
+          onChange={(sections) => onChange({ ...template, sections })} addPlaceholder="加一栏，比如：口头禅、名场面" />
+      </div>
+      <p className="mt-4 text-xs text-ink-3">「此刻」那几栏（实力与地位、在哪、处境、眼下想要）由设定师每写完一章更新，不在这里改。</p>
+    </div>
+  )
+}
+
+/** 按这本书的栏目重新摆一个角色：内容按原来的名字找，改了名也跟着走。 */
+function applyTemplate(entry: VEntry, template: CardTemplate): VEntry {
+  if (entry.kind !== 'character') return entry
+  return {
+    ...entry,
+    facts: template.facts.map((f) => {
+      const old = entry.facts.find(([label]) => label === f.key)
+      return [f.label, old?.[1] ?? '', f.label === f.key ? old?.[2] : undefined] as [string, string, string?]
+    }),
+    sections: template.sections.map((f) => {
+      const old = entry.sections.find((s) => s.label === f.key)
+      return { key: f.key, label: f.label, text: old?.text ?? '', placeholder: f.label === f.key ? old?.placeholder ?? CHARACTER_PLACEHOLDERS[f.key] : undefined }
+    }),
+  }
+}
+
 /** 一类的设定连成一页：每条一张白卡片往下排；点左边滚过去，往下滚左边跟着选中。 */
-function CategoryStream({ book, category, next, nav, fresh, scrollReq, onSpy, onNewEntry, onAccept, pageRef }: {
+function CategoryStream({ book, category, next, nav, fresh, scrollReq, onSpy, onNewEntry, onAccept, pageRef, fields }: {
   book: VBook; category: VCategory; next?: VCategory; nav: Nav; fresh: string
   scrollReq: ScrollReq | null; onSpy: (id: string) => void; onNewEntry: () => void
   onAccept: (items: { name: string; text: string }[]) => void; pageRef: React.RefObject<HTMLElement | null>
+  /** 角色列表才有：这本书的角色卡栏目 */
+  fields?: { template: CardTemplate; defaults: CardTemplate; counts: Record<string, number>; onChange: (template: CardTemplate) => void }
 }) {
   const [asking, setAsking] = useState(false)
+  const [editing, setEditing] = useState(false)
   const pauseUntil = useRef(0)
   const spy = useRef(onSpy)
   spy.current = onSpy
@@ -863,6 +975,11 @@ function CategoryStream({ book, category, next, nav, fresh, scrollReq, onSpy, on
             <p className="mt-2 text-[15px] leading-relaxed text-ink-3">{category.about}</p>
           </div>
           <div className="flex shrink-0 gap-2">
+            {fields && (
+              <button type="button" onClick={() => setEditing(!editing)} className={clsx('flex h-9 items-center gap-1.5 rounded-lg px-3 text-sm transition-colors', editing ? 'bg-line/60 text-ink' : 'text-ink-2 hover:bg-line/50 hover:text-ink')}>
+                <SlidersHorizontal className="size-4" />调整栏目
+              </button>
+            )}
             <button type="button" onClick={onNewEntry} className="flex h-9 items-center gap-1.5 rounded-lg border border-line-2 bg-card px-4 text-sm text-ink transition-colors hover:border-ink-3/50">
               <Plus className="size-4" />自己写一条
             </button>
@@ -874,6 +991,7 @@ function CategoryStream({ book, category, next, nav, fresh, scrollReq, onSpy, on
             )}
           </div>
         </div>
+        {fields && editing && <div className="mt-5"><CardTemplateEditor {...fields} onClose={() => setEditing(false)} /></div>}
         {asking && <div className="mt-5"><AskPanel category={category} onAccept={onAccept} onClose={() => setAsking(false)} /></div>}
       </header>
 
@@ -1300,10 +1418,30 @@ function Workspace({ book: base, switcher }: { book: VBook; switcher: ReactNode 
   const [customCats, setCustomCats] = useState<VCategory[]>([])
   const [added, setAdded] = useState<Record<string, VEntry[]>>({})
   const [outline, setOutline] = useState(base.outline)
+  // 这本书的角色卡有哪几栏：默认照第一个角色的样子，作者可以改
+  const defaultTemplate = useMemo<CardTemplate>(() => {
+    const sample = base.categories.find((c) => c.name === '角色列表')?.entries.find((e) => e.kind === 'character')
+    const facts = sample?.facts.map(([label]) => label) ?? ['定位', '所属', '性别', '年龄', '别名']
+    return { facts: facts.map((f) => ({ key: f, label: f })), sections: CHARACTER_FIELDS.map((f) => ({ key: f, label: f })) }
+  }, [base])
+  const [template, setTemplate] = useState<CardTemplate>(defaultTemplate)
   const book = useMemo(() => ({
     ...base,
-    categories: [...base.categories, ...customCats].map((c) => ({ ...c, entries: [...c.entries, ...(added[c.name] ?? [])] })),
-  }), [base, customCats, added])
+    categories: [...base.categories, ...customCats].map((c) => ({
+      ...c,
+      entries: [...c.entries, ...(added[c.name] ?? [])].map((e) => (c.name === '角色列表' ? applyTemplate(e, template) : e)),
+    })),
+  }), [base, customCats, added, template])
+  // 每一栏有几个人写了：删之前提醒
+  const fieldCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    const people = [...(base.categories.find((c) => c.name === '角色列表')?.entries ?? []), ...(added['角色列表'] ?? [])]
+    for (const person of people) {
+      for (const [label, value] of person.facts) if (value) counts[label] = (counts[label] ?? 0) + 1
+      for (const field of person.sections) if (field.text) counts[field.label] = (counts[field.label] ?? 0) + 1
+    }
+    return counts
+  }, [base, added])
   const [tab, setTab] = useState<Tab>('设定')
   const [entry, setEntry] = useState(() => (base.categories.some((c) => c.entries.length) ? firstSelection(base) : 'overview'))
   const [fresh, setFresh] = useState('')
@@ -1405,6 +1543,7 @@ function Workspace({ book: base, switcher }: { book: VBook; switcher: ReactNode 
               : category ? (
                 <CategoryStream key={category.name} book={book} category={category} next={book.categories[categoryIndex + 1]} nav={nav} fresh={fresh}
                   scrollReq={scrollReq} pageRef={pageRef} onSpy={(id) => setEntry((now) => (now === id ? now : id))}
+                  fields={category.name === '角色列表' ? { template, defaults: defaultTemplate, counts: fieldCounts, onChange: setTemplate } : undefined}
                   onNewEntry={() => newEntry(category.name)} onAccept={(items) => accept(category.name, items)} />
               )
                 : <SettingsOverview book={book} nav={nav} onSelect={nav.openEntry} />

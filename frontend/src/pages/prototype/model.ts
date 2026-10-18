@@ -1,6 +1,8 @@
 /** 工作台原型的数据形状：示例书、空书、旧书快照、书架上的真书，都先转成这个样子再画。 */
 
 export interface VField {
+  /** 原来的栏目名：作者改了名，程序还按它认（比如身世后面挂「另有秘密」） */
+  key?: string
   label: string
   text: string
   placeholder?: string
