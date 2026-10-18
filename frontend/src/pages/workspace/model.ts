@@ -242,22 +242,33 @@ export function numberChapters(root: VNode): void {
   visit(root)
 }
 
-/** 把条目名字在大纲里出现的地方连起来：条目的「出现在」和大纲节点的「用到的设定」。 */
+/** 把条目名字在大纲里出现的地方连起来：条目的「出现在」和大纲节点的「用到的设定」。
+ *  「出现在」只列最底下那一层：第 1 章提到了，就不再把它上面的单元、卷、篇也列一遍。 */
 export function linkMentions(book: VBook): void {
   const entries = book.categories.flatMap((c) => c.entries)
-  const visit = (node: VNode) => {
+  const mark = (node: VNode) => {
     const text = [node.text, ...(node.sections ?? []).map((s) => s.text)].join('\n')
     for (const entry of entries) {
       const names = [entry.name.replace(/（.*?）|\(.*?\)/g, '')].filter((n) => n.length >= 2)
       if (!node.uses.includes(entry.id) && names.some((n) => text.includes(n))) node.uses.push(entry.id)
-      if (node.uses.includes(entry.id) && node.kind !== '全书' && entry.appears.length < 4 && !entry.appears.some((a) => a.node === node.id)) {
-        entry.appears.push({ node: node.id, label: node.title })
-      }
     }
-    node.uses = node.uses.slice(0, 10)
-    node.children?.forEach(visit)
+    node.children?.forEach(mark)
   }
-  visit(book.outline)
+  // 返回这一层或下面有没有提到；下面提到了，这一层就不进「出现在」
+  const collect = (node: VNode, entry: VEntry): boolean => {
+    let below = false
+    for (const child of node.children ?? []) if (collect(child, entry)) below = true
+    const here = node.uses.includes(entry.id)
+    if (here && !below && node.kind !== '全书' && entry.appears.length < 4) entry.appears.push({ node: node.id, label: node.title })
+    return here || below
+  }
+  const trim = (node: VNode) => {
+    node.uses = node.uses.slice(0, 10)
+    node.children?.forEach(trim)
+  }
+  mark(book.outline)
+  for (const entry of entries) collect(book.outline, entry)
+  trim(book.outline)
 }
 
 /** 「第一卷」加全角空格加「杂役院」：拆成前缀和名字，前缀程序排，名字作者起。 */
