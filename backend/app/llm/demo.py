@@ -741,6 +741,33 @@ def _section(text: str, name: str) -> str:
     return found.group(1) if found else ""
 
 
+def _book_draft(user: str) -> s.BookDraft:
+    """演示：按点子填一版；按意见改时照现在的样子交回，只在简介后面注明改过。"""
+    current = _section(user, "新建页上现在的样子")
+    if current:
+        row = dict(re.findall(r"^(书名|简介|频道|类别|标签|篇幅)：(.*)$", current, re.M))
+        keep = {key: "" if value == "（空着）" else value for key, value in row.items()}
+        return s.BookDraft(
+            title=keep.get("书名", ""),
+            blurb=f"{keep.get('简介', '')}（已按意见改过）",
+            channel=keep.get("频道") or "男频",
+            genre=keep.get("类别", ""),
+            tags=[tag for tag in keep.get("标签", "").split("、") if tag],
+            target_length=int(re.sub(r"\D", "", keep.get("篇幅", "")) or 200),
+            reply="按你的意见改了简介，别的没动。",
+        )
+    idea = _section(user, "作者的点子").strip() or "一个普通人卷进了不普通的事"
+    return s.BookDraft(
+        title="寿命簿" if "寿命" in idea else "青灯照夜",
+        blurb=f"{idea.rstrip('。')}。他以为自己只是想活下去，直到发现，整座宗门都在等同一天。",
+        channel="男频",
+        genre="玄幻",
+        tags=["苟道", "宗门", "扮猪吃虎"],
+        target_length=200,
+        reply="按你的点子先填了一版，主打苟着变强。",
+    )
+
+
 def _materials(user: str) -> s.ChapterMaterials:
     """演示：章纲点名的人物之外再补上老瞎子；挑出章纲里提到的设定条目和青灯；第 3 章以后回顾一下第 1 章。"""
     outline = _section(user, "本章章纲") + _section(user, "所在剧情单元")
@@ -1015,6 +1042,7 @@ async def respond(schema: type[BaseModel], system: str, user: str) -> BaseModel:
     from app.llm import demo_setup
 
     handlers = {
+        s.BookDraft: lambda: _book_draft(user),
         s.PitchSet: lambda: demo_setup.pitches(user),
         s.StoryConcept: lambda: demo_setup.concept(user),
         s.LibraryFocus: lambda: demo_setup.focus(user),

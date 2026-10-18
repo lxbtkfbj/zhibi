@@ -2,7 +2,7 @@ import { ArrowRight, Feather, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { motion, useReducedMotion } from 'motion/react'
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useBooks, useCreateBook, useDeleteBook, useProfiles } from '../api/hooks'
+import { useBooks, useDeleteBook, useProfiles } from '../api/hooks'
 import type { BookSummary } from '../api/types'
 import { BookCover } from '../components/BookCover'
 import { Cloud, Diamond, FretDivider, InkMountains } from '../components/decor'
@@ -20,26 +20,17 @@ const IDEAS = [
 function Composer() {
   const [idea, setIdea] = useState('')
   const [placeholder, setPlaceholder] = useState(0)
-  const create = useCreateBook()
   const navigate = useNavigate()
   const { data: profiles } = useProfiles()
   const demoOnly = profiles !== undefined && profiles.every((p) => p.provider === 'demo')
-  const ready = idea.trim().length >= 4
 
   useEffect(() => {
     const timer = setInterval(() => setPlaceholder((i) => (i + 1) % IDEAS.length), 4000)
     return () => clearInterval(timer)
   }, [])
 
-  const submit = async () => {
-    // 快捷键会绕过按钮的禁用状态，这里再拦一次，避免重复建书
-    // 开书只走「一步一步看」，每一步做完停下来给作者确认
-    if (!ready || create.isPending) return
-    try {
-      const result = await create.mutateAsync({ idea: idea.trim(), style_reference: '', mode: 'puzzle', prefill: false })
-      navigate(`/books/${result.book.id}`)
-    } catch { /* 错误在创建区显示，保留点子 */ }
-  }
+  // 写了点子就带到新建页，由编辑部先起草一版；没写就是空白新建页
+  const submit = () => navigate('/new', { state: idea.trim() ? { idea: idea.trim() } : null })
 
   return (
     <div className="paper relative overflow-hidden p-2 transition-shadow focus-within:shadow-[var(--shadow-lift)]">
@@ -48,7 +39,7 @@ function Composer() {
         onChange={(e) => setIdea(e.target.value)}
         rows={3}
         placeholder={IDEAS[placeholder]}
-        onKeyDown={(e) => e.key === 'Enter' && (e.ctrlKey || e.metaKey) && void submit()}
+        onKeyDown={(e) => e.key === 'Enter' && (e.ctrlKey || e.metaKey) && submit()}
         className="w-full resize-none rounded-xl bg-transparent px-4 pt-3 font-serif text-lg leading-relaxed text-ink placeholder:text-ink-3/70 focus:outline-none"
       />
       <div className="flex flex-wrap items-center gap-2 px-2 pb-1">
@@ -60,19 +51,16 @@ function Composer() {
           给我一个灵感
         </button>
         <span className="ml-auto hidden text-xs text-ink-3 sm:inline">Ctrl + Enter</span>
-        <Button variant="seal" size="lg" onClick={submit} loading={create.isPending} disabled={!ready}>
-          交给编辑部
+        <Button variant="seal" size="lg" onClick={submit}>
+          开新书
           <ArrowRight className="size-4" />
         </Button>
       </div>
       {demoOnly && (
         <p className="mx-2 mt-2 mb-1 rounded-lg bg-writer-soft px-3 py-2 text-xs text-writer">
-          还没有配置模型，编辑部会用「演示模式」生成一本示例书。<Link to="/settings" className="underline underline-offset-2">去添加模型</Link>
+          还没有配置模型，编辑部会用「演示模式」起草示例内容。<Link to="/settings" className="underline underline-offset-2">去添加模型</Link>
         </p>
       )}
-      <div className="px-2">
-        <ErrorText error={create.error} />
-      </div>
     </div>
   )
 }

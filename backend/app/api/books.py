@@ -12,6 +12,7 @@ from app.agents.glossary import clean_techniques
 from app.api.book_settings import new_book_defaults
 from app.api.deps import SessionDep, ensure_idle, get_book, get_redis
 from app.api.story_map import validate_node
+from app.book_meta import DEFAULT_CHAPTER_WORDS, channel_of
 from app.models import Book, Chapter, Job, PlotUnit, StoryNode, StoryThread, Volume
 from app.schemas import (
     BookCreate,
@@ -115,10 +116,12 @@ async def create_blank_book(body: BookCreate, session: AsyncSession) -> BookCrea
     filled = {
         "title": body.title,
         "story": body.blurb,
+        "channel": body.channel or channel_of(body.genre),
         "genre": body.genre,
         "tags": body.tags,
         "target_length": body.target_length,
     }
+    settings = await new_book_defaults(session)
     book = Book(
         title=body.title or "未命名",
         idea=body.blurb,
@@ -127,7 +130,9 @@ async def create_blank_book(body: BookCreate, session: AsyncSession) -> BookCrea
         status="setting_up",
         concept={key: value for key, value in filled.items() if value},
     )
-    book.settings = await new_book_defaults(session)
+    # 新建页按这个字数给作者算章数，没在设置里定每章字数时记进定调，后面规划和写作都照它
+    book.concept["chapter_words"] = settings.get("chapter_words") or DEFAULT_CHAPTER_WORDS
+    book.settings = settings
     session.add(book)
     await session.commit()
     await session.refresh(book)

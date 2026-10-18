@@ -19,6 +19,12 @@ async def draft_pitches(llm: LLMRouter, blocks: dict[str, str]) -> s.PitchSet:
     )
 
 
+async def draft_book(llm: LLMRouter, blocks: dict[str, str]) -> s.BookDraft:
+    return await llm.structured(
+        "chief", s.BookDraft, persona("chief"), render("book_draft", **blocks), purpose="新建页·起草"
+    )
+
+
 async def draft_story(llm: LLMRouter, blocks: dict[str, str]) -> s.StoryConcept:
     return await llm.structured(
         "chief", s.StoryConcept, persona("chief"), render("setup_story", **blocks), purpose="开书·定调"

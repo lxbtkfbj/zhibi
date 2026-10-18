@@ -6,6 +6,7 @@ from app.prompts import VARIABLE, canonical_name, default_content
 
 # 名称、中文名、分组、实际调用角色、使用时机。顺序就是界面顺序。
 CATALOG = [
+    ("book_draft", "新建页起草", "开书", "chief", "作者在首页写点子点开新书时，先填好书名、简介、类别、标签和篇幅；不满意时按意见改"),
     ("setup_pitches", "三个故事方向", "开书", "chief", "开书第一步：按点子给三个故事方向"),
     ("setup_story", "定调", "开书", "chief", "把挑中的故事方向展开成定调"),
     ("library_build_focus", "建库：主角和金手指", "开书", "lorekeeper", "开书第二步：先出重点"),
@@ -92,6 +93,7 @@ VARIABLE_LABELS = {
     "secrets": "信息差表",
     "rhythm": "节奏底线",
     "idea": "作者的点子",
+    "catalog": "可选的类别和常见标签",
     "requirements": "作者的要求",
     "style": "文风参考",
     "revision": "修改要求",

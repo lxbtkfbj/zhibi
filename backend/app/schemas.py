@@ -79,6 +79,13 @@ class ModelListOut(BaseModel):
 # ---------- 书 ----------
 
 
+def clean_tag_list(value: list[str]) -> list[str]:
+    tags = [tag.strip() for tag in value if tag.strip()]
+    if any(len(tag) > 20 for tag in tags):
+        raise ValueError("每个标签不超过 20 个字")
+    return list(dict.fromkeys(tags))
+
+
 class BookCreate(BaseModel):
     prefill: bool = False
     idea: str = Field("", max_length=5000)
@@ -90,9 +97,11 @@ class BookCreate(BaseModel):
     start_setup: bool = True
     title: str = Field("", max_length=200)
     blurb: str = Field("", max_length=5000)
+    channel: Literal["男频", "女频", ""] = ""
     genre: str = Field("", max_length=100)
     tags: list[str] = Field(default_factory=list, max_length=20)
-    target_length: Literal[50, 100, 200, 300, 500] | None = None
+    # 单位万字
+    target_length: int | None = Field(None, ge=1, le=5000)
 
     @field_validator("title", "blurb", "genre")
     @classmethod
@@ -102,15 +111,48 @@ class BookCreate(BaseModel):
     @field_validator("tags")
     @classmethod
     def clean_tags(cls, value: list[str]) -> list[str]:
-        tags = [tag.strip() for tag in value if tag.strip()]
-        if any(len(tag) > 20 for tag in tags):
-            raise ValueError("每个标签不超过 20 个字")
-        return list(dict.fromkeys(tags))
+        return clean_tag_list(value)
 
     @model_validator(mode="after")
     def idea_needed_to_start(self) -> "BookCreate":
         if self.start_setup and len(self.idea.strip()) < 4:
             raise ValueError("点子至少写 4 个字")
+        return self
+
+
+class BookDraftFields(BaseModel):
+    """新建页上的几项：编辑部起草或按意见改，都只在页面上，作者点下一步才建书。"""
+
+    title: str = Field("", max_length=200)
+    blurb: str = Field("", max_length=5000)
+    channel: Literal["男频", "女频", ""] = ""
+    genre: str = Field("", max_length=100)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+    target_length: int | None = Field(None, ge=1, le=5000)
+
+    @field_validator("tags")
+    @classmethod
+    def clean_tags(cls, value: list[str]) -> list[str]:
+        return clean_tag_list(value)
+
+
+class BookDraftOut(BookDraftFields):
+    # 编辑部说的一句话：这版的思路，或这次改了哪里
+    reply: str = ""
+
+
+class BookDraftIn(BaseModel):
+    idea: str = Field("", max_length=5000)
+    # 按意见改时带上页面上现在的样子
+    current: BookDraftFields | None = None
+    feedback: str = Field("", max_length=2000)
+
+    @model_validator(mode="after")
+    def has_something(self) -> "BookDraftIn":
+        if self.feedback.strip() and self.current is None:
+            raise ValueError("按意见改要带上现在的内容")
+        if not self.feedback.strip() and len(self.idea.strip()) < 2:
+            raise ValueError("先写一句点子")
         return self
 
 

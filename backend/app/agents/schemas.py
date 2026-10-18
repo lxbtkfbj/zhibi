@@ -658,6 +658,16 @@ class LibraryIntent(Lenient):
     reply: str = Field(default="", description="改设定、写作要求时，主编在群聊里回作者的一句话；提问闲聊留空")
 
 
+class BookDraft(Lenient):
+    title: str = Field(description="书名本身（不带书名号、不带备选）")
+    blurb: str = Field(description="简介：写给读者看的那段话，100-250 字；开头一句就抓人，不剧透结局")
+    channel: Literal["男频", "女频"] = Field(description="男频还是女频")
+    genre: str = Field(description="类别：从给出的类别里挑一个，原样照写")
+    tags: list[str] = Field(default_factory=list, description="3-5 个标签，优先用给出的常见标签，没有合适的才自己写，每个不超过 6 个字")
+    target_length: int = Field(ge=1, le=5000, description="篇幅，单位万字，一般 100-300")
+    reply: str = Field(default="", description="一句话告诉作者你这版的思路，或者这次改了哪里")
+
+
 class Pitch(Lenient):
     name: str = Field(description="方向名：给这个版本贴的标签，4-8 字，说清主打什么，如「废柴逆袭流」；不是书名")
     text: str = Field(description="故事方向：一百字左右，一段话说清主角是谁、凭什么、想要什么、读者爽在哪")
