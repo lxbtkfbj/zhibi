@@ -590,6 +590,8 @@ export interface ChatOutcome {
   text?: string
   /** fill：补上的几栏 */
   filled?: string[]
+  /** created：群聊里让编辑部新建的几条，撤销就把它们删掉 */
+  items?: { target_type: 'character' | 'entry'; target_id: string; name: string }[]
   /** outline：编辑部写大纲上的那一段之前的样子，撤销就存回去 */
   before?: Record<string, unknown>
   plan_id?: number

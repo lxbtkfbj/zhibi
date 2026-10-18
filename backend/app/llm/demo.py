@@ -934,6 +934,14 @@ def _library_intent(user: str) -> s.LibraryIntent:
     note = _match(r"【作者的话】\n(.*?)(?=\n\n要求：|\Z)", user).strip()
     if "测试分流出错" in note:
         raise RuntimeError("演示分流出错")
+    # 新建设定：「写一张封不觉的角色卡」「新建一个角色王二」「帮我加一个地点」
+    if any(w in note for w in ("角色卡", "新建", "加一个")):
+        named = re.search(r"写一张(.+?)的角色卡|新建一个(?:角色)?(.+?)(?:角色|人物|$)", note)
+        names = [n for n in (named.groups() if named else ()) if n]
+        category = "角色列表" if any(w in note for w in ("角色", "人物", "反派")) else "地点列表" if "地点" in note else "特殊规则"
+        return s.LibraryIntent(
+            kind="新建设定", category=category, new_names=names[:1], count=1, instruction=note, reply="好，交给设定师写。"
+        )
     # 写大纲：「帮我写一下这篇」「把第三卷写一下」
     if any(w in note for w in ("写一下", "写写", "帮我写", "细化", "重写")) and any(
         w in note for w in ("篇", "卷", "章", "单元", "结局", "这一段", "这段", "大纲")

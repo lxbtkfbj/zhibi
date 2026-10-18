@@ -634,12 +634,20 @@ class LibraryReview(Lenient):
 
 
 class LibraryIntent(Lenient):
-    kind: Literal["改设定", "写大纲", "写作要求", "提问闲聊"] = Field(
-        description="这句话是哪一种：要改设定库里的某一处选「改设定」；要编辑部现在就把大纲上的某一段（结局、某一篇、某一卷、某个单元、某一章）写出来或重写选「写大纲」；要编辑部以后规划、写作时照着做的选「写作要求」；提问、商量、出主意、闲聊选「提问闲聊」；拿不准时选「提问闲聊」"
+    kind: Literal["改设定", "新建设定", "写大纲", "写作要求", "提问闲聊"] = Field(
+        description="这句话是哪一种：要改设定库里已有的某一处选「改设定」；要编辑部在设定库里新写一条（或几条）现在还没有的人物、地方、势力、物品、规矩……选「新建设定」；要编辑部现在就把大纲上的某一段（结局、某一篇、某一卷、某个单元、某一章）写出来或重写选「写大纲」；要编辑部以后规划、写作时照着做的选「写作要求」；提问、商量、出主意、闲聊选「提问闲聊」；拿不准时选「提问闲聊」"
     )
     target_name: str = Field(
         default="", description="改设定时才写：要改哪一条，条目或角色卡片的名称，照设定库目录里的写法"
     )
+    category: str = Field(
+        default="",
+        description="新建设定时才写：写进哪一类，照设定库目录里的类名，比如「角色列表」「地点列表」；作者没说的按要写的东西挑最合适的一类",
+    )
+    new_names: list[str] = Field(
+        default_factory=list, description="新建设定时才写：作者点了名的几条的名字；没点名的留空，由设定师起名"
+    )
+    count: int = Field(default=1, ge=1, le=5, description="新建设定时才写：写几条；作者点了名的就是点名的条数，没说就是 1")
     part: str = Field(
         default="", description="改设定时才写：改这一条的哪一处：卡片的字段名、等级的级名、「名称」「一句话」「一段话」"
     )
@@ -652,7 +660,7 @@ class LibraryIntent(Lenient):
         default="给几个写法",
         description="改设定时才写：作者只说了不满意、没说怎么改的，选给几个写法；说清了怎么改的，选照作者的意思改；要把这一条补齐、写全、补完整的，选补齐空着的",
     )
-    instruction: str = Field(default="", description="改设定、写大纲时才写：作者想怎么改、想写成什么样，用作者的话概括一句")
+    instruction: str = Field(default="", description="改设定、新建设定、写大纲时才写：作者想怎么改、想写成什么样，用作者的话概括一句")
     requirement: str = Field(
         default="",
         description="写作要求时才写：写成一句清楚的要求，说清做什么、不写理由，「这样」「那个」换成具体内容，60 字以内",
@@ -665,7 +673,7 @@ class LibraryIntent(Lenient):
         default="主编",
         description="提问闲聊时才写：谁来回答最合适：问设定、前后对不对、谁知道什么找设定师；问怎么写、文风找写手；要挑毛病找审稿；其余找主编",
     )
-    reply: str = Field(default="", description="改设定、写大纲、写作要求时，主编在群聊里回作者的一句话；提问闲聊留空")
+    reply: str = Field(default="", description="改设定、新建设定、写大纲、写作要求时，主编在群聊里回作者的一句话；提问闲聊留空")
 
 
 class BookDraft(Lenient):

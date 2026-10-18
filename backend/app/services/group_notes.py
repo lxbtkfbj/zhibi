@@ -10,7 +10,7 @@ from app.agents.schemas import LibraryIntent
 from app.api.library_ai import RewriteIn, call_model, rewrite_target, say
 from app.db import get_sessionmaker
 from app.models import Book, Job, MeetingMessage, SettingSuggestion, SettingVersion
-from app.schemas import MeetingMessageOut
+from app.schemas import DraftRequest, MeetingMessageOut
 from app.services import jobs
 from app.services.chat import conversation_lock, reply_background
 from app.services.chat_context import (
@@ -23,7 +23,16 @@ from app.services.chat_context import (
     wants_new_pitches,
     wants_plan,
 )
-from app.services.desk import column_in, fill_entry, path_of, value_of
+from app.services.desk import (
+    category_label,
+    category_layout,
+    column_in,
+    fill_entry,
+    path_of,
+    resolve_category,
+    save_drafted,
+    value_of,
+)
 from app.services.library import lock_book
 from app.services.library_context import load_context
 from app.services.meeting import message_dict, post_message, publish
@@ -210,7 +219,7 @@ async def apply_intent(session, redis, message, intent):
     working = job is not None and job.status in jobs.BUSY_STATUSES
     if intent.kind == "写大纲":
         return await write_outline_from_chat(session, redis, book, message, intent)
-    if intent.kind == "改设定" and working and job.kind != "book_setup":
+    if intent.kind in ("改设定", "新建设定") and working and job.kind != "book_setup":
         title = text[:40] + ("……" if len(text) > 40 else "")
         suggestion = SettingSuggestion(
             book_id=book_id,
@@ -222,6 +231,8 @@ async def apply_intent(session, redis, message, intent):
         await session.flush()
         outcome = {"kind": "later", "suggestion_id": str(suggestion.id)}
         reply = "编辑部正在写，这一处等写完再改。我放进待处理的建议了，写完点「现在改」。"
+    elif intent.kind == "新建设定" and not working:
+        return await create_from_chat(session, redis, book, message, intent)
     elif intent.kind == "写作要求" or working:
         row = await add_requirement(
             session, book_id, intent.requirement or text, "note", SCOPE_INPUTS[intent.scope], message_id=message_id
@@ -234,10 +245,15 @@ async def apply_intent(session, redis, message, intent):
         target = ctx.find_target(intent.target_name)
         if target is None:
             outcome = {"kind": "not_found", "target_name": intent.target_name}
-            reply = f"没找到「{intent.target_name}」这一条。去设定库点那一处改，或者告诉我它在哪一类。"
+            reply = (
+                f"设定库里还没有「{intent.target_name}」。要新写一条就说「新建{intent.target_name}」；"
+                "要改的是别的哪一条，说一下它的名字。"
+            )
         else:
             # 先按新书页上这一条的栏目认改哪一栏：模型写的 part，或者作者话里提到的栏目名
-            key = None if intent.part.strip() in NAME_PARTS else await column_in(session, book, target, intent.part, text)
+            key = (
+                None if intent.part.strip() in NAME_PARTS else await column_in(session, book, target, intent.part, text)
+            )
             if key is not None:
                 path = path_of(target, key)
                 value = value_of(target, key)
@@ -287,7 +303,10 @@ async def apply_intent(session, redis, message, intent):
                 }
                 doing = "出三种写法" if body.mode == "options" else "改"
                 await update_message(
-                    session, redis, message, outcome={"kind": "working", "text": f"设定师在{doing}「{outcome['target_label']}」"}
+                    session,
+                    redis,
+                    message,
+                    outcome={"kind": "working", "text": f"设定师在{doing}「{outcome['target_label']}」"},
                 )
                 try:
                     result = await asyncio.wait_for(
@@ -302,7 +321,9 @@ async def apply_intent(session, redis, message, intent):
                     outcome["revert_version_id"] = result.get("revert_version_id") or await revert_id(
                         session, body.target_type, body.target_id
                     )
-                reply = intent.reply or ("三种写法在这条消息下面，挑一个换上。" if body.mode == "options" else "改好了，去看看。")
+                reply = intent.reply or (
+                    "三种写法在这条消息下面，挑一个换上。" if body.mode == "options" else "改好了，去看看。"
+                )
     await update_message(session, redis, message, outcome=outcome)
     if reply:
         await say(session, redis, book_id, "chief", reply)
@@ -319,7 +340,13 @@ async def write_outline_from_chat(session, redis, book, message, intent):
         said = intent.outline_target if intent.outline_target and intent.outline_target != "正在看的" else ""
         await update_message(session, redis, message, outcome={"kind": "not_found", "target_name": said or "这一段"})
         head = f"没认出要写大纲上的「{said}」。" if said else "没认出要写大纲上的哪一段。"
-        await say(session, redis, book_id, "chief", head + "先在新书页打开那一页再说「帮我写这一段」，或者说清是第几篇、第几卷、第几章。")
+        await say(
+            session,
+            redis,
+            book_id,
+            "chief",
+            head + "先在新书页打开那一页再说「帮我写这一段」，或者说清是第几篇、第几卷、第几章。",
+        )
         return False
     target_type, target_id, label = found
     await update_message(session, redis, message, outcome={"kind": "working", "text": f"主编在写{label}"})
@@ -334,7 +361,84 @@ async def write_outline_from_chat(session, redis, book, message, intent):
     }
     await update_message(session, redis, message, outcome=outcome)
     note = result.get("note", "").strip()
-    await say(session, redis, book_id, "chief", f"{label}写好了，已经换上去，在大纲上看。" + (f"这次的思路：{note}" if note else ""))
+    await say(
+        session,
+        redis,
+        book_id,
+        "chief",
+        f"{label}写好了，已经换上去，在大纲上看。" + (f"这次的思路：{note}" if note else ""),
+    )
+    return False
+
+
+async def create_from_chat(session, redis, book, message, intent):
+    """群聊里说「写一张封不觉的角色卡」：设定师照这一类现在的栏目写好，直接放进设定库，消息下面能撤销。"""
+    from app.api.workspace import draft_entries
+
+    book_id, message_id = book.id, message.id
+    category = await resolve_category(session, book_id, intent.category)
+    if category is None:
+        said = f"「{intent.category}」" if intent.category.strip() else ""
+        await update_message(
+            session, redis, message, outcome={"kind": "not_found", "target_name": intent.category or "这一类"}
+        )
+        await say(
+            session,
+            redis,
+            book_id,
+            "chief",
+            f"没认出要放进哪一类{said}。说清是角色、地点、势力还是别的哪一类，或者去那一类里点「编辑部帮写」。",
+        )
+        return False
+    label = await category_label(session, book_id, category)
+    ctx = await load_context(session, book)
+    taken = {n for row in [*ctx.characters, *ctx.entries] for n in [row.name, *(row.aliases or [])] if n}
+    asked = [name.strip() for name in intent.new_names if name.strip()]
+    names = [name for name in asked if name not in taken]
+    if asked and not names:
+        have = "、".join(f"「{name}」" for name in asked)
+        await update_message(session, redis, message, outcome={"kind": "not_found", "target_name": asked[0]})
+        await say(
+            session,
+            redis,
+            book_id,
+            "chief",
+            f"设定库里已经有{have}了。想补齐空着的就说「把{asked[0]}补齐」，想改哪一栏就直接说。",
+        )
+        return False
+    count = len(names) or intent.count
+    request = (intent.instruction.strip() or message.content) + (f"\n名字就用：{'、'.join(names)}" if names else "")
+    facts, sections = await category_layout(session, book, category)
+    what = "、".join(f"「{name}」" for name in names) if names else f" {count} 条{label}"
+    await update_message(session, redis, message, outcome={"kind": "working", "text": f"设定师在写{what}"})
+    body = DraftRequest(category=category, request=request[:1000], count=count, facts=facts, sections=sections)
+    try:
+        result = await asyncio.wait_for(draft_entries(body, book, session), timeout=ACTION_TIMEOUT)
+    except TimeoutError as exc:
+        raise HTTPException(504, "这次编辑部太慢了，两分半还没写完，没建。再试一次") from exc
+    if not result["entries"]:
+        raise HTTPException(502, "设定师这次没写出来，再试一次")
+    await lock_book(session, book_id)
+    rows = await save_drafted(session, book_id, category, result["entries"])
+    items = [{"target_type": target_type_of(row), "target_id": str(row.id), "name": row.name} for row in rows]
+    message = await session.get(MeetingMessage, message_id)
+    outcome = {
+        "kind": "created",
+        "target_type": items[0]["target_type"],
+        "target_id": items[0]["target_id"],
+        "target_label": f"{label} · {'、'.join(item['name'] for item in items)}",
+        "items": items,
+    }
+    await update_message(session, redis, message, outcome=outcome)
+    note = (result.get("note") or "").strip()
+    made = "、".join(f"「{item['name']}」" for item in items)
+    await say(
+        session,
+        redis,
+        book_id,
+        "chief",
+        f"写好了{made}，放进了{label}，在卡上看；不满意可以撤销。" + (f"这次的思路：{note}" if note else ""),
+    )
     return False
 
 

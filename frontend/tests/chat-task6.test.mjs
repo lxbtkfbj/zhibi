@@ -19,6 +19,7 @@ test('处理结果采用当前要求文字和范围，删除后不会显示旧�
   assert.deepEqual(outcomeCopy({ kind: 'requirement' }), { text: '已撤销', actions: [] })
   assert.equal(outcomeCopy({ kind: 'chat' }).text, '只是聊天，没有记')
   assert.deepEqual(outcomeCopy({ kind: 'chat' }).actions, ['其实要记下'])
+  assert.deepEqual(outcomeCopy({ kind: 'created', target_label: '角色列表 · 封不觉' }), { text: '写好了，放进了角色列表 · 封不觉', actions: ['去看看', '撤销'] })
   assert.equal(outcomeCopy({ kind: 'to_job' }, row).text, '已交给编辑部：做完手头这一步就照办')
   // 2026-10-18：三种写法就在消息下面挑，不再跳去设定库
   assert.deepEqual(outcomeCopy({ kind: 'edit', mode: 'options', target_label: '境界' }).actions, [])

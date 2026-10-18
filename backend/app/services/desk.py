@@ -14,7 +14,7 @@ from app.agents import schemas as s
 from app.agents.context import format_requirements
 from app.library_config import BUILTIN_CATEGORIES, CHARACTER_CATEGORY, GOLDFINGER
 from app.models import Book, Character, SettingCategory, WorldEntry
-from app.services.library import ensure_unlocked, infer_status, load_target, lock_book
+from app.services.library import ensure_unlocked, infer_status, load_target, lock_book, validate_entry
 from app.services.library_context import load_context
 from app.services.requirements import active_requirements, requirement_text
 from app.services.versions import previous_version_id, record_version, snapshot_of
@@ -45,7 +45,10 @@ WORLD_OVERVIEW = "世界概况"
 LADDER = "等级体系"
 # 每一类默认有哪几栏：名字下面的小字、正文栏目
 DEFAULT_FIELDS = {
-    "角色列表": (["定位", "所属", "性别", "年龄", "别名"], ["外貌", "性格与说话方式", "身世", "想要什么", "软肋", "能力", "成长与结局", "备注"]),
+    "角色列表": (
+        ["定位", "所属", "性别", "年龄", "别名"],
+        ["外貌", "性格与说话方式", "身世", "想要什么", "软肋", "能力", "成长与结局", "备注"],
+    ),
     "金手指": (["是什么", "谁知道"], ["能做什么", "规矩和限制", "代价", "怎么变强", "来历"]),
     "地点列表": (["归谁管"], ["内容"]),
     "势力列表": (["领头的", "对主角", "地盘"], ["内容"]),
@@ -92,7 +95,9 @@ async def columns_of(session: AsyncSession, book: Book, target: Character | Worl
         return [("内容", "总说明" if target.style == "ladder" else "内容")]
     saved = (book.card_layouts or {}).get(category)
     if saved:
-        return with_now_power(target, [(f["key"], f["label"]) for f in [*saved.get("facts", []), *saved.get("sections", [])]])
+        return with_now_power(
+            target, [(f["key"], f["label"]) for f in [*saved.get("facts", []), *saved.get("sections", [])]]
+        )
     if category.startswith("custom:"):
         custom = await session.scalar(
             select(SettingCategory).where(
@@ -216,6 +221,101 @@ async def fill_entry(
     revert = await previous_version_id(session, target_type, target.id)
     await session.commit()
     return {"filled": filled, "note": result.note, "target_name": name, "revert_version_id": revert}
+
+
+# 群聊里说的类名（模型可能照设定库目录写旧名，比如「角色卡片」「世界与地图」）→ 新书页上的类别
+CATEGORY_WORDS = {
+    "角色": "角色列表",
+    "人物": "角色列表",
+    "地点": "地点列表",
+    "地方": "地点列表",
+    "地图": "地点列表",
+    "势力": "势力列表",
+    "宗门": "势力列表",
+    "物品": "物品功法",
+    "功法": "物品功法",
+    "法宝": "物品功法",
+    "往事": "往事秘密",
+    "秘密": "往事秘密",
+    "规则": "特殊规则",
+    "规矩": "特殊规则",
+    "境界": LADDER,
+    "等级": LADDER,
+}
+
+
+async def resolve_category(session: AsyncSession, book_id: uuid.UUID, name: str) -> str | None:
+    """认出是哪一类：内置的返回新书页上的类名，自建的返回 custom:key；认不出返回 None。"""
+    name = name.strip()
+    if not name:
+        return None
+    if name in ("角色列表", LADDER, *ENTRY_CATEGORIES):
+        return name
+    customs = list(await session.scalars(select(SettingCategory).where(SettingCategory.book_id == book_id)))
+    for row in customs:
+        if row.name == name:
+            return f"custom:{row.key}"
+    return next((category for word, category in CATEGORY_WORDS.items() if word in name), None)
+
+
+async def category_label(session: AsyncSession, book_id: uuid.UUID, category: str) -> str:
+    if not category.startswith("custom:"):
+        return category
+    custom = await session.scalar(
+        select(SettingCategory).where(
+            SettingCategory.book_id == book_id, SettingCategory.key == category.removeprefix("custom:")
+        )
+    )
+    return custom.name if custom is not None else category
+
+
+async def category_layout(session: AsyncSession, book: Book, category: str) -> tuple[list[dict], list[dict]]:
+    """这一类现在有哪几栏：名字下面的小字、正文栏目，每栏 {key, label}；和新书页上这一类的样子一致。"""
+    if category == LADDER:
+        return [], []
+    saved = (book.card_layouts or {}).get(category)
+    if saved:
+        return list(saved.get("facts", [])), list(saved.get("sections", []))
+    if category.startswith("custom:"):
+        custom = await session.scalar(
+            select(SettingCategory).where(
+                SettingCategory.book_id == book.id, SettingCategory.key == category.removeprefix("custom:")
+            )
+        )
+        if custom is None or custom.style == "ladder":
+            return [], []
+        fields = (custom.fields or []) if custom.style == "card" else ["内容"]
+        return [], [{"key": name, "label": name} for name in fields]
+    facts, sections = DEFAULT_FIELDS.get(category, ([], ["内容"]))
+    return [{"key": name, "label": name} for name in facts], [{"key": name, "label": name} for name in sections]
+
+
+async def save_drafted(
+    session: AsyncSession, book_id: uuid.UUID, category: str, drafts: list[dict]
+) -> list[Character | WorldEntry]:
+    """把设定师写好的几条直接存进这一类（群聊里说「新建」时用）：来源记成 AI，每条记一个版本。"""
+    rows: list[Character | WorldEntry] = []
+    for item in drafts:
+        if category == "角色列表":
+            row: Character | WorldEntry = Character(book_id=book_id, name=item["name"], source="ai")
+        else:
+            data = await validate_entry(
+                session, book_id, {"category": ENTRY_CATEGORIES.get(category, category), "name": item["name"]}
+            )
+            row = WorldEntry(book_id=book_id, source="ai", **data)
+        if isinstance(row, WorldEntry) and row.style == "ladder":
+            row.content = item["values"].get("总说明", "")
+            row.levels = item.get("levels") or []
+        else:
+            for key, value in item["values"].items():
+                write_value(row, key, value)
+        row.status = infer_status(row)
+        session.add(row)
+        await session.flush()
+        kind = "character" if isinstance(row, Character) else "entry"
+        await record_version(session, book_id, kind, row, "ai", "群聊里让编辑部新建")
+        rows.append(row)
+    return rows
 
 
 def path_of(target: Character | WorldEntry, key: str) -> str:

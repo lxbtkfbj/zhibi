@@ -30,6 +30,7 @@ export function outcomeCopy(outcome: ChatOutcome, requirement?: AuthorRequiremen
   if (outcome.kind === 'fill') return outcome.filled?.length
     ? { text: `补好了「${outcome.target_label}」空着的 ${outcome.filled.length} 栏：${outcome.filled.join('、')}`, actions: ['去看看', '撤销'] }
     : { text: `「${outcome.target_label}」每一栏都写了，没补`, actions: ['去看看'] }
+  if (outcome.kind === 'created') return { text: `写好了，放进了${outcome.target_label ?? '设定库'}`, actions: ['去看看', '撤销'] }
   if (outcome.kind === 'outline') return { text: `写好了${outcome.target_label ?? '这一段'}，已经换上去`, actions: ['去看看', '撤销'] }
   if (outcome.kind === 'plan_pending') return { text: '正在整理方案…', actions: [] }
   if (outcome.kind === 'too_late') return { text: '编辑部这时在等你拍板，这句话没有记，也没有改。要改的话，在拍板的地方提意见，或者让我总结成方案。', actions: [] }

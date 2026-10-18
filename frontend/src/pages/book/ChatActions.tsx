@@ -42,6 +42,12 @@ export function ChatOutcome({ message, result }: { message: MeetingMessage; resu
           setUndone(true)
           void qc.invalidateQueries({ queryKey: ['workspace', bookId] })
         }
+        else if (outcome.kind === 'created' && outcome.items?.length) {
+          // 群聊里新建的：撤销就是删掉建的那几条
+          for (const item of outcome.items) await del(`/${item.target_type === 'character' ? 'characters' : 'world-entries'}/${item.target_id}`)
+          setUndone(true)
+          void qc.invalidateQueries({ queryKey: ['workspace', bookId] })
+        }
         else if (outcome.revert_version_id) {
           await revert.mutateAsync(outcome.revert_version_id)
           setUndone(true)
