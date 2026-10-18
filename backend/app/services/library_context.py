@@ -8,7 +8,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.context import format_concept
-from app.library_config import BUILTIN_CATEGORIES, CHARACTER_CATEGORY, GENRE_DEFAULTS, LEGACY_ROLE_TYPES, STATUSES
+from app.library_config import (
+    BUILTIN_CATEGORIES,
+    CHARACTER_CATEGORY,
+    GENRE_DEFAULTS,
+    GOLDFINGER,
+    LEGACY_ROLE_TYPES,
+    STATUSES,
+)
 from app.models import Book, Character, PlotUnit, SettingCategory, StoryNode, Volume, WorldEntry
 from app.services.splice import read_path
 
@@ -39,6 +46,26 @@ def genre_defaults(genre: str) -> str:
             lines.append(f"【{group}】")
         lines.extend(f"- {category} · {name}（{STATUSES[status]}）" for category, name, status in entries)
     return "\n".join(lines)
+
+
+# 设定全文加起来在这个字数以内，就整份带给模型；超过了只带主角、金手指、等级体系的全文，其余列目录
+FULL_LIBRARY_BUDGET = 20000
+GIST_LIMIT = 40
+
+
+def gist(target: Any) -> str:
+    """目录里跟在名字后面的那一句：有一句话用一句话；新书页上一栏栏写的卡没有一句话，从写了的内容里截第一句。"""
+    if target.one_line:
+        return target.one_line
+    if isinstance(target, Character):
+        pieces = [target.background, target.goal, target.abilities, target.personality, target.appearance]
+        pieces += [str(value) for value in (target.extra or {}).values()]
+    else:
+        pieces = [target.content] + [field.get("value") or "" for field in target.fields or []]
+        pieces += [f"{level['name']}：{level['text']}" for level in target.levels or []][:1]
+    text = next((str(piece).strip() for piece in pieces if piece and str(piece).strip()), "")
+    first = re.split(r"(?<=[。！？!?])|\n", text, maxsplit=1)[0].strip()
+    return first if len(first) <= GIST_LIMIT else first[:GIST_LIMIT] + "…"
 
 
 @dataclass
@@ -109,10 +136,26 @@ class LibraryContext:
                     label += "（以后再说）"
                 if target.locked:
                     label += "（已锁）"
-                if target.one_line:
-                    label += f"：{target.one_line}"
+                if line := gist(target):
+                    label += f"：{line}"
                 lines.append(f"- {label}")
         return "\n".join(lines)
+
+    def is_core(self, target: Character | WorldEntry) -> bool:
+        """主角、金手指、等级体系：编辑部干什么活都得知道细节的几条。"""
+        if isinstance(target, Character):
+            return target.role_type == "主角"
+        return target.category in (GOLDFINGER, "等级体系") or "金手指" in (target.tags or [])
+
+    @property
+    def library_material(self) -> str:
+        """编辑部帮写、补齐、写大纲、改一处、聊天时看的设定：书小时整份全文，书大了核心几条全文加目录。"""
+        full = self.library_full
+        if len(full) <= FULL_LIBRARY_BUDGET:
+            return full or "（还没有设定）"
+        core = "\n\n".join(self.entry_full_text(target) for target in self.targets if self.is_core(target))
+        index = "其余各条只列名字和一句话：\n" + self.library
+        return f"{core}\n\n{index}" if core else index
 
     def _arcs(self) -> list[StoryNode]:
         return [
@@ -153,11 +196,17 @@ class LibraryContext:
             return f"{heading}：{target.summary}"
         lines = [heading]
         if isinstance(target, Character):
+            if target.one_line:
+                lines.append(f"一句话：{target.one_line}")
             for label, column in CHARACTER_CATEGORY["fields"]:
                 value = getattr(target, column, "")
                 if value:
                     lines.append(f"{label}：{'、'.join(value) if isinstance(value, list) else value}")
             lines.extend(f"{label}：{value}" for label, value in (target.extra or {}).items() if value)
+            if target.location:
+                lines.append(f"此刻在哪：{target.location}")
+            if target.condition:
+                lines.append(f"此刻处境：{target.condition}")
             if target.want:
                 lines.append(f"此刻想要：{target.want}")
         elif target.style == "ladder":
@@ -168,7 +217,9 @@ class LibraryContext:
         else:
             lines.append(f"一句话：{target.one_line or ''}")
             lines.extend(f"{field['name']}：{field['value']}" for field in target.fields or [] if field.get("value"))
-            lines.append(target.content or "")
+            # 金手指的「能做什么」存在 content 里
+            content = target.content or ""
+            lines.append(f"能做什么：{content}" if content and target.category == GOLDFINGER else content)
         return "\n".join(lines)
 
     @property

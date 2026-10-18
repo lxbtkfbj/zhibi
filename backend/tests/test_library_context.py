@@ -138,12 +138,12 @@ def test_catalog_and_full_text_are_exact_and_category_ordered(context):
     assert context.library == (
         "【角色卡片】\n- 楚风（主角）（已锁）：敢拿命下注的少年。\n"
         "【等级体系】\n- 武道境界：修士的境界。\n"
-        "【世界与地图】\n- 天风国\n- 青阳城（属于天风国）：楚风出发的地方。\n"
+        "【世界与地图】\n- 天风国：各城归皇室管。\n- 青阳城（属于天风国）：楚风出发的地方。\n"
         "【往事与秘密】\n- 底牌：骗局\n【厉鬼】（自建类别）\n"
         "- 末班车司机（以后再说）（已锁）：修士的境界。"
     )
     assert context.entry_full_text(context.characters[0]) == (
-        "角色卡片 · 楚风\n姓名：楚风\n别名：小风\n定位：主角\n性别：男\n想要什么：终结寿元交易\n此刻想要：救出母亲"
+        "角色卡片 · 楚风\n一句话：敢拿命下注的少年。\n姓名：楚风\n别名：小风\n定位：主角\n性别：男\n想要什么：终结寿元交易\n此刻想要：救出母亲"
     )
     assert (
         context.entry_full_text(context.entries[0])

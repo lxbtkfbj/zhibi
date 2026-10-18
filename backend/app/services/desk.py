@@ -56,6 +56,8 @@ DEFAULT_FIELDS = {
 # 地点这一类不要「第一条是世界概况」那句：世界概况在新书页上单独一页
 PLACE_HINT = "一个个地方：这是什么地方，给人什么感觉；属于哪里；谁说了算；有什么规矩或危险；主角在这里处境如何；这里能得到什么。用得上的写，用不上的不写。"
 FILL_TIMEOUT = 150
+# 人物「此刻」里的实力与地位，存在 characters.extra
+NOW_POWER = "实力与地位"
 
 
 def content_key(category: str) -> str:
@@ -90,7 +92,7 @@ async def columns_of(session: AsyncSession, book: Book, target: Character | Worl
         return [("内容", "总说明" if target.style == "ladder" else "内容")]
     saved = (book.card_layouts or {}).get(category)
     if saved:
-        return [(f["key"], f["label"]) for f in [*saved.get("facts", []), *saved.get("sections", [])]]
+        return with_now_power(target, [(f["key"], f["label"]) for f in [*saved.get("facts", []), *saved.get("sections", [])]])
     if category.startswith("custom:"):
         custom = await session.scalar(
             select(SettingCategory).where(
@@ -100,7 +102,15 @@ async def columns_of(session: AsyncSession, book: Book, target: Character | Worl
         fields = (custom.fields or []) if custom is not None and custom.style == "card" else ["内容"]
         return [(name, name) for name in fields]
     facts, sections = DEFAULT_FIELDS.get(category, ([], ["内容"]))
-    return [(name, name) for name in [*facts, *sections]]
+    columns = [(name, name) for name in [*facts, *sections]]
+    return with_now_power(target, columns)
+
+
+def with_now_power(target: Character | WorldEntry, columns: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """人物多补一栏开局的实力与地位（「此刻」那一格），写过一章以后由设定师每章更新。"""
+    if isinstance(target, Character) and all(key != NOW_POWER for key, _ in columns):
+        return [*columns, (NOW_POWER, NOW_POWER)]
+    return columns
 
 
 def value_of(target: Character | WorldEntry, key: str) -> str:
@@ -167,7 +177,8 @@ async def fill_entry(
     blocks = dict(
         target_name=name,
         concept=ctx.concept,
-        library=ctx.library,
+        library=ctx.library_material,
+        outline=ctx.outline,
         target_full=ctx.entry_full_text(target),
         related=ctx.related(target),
         category_hint=hint_of(target, custom_hint),

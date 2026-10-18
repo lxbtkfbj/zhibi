@@ -121,7 +121,7 @@ async def rewrite_target(
     name, part = ctx.target_name(target), ctx.part_label(target, body.path)
     values = dict(
         concept=ctx.concept,
-        library=ctx.library,
+        library=ctx.library_material,
         target_full=ctx.entry_full_text(target),
         related=ctx.related(target),
         target_label=ctx.target_label(target, body.path),

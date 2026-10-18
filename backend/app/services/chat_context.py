@@ -296,7 +296,7 @@ async def reply_values(session, book, thread, role, rows, unanswered, summary):
     return dict(
         where="私聊" if thread != "group" else "编辑部群聊",
         concept=ctx.concept,
-        library=ctx.library,
+        library=ctx.library_material,
         outline=ctx.outline,
         progress=await progress_of(session, ctx, chapters, job),
         requirements=requirements_list(await active_requirements(session, book.id)),

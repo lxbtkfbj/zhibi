@@ -24,6 +24,7 @@ from app.services.desk import (
     CHARACTER_COLUMNS,
     ENTRY_CATEGORIES,
     LADDER,
+    NOW_POWER,
     PLACE_HINT,
     WORLD_OVERVIEW,
     content_key,
@@ -369,14 +370,16 @@ async def draft_entries(body: DraftRequest, book: Book = Depends(get_book), sess
     if ladder:
         fields = "一级一级往上排：values 只写一栏「总说明」，各级写在 levels 里。"
     else:
-        facts = "、".join(f.label for f in body.facts)
+        # 人物顺手写上开局的实力与地位（新书页「此刻」那一格），不用等第一章写完
+        facts = "、".join([f.label for f in body.facts] + ([NOW_POWER] if people else []))
         sections = "、".join(f.label for f in body.sections) or "内容"
         fields = (f"名字下面的短栏目：{facts}\n" if facts else "") + f"正文栏目：{sections}"
     requirements = await active_requirements(session, book.id)
     blocks = dict(
         category=name,
         concept=ctx.concept,
-        library=ctx.library,
+        library=ctx.library_material,
+        outline=ctx.outline,
         same_kind=same_kind_text(ctx, same),
         category_hint=hint,
         fields=fields,
@@ -391,6 +394,8 @@ async def draft_entries(body: DraftRequest, book: Book = Depends(get_book), sess
     result = await call_model(book_id, "lorekeeper", s.DraftSet, "library_draft", **blocks)
 
     keys = {f.label.strip(): f.key for f in [*body.facts, *body.sections]}
+    if people:
+        keys[NOW_POWER] = NOW_POWER
     entries = []
     for item in result.entries:
         title = item.name.strip()

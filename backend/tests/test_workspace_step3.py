@@ -107,7 +107,7 @@ async def test_draft_characters_follow_the_book_columns_and_skip_taken_names(cli
     # 名字撞了已有的就不要
     assert [e["name"] for e in entries] == ["演示角色2", "演示角色3"]
     # 栏目按显示名写，交回来按存内容时认的名字
-    assert entries[0]["values"] == {"定位": "配角", "所属": "（演示）第2条的门派", "外貌": "（演示）第2条的外貌", "软肋": "（演示）第2条的软肋"}
+    assert entries[0]["values"] == {"定位": "配角", "所属": "（演示）第2条的门派", "外貌": "（演示）第2条的外貌", "软肋": "（演示）第2条的软肋", "实力与地位": "（演示）第2条的实力与地位"}
     # 什么都没存
     library = (await client.get(f"/api/books/{book}/library")).json()
     assert [c["name"] for c in library["characters"]] == ["演示角色1"]
@@ -175,7 +175,7 @@ async def test_fill_entry_only_fills_empty_columns_and_can_be_undone(client):
     assert res.status_code == 200, res.text
     body = res.json()
     # 定位、性别、年龄写过了不补；所属、别名和正文栏目补上
-    assert body["filled"] == ["所属", "别名", "外貌", "性格与说话方式", "身世", "想要什么", "软肋", "能力", "成长与结局", "备注"]
+    assert body["filled"] == ["所属", "别名", "外貌", "性格与说话方式", "身世", "想要什么", "软肋", "能力", "成长与结局", "备注", "实力与地位"]
     library = (await client.get(f"/api/books/{book}/library")).json()
     person = library["characters"][0]
     assert person["gender"] == "男" and person["age"] == "19" and person["role_type"] == "主角"

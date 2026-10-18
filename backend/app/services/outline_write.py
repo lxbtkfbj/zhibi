@@ -225,7 +225,7 @@ async def write_outline_node(
     blocks = dict(
         node_name=target.name,
         concept=ctx.concept,
-        library=ctx.library,
+        library=ctx.library_material,
         outline=outline_text(ctx, state, target),
         current=current_text(target),
         requirements=format_requirements([requirement_text(row) for row in requirements], [], book.settings),

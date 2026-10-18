@@ -896,7 +896,9 @@ const askMemory = new Map<string, AskMemory>()
 
 /** 一条候选：和自己写的卡片一样，名字、名字下面的小字、正文一栏一栏。 */
 function DraftPreview({ item, template }: { item: DraftItem; template: CardTemplate }) {
-  const facts = template.facts.filter((f) => item.values[f.key])
+  // 人物多一格开局的实力与地位，收下后在「此刻」里
+  const now = item.values['实力与地位'] && !template.facts.some((f) => f.key === '实力与地位') ? [{ key: '实力与地位', label: '实力与地位' }] : []
+  const facts = [...template.facts, ...now].filter((f) => item.values[f.key])
   const sections = template.sections.filter((f) => item.values[f.key])
   return (
     <>
@@ -1137,7 +1139,7 @@ function CardTemplateEditor({ category, template, counts, onClose }: {
           onEdit={(sections) => setDraft({ ...draft, sections })} onCommit={(sections, dropped) => commit({ ...draft, sections }, dropped)}
           addPlaceholder={people ? '加一栏，比如：口头禅、名场面' : '加一栏，比如：用法、来历'} />
       </div>
-      {people && <p className="mt-4 text-xs text-ink-3">「此刻」那几栏（实力与地位、在哪、处境、眼下想要）由设定师每写完一章更新，不在这里改。</p>}
+      {people && <p className="mt-4 text-xs text-ink-3">「此刻」那几栏（实力与地位、在哪、处境、眼下想要）由设定师每写完一章更新，不在这里改；开局的实力与地位，编辑部帮写、补齐人物时会先写上。</p>}
     </div>
   )
 }

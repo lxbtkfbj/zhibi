@@ -911,7 +911,7 @@ def _library_review(user: str) -> s.LibraryReview:
     # 段落样式的一句话后才是一段话；卡片和阶梯不会被误当成正文。
     for entry in re.split(r"\n\n(?=[^\n]+ · )", library):
         match = re.match(r"[^\n]+ · ([^\n]+)\n一句话：[^\n]*\n(.+)", entry, re.S)
-        if not match or not match[2].strip():
+        if not match or not match[2].strip() or entry.startswith("角色卡片 · "):
             continue
         sentence = re.match(r"[^。！？!?\n]+[。！？!?]?", match[2].strip())
         if sentence:
