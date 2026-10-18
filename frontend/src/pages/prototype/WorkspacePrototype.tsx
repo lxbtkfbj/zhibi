@@ -18,6 +18,8 @@ import { CHAT, PENDING, SAMPLE_BOOK, emptyBook } from './sampleBook'
 type Tab = '简介' | '设定' | '大纲'
 type Dock = 'ball' | 'float' | 'side'
 type CategoryStyle = NonNullable<VCategory['custom']>['style']
+/** 点了左边：滚到哪一张；同一类里平滑滚，换类直接跳 */
+interface ScrollReq { id: string; smooth: boolean; n: number }
 
 const ROLE_STYLE: Record<string, string> = {
   主编: 'bg-chief text-on-role',
@@ -140,7 +142,7 @@ function Prose({ text, placeholder, autoFocus }: { text: string; placeholder?: s
     <>
       <div className={clsx('relative', long && !open && 'max-h-[11.5em] overflow-hidden')}>
         <Editable multiline autoFocus={autoFocus} placeholder={placeholder ?? '还没写'} className="font-serif text-[17px] leading-[1.95] text-ink 2xl:text-lg">{text}</Editable>
-        {long && !open && <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-manuscript to-transparent" />}
+        {long && !open && <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-card to-transparent" />}
       </div>
       {long && (
         <button type="button" onClick={() => setOpen(!open)} className="mt-1 text-[13px] text-chief hover:underline">
@@ -320,8 +322,13 @@ function DirectoryShell({ title, search, onTitle, children, footer, addMenu }: {
 const rowSelected = 'bg-card shadow-[0_1px_2px_rgb(60_40_20/0.08)]'
 
 function EntryButton({ entry, selected, depth = 0, onSelect }: { entry: VEntry; selected: string; depth?: number; onSelect: (id: string) => void }) {
+  const ref = useRef<HTMLButtonElement>(null)
+  // 右边滚动换了选中的那条，左边目录跟着滚到看得见
+  useEffect(() => {
+    if (selected === entry.id) ref.current?.scrollIntoView({ block: 'nearest' })
+  }, [selected, entry.id])
   return (
-    <button type="button" onClick={() => onSelect(entry.id)} title={entry.name}
+    <button ref={ref} type="button" onClick={() => onSelect(entry.id)} title={entry.name}
       style={{ paddingLeft: 10 + depth * 14 }}
       className={clsx('flex w-full items-center gap-2 rounded-md py-[7px] pr-2.5 text-left font-serif text-[15px] transition-colors 2xl:text-base',
         selected === entry.id ? `${rowSelected} font-bold text-ink` : 'text-ink-2 hover:bg-line/40 hover:text-ink')}>
@@ -334,9 +341,8 @@ function EntryButton({ entry, selected, depth = 0, onSelect }: { entry: VEntry; 
 
 const SHOW_FIRST = 12
 
-/** 一类里的条目：地点按「属于哪里」缩进；太多先只显示前面一部分。 */
-function EntryList({ entries, selected, onSelect }: { entries: VEntry[]; selected: string; onSelect: (id: string) => void }) {
-  const [all, setAll] = useState(false)
+/** 地点按「属于哪里」排成树：先父后子。 */
+function treeRows(entries: VEntry[]): { entry: VEntry; depth: number }[] {
   const ids = new Set(entries.map((e) => e.id))
   const children = new Map<string, VEntry[]>()
   for (const e of entries) if (e.parent && ids.has(e.parent)) children.set(e.parent, [...(children.get(e.parent) ?? []), e])
@@ -346,6 +352,23 @@ function EntryList({ entries, selected, onSelect }: { entries: VEntry[]; selecte
     for (const child of children.get(e.id) ?? []) walk(child, Math.min(depth + 1, 3))
   }
   entries.filter((e) => !e.parent || !ids.has(e.parent)).forEach((e) => walk(e, 0))
+  return rows
+}
+
+function roleOrder(entries: VEntry[]): string[] {
+  return [...ROLE_ORDER, ...new Set(entries.map((e) => e.role ?? '配角').filter((r) => !ROLE_ORDER.includes(r)))]
+}
+
+/** 右边连着排的顺序和左边目录一样：角色按定位分组，地点按树。 */
+function orderEntries(category: VCategory): VEntry[] {
+  if (category.name === '角色列表') return roleOrder(category.entries).flatMap((role) => category.entries.filter((e) => (e.role ?? '配角') === role))
+  return treeRows(category.entries).map((r) => r.entry)
+}
+
+/** 一类里的条目：地点按「属于哪里」缩进；太多先只显示前面一部分。 */
+function EntryList({ entries, selected, onSelect }: { entries: VEntry[]; selected: string; onSelect: (id: string) => void }) {
+  const [all, setAll] = useState(false)
+  const rows = treeRows(entries)
   const selectedAt = rows.findIndex((r) => r.entry.id === selected)
   const limit = all || selectedAt >= SHOW_FIRST ? rows.length : SHOW_FIRST
   return (
@@ -361,7 +384,7 @@ function EntryList({ entries, selected, onSelect }: { entries: VEntry[]; selecte
 }
 
 function CharacterGroups({ entries, selected, onSelect }: { entries: VEntry[]; selected: string; onSelect: (id: string) => void }) {
-  const roles = [...ROLE_ORDER, ...new Set(entries.map((e) => e.role ?? '配角').filter((r) => !ROLE_ORDER.includes(r)))]
+  const roles = roleOrder(entries)
   const [closed, setClosed] = useState<string[]>(() => (entries.filter((e) => e.role === '配角').length > 4 ? ['配角'] : []))
   return (
     <>
@@ -531,12 +554,13 @@ function OutlineTreeView({ node, depth, selected, onSelect, open, toggle, onAdd 
 
 /* ---------------- 中间一页纸 ---------------- */
 
+const paperCard = 'rounded-xl border border-line bg-card px-12 py-11 shadow-[var(--shadow-paper)] 2xl:px-16 2xl:py-14'
+
 function Sheet({ children, narrow }: { children: ReactNode; narrow?: boolean }) {
   return (
-    // 不再是一张浮在背景上的卡片：整块中间区域就是纸，字在里面居中
-    <article className={clsx('mx-auto w-full px-12 pt-12 pb-24 2xl:px-16 2xl:pt-16', narrow ? 'max-w-[860px] 2xl:max-w-[920px]' : 'max-w-[1080px] 2xl:max-w-[1180px]')}>
-      {children}
-    </article>
+    <div className={clsx('mx-auto w-full px-8 py-10 2xl:py-12', narrow ? 'max-w-[880px] 2xl:max-w-[940px]' : 'max-w-[1080px] 2xl:max-w-[1180px]')}>
+      <article className={paperCard}>{children}</article>
+    </div>
   )
 }
 
@@ -566,15 +590,14 @@ function Body({ children, side }: { children: ReactNode; side: ReactNode }) {
   )
 }
 
-/** 角色卡、金手指：一栏一栏的正文＋右边资料卡。 */
-function CardEntryPage({ book, entry, nav, fresh }: { book: VBook; entry: VEntry; nav: Nav; fresh: boolean }) {
+/** 角色卡、金手指的一张卡：一栏一栏的正文＋右边资料卡。 */
+function CharacterCard({ book, entry, nav, fresh }: { book: VBook; entry: VEntry; nav: Nav; fresh: boolean }) {
   const secret = entry.secret ? findEntry(book, entry.secret) : undefined
   const goldfinger = entry.goldfinger ? findEntry(book, entry.goldfinger) : undefined
   const holder = entry.holder ? findEntry(book, entry.holder) : undefined
   const secretChip = secret && <div className="mt-2"><LinkChip icon={<Lock className="size-3" />} onClick={() => nav.openEntry(secret.id)}>另有秘密：{secret.name}</LinkChip></div>
   return (
-    <Sheet>
-      <Crumb items={['设定', entry.category]} />
+    <section id={`entry-${entry.id}`} data-entry={entry.id} className={clsx(paperCard, 'scroll-mt-6')}>
       <div className="flex flex-wrap items-center gap-3">
         <Title autoFocus={fresh} placeholder="起个名字">{entry.name}</Title>
         <Tags entry={entry} />
@@ -615,17 +638,16 @@ function CardEntryPage({ book, entry, nav, fresh }: { book: VBook; entry: VEntry
           </Section>
         ))}
       </Body>
-    </Sheet>
+    </section>
   )
 }
 
-/** 段落类和阶梯：一个名字加一段话（或一级一级），一栏到底。 */
-function PlainEntryPage({ book, entry, category, nav, fresh }: { book: VBook; entry: VEntry; category?: VCategory; nav: Nav; fresh: boolean }) {
+/** 段落类和阶梯的一张卡：一个名字加一段话（或一级一级）。 */
+function PlainCard({ book, entry, category, nav, fresh }: { book: VBook; entry: VEntry; category?: VCategory; nav: Nav; fresh: boolean }) {
   const parent = entry.parent ? findEntry(book, entry.parent) : undefined
   const example = category?.example
   return (
-    <Sheet narrow>
-      <Crumb items={['设定', entry.category]} />
+    <section id={`entry-${entry.id}`} data-entry={entry.id} className={clsx(paperCard, 'scroll-mt-6')}>
       <div className="flex flex-wrap items-center gap-3">
         <Title autoFocus={fresh} placeholder={example ? `起个名字，比如「${example.name}」` : '起个名字'}>{entry.name}</Title>
         <Tags entry={entry} />
@@ -666,7 +688,7 @@ function PlainEntryPage({ book, entry, category, nav, fresh }: { book: VBook; en
           {entry.appears.map((a) => <LinkChip key={a.node} icon={<BookOpen className="size-3" />} onClick={() => nav.openNode(a.node)}>{a.label}</LinkChip>)}
         </div>
       )}
-    </Sheet>
+    </section>
   )
 }
 
@@ -761,41 +783,102 @@ function fakeResults(category: VCategory, want: string): { name: string; text: s
   return [1, 2].map((i) => ({ name: `${base}（候选${cn(i)}）`, text: `原型里的假内容。真用时，编辑部会按你说的「${want || '按简介补'}」，照简介和已有设定写一条「${category.name}」。` }))
 }
 
-function CategoryPage({ category, nav, onNewEntry, onAccept }: { category: VCategory; nav: Nav; onNewEntry: () => void; onAccept: (items: { name: string; text: string }[]) => void }) {
+/** 一类的设定连成一页：每条一张白卡片往下排；点左边滚过去，往下滚左边跟着选中。 */
+function CategoryStream({ book, category, next, nav, fresh, scrollReq, onSpy, onNewEntry, onAccept, pageRef }: {
+  book: VBook; category: VCategory; next?: VCategory; nav: Nav; fresh: string
+  scrollReq: ScrollReq | null; onSpy: (id: string) => void; onNewEntry: () => void
+  onAccept: (items: { name: string; text: string }[]) => void; pageRef: React.RefObject<HTMLElement | null>
+}) {
   const [asking, setAsking] = useState(false)
+  const pauseUntil = useRef(0)
+  const spy = useRef(onSpy)
+  spy.current = onSpy
+  const wide = category.name === '角色列表' || category.name === '金手指' || category.entries.some((e) => e.kind === 'character' || e.kind === 'goldfinger')
+
+  // 点了左边的某一条：滚到那张卡；点的是类别就回到顶上
+  useEffect(() => {
+    const root = pageRef.current
+    if (!root || !scrollReq) return
+    pauseUntil.current = Date.now() + (scrollReq.smooth ? 900 : 200)
+    const card = document.getElementById(`entry-${scrollReq.id}`)
+    if (card) card.scrollIntoView({ behavior: scrollReq.smooth ? 'smooth' : 'auto', block: 'start' })
+    else root.scrollTo({ top: 0, behavior: scrollReq.smooth ? 'smooth' : 'auto' })
+  }, [scrollReq, pageRef])
+
+  // 自己往下滚：哪张卡到了屏幕上方三分之一，左边就选中它；滚到底选最后一张
+  useEffect(() => {
+    const root = pageRef.current
+    if (!root) return
+    let frame = 0
+    const check = () => {
+      frame = 0
+      if (Date.now() < pauseUntil.current) return
+      const cards = [...root.querySelectorAll<HTMLElement>('[data-entry]')]
+      if (!cards.length) return
+      const line = root.getBoundingClientRect().top + root.clientHeight * 0.3
+      let current = `cat:${category.name}`
+      for (const card of cards) {
+        if (card.getBoundingClientRect().top <= line) current = card.dataset.entry!
+        else break
+      }
+      if (root.scrollTop + root.clientHeight >= root.scrollHeight - 4) current = cards[cards.length - 1].dataset.entry!
+      spy.current(current)
+    }
+    const onScroll = () => { if (!frame) frame = requestAnimationFrame(check) }
+    root.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      root.removeEventListener('scroll', onScroll)
+      cancelAnimationFrame(frame)
+    }
+  }, [category.name, pageRef])
+
   return (
-    <Sheet narrow>
-      <Crumb items={['设定']} />
-      <h1 className="font-serif text-[34px] font-bold 2xl:text-[38px]">{category.name}</h1>
-      <p className="mt-3 text-[15px] leading-relaxed text-ink-3">{category.about}</p>
-
-      {category.entries.length > 0 && (
-        <div className="mt-8 divide-y divide-line border-y border-line">
-          {category.entries.map((entry) => (
-            <button key={entry.id} type="button" onClick={() => nav.openEntry(entry.id)} className="group flex w-full items-baseline gap-5 py-4 text-left">
-              <span className="w-40 shrink-0 truncate font-serif text-[17px] font-bold text-ink group-hover:text-seal">{entry.name || '未命名'}</span>
-              <span className="line-clamp-1 flex-1 text-[15px] text-ink-2">{(entry.oneLine || entry.body || entry.overview || '').split('\n')[0] || <span className="text-ink-3">还没写</span>}</span>
+    <div className={clsx('mx-auto w-full px-8 pt-10 pb-[40vh] 2xl:pt-12', wide ? 'max-w-[1080px] 2xl:max-w-[1180px]' : 'max-w-[880px] 2xl:max-w-[940px]')}>
+      <header className="mb-8 px-2">
+        <Crumb items={['设定']} />
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="font-serif text-[32px] font-bold 2xl:text-[36px]">
+              {category.name}
+              {category.entries.length > 0 && <span className="ml-3 font-sans text-base font-normal text-ink-3">{category.entries.length} 条</span>}
+            </h1>
+            <p className="mt-2 text-[15px] leading-relaxed text-ink-3">{category.about}</p>
+          </div>
+          <div className="flex shrink-0 gap-2">
+            <button type="button" onClick={onNewEntry} className="flex h-9 items-center gap-1.5 rounded-lg border border-line-2 bg-card px-4 text-sm text-ink transition-colors hover:border-ink-3/50">
+              <Plus className="size-4" />自己写一条
             </button>
-          ))}
+            {!asking && (
+              <button type="button" onClick={() => setAsking(true)} className="flex h-9 items-center gap-2 rounded-lg bg-ink px-4 text-sm text-paper-2 transition-colors hover:bg-ink-2">
+                <span className="flex size-5 items-center justify-center rounded-full bg-chief font-serif text-[11px] text-on-role">编</span>
+                让编辑部写几条
+              </button>
+            )}
+          </div>
         </div>
-      )}
+        {asking && <div className="mt-5"><AskPanel category={category} onAccept={onAccept} onClose={() => setAsking(false)} /></div>}
+      </header>
 
-      {!category.entries.length && category.example && (
-        <div className="mt-8 rounded-xl border border-dashed border-line-2 px-6 py-5">
-          <p className="mb-2 text-xs tracking-wider text-ink-3">比如这样写一条</p>
-          <p className="font-serif text-[17px] font-bold text-ink-2">{category.example.name}</p>
-          <p className="mt-1.5 font-serif text-[15px] leading-[1.9] whitespace-pre-line text-ink-3">{category.example.text}</p>
-        </div>
-      )}
-
-      <div className="mt-8 flex flex-wrap gap-3">
-        <button type="button" onClick={onNewEntry} className="flex h-10 items-center gap-1.5 rounded-lg border border-line-2 bg-card px-5 text-sm text-ink transition-colors hover:border-ink-3/50">
-          <Plus className="size-4" />自己写一条
-        </button>
-        {!asking && <AskButton onClick={() => setAsking(true)}>让编辑部写几条</AskButton>}
+      <div className="space-y-6">
+        {orderEntries(category).map((entry) => (entry.kind === 'character' || entry.kind === 'goldfinger'
+          ? <CharacterCard key={entry.id} book={book} entry={entry} nav={nav} fresh={fresh === entry.id} />
+          : <PlainCard key={entry.id} book={book} entry={entry} category={category} nav={nav} fresh={fresh === entry.id} />))}
+        {!category.entries.length && category.example && (
+          <div className="rounded-xl border border-dashed border-line-2 px-12 py-10">
+            <p className="mb-3 text-xs tracking-wider text-ink-3">比如这样写一条</p>
+            <p className="font-serif text-[26px] font-bold text-ink-3">{category.example.name}</p>
+            <p className="mt-4 font-serif text-[17px] leading-[1.95] whitespace-pre-line text-ink-3">{category.example.text}</p>
+          </div>
+        )}
       </div>
-      {asking && <div className="mt-5"><AskPanel category={category} onAccept={onAccept} onClose={() => setAsking(false)} /></div>}
-    </Sheet>
+
+      {next && (
+        <button type="button" onClick={() => nav.openEntry(`cat:${next.name}`)}
+          className="mt-10 ml-auto flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-ink-3 transition-colors hover:bg-line/50 hover:text-ink">
+          下一类：{next.name}<ChevronRight className="size-4" />
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -1184,6 +1267,8 @@ function Workspace({ book: base, switcher }: { book: VBook; switcher: ReactNode 
   })
   const [dock, setDock] = useState<Dock>('ball')
   const [toast, setToast] = useState('')
+  // 一打开就滚到选中的那一条
+  const [scrollReq, setScrollReq] = useState<ScrollReq | null>(() => ({ id: entry, smooth: false, n: 0 }))
   const pageRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
@@ -1194,10 +1279,12 @@ function Workspace({ book: base, switcher }: { book: VBook; switcher: ReactNode 
 
   const nav: Nav = {
     openEntry: (id) => {
+      const same = tab === '设定' && categoryOf(id) === categoryOf(entry)
       setTab('设定')
       setEntry(id)
       setFresh('')
-      pageRef.current?.scrollTo({ top: 0 })
+      setScrollReq({ id, smooth: same && !!categoryOf(id), n: Date.now() })
+      if (!categoryOf(id)) pageRef.current?.scrollTo({ top: 0 })
     },
     openNode: (id) => {
       setTab('大纲')
@@ -1209,18 +1296,24 @@ function Workspace({ book: base, switcher }: { book: VBook; switcher: ReactNode 
     toast: setToast,
   }
 
-  const categoryName = entry.startsWith('cat:') ? entry.slice(4) : ''
-  const category = categoryName ? book.categories.find((c) => c.name === categoryName) ?? emptyCategory(categoryName) : undefined
-  const current = entry !== 'overview' && entry !== 'world' && !categoryName ? findEntry(book, entry) : undefined
-  const currentCategory = current && book.categories.find((c) => c.name === current.category)
+  const categoryName = categoryOf(entry)
+  const categoryIndex = book.categories.findIndex((c) => c.name === categoryName)
+  const category = categoryName ? book.categories[categoryIndex] ?? emptyCategory(categoryName) : undefined
+
+  function categoryOf(id: string): string {
+    if (id.startsWith('cat:')) return id.slice(4)
+    return findEntry(book, id)?.category ?? ''
+  }
 
   const newEntry = (name: string) => {
     const cat = book.categories.find((c) => c.name === name)
     if (!cat) return
     const blank = blankEntry(cat)
     setAdded({ ...added, [name]: [...(added[name] ?? []), blank] })
-    nav.openEntry(blank.id)
+    setTab('设定')
+    setEntry(blank.id)
     setFresh(blank.id)
+    setScrollReq({ id: blank.id, smooth: true, n: Date.now() })
   }
   const accept = (name: string, items: { name: string; text: string }[]) => {
     const made = items.map((item): VEntry => ({ ...blankEntry(book.categories.find((c) => c.name === name) ?? emptyCategory(name)), name: item.name, body: item.text }))
@@ -1257,15 +1350,16 @@ function Workspace({ book: base, switcher }: { book: VBook; switcher: ReactNode 
               toggle={(id) => setOpen(open.includes(id) ? open.filter((x) => x !== id) : [...open, id])} />
           </DirectoryShell>
         )}
-        <main ref={pageRef} className={clsx('scroll-thin min-w-0 flex-1 overflow-y-auto', tab === '简介' ? 'bg-paper' : 'bg-manuscript')}>
+        <main ref={pageRef} className="scroll-thin min-w-0 flex-1 overflow-y-auto">
           {tab === '简介' && <BlurbPage book={book} />}
           {tab === '设定' && (
-            current ? (current.kind === 'character' || current.kind === 'goldfinger'
-              ? <CardEntryPage key={current.id} book={book} entry={current} nav={nav} fresh={fresh === current.id} />
-              : <PlainEntryPage key={current.id} book={book} entry={current} category={currentCategory} nav={nav} fresh={fresh === current.id} />)
-              : entry === 'world' ? <WorldPage book={book} />
-                : category ? <CategoryPage key={category.name} category={category} nav={nav} onNewEntry={() => newEntry(category.name)} onAccept={(items) => accept(category.name, items)} />
-                  : <SettingsOverview book={book} nav={nav} onSelect={nav.openEntry} />
+            entry === 'world' ? <WorldPage book={book} />
+              : category ? (
+                <CategoryStream key={category.name} book={book} category={category} next={book.categories[categoryIndex + 1]} nav={nav} fresh={fresh}
+                  scrollReq={scrollReq} pageRef={pageRef} onSpy={(id) => setEntry((now) => (now === id ? now : id))}
+                  onNewEntry={() => newEntry(category.name)} onAccept={(items) => accept(category.name, items)} />
+              )
+                : <SettingsOverview book={book} nav={nav} onSelect={nav.openEntry} />
           )}
           {tab === '大纲' && <OutlinePage key={node} book={book} outline={outline} id={node} nav={nav} onAdd={addNode} />}
         </main>
