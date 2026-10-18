@@ -94,8 +94,6 @@ function Editable({ value, onSave, className, multiline, boxed, placeholder, aut
 }
 
 const LONG = 260
-/** 这些定位的角色栏目全摆出来；配角写两三笔就够 */
-const MAJOR_ROLES = ['主角', '女主', '男主', '班底', '对手', '导师']
 
 /** 一段长文字：可以直接改；太长先折起来，点进去改就展开。 */
 function Prose({ value, onSave, placeholder, autoFocus, readOnly }: { value: string; onSave?: (text: string) => void; placeholder?: string; autoFocus?: boolean; readOnly?: boolean }) {
@@ -591,22 +589,6 @@ function Tags({ entry }: { entry: VEntry }) {
   )
 }
 
-/** 卡片底部一排：空着的栏目先收在这里，点哪个展开哪个，不让一堆灰字把卡片撑满。 */
-function MoreToWrite({ labels, onOpen }: { labels: string[]; onOpen: (label: string) => void }) {
-  if (!labels.length) return null
-  return (
-    <div className="mt-8 flex flex-wrap items-center gap-2 text-[13px]">
-      <span className="mr-1 text-ink-3">还可以写</span>
-      {labels.map((label) => (
-        <button key={label} type="button" onClick={() => onOpen(label)}
-          className="flex items-center gap-1 rounded-full border border-dashed border-line-2 px-3 py-1 text-ink-2 transition-colors hover:border-ink-3/60 hover:text-ink">
-          <Plus className="size-3" />{label}
-        </button>
-      ))}
-    </div>
-  )
-}
-
 interface MetaItem { label: string; value?: string; placeholder?: string; link?: () => void; onSave?: (text: string) => void; picker?: ReactNode }
 
 /** 名字下面一行小字：定位、性别、年龄这类短的。 */
@@ -722,31 +704,22 @@ function DraftNote({ entry }: { entry: VEntry }) {
   return <p className="mt-2 text-[13px] text-ink-3">起好名字才会存下来</p>
 }
 
-/** 角色卡、金手指的一张卡：一栏到底。短字段在名字下面，长字段一段段往下，空的收在「还可以写」。 */
+/** 角色卡、金手指的一张卡：一栏到底。短字段在名字下面，长字段一段段往下，空着的也摆出来。 */
 function CharacterCard({ book, entry, nav, fresh }: { book: VBook; entry: VEntry; nav: Nav; fresh: boolean }) {
   const { actions } = useWorkspace()
   const save = useSave()
   const saveEntry = useEntrySaver(entry)
-  const [opened, setOpened] = useState<string[]>([])
   const readOnly = entry.readonly
   const draft = entry.id.startsWith('draft-')
   const secret = entry.secret ? findEntry(book, entry.secret) : undefined
   const goldfinger = entry.goldfinger ? findEntry(book, entry.goldfinger) : undefined
   const holder = entry.holder ? findEntry(book, entry.holder) : undefined
-  // 重要角色和金手指：栏目一打开就全摆着；配角只摆外貌、性格，其余收在「还可以写」
-  const major = entry.kind === 'goldfinger' || MAJOR_ROLES.includes(entry.role ?? '')
-  const always = major ? entry.sections.map((f) => f.label) : entry.sections.filter((f) => ['外貌', '性格与说话方式'].includes(f.key ?? f.label)).map((f) => f.label)
-  const show = (label: string, value: string) => !!value || opened.includes(label) || always.includes(label)
-  const facts = entry.facts.filter(([label, value]) => !!value || opened.includes(label) || major || label === '定位')
-  const sections = entry.sections.filter((f) => show(f.label, f.text))
+  // 这一类有哪几栏就一次全摆出来，空着的显示一行淡字，点上去就能写
+  const facts = entry.facts
+  const sections = entry.sections
   const now = entry.now?.filter(([, value]) => value) ?? []
   const relations = entry.relations ?? []
   const people = entry.kind === 'character'
-  const more = [
-    ...entry.facts.filter(([label]) => !facts.some(([shown]) => shown === label)).map(([label]) => label),
-    ...entry.sections.filter((f) => !show(f.label, f.text)).map((f) => f.label),
-    ...(people && !draft && !readOnly && !relations.length && !opened.includes('关系') ? ['关系'] : []),
-  ]
   const field = (key: string) => (text: string) => saveEntry({ fields: { [key]: text } })
   return (
     <section id={`entry-${entry.id}`} data-entry={entry.id} className={clsx(paperCard, 'group/card relative scroll-mt-6')}>
@@ -777,7 +750,7 @@ function CharacterCard({ book, entry, nav, fresh }: { book: VBook; entry: VEntry
           </p>
         </div>
       )}
-      {(sections.length > 0 || relations.length > 0 || opened.includes('关系')) && (
+      {(sections.length > 0 || (people && !draft)) && (
         <div className="mt-8 space-y-8 border-t border-line pt-8">
           {sections.map((f) => (
             <Section key={f.key ?? f.label} field={f} readOnly={readOnly} onSave={field(f.key ?? f.label)}>
@@ -785,10 +758,9 @@ function CharacterCard({ book, entry, nav, fresh }: { book: VBook; entry: VEntry
               {(f.key ?? f.label) === '能力' && goldfinger && <div className="mt-2"><LinkChip icon={<Sparkles className="size-3" />} onClick={() => nav.openEntry(goldfinger.id)}>金手指：{goldfinger.name}</LinkChip></div>}
             </Section>
           ))}
-          {people && !draft && (relations.length > 0 || opened.includes('关系')) && <Relations book={book} entry={entry} nav={nav} readOnly={readOnly} />}
+          {people && !draft && (!readOnly || relations.length > 0) && <Relations book={book} entry={entry} nav={nav} readOnly={readOnly} />}
         </div>
       )}
-      <MoreToWrite labels={more} onOpen={(label) => setOpened([...opened, label])} />
       <AppearsRow items={entry.appears} nav={nav} />
     </section>
   )
