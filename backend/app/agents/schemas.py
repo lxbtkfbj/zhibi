@@ -447,7 +447,13 @@ class CharacterUpdate(Lenient):
     location: str = Field(default="", description="本章结束时所在位置；没变就留空")
     condition: str = Field(default="", description="本章结束时的状态，如伤势、处境、心境；没变就留空")
     want: str = Field(default="", description="本章结束时此人此刻最想马上做成的事；变了才写，没变就留空")
-    abilities: str = Field(default="", description="能力或修为的最新情况；没变就留空")
+    power: str = Field(
+        default="",
+        description="本章结束时的实力与地位：修炼的写境界，言情、职场写身份、家世、职位，用等级体系里的叫法；变了才写，没变就留空",
+    )
+    abilities: str = Field(
+        default="", description="会的本事变了（学会新本事、失去旧本事）才写，写变化后完整的能力说明；境界写在实力与地位；没变就留空"
+    )
     is_alive: bool = Field(default=True, description="本章结束时是否还活着")
 
 
@@ -580,7 +586,7 @@ class FieldValue(Lenient):
 
 class NewEntry(Lenient):
     category: str = Field(
-        description="放进哪一类：角色卡片、等级体系、世界与地图、势力划分、物品与功法、往事与秘密、特殊规则，或已有的自建类别的名字"
+        description="放进哪一类：角色卡片、金手指、等级体系、世界与地图、势力划分、物品与功法、往事与秘密、特殊规则，或已有的自建类别的名字"
     )
     name: str = Field(description="条目名称；角色卡片写人名")
     status: Literal["现在要定", "一句话就好", "以后再说"] = Field(description="现在要定、一句话就好、以后再说")
@@ -606,7 +612,7 @@ class NewCategory(Lenient):
 class GapReport(Lenient):
     entries: list[NewEntry] = Field(default_factory=list, description="建议新增的条目，最多 8 条；已有的不要重复")
     categories: list[NewCategory] = Field(
-        default_factory=list, description="建议新建的自建类别，最多 2 个；七个默认类别放得下的不要建"
+        default_factory=list, description="建议新建的自建类别，最多 2 个；八个默认类别放得下的不要建"
     )
     note: str = Field(default="", description="给作者的一句话总结")
 
@@ -741,8 +747,8 @@ class CharacterCardDraft(Lenient):
 
 
 class FingerDraft(Lenient):
-    place: Literal["物品与功法", "特殊规则", "角色卡片"] = Field(
-        description="金手指放在哪：是东西放物品与功法，是系统或机制放特殊规则，是主角天生的特质就写在主角的角色卡片里"
+    place: Literal["金手指", "物品与功法", "特殊规则", "角色卡片"] = Field(
+        description="金手指放在哪：一般放「金手指」这一类；没有金手指、只写主角最大优势的，写在主角的角色卡片里"
     )
     name: str = Field(description="金手指的名称，如「轮回镜」；写在角色卡片里的，填主角的名字")
     one_line: str = Field(description="一句话")
@@ -765,7 +771,7 @@ class LevelDraft(Lenient):
 
 class EntryDraft(Lenient):
     category: str = Field(
-        description="放进哪一类：等级体系、世界与地图、势力划分、物品与功法、往事与秘密、特殊规则；七类放不下、属于建议的自建类别的，写那个自建类别的名字"
+        description="放进哪一类：等级体系、世界与地图、势力划分、物品与功法、往事与秘密、特殊规则；这几类放不下、属于建议的自建类别的，写那个自建类别的名字"
     )
     name: str = Field(description="条目名称；世界与地图的第一条叫「世界概况」")
     status: Literal["现在要定", "一句话就好", "以后再说"] = Field(description="现在要定、一句话就好、以后再说")
@@ -790,7 +796,7 @@ class LibraryRest(Lenient):
     entries: list[EntryDraft] = Field(description="设定条目：按题材常建的条目起步，用得上的才建，用不上的不建")
     categories: list[NewCategory] = Field(
         default_factory=list,
-        description="七个默认类别放不下、又是这本书的核心东西时，建议新建的自建类别，最多 2 个；作者同意才建",
+        description="八个默认类别放不下、又是这本书的核心东西时，建议新建的自建类别，最多 2 个；作者同意才建",
     )
     decisions: list[AuthorChoice] = decisions_field()
     remark: str = remark_field("这本书的设定以什么为主、哪几条最要紧")
@@ -919,7 +925,7 @@ class PlanItem(Lenient):
     )
     category: str = Field(
         default="",
-        description="设定库里新建的才写：放进哪一类，七个默认类别之一（角色卡片、等级体系、世界与地图、势力划分、物品与功法、往事与秘密、特殊规则）或已有的自建类别",
+        description="设定库里新建的才写：放进哪一类，八个默认类别之一（角色卡片、金手指、等级体系、世界与地图、势力划分、物品与功法、往事与秘密、特殊规则）或已有的自建类别",
     )
     change: str = Field(
         description="要落实成什么，写清楚具体内容，不看前面的对话也能照做；不要写「方向一」「刚才说的那个」，要把内容写出来"

@@ -1,9 +1,11 @@
-"""新工作台：每本书每一类设定有哪几栏。
+"""新工作台：每本书每一类设定有哪几栏；作者自己在大纲里加篇、加章。
 
 栏目按名字存内容：角色有专门一列的栏目（外貌、身世……）存在列里，其余放 extra；
 设定条目的「内容」存 content，其余放 fields。改名时内容跟着改名，删掉的栏目内容一起清掉。
+作者加的篇只有名字和一段话，排在已规划的篇后面；写到它时编辑部照这段话分卷（write_book.fill_segment）。
 """
 
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -11,9 +13,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import SessionDep, ensure_idle, get_book
-from app.models import Book, Character, SettingCategory, WorldEntry
-from app.schemas import CardLayoutIn
+from app.library_config import GOLDFINGER
+from app.models import Book, Chapter, Character, PlotUnit, SettingCategory, StoryNode, Volume, WorldEntry
+from app.schemas import ArcCreate, CardLayoutIn, ChapterCreate
+from app.services import outline_structure
 from app.services.library import lock_book
+from app.services.versions import record_version
 
 router = APIRouter(tags=["workspace"])
 
@@ -30,16 +35,15 @@ CHARACTER_COLUMNS = {
     "能力": "abilities",
     "备注": "notes",
 }
-# 工作台上的类别 → 设定库里的类别；金手指是带「金手指」标签的条目
+# 工作台上的类别 → 设定库里的类别
 ENTRY_CATEGORIES = {
     "地点列表": "世界与地图",
     "势力列表": "势力划分",
     "物品功法": "物品与功法",
     "往事秘密": "往事与秘密",
     "特殊规则": "特殊规则",
-    "金手指": None,
+    "金手指": GOLDFINGER,
 }
-GOLDFINGER = "金手指"
 WORLD_OVERVIEW = "世界概况"
 
 
@@ -48,10 +52,17 @@ def content_key(category: str) -> str:
     return "能做什么" if category == GOLDFINGER else "内容"
 
 
+def is_goldfinger(row: WorldEntry) -> bool:
+    """金手指这一类，加上别的内置类别里带「金手指」标签的段落条目（和前端一样都摆在金手指里）。"""
+    if row.category == GOLDFINGER:
+        return True
+    return GOLDFINGER in (row.tags or []) and row.style == "paragraph" and not row.category.startswith("custom:")
+
+
 async def entry_rows(session: AsyncSession, book_id, category: str) -> list[WorldEntry]:
     rows = list(await session.scalars(select(WorldEntry).where(WorldEntry.book_id == book_id)))
     if category == GOLDFINGER:
-        return [r for r in rows if GOLDFINGER in (r.tags or [])]
+        return [r for r in rows if is_goldfinger(r)]
     if category.startswith("custom:"):
         return [r for r in rows if r.category == category]
     key = ENTRY_CATEGORIES[category]
@@ -59,7 +70,7 @@ async def entry_rows(session: AsyncSession, book_id, category: str) -> list[Worl
         r
         for r in rows
         if r.category == key
-        and GOLDFINGER not in (r.tags or [])
+        and not is_goldfinger(r)
         and not (key == "世界与地图" and r.name.strip() == WORLD_OVERVIEW)
     ]
 
@@ -158,4 +169,136 @@ async def reset_card_layout(category: str, book: Book = Depends(get_book), sessi
     await lock_book(session, book.id)
     await ensure_idle(session, book.id)
     book.card_layouts = {k: v for k, v in (book.card_layouts or {}).items() if k != category}
+    await session.commit()
+
+
+# ---------- 大纲：作者自己加篇、加章 ----------
+
+
+async def _ordered_nodes(session: AsyncSession, book_id) -> list[StoryNode]:
+    return list(
+        await session.scalars(
+            select(StoryNode).where(StoryNode.book_id == book_id).order_by(StoryNode.position, StoryNode.id)
+        )
+    )
+
+
+@router.post("/books/{book_id}/arcs", status_code=201)
+async def create_arc(body: ArcCreate, book: Book = Depends(get_book), session: AsyncSession = SessionDep) -> dict:
+    """在已规划的篇后面加一篇：只有名字和一段话，写到它时编辑部照这段话分卷。"""
+    await lock_book(session, book.id)
+    await ensure_idle(session, book.id)
+    nodes = await _ordered_nodes(session, book.id)
+    planned = [i for i, node in enumerate(nodes) if node.segment is not None]
+    if not planned and await session.scalar(select(Volume.id).where(Volume.book_id == book.id).limit(1)):
+        raise HTTPException(409, "这本书的卷没有分篇，不能再加篇")
+    if any(node.kind == "ending" and node.segment is not None for node in nodes):
+        raise HTTPException(409, "全书已经规划到结局了，不能再往后加篇")
+    if planned:
+        at = planned[-1] + 1
+    else:
+        at = next((i + 1 for i, node in enumerate(nodes) if node.kind == "opening"), 0)
+    title = body.title.strip()
+    node = StoryNode(
+        book_id=book.id,
+        position=0,
+        kind="milestone",
+        title=title,
+        event="",
+        segment={"title": title, "text": body.text.strip()},
+        status="pencil",
+        origin="author",
+    )
+    nodes.insert(at, node)
+    for position, row in enumerate(nodes, 1):
+        row.position = position
+    session.add(node)
+    await session.flush()
+    await record_version(session, book.id, "segment", node, "author")
+    await session.commit()
+    return {"id": str(node.id)}
+
+
+@router.delete("/arcs/{node_id}", status_code=204)
+async def delete_arc(node_id: uuid.UUID, session: AsyncSession = SessionDep) -> None:
+    """删一篇：下面还有卷的先删卷；开篇和结局不能删。"""
+    node = await session.get(StoryNode, node_id)
+    if node is None:
+        raise HTTPException(404, "这一篇不存在")
+    await lock_book(session, node.book_id)
+    await ensure_idle(session, node.book_id)
+    if node.kind in {"opening", "ending"}:
+        raise HTTPException(409, "开篇和结局不能删")
+    if await session.scalar(select(Volume.id).where(Volume.target_node_id == node.id).limit(1)):
+        raise HTTPException(409, "这一篇下面还有卷，先把卷删掉")
+    nodes = [row for row in await _ordered_nodes(session, node.book_id) if row.id != node.id]
+    await session.delete(node)
+    await session.flush()
+    for position, row in enumerate(nodes, 1):
+        row.position = position
+    await session.commit()
+
+
+@router.post("/units/{unit_id}/chapters", status_code=201)
+async def create_chapter(unit_id: uuid.UUID, body: ChapterCreate, session: AsyncSession = SessionDep) -> dict:
+    """在单元最后加一章。单元原来预留了章数的，先填预留的；没有了就多算一章。"""
+    unit = await session.get(PlotUnit, unit_id)
+    if unit is None:
+        raise HTTPException(404, "剧情单元不存在")
+    await lock_book(session, unit.book_id)
+    await ensure_idle(session, unit.book_id)
+    state = await outline_structure.load_structure(session, unit.book_id)
+    unit = next(row for row in state.units if row.id == unit_id)
+    volume = next(row for row in state.volumes if row.id == unit.volume_id)
+    if unit.status == "done" or volume.status == "done":
+        raise HTTPException(409, "这个单元已经写完了，不能再加章")
+    own = state.own_chapters(unit)
+    if len(own) >= 50:
+        raise HTTPException(422, "每个单元最多 50 章，请先增加单元")
+    outline = body.outline.model_dump(exclude_none=True)
+    outline["scenes"] = [scene.strip() for scene in outline.get("scenes") or [] if scene.strip()]
+    chapter = Chapter(
+        book_id=unit.book_id,
+        volume_id=unit.volume_id,
+        unit_id=unit.id,
+        # 先放在最前面的空号，下面按顺序重排章号
+        index=min((row.index for row in state.chapters), default=1) - 1,
+        title=body.title.strip(),
+        outline=outline,
+        status="planned",
+    )
+    session.add(chapter)
+    await session.flush()
+    state.chapters.append(chapter)
+    if len(own) + 1 > unit.chapter_count:
+        unit.chapter_count = len(own) + 1
+        volume.chapter_count = sum(row.chapter_count for row in state.own_units(volume.id))
+    await outline_structure.finish_structure(
+        session, unit.book_id, state, "新增一章", affected={unit.id, volume.id}
+    )
+    await session.commit()
+    return {"index": chapter.index}
+
+
+@router.delete("/books/{book_id}/chapters/{index}", status_code=204)
+async def delete_chapter(index: int, book: Book = Depends(get_book), session: AsyncSession = SessionDep) -> None:
+    """删一章还没开写的章纲，单元少算一章。"""
+    await lock_book(session, book.id)
+    await ensure_idle(session, book.id)
+    state = await outline_structure.load_structure(session, book.id)
+    chapter = next((row for row in state.chapters if row.index == index), None)
+    if chapter is None:
+        raise HTTPException(404, "这一章还不存在")
+    if outline_structure.started(chapter):
+        raise HTTPException(409, "这一章已经开写了，不能删")
+    unit = next((row for row in state.units if row.id == chapter.unit_id), None)
+    if unit is None:
+        raise HTTPException(409, "这一章不在哪个单元里，不能在这里删")
+    volume = next(row for row in state.volumes if row.id == unit.volume_id)
+    state.chapters.remove(chapter)
+    await session.delete(chapter)
+    await session.flush()
+    unit.chapter_count = max(1, unit.chapter_count - 1)
+    volume.chapter_count = sum(row.chapter_count for row in state.own_units(volume.id))
+    await outline_structure.finish_structure(session, book.id, state, "删掉一章", affected={unit.id, volume.id})
     await session.commit()

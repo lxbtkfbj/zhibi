@@ -434,9 +434,30 @@ class ChapterOut(ChapterBrief):
     updated_at: datetime
 
 
+class ChapterOutlineIn(BaseModel):
+    """作者在新书页改的章纲：发生什么（第一行是目标，下面每行一个场景）、看点、结尾钩子。"""
+
+    goal: str | None = Field(None, max_length=2000)
+    scenes: list[str] | None = Field(None, max_length=20)
+    cool_point: str | None = Field(None, max_length=2000)
+    hook: str | None = Field(None, max_length=2000)
+
+
 class ChapterPatch(BaseModel):
     title: str | None = Field(None, min_length=1, max_length=200)
     content: str | None = None
+    # 只改给出的几项；已经开写的章不能改
+    outline: ChapterOutlineIn | None = None
+
+
+class ChapterCreate(BaseModel):
+    title: str = Field(default="", max_length=200)
+    outline: ChapterOutlineIn = Field(default_factory=ChapterOutlineIn)
+
+
+class ArcCreate(BaseModel):
+    title: str = Field(default="", max_length=100)
+    text: str = Field(default="", max_length=4000)
 
 
 class RewriteRequest(BaseModel):

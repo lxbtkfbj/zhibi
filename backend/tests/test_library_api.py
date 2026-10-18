@@ -106,7 +106,8 @@ async def test_library_categories_counts_focus_and_sorting(client, sessionmaker)
         "custom:b",
     ]
     assert body["categories"][0]["count"] == 3 and body["categories"][0]["must_count"] == 1
-    assert body["categories"][1]["count"] == body["categories"][1]["must_count"] == 1
+    ladder = next(row for row in body["categories"] if row["key"] == "等级体系")
+    assert ladder["count"] == ladder["must_count"] == 1
     assert body["categories"][-2]["count"] == 1 and body["categories"][-2]["must_count"] == 0
     assert [row["name"] for row in body["characters"]] == ["普通人", "对手", "主角"]
     assert [row["name"] for row in body["entries"]] == ["阶梯", "系统", "厉鬼"]

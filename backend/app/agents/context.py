@@ -36,6 +36,8 @@ def format_concept(c: dict[str, Any]) -> str:
             ],
             f"基调：{c.get('tone', '')}",
             f"篇幅：{format_length(c)}",
+            # 作者在新书页写的全书结局（还没有结局节点时存在这里）
+            *([f"全书结局：{c['ending']}"] if c.get("ending") else []),
         ]
     )
 
@@ -87,10 +89,13 @@ def format_character_state(ch: dict[str, Any]) -> str:
     parts = [f"【{ch.get('name', '')}】{ch.get('role_type', '')}"]
     if ch.get("is_alive") is False:
         parts.append("已死亡")
+    power = (ch.get("extra") or {}).get("实力与地位")
+    if power:
+        parts.append(f"实力与地位：{power}")
     for label, key in (
         ("位置", "location"),
         ("状态", "condition"),
-        ("实力", "abilities"),
+        ("本事" if power else "实力", "abilities"),
         ("目标", "goal"),
         ("此刻想要", "want"),
     ):

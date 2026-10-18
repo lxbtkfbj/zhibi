@@ -8,7 +8,7 @@ from copy import deepcopy
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.library_config import BUILTIN_CATEGORIES, STATUSES
+from app.library_config import BUILTIN_CATEGORIES, GOLDFINGER, STATUSES
 from app.models import (
     Book,
     Chapter,
@@ -207,16 +207,16 @@ async def save_library_focus(session: AsyncSession, book_id: uuid.UUID, focus: d
             protagonist.tags = list(dict.fromkeys([*(protagonist.tags or []), "金手指"]))
             await _version(session, book_id, "character", protagonist, before, "开书：金手指")
     else:
-        # A same-name card/entry is also only filled, even if it lacked the tag.
+        # 金手指单独一类；旧的 place（物品与功法、特殊规则）也放进这一类
         same = next(
-            (r for r in entries if r.category == finger["place"] and finger["name"] in [r.name, *(r.aliases or [])]),
+            (r for r in entries if r.category == GOLDFINGER and finger["name"] in [r.name, *(r.aliases or [])]),
             None,
         )
         if same is not None:
             await _fill_focus(session, book_id, same, {key: finger.get(key, "") for key in ("one_line", "content")})
         else:
             row, writable, before = await _entry(
-                session, book_id, {**finger, "category": finger["place"]}, tags=["金手指"]
+                session, book_id, {**finger, "category": GOLDFINGER}, tags=["金手指"]
             )
             if writable:
                 await _version(session, book_id, "entry", row, before, "开书：金手指")
@@ -349,7 +349,12 @@ async def save_outline(session: AsyncSession, book_id: uuid.UUID, outline: dict)
         }
         for index, arc in enumerate(outline.get("arcs") or [])
     ]
-    drafts += [{"kind": "ending", "title": "结局", "event": outline.get("ending", "")}]
+    # 作者在新书页写过全书结局（还没有结局节点时存在概念里）：照作者的写，写进结局节点后概念里不再留
+    book = await session.get(Book, book_id)
+    author_ending = str((book.concept or {}).get("ending") or "").strip()
+    if author_ending:
+        book.concept = {key: value for key, value in book.concept.items() if key != "ending"}
+    drafts += [{"kind": "ending", "title": "结局", "event": author_ending or outline.get("ending", "")}]
     # 开篇、结局固定在树的两端，不能被遗漏的锁定篇占掉。
     middle, removed_nodes = _protected_merge(
         [row for row in old_nodes if row.kind == "milestone"],

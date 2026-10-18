@@ -1239,8 +1239,9 @@ function OutlinePage({ book, outline, id, nav, onAdd, fresh }: { book: VBook; ou
   const child = childKind(node)
   const canAdd = actions.canAdd(node)
   const meta: { label: string; value: string }[] = []
-  if (node.range) meta.push({ label: '章数', value: `${node.range[1] - node.range[0] + 1} 章 · 第 ${node.range[0]}–${node.range[1]} 章` })
-  else if (node.chapters) meta.push({ label: '章数', value: `${node.chapters} 章` })
+  // 章号已经在章的标题里，不再列章数
+  if (node.kind !== '章' && node.range) meta.push({ label: '章数', value: `${node.range[1] - node.range[0] + 1} 章 · 第 ${node.range[0]}–${node.range[1]} 章` })
+  else if (node.kind !== '章' && node.chapters) meta.push({ label: '章数', value: `${node.chapters} 章` })
   if (node.progress && node.progress !== '已规划') meta.push({ label: '写到', value: node.progress })
   return (
     <Sheet narrow>
@@ -1263,7 +1264,10 @@ function OutlinePage({ book, outline, id, nav, onAdd, fresh }: { book: VBook; ou
       )}
       <div className="mt-8 space-y-8 border-t border-line pt-8">
         {node.sections
-          ? node.sections.map((field) => <Section key={field.label} field={field} readOnly={actions.live} onSave={() => undefined} />)
+          ? node.sections.map((field) => (
+            <Section key={field.label} field={field} readOnly={!actions.canEdit(node, 'text')}
+              onSave={(text) => save(actions.saveNode(node, { sections: { [field.label]: text } }))} />
+          ))
           : <Prose value={node.text} readOnly={!actions.canEdit(node, 'text')} placeholder={NODE_PLACEHOLDER[node.kind]}
             onSave={(text) => save(actions.saveNode(node, { text }))} />}
         {child && (canAdd || !!node.children?.length) && (

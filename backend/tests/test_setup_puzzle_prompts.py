@@ -17,6 +17,7 @@ from app.llm import demo, demo_setup
 from app.main import app
 from app.models import PromptOverride
 from app.prompts.catalog import BY_NAME, variables
+from tests.later_changes import with_later_changes
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -28,7 +29,7 @@ def default_prompts(monkeypatch):
 
 def test_task3_schema_fields_descriptions_and_order_match_verbatim():
     task = ROOT / "docs/codex任务/第三包/3-开书新三步.md"
-    for block in re.findall(r"```python\n(.*?)\n```", task.read_text(encoding="utf-8"), re.S):
+    for block in re.findall(r"```python\n(.*?)\n```", with_later_changes(task.read_text(encoding="utf-8")), re.S):
         if not block.startswith("class "):
             continue
         namespace = vars(s).copy()
@@ -86,7 +87,8 @@ PROMPT_HASHES = {
     "setup_notes": "6decc9266e64f6a871b8352e0aaa73db7c9a31b8c0b40149561fa853ea9fd7e0",
     "setup_pitches": "b93adc4c08d74ed755f97f4e620c8d5afea595c0d6706e7bdfd9f14610d416b6",
     "setup_story": "b1bc94d476a379e0c5485b4ec5d5d81af479ad668e87b7196b30f14f43a407b2",
-    "library_build_focus": "0284a4ca8634517709cc97949ea9920c7f6281e81e6d20dd30c30c49b2918822",
+    # 2026-10-18 新书页第二步：金手指单独成一类，第 5、7 条改了
+    "library_build_focus": "c2472b40bf248d7c17f456bb8b04b142b5224146a8b0f0260c347904c5e5dd32",
     "library_build_rest": "4a97372a5144f59718def6ab894df35e82de3b8703191a38795225a8b2548df4",
     "setup_outline": "c63dbda748ff87e91737c1294b24c20b8e400ad67fb60c0cdf91fecb249fb147",
 }

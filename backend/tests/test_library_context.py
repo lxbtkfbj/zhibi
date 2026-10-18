@@ -15,6 +15,7 @@ from app.prompts import default_content
 from app.prompts.catalog import BY_NAME, variables
 from app.services.library_context import LibraryContext, genre_defaults, rewrite_mode
 from app.services.splice import read_path
+from tests.later_changes import with_later_changes
 
 
 def entry(name="武道境界", **kwargs):
@@ -190,7 +191,7 @@ def test_all_path_labels_hints_and_current_ranges(context):
     assert context.target_label(context.volumes[0], "summary") == "大纲 · 第 1 卷「青阳」 · 一段话"
     assert context.target_label(context.units[0], "summary") == "大纲 · 单元「夜路」 · 一段话"
     assert context.category_hint(context.characters[0]) == CHARACTER_CATEGORY["hint"]
-    assert context.category_hint(ladder) == BUILTIN_CATEGORIES[0]["hint"]
+    assert context.category_hint(ladder) == next(c for c in BUILTIN_CATEGORIES if c["key"] == "等级体系")["hint"]
     assert context.category_hint(ghost) == "说清规则。"
     assert context.category_hint(context.book) == "一段话说清这本小说主要讲什么故事"
     assert context.category_hint(context.nodes[1]) == "这一层的一段话要说清的事，见大纲的写法"
@@ -276,7 +277,7 @@ def test_route_name_precedence_and_path_resolution(context):
 
 def test_schemas_preserve_task_ast_and_prompt_catalog():
     root = Path(__file__).resolve().parents[2]
-    task = (root / "docs/codex任务/第三包/2-设定库的AI操作.md").read_text(encoding="utf-8")
+    task = with_later_changes((root / "docs/codex任务/第三包/2-设定库的AI操作.md").read_text(encoding="utf-8"))
     expected = ast.parse(task.split("```python\n", 1)[1].split("\n```", 1)[0])
     actual = ast.parse((root / "backend/app/agents/schemas.py").read_text(encoding="utf-8"))
     classes = {node.name: node for node in actual.body if isinstance(node, ast.ClassDef)}

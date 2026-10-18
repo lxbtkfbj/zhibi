@@ -38,7 +38,23 @@ from app.services.setup_store import (
 )
 
 # 定稿时设定师会改的人物状态、伏笔进展；记下改前改后的值，重写时据此撤销
-CHARACTER_STATE = ("location", "condition", "want", "abilities", "is_alive")
+CHARACTER_STATE = ("location", "condition", "want", "abilities", "power", "is_alive")
+# 「此刻」里的实力与地位存在角色的 extra 里，按这个栏目名
+POWER = "实力与地位"
+
+
+def char_state(row: Character, key: str) -> Any:
+    if key == "power":
+        return (row.extra or {}).get(POWER, "")
+    return getattr(row, key)
+
+
+def set_char_state(row: Character, key: str, value: Any) -> None:
+    if key == "power":
+        extra = {k: v for k, v in (row.extra or {}).items() if k != POWER}
+        row.extra = {**extra, POWER: value} if value else extra
+    else:
+        setattr(row, key, value)
 LEDGER_STATE = ("status", "planted_chapter", "hint_chapters", "resolved_chapter")
 
 
@@ -529,14 +545,14 @@ async def apply_digest(
         row = characters.get(change.name.strip())
         if row is None:
             continue
-        before = _state(row, CHARACTER_STATE)
-        for key in ("location", "condition", "want", "abilities"):
+        before = {key: char_state(row, key) for key in CHARACTER_STATE}
+        for key in ("location", "condition", "want", "abilities", "power"):
             value = getattr(change, key).strip()
-            if value and value != getattr(row, key) and (row.name, key) not in later:
-                setattr(row, key, value)
+            if value and value != char_state(row, key) and (row.name, key) not in later:
+                set_char_state(row, key, value)
         if not change.is_alive and row.is_alive and (row.name, "is_alive") not in later:
             row.is_alive = False
-        after = _state(row, CHARACTER_STATE)
+        after = {key: char_state(row, key) for key in CHARACTER_STATE}
         if after != before:
             log["characters"].append({"name": row.name, "before": before, "after": after})
             updated += 1
@@ -720,8 +736,8 @@ async def revert_chapter(session: AsyncSession, book_id: uuid.UUID, chapter: Cha
             continue
         changed = False
         for key, before in (item.get("before") or {}).items():
-            if key in CHARACTER_STATE and getattr(row, key) == (item.get("after") or {}).get(key):
-                setattr(row, key, before)
+            if key in CHARACTER_STATE and char_state(row, key) == (item.get("after") or {}).get(key):
+                set_char_state(row, key, before)
                 changed = True
         out["characters"] += changed
     for name in log.get("created") or []:

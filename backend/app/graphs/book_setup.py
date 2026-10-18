@@ -14,7 +14,7 @@ from app.agents.context import format_length, format_requirements, format_revisi
 from app.agents.setup_puzzle import ORDER, PIECE_NAMES, PIECE_ORDER, PIECES, piece_checks
 from app.book_settings import settings_of
 from app.graphs.deps import GraphDeps
-from app.library_config import BUILTIN_CATEGORIES, CHARACTER_CATEGORY
+from app.library_config import BUILTIN_CATEGORIES, CHARACTER_CATEGORY, GOLDFINGER
 from app.llm.router import LLMError
 from app.models import Book, Character, MeetingMessage, SettingSuggestion, WorldEntry
 from app.prompts import render
@@ -579,8 +579,11 @@ async def settings_rest_node(state: SetupState, runtime: Runtime[GraphDeps]) -> 
     await d.emit.status("lorekeeper", "设定师正在补齐其余设定…")
     blocks = await _library_blocks(d, state, exclude_focus=True)
     blocks.pop("library")
+    # 金手指上一步已经写好，这一步不再建
     blocks["category_hints"] = "\n".join(
-        f"【{category['name']}】{category['hint']}" for category in [CHARACTER_CATEGORY, *BUILTIN_CATEGORIES]
+        f"【{category['name']}】{category['hint']}"
+        for category in [CHARACTER_CATEGORY, *BUILTIN_CATEGORIES]
+        if category["key"] != GOLDFINGER
     )
     blocks["revision"] = _revision(state, "settings_rest")
     result = await editorial.build_library_rest(d.llm, blocks)

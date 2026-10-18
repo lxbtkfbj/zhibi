@@ -1,5 +1,6 @@
 """设定库的共用校验、归属检查与目标装载。"""
 
+import re
 import uuid
 from copy import deepcopy
 from typing import Any
@@ -32,6 +33,48 @@ TARGET_MODELS = {
 def author_source(target: Any) -> str:
     """作者自己写的保留来源；其他来源经作者修改后明确标记。"""
     return "author" if target.source == "author" else "ai_edited"
+
+
+# 作者改了这些，才按写了多少重算「现在要定／一句话就好／以后再说」；锁住、挪位置不算
+CHARACTER_CONTENT = (
+    "one_line",
+    "appearance",
+    "personality",
+    "background",
+    "goal",
+    "abilities",
+    "notes",
+    "relation",
+    "extra",
+)
+ENTRY_CONTENT = ("one_line", "content", "fields", "levels")
+# 角色名字下面的短字段和「此刻」不算写了内容
+CHARACTER_SHORT_EXTRA = {"所属", "实力与地位"}
+ONE_SENTENCE = 60
+
+
+def written_pieces(target: Character | WorldEntry) -> list[str]:
+    if isinstance(target, Character):
+        pieces = [getattr(target, column) or "" for column in CHARACTER_CONTENT if column != "extra"]
+        pieces += [value for key, value in (target.extra or {}).items() if key not in CHARACTER_SHORT_EXTRA]
+    else:
+        pieces = [target.one_line or "", target.content or ""]
+        pieces += [field.get("value") or "" for field in target.fields or []]
+        pieces += [f"{level.get('name') or ''}{level.get('text') or ''}" for level in target.levels or []]
+    return [piece.strip() for piece in pieces if isinstance(piece, str) and piece.strip()]
+
+
+def infer_status(target: Character | WorldEntry) -> str:
+    """只有名字＝以后再说，只有一句话＝一句话就好，写得更多＝现在要定。"""
+    pieces = written_pieces(target)
+    if not pieces:
+        return "later"
+    if len(pieces) == 1:
+        text = pieces[0]
+        sentences = [s for s in re.split(r"[。！？!?；;\n]", text) if s.strip()]
+        if len(text) <= ONE_SENTENCE and len(sentences) <= 1:
+            return "one"
+    return "must"
 
 
 def parse_uuid(value: Any, label: str = "目标") -> uuid.UUID:

@@ -44,7 +44,15 @@ CHARACTER_CATEGORY = {
     ],
 }
 
+GOLDFINGER = "金手指"
+
 BUILTIN_CATEGORIES = [
+    {
+        "key": GOLDFINGER,
+        "name": "金手指",
+        "style": "paragraph",
+        "hint": "主角最大的倚仗：系统、物品、体质、重生记忆……写清是什么、谁知道、能做什么、规矩和限制、代价、怎么变强、来历。一般只有一两条；主角天生的特质也可以单拎出来写在这里。",
+    },
     {
         "key": "等级体系",
         "name": "等级体系",

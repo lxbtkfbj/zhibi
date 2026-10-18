@@ -72,6 +72,8 @@ export interface VNode {
   /** 写到哪了：没写 / 正在写 / 写完 */
   progress?: string
   later?: boolean
+  /** 写到再定的篇里排在最前面的那一篇：可以直接在它下面加卷，加了它就定下来 */
+  next?: boolean
   locked?: boolean
   uses: string[]
   children?: VNode[]
@@ -107,7 +109,7 @@ export interface CardTemplate { facts: FieldItem[]; sections: FieldItem[] }
 /** 八个默认类别。名字三到五个字；from 是真实设定库里对应的类别。 */
 export const CATEGORY_DEFS: { name: string; from: string[]; about: string; example?: { name: string; text: string } }[] = [
   { name: '角色列表', from: ['角色卡片'], about: '有名有姓、会再出场的人；会说话的器灵、系统人格也算。' },
-  { name: '金手指', from: [], about: '主角最大的倚仗：系统、物品、体质、重生记忆……能做什么、有什么代价、怎么变强。' },
+  { name: '金手指', from: ['金手指'], about: '主角最大的倚仗：系统、物品、体质、重生记忆……能做什么、有什么代价、怎么变强。' },
   {
     name: '等级体系', from: ['等级体系'], about: '一切分高低的等级：修炼境界、玩家等级、鬼的等级、官阶……一本书可以有好几套。',
     example: { name: '修炼境界', text: '炼气：分九层，外门弟子大多卡在这里。\n筑基：寿命翻倍。\n金丹：可以开宗立派。\n元婴：先只列个名字，以后再补。' },

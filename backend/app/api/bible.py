@@ -28,7 +28,14 @@ from app.schemas import (
     WorldEntryOut,
     WorldEntryPatch,
 )
-from app.services.library import author_source, lock_book, validate_entry
+from app.services.library import (
+    CHARACTER_CONTENT,
+    ENTRY_CONTENT,
+    author_source,
+    infer_status,
+    lock_book,
+    validate_entry,
+)
 from app.services.library_cascade import author_rename_suggestions
 from app.services.versions import record_version, snapshot_of
 
@@ -67,6 +74,8 @@ async def _create(session: AsyncSession, book_id: uuid.UUID, model: Any, body: B
     if model in (Character, WorldEntry):
         data["source"] = "author"
     row = model(book_id=book_id, **data)
+    if model in (Character, WorldEntry) and "status" not in data:
+        row.status = infer_status(row)
     session.add(row)
     try:
         if model in (Character, WorldEntry):
@@ -126,6 +135,9 @@ async def _update(session: AsyncSession, model: Any, row_id: uuid.UUID, body: Ba
                 ]
     for key, value in data.items():
         setattr(row, key, value)
+    content = CHARACTER_CONTENT if model is Character else ENTRY_CONTENT
+    if versioned and "status" not in data and any(key in data for key in content):
+        row.status = infer_status(row)
     try:
         if versioned:
             row.source = author_source(row)

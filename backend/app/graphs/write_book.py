@@ -147,6 +147,8 @@ class WriteState(TypedDict, total=False):
     segment_done: bool
     # 本段是否自动通过在进拍板点前落检查点；等待期间改设置不能吞掉已提交的意见。
     segment_automatic: bool
+    # 作者自己加的、还没有卷的篇：写到它时先给它分卷
+    arc_id: str
     chapters_revision: str
     chapters_pending: bool
 
@@ -186,6 +188,9 @@ async def decide(session: AsyncSession, book_id: uuid.UUID, state: WriteState) -
             volumes = (state.get("segment_split") or {}).get("volumes") or []
             first = volumes[0].get("index", 1) if volumes else 1
             return {"step": "done", "reason": f"下一篇定好了，开写时从第 {first} 卷接着写。"}
+        empty = await _empty_author_arc(session, book.id)
+        if empty is not None:
+            return {"step": "fill_segment", "arc_id": str(empty.id)}
         last = await _last_segment(session, book.id)
         if last is not None and last.kind == "ending":
             return {"step": "done", "reason": "全书已经规划到结局了。"}
@@ -223,11 +228,30 @@ async def _last_segment(session: AsyncSession, book_id: uuid.UUID) -> StoryNode 
     )
 
 
+async def _empty_author_arc(session: AsyncSession, book_id: uuid.UUID) -> StoryNode | None:
+    """作者自己加的篇：有名字和一段话，还没有卷、也没让主编分过卷。"""
+    nodes = await session.scalars(
+        select(StoryNode)
+        .where(StoryNode.book_id == book_id, StoryNode.segment.is_not(None))
+        .order_by(StoryNode.position)
+    )
+    owned = set(await session.scalars(select(Volume.target_node_id).where(Volume.book_id == book_id)))
+    return next(
+        (
+            node
+            for node in nodes
+            if "split" not in node.segment and "number" not in node.segment and node.id not in owned
+        ),
+        None,
+    )
+
+
 async def _next_step(session: AsyncSession, book: Book, state: WriteState) -> dict:
     until = state.get("until", "count")
     volumes = list(
         (await session.execute(select(Volume).where(Volume.book_id == book.id).order_by(Volume.index))).scalars().all()
     )
+    empty = await _empty_author_arc(session, book.id)
     for volume in volumes:
         here = {"volume_id": str(volume.id), "volume_index": volume.index, "volume_title": volume.title}
         if volume.status == "done":
@@ -244,6 +268,13 @@ async def _next_step(session: AsyncSession, book: Book, state: WriteState) -> di
             .all()
         )
         endpoint = await session.get(StoryNode, volume.target_node_id) if volume.target_node_id else None
+        if empty is not None and endpoint is not None and empty.position < endpoint.position:
+            title = (empty.segment or {}).get("title") or empty.title
+            return {
+                **out,
+                "step": "done",
+                "reason": f"大纲里「{title}」这一篇还没有卷，后面的篇倒先有了卷，编辑部没法插在中间。请先在大纲里给「{title}」加卷，再接着写。",
+            }
         if (
             endpoint is not None
             and endpoint.segment is not None
@@ -287,6 +318,8 @@ async def _next_step(session: AsyncSession, book: Book, state: WriteState) -> di
         if not volume.recap.strip():
             return {**out, "step": "recap_volume"}
         volume.status = "done"
+    if empty is not None:
+        return {"step": "fill_segment", "arc_id": str(empty.id)}
     last = await _last_segment(session, book.id)
     if last is not None and last.kind != "ending":
         if until == "volume" and state.get("start_volume"):
@@ -548,14 +581,18 @@ async def segment_gate_node(
 
 
 async def fill_segment_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:
+    """开写前补齐篇：开书只写了一段话的篇补线索、出场和信息差；作者自己加的、还没有卷的篇先分卷。"""
     d = runtime.context
     await d.check_cancel()
     async with d.sessionmaker() as session:
         book = await session.get(Book, d.book_id)
-        volume = await session.get(Volume, uuid.UUID(state["volume_id"]))
-        endpoint = await session.get(StoryNode, volume.target_node_id)
+        if state.get("arc_id"):
+            endpoint = await session.get(StoryNode, uuid.UUID(state["arc_id"]))
+        else:
+            volume = await session.get(Volume, uuid.UUID(state["volume_id"]))
+            endpoint = await session.get(StoryNode, volume.target_node_id)
         if endpoint is None or endpoint.segment is None or "split" in endpoint.segment or "number" in endpoint.segment:
-            return {}
+            return {"arc_id": ""}
         nodes = await setup_store.load_nodes(session, d.book_id)
         number = [node["id"] for node in nodes if node.get("segment") is not None].index(str(endpoint.id)) + 1
         end_index = next(i for i, node in enumerate(nodes, 1) if node["id"] == str(endpoint.id))
@@ -570,46 +607,64 @@ async def fill_segment_node(state: WriteState, runtime: Runtime[GraphDeps]) -> d
         )
         blocks = await segment_blocks(session, book)
         setup = await setup_store.load_setup(session, d.book_id)
-        fixed = "【这一篇已经分好的卷】\n" + "\n".join(
-            f"第 {row.index} 卷「{row.title}」约 {row.chapter_count} 章"
-            + ("（已锁）" if row.locked else "")
-            + f"：{row.summary}"
-            for row in volumes
-        )
+        if volumes:
+            first_volume = volumes[0].index
+            fixed = "【这一篇已经分好的卷】\n" + "\n".join(
+                f"第 {row.index} 卷「{row.title}」约 {row.chapter_count} 章"
+                + ("（已锁）" if row.locked else "")
+                + f"：{row.summary}"
+                for row in volumes
+            )
+            volume_hint = "这一篇的卷已经分好了，卷号照【这一篇已经分好的卷】。"
+        else:
+            lengths = await segment_lengths(session, book)
+            first_volume, fixed, volume_hint = lengths["next_volume"], "", lengths["volume_hint"]
         blocks.update(
             segment=arc_text(book.spine or {}, book.world or {}, plan, number),
-            threads=format_threads(setup["volumes"]["threads"], volume=volumes[0].index),
+            threads=format_threads(setup["volumes"]["threads"], volume=first_volume),
             playbook=pick(book.concept, settings_of(book)["playbook"]).text("outline"),
-            volume_hint="这一篇的卷已经分好了，卷号照【这一篇已经分好的卷】。",
+            volume_hint=volume_hint,
             fixed=fixed,
             revision="",
         )
         endpoint_id = endpoint.id
+    if not volumes:
+        await d.emit.status("chief", f"主编正在给第 {number} 篇分卷…")
     result = await editorial.split_next_segment(d.llm, blocks)
     data = result.model_dump()
-    matching_count = min(len(volumes), len(data.get("volumes") or []))
-    data["volumes"] = [
-        {**card, "index": row.index, "chapter_count": row.chapter_count}
-        for row, card in zip(volumes, data.get("volumes") or [], strict=False)
-    ]
-    # 对不上的卷保留原内容，但仍为线索、期待的卷号范围提供完整骨架。
-    data["volumes"] += [
-        {"index": row.index, "title": row.title, "summary": row.summary, "chapter_count": row.chapter_count}
-        for row in volumes[len(data["volumes"]) :]
-    ]
-    split, _, _ = normalize_split(data, plan, setup["world"]["characters"], volumes[0].index)
+    matching_count = None
+    if volumes:
+        matching_count = min(len(volumes), len(data.get("volumes") or []))
+        data["volumes"] = [
+            {**card, "index": row.index, "chapter_count": row.chapter_count}
+            for row, card in zip(volumes, data.get("volumes") or [], strict=False)
+        ]
+        # 对不上的卷保留原内容，但仍为线索、期待的卷号范围提供完整骨架。
+        data["volumes"] += [
+            {"index": row.index, "title": row.title, "summary": row.summary, "chapter_count": row.chapter_count}
+            for row in volumes[len(data["volumes"]) :]
+        ]
+    split, _, _ = normalize_split(data, plan, setup["world"]["characters"], first_volume)
     async with d.sessionmaker() as session:
         stats = await arc_store.fill_arc(
             session, await session.get(Book, d.book_id), endpoint_id, split, nodes, matching_count=matching_count
         )
         await session.commit()
     if not stats.get("already_saved"):
-        await d.emit.say(
-            "chief",
-            f"开写前，我把第 {number} 篇的线索、人物出场、读者在等的事和信息差排好了：{stats['threads']} 条线，{stats['new_secrets']} 条信息差。",
-        )
+        if volumes:
+            text = f"开写前，我把第 {number} 篇的线索、人物出场、读者在等的事和信息差排好了：{stats['threads']} 条线，{stats['new_secrets']} 条信息差。"
+        else:
+            count = sum(card.get("chapter_count", 0) for card in split.get("volumes") or [])
+            text = (
+                f"第 {number} 篇是你自己写的，我照你那段话分了 {len(split.get('volumes') or [])} 卷、约 {count} 章，"
+                f"线索和信息差也排好了：{stats['threads']} 条线，{stats['new_secrets']} 条信息差。"
+            )
+        await d.emit.say("chief", text)
         await d.emit.artifact("chief", f"第 {number} 篇分卷与线索", {"type": "segment_volumes", "data": split})
-    return {}
+    if not state.get("arc_id"):
+        return {}
+    # 只定下一篇时，给作者自己写的篇分好卷就算定好了
+    return {"arc_id": "", "segment_done": state.get("until") == "segment", "segment_split": split}
 
 
 async def fill_volume_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dict:

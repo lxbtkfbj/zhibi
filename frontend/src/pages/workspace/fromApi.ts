@@ -27,7 +27,14 @@ export const CHARACTER_COLUMNS: Record<string, keyof LibraryItem> = {
 const NOW_EXTRA = '实力与地位'
 /** 工作台上的类别 → 设定库里的类别 */
 export const ENTRY_CATEGORY: Record<string, string> = {
-  等级体系: '等级体系', 地点列表: '世界与地图', 势力列表: '势力划分', 物品功法: '物品与功法', 往事秘密: '往事与秘密', 特殊规则: '特殊规则', 金手指: '特殊规则',
+  等级体系: '等级体系', 地点列表: '世界与地图', 势力列表: '势力划分', 物品功法: '物品与功法', 往事秘密: '往事与秘密', 特殊规则: '特殊规则', 金手指: '金手指',
+}
+
+/** 章纲那三栏空着时的提示 */
+const CHAPTER_HINTS: Record<string, string> = {
+  发生什么: '第一行写这一章要做成什么，下面每行一个场景',
+  看点: '读者爽在哪一下：打脸、反转、突破、心动、揭秘……',
+  结尾钩子: '停在什么悬念上，让人想看下一章',
 }
 export const WORLD_OVERVIEW = '世界概况'
 
@@ -96,11 +103,13 @@ function outlineNodes(tree: OutlineTree, chapters: ChapterBrief[], ending?: stri
     const brief = byIndex.get(index)
     const o = brief?.outline
     const happen = [text(o?.goal), ...(o?.scenes ?? []).map(text)].filter(Boolean).join('\n')
-    const sections = o && (happen || o.cool_point || o.hook)
-      ? [{ label: '发生什么', text: happen }, { label: '看点', text: text(o.cool_point) }, { label: '结尾钩子', text: text(o.hook) }]
-      : [{ label: brief?.summary ? '这一章写了什么' : '发生什么', text: text(brief?.summary), placeholder: '发生什么；看点；结尾的钩子' }]
+    // 还没开写的章：章纲三栏一直摆着，能改；写过的有章纲就看章纲，没有就看写了什么
+    const outline = status === 'planned' || (o && (happen || o.cool_point || o.hook))
+    const sections: VField[] = outline
+      ? [['发生什么', happen], ['看点', text(o?.cool_point)], ['结尾钩子', text(o?.hook)]].map(([label, value]) => ({ label, text: value, placeholder: CHAPTER_HINTS[label] }))
+      : [{ label: '这一章写了什么', text: text(brief?.summary) }]
     return {
-      id: `c${index}`, kind: '章', title: `第${index}章　${title || '待定'}`, text: '', sections, progress: outlineStatusText(status), uses: [],
+      id: `c${index}`, kind: '章', title: `第${index}章　${title}`, text: '', sections, progress: outlineStatusText(status), uses: [],
       ...(brief ? { ref: { type: 'chapter' as const, id: String(index) } } : {}),
     }
   }
@@ -115,20 +124,25 @@ function outlineNodes(tree: OutlineTree, chapters: ChapterBrief[], ending?: stri
         children: u.chapters.map((c) => chapterNode(c.index, c.title, c.status)),
       })),
     }))
+  // 写到再定的篇里，排在最前面的那一篇可以直接加卷
+  const next = tree.arcs.find((arc) => !arc.planned && !isLaterEnding(arc))
   const children: VNode[] = tree.segmented
     ? tree.arcs.map((arc, i): VNode => {
-      const later = isLaterEnding(arc) || !arc.planned
+      const rest = isLaterEnding(arc)
       return {
-        id: `a:${arc.node_id ?? i}`, kind: '篇', title: later ? `第${cn(i + 1)}篇` : `第${cn(i + 1)}篇　${arc.title}`, text: arcText(arc), later, locked: arc.locked, uses: [],
+        id: `a:${arc.node_id ?? i}`, kind: '篇', title: rest ? `第${cn(i + 1)}篇` : `第${cn(i + 1)}篇　${arc.title}`, text: arcText(arc),
+        later: rest || !arc.planned, next: arc === next, locked: arc.locked, uses: [],
         childKind: '卷', children: volumes(arc.volumes),
-        ...(arc.node_id && arc.planned ? { ref: { type: 'segment' as const, id: arc.node_id } } : {}),
+        // 「后面的篇」（结局之前还没定的那一段）不能改；其余的篇都能改名字和那段话
+        ...(arc.node_id && !rest ? { ref: { type: 'segment' as const, id: arc.node_id } } : {}),
       }
     })
     : volumes(tree.arcs.flatMap((arc) => arc.volumes))
   // 全书那一段：有结局节点存在节点上，没有就存在书的概念里
   const root: VNode = {
     id: 'book', kind: '全书', title: '全书', text: text(tree.ending?.event) || text(ending), uses: [], children,
-    childKind: tree.segmented ? '篇' : '卷',
+    // 没分篇、也还没有卷的空书，全书下面先加篇
+    childKind: tree.segmented || !tree.arcs.some((arc) => arc.volumes.length) ? '篇' : '卷',
     ref: tree.ending ? { type: 'segment', id: tree.ending.node_id } : { type: 'book', id: '' },
   }
   numberChapters(root)
@@ -152,7 +166,9 @@ export function bookFromApi(parts: ApiParts): VBook {
       world = text(item.content) || text(item.one_line)
       continue
     }
-    const category = item.tags?.includes('金手指') ? '金手指' : builtinName(key) ?? key
+    // 金手指这一类，加上别的内置类别里带「金手指」标签的段落条目（老数据）
+    const tagged = item.tags?.includes('金手指') && item.style !== 'ladder' && !key.startsWith('custom:')
+    const category = tagged ? '金手指' : builtinName(key) ?? key
     byCategory.set(category, [...(byCategory.get(category) ?? []), settingEntry(item, category)])
   }
   // 带金手指标签的角色：在金手指里也列一条，内容是他的「能力」，到角色卡上去改

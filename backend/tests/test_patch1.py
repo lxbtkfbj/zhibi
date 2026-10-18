@@ -38,6 +38,7 @@ from app.services.chat_context import accepts_plan, dialogue, obvious_question, 
 from app.services.library_context import existing_text, load_context
 from app.services.meeting import post_message
 from app.services.setup_store_v3 import save_library_focus, save_library_rest
+from tests.later_changes import with_later_changes
 from tests.test_chat_task6 import client as _client  # noqa: F401
 from tests.test_chat_task6 import final_message, seed
 from tests.test_setup_puzzle_flow import flow as _flow
@@ -582,7 +583,7 @@ async def test_focus_wrong_ai_name_fills_only_blanks_and_rest_alias_skip(session
 
 def test_patch_verbatim_schemas_prompts_and_visible_names():
     root = Path(__file__).parents[2]
-    doc = (root / "docs/codex任务/第三包/补丁1-群聊和开书改进.md").read_text(encoding="utf8")
+    doc = with_later_changes((root / "docs/codex任务/第三包/补丁1-群聊和开书改进.md").read_text(encoding="utf8"))
     actual = ast.parse((root / "backend/app/agents/schemas.py").read_text(encoding="utf8"))
     block = re.search(r"```python\n(class PlanItem[\s\S]*?)\n```", doc)[1]
     for expected in ast.parse(block).body:

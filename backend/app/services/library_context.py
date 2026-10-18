@@ -74,11 +74,20 @@ class LibraryContext:
                 else (f"点子：{self.book.idea}" if self.book.idea else "（还没有定调）")
             )
         lines = [concept["story"]]
+        if self.concept_ending:
+            lines.append(f"全书结局：{self.concept_ending}")
         secret_id = concept.get("secret_entry_id")
         secret = next((entry for entry in self.entries if str(entry.id) == str(secret_id)), None)
         if secret is not None:
             lines.append(f"底牌（只有作者和编辑部知道）：{secret.content or secret.one_line}")
         return "\n".join(lines)
+
+    @property
+    def concept_ending(self) -> str:
+        """作者写在概念里的全书结局；已经有结局节点时以节点为准。"""
+        if any(node.kind == "ending" for node in self.nodes):
+            return ""
+        return str((self.book.concept or {}).get("ending") or "").strip()
 
     @property
     def library(self) -> str:
@@ -238,6 +247,8 @@ class LibraryContext:
         ending = next((node for node in reversed(self.nodes) if node.kind == "ending"), None)
         if ending:
             lines.append(f"结局：{ending.event}")
+        elif self.concept_ending:
+            lines.append(f"结局：{self.concept_ending}")
         return "\n".join(lines) or "（还没有大纲）"
 
     def scope(self, target: Any | None = None) -> str:

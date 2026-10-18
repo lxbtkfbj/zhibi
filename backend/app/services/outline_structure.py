@@ -8,12 +8,36 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.planning import fit_chapter_counts
-from app.models import Chapter, PlotUnit, Volume
+from app.models import Chapter, PlotUnit, StoryNode, Volume
 from app.services.versions import record_version, snapshot_of
 
 
 def started(chapter: Chapter) -> bool:
     return chapter.status != "planned" or bool(chapter.content)
+
+
+async def plan_arc_for_volume(session: AsyncSession, book_id: uuid.UUID, node_id: uuid.UUID) -> None:
+    """分篇的书在「写到再定」的篇下面加卷：先把这一篇定下来，名字和一段话照节点上写的。
+
+    只能是已规划的篇后面紧挨着的那一篇，不然写作时会被跳过。没分篇的旧书照旧。
+    """
+    nodes = list(
+        await session.scalars(
+            select(StoryNode).where(StoryNode.book_id == book_id).order_by(StoryNode.position, StoryNode.id)
+        )
+    )
+    node = next(row for row in nodes if row.id == node_id)
+    planned = [i for i, row in enumerate(nodes) if row.segment is not None]
+    if node.segment is not None or not planned:
+        return
+    if node.kind != "milestone":
+        raise HTTPException(409, "「后面的篇」还没定下来，先在全书下面加一篇，再往里加卷")
+    following = next((row for row in nodes[planned[-1] + 1 :] if row.kind == "milestone"), None)
+    if node is not following:
+        raise HTTPException(409, "前面还有没定下来的篇，先给前面的篇加卷")
+    before = snapshot_of(node)
+    node.segment = {"title": node.title, "text": node.event}
+    await record_version(session, book_id, "segment", node, "author", before=before)
 
 
 @dataclass

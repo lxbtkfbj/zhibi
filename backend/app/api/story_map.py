@@ -187,7 +187,13 @@ async def update_node(node_id: uuid.UUID, body: NodePatch, session: AsyncSession
             if isinstance(value.get("opening"), dict):
                 value["opening"] = {**(node.segment.get("opening") or {}), **value["opening"]}
             value = {**node.segment, **value}
+            if node.origin == "author" and not node.event and "title" in value:
+                # 作者自己加的篇没有单写终点，终点名跟着篇名走
+                node.title = str(value["title"])[:100]
         setattr(node, field, value)
+    if node.kind == "ending" and body.event is not None and "ending" in (book.concept or {}):
+        # 全书结局只认一处：有了结局节点，概念里旧写的那句就不留
+        book.concept = {key: value for key, value in book.concept.items() if key != "ending"}
     await record_version(session, node.book_id, "segment", node, "author", before=before)
     await session.commit()
     await session.refresh(node)

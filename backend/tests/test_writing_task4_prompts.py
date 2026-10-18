@@ -16,7 +16,8 @@ PROMPT_BLOBS = {
     "prepare_chapter": "1f2246e3568111f6f18cbb30f50347bec9804152",
     "write_chapter": "552334325a50476fa570fe5e17c3fc90d1702624",
     "check_consistency": "bace136fa067545cf03089c955a4aaf4a182c704",
-    "digest_chapter": "a4a5e48b0a6c9289a76deb30edccb1d7777c2180",
+    # 2026-10-18 新书页第二步：人物变化加上实力与地位
+    "digest_chapter": "defb3ca2a865384948b1afacceef4d0571c531ef",
     "review_chapter": "0461852be16ad7f0a4f81c4f537be0f9041da04e",
     "recap_unit": "c564536ba7ae7825f2bc2ed813d342df7a4439fe",
     "recap_volume": "a060bdccbe7e54325d0787388702e72c5403cd68",

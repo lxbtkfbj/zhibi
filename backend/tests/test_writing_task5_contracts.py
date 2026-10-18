@@ -19,7 +19,8 @@ PROMPTS = {
     "split_segment": "3350f8ca910a8e45a5a2f085c508dbae4ef4e74b668c349adbfbe1ede89c4975",
     "plan_volume": "c7180d20aee1ff14901fe1f4fd89fa2f24f209b3bd487e46a378f9dd907fbe2b",
     "plan_chapters": "bfefd711e7c052a6b070e9a99a1ccbad0e4a602b20b0f03f574d979d147901b8",
-    "digest_chapter": "ef93d91acc8caf034ed748bbe7750f82798fc361f84c6628c89c8e9d190fa3ae",
+    # 2026-10-18 新书页第二步：人物变化加上实力与地位
+    "digest_chapter": "2e6ad0ed97fac9431496522eb4c1af9d2207a3ed0fd9fd98148f216f750a0e36",
 }
 
 

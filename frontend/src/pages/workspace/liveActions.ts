@@ -18,7 +18,7 @@ async function loadParts(bookId: string): Promise<ApiParts> {
     get<LibrarySnapshot>(`/books/${bookId}/library`),
     get<OutlineTree>(`/books/${bookId}/outline-tree`),
     get<{ relationships: ApiParts['relationships'] }>(`/books/${bookId}/bible`),
-    get<ChapterBrief[]>(`/books/${bookId}/chapters`),
+    get<ChapterBrief[]>(`/books/${bookId}/chapters?with_outline=true`),
   ])
   return { book, library, outline, relationships: bible.relationships ?? [], chapters }
 }
@@ -48,6 +48,27 @@ function entryBody(category: string, fields: Record<string, string>): { content?
     else body.field_values = { ...body.field_values, [key]: value }
   }
   return body
+}
+
+/** 章纲三栏 → 章节的 outline：「发生什么」第一行是目标，下面每行一个场景。 */
+function chapterOutline(sections: Record<string, string>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  if ('发生什么' in sections) {
+    const lines = sections['发生什么'].split('\n').map((line) => line.trim()).filter(Boolean)
+    out.goal = lines[0] ?? ''
+    out.scenes = lines.slice(1)
+  }
+  if ('看点' in sections) out.cool_point = sections['看点']
+  if ('结尾钩子' in sections) out.hook = sections['结尾钩子']
+  return out
+}
+
+/** 新加的卷排在哪一卷后面：这一篇（和它前面的篇）最后一卷；没分篇的书就是全书最后一卷。 */
+function lastVolume(tree: OutlineTree | undefined, nodeId?: string): string | null {
+  if (!tree) return null
+  const upTo = nodeId ? tree.arcs.findIndex((a) => a.node_id === nodeId) : tree.arcs.length - 1
+  const volumes = tree.arcs.slice(0, upTo + 1).flatMap((a) => a.volumes)
+  return volumes.at(-1)?.id ?? null
 }
 
 /** 卡片上所有栏目的内容，按 key。 */
@@ -146,31 +167,58 @@ export function useLiveBook(bookId: string) {
         if (!ref) return
         if (ref.type === 'volume') await done(patch(`/volumes/${ref.id}`, { ...(change.name !== undefined ? { title: change.name } : {}), ...(change.text !== undefined ? { summary: change.text } : {}) }))
         else if (ref.type === 'unit') await done(patch(`/units/${ref.id}`, { ...(change.name !== undefined ? { title: change.name } : {}), ...(change.text !== undefined ? { summary: change.text } : {}) }))
-        else if (ref.type === 'chapter' && change.name) await done(patch(`/books/${bookId}/chapters/${ref.id}`, { title: change.name }))
+        else if (ref.type === 'chapter') {
+          const body: Record<string, unknown> = {}
+          if (change.name) body.title = change.name
+          if (change.sections) body.outline = chapterOutline(change.sections)
+          if (Object.keys(body).length) await done(patch(`/books/${bookId}/chapters/${ref.id}`, body))
+        }
         else if (ref.type === 'book' && change.text !== undefined) await concept({ ending: change.text })
         else if (ref.type === 'segment' && node.kind === '全书' && change.text !== undefined) await done(patch(`/nodes/${ref.id}`, { event: change.text }))
+        // 写到再定的篇：名字和那段话就是节点上的
+        else if (ref.type === 'segment' && node.later) await done(patch(`/nodes/${ref.id}`, { ...(change.name !== undefined ? { title: change.name } : {}), ...(change.text !== undefined ? { event: change.text } : {}) }))
         else if (ref.type === 'segment') await done(patch(`/nodes/${ref.id}`, { segment: { ...(change.name !== undefined ? { title: change.name } : {}), ...(change.text !== undefined ? { text: change.text } : {}) } }))
       },
+      // 新加的都排在同一层的最后面
       addNode: async (parent) => {
         const ref = parent.ref
-        if (parent.kind === '全书' && parent.childKind === '卷') return `v:${(await done(post<{ id: string }>(`/books/${bookId}/volumes`, {}))).id}`
-        if (parent.kind === '篇' && ref?.type === 'segment') return `v:${(await done(post<{ id: string }>(`/books/${bookId}/volumes`, { target_node_id: ref.id }))).id}`
-        if (parent.kind === '卷' && ref) return `u:${(await done(post<{ id: string }>(`/volumes/${ref.id}/units`, {}))).id}`
+        const tree = parts.current?.outline
+        if (parent.kind === '全书' && parent.childKind === '篇') return `a:${(await done(post<{ id: string }>(`/books/${bookId}/arcs`, {}))).id}`
+        if (parent.kind === '全书' && parent.childKind === '卷') return `v:${(await done(post<{ id: string }>(`/books/${bookId}/volumes`, { after_volume_id: lastVolume(tree) }))).id}`
+        if (parent.kind === '篇' && ref?.type === 'segment') return `v:${(await done(post<{ id: string }>(`/books/${bookId}/volumes`, { target_node_id: ref.id, after_volume_id: lastVolume(tree, ref.id) }))).id}`
+        if (parent.kind === '卷' && ref) {
+          const units = tree?.arcs.flatMap((a) => a.volumes).find((v) => v.id === ref.id)?.units ?? []
+          return `u:${(await done(post<{ id: string }>(`/volumes/${ref.id}/units`, { after_unit_id: units.at(-1)?.id ?? null }))).id}`
+        }
+        if (parent.kind === '单元' && ref) return `c${(await done(post<{ index: number }>(`/units/${ref.id}/chapters`, {}))).index}`
         return undefined
       },
       deleteNode: async (node) => {
         if (node.ref?.type === 'volume') await done(del(`/volumes/${node.ref.id}`))
         else if (node.ref?.type === 'unit') await done(del(`/units/${node.ref.id}`))
+        else if (node.ref?.type === 'chapter') await done(del(`/books/${bookId}/chapters/${node.ref.id}`))
+        else if (node.ref?.type === 'segment' && node.kind === '篇') await done(del(`/arcs/${node.ref.id}`))
       },
-      // 手动加篇、加章后端还没有：先只能加卷和单元
-      canAdd: (parent) => (parent.kind === '全书' && parent.childKind === '卷') || (parent.kind === '篇' && parent.ref?.type === 'segment') || (parent.kind === '卷' && !!parent.ref),
+      canAdd: (parent) => {
+        if (parent.kind === '全书') return parent.childKind === '篇' || parent.childKind === '卷'
+        if (parent.kind === '篇') return parent.ref?.type === 'segment' && (!parent.later || !!parent.next)
+        if (parent.kind === '卷') return !!parent.ref
+        if (parent.kind === '单元') return !!parent.ref && parent.progress !== '已写完'
+        return false
+      },
       canEdit: (node, part) => {
         if (!node.ref) return false
         if (node.kind === '全书') return part === 'text'
-        if (node.kind === '章') return part === 'name'
+        // 章纲只有还没开写的能改
+        if (node.kind === '章') return part === 'name' || node.progress === '已规划'
         return true
       },
-      canDelete: (node) => node.ref?.type === 'volume' || node.ref?.type === 'unit',
+      canDelete: (node) => {
+        if (node.ref?.type === 'volume' || node.ref?.type === 'unit') return true
+        if (node.kind === '章') return !!node.ref && node.progress === '已规划'
+        // 篇下面还有卷的，先删卷
+        return node.kind === '篇' && !!node.ref && !node.children?.length
+      },
     }
   }, [bookId, qc])
 

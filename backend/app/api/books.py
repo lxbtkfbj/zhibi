@@ -380,6 +380,8 @@ async def create_volume(
     await lock_book(session, book.id)
     await ensure_idle(session, book.id)
     await validate_node(session, book.id, body.target_node_id)
+    if body.target_node_id is not None:
+        await outline_structure.plan_arc_for_volume(session, book.id, body.target_node_id)
     state = await outline_structure.load_structure(session, book.id)
     volume = Volume(
         book_id=book.id,
@@ -453,9 +455,12 @@ async def update_thread(thread_id: uuid.UUID, body: ThreadPatch, session: AsyncS
 
 @router.get("/books/{book_id}/chapters", response_model=list[ChapterBrief])
 async def list_chapters(
-    book: Book = Depends(get_book), volume: int | None = None, session: AsyncSession = SessionDep
+    book: Book = Depends(get_book),
+    volume: int | None = None,
+    with_outline: bool = False,
+    session: AsyncSession = SessionDep,
 ) -> list[ChapterBrief]:
-    """全书章节目录；指定 volume 时只列这一卷，并带上章纲。"""
+    """全书章节目录；指定 volume 时只列这一卷，并带上章纲；with_outline 时全书都带章纲（新书页用）。"""
     stmt = select(Chapter).where(Chapter.book_id == book.id).order_by(Chapter.index)
     if volume is not None:
         stmt = stmt.join(Volume, Chapter.volume_id == Volume.id).where(Volume.index == volume)
@@ -463,7 +468,7 @@ async def list_chapters(
     out = []
     for c in rows:
         brief = ChapterBrief.model_validate(c)
-        brief.outline = c.outline if volume is not None else None
+        brief.outline = c.outline if volume is not None or with_outline else None
         out.append(brief)
     return out
 
@@ -488,6 +493,13 @@ async def update_chapter(
 ) -> ChapterOut:
     await ensure_idle(session, book.id)
     chapter = await _chapter(session, book.id, index)
+    if body.outline is not None:
+        if outline_structure.started(chapter):
+            raise HTTPException(409, "这一章已经开写了，章纲不能改")
+        changes = body.outline.model_dump(exclude_unset=True)
+        if "scenes" in changes:
+            changes["scenes"] = [scene.strip() for scene in changes["scenes"] or [] if scene.strip()]
+        chapter.outline = {**(chapter.outline or {}), **{key: value for key, value in changes.items() if value is not None}}
     if body.title is not None:
         chapter.title = body.title
     if body.content is not None:

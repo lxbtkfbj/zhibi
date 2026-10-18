@@ -42,7 +42,8 @@ export interface WorkspaceActions {
   saveTemplate(category: VCategory, template: CardTemplate, dropped: string[]): Promise<void>
   resetTemplate(category: VCategory): Promise<void>
   createCategory(name: string, style: CategoryStyle, fields: string[], about: string): Promise<void>
-  saveNode(node: VNode, change: { name?: string; text?: string }): Promise<void>
+  /** sections 是章纲那几栏，键是栏目名（发生什么、看点、结尾钩子） */
+  saveNode(node: VNode, change: { name?: string; text?: string; sections?: Record<string, string> }): Promise<void>
   /** 在这个节点下面加一个下一层，返回新节点的 id */
   addNode(parent: VNode): Promise<string | undefined>
   deleteNode(node: VNode): Promise<void>
@@ -142,6 +143,7 @@ export function useLocalBook(initial: VBook): [VBook, WorkspaceActions] {
         if (!target) return b
         if (change.text !== undefined) target.text = change.text
         if (change.name !== undefined) target.title = `${splitTitle(target.title)[0]}　${change.name}`
+        if (change.sections) target.sections = target.sections?.map((f) => (f.label in change.sections! ? { ...f, text: change.sections![f.label] } : f))
         return { ...b, outline }
       }),
       addNode: async (parent) => {

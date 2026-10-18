@@ -454,6 +454,27 @@ async def fill_arc(session, book, endpoint_id, split, nodes_view, *, matching_co
         [row for row in await rows(session, Volume, book.id) if row.target_node_id == endpoint.id],
         key=lambda row: row.index,
     )
+    if not volumes:
+        # 作者自己加的篇还没有卷：按编辑部分好的卷接在最后面建出来
+        first = int(await session.scalar(select(func.max(Volume.index)).where(Volume.book_id == book.id)) or 0) + 1
+        cards = split.get("volumes") or []
+        if not cards:
+            raise ValueError("这一篇还没有分卷。")
+        if [card.get("index") for card in cards] != list(range(first, first + len(cards))):
+            raise ValueError("分卷期间卷号发生了变化，请重试。")
+        for data in cards:
+            volume = Volume(
+                book_id=book.id, index=data["index"], title=data.get("title", ""), status="planned"
+            )
+            volume.target_node_id = endpoint.id
+            for key in VOLUME_FIELDS:
+                if data.get(key) is not None:
+                    setattr(volume, key, clean_techniques(data[key]) if key == "techniques" else deepcopy(data[key]))
+            volume.thread_beats = deepcopy(data.get("thread_beats") or [])
+            session.add(volume)
+            volumes.append(volume)
+            await version(session, book.id, "volume", volume, note="开写前给这一篇分卷")
+        matching_count = 0
     allowed = {
         "stage",
         "want",

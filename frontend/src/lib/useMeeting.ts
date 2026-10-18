@@ -25,6 +25,18 @@ export function useMeeting(bookId: string) {
 
   useEffect(() => {
     const source = new EventSource(`/api/books/${bookId}/events`)
+    // 连上时服务器一口气补发全部历史消息：一阵子里要刷新的攒在一起，只刷新一次，不然几百条消息就是几千次请求
+    const pending = new Map<string, readonly unknown[]>()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const refresh = (queryKeys: readonly (readonly unknown[])[]) => {
+      for (const key of queryKeys) pending.set(JSON.stringify(key), key)
+      timer ??= setTimeout(() => {
+        timer = undefined
+        const all = [...pending.values()]
+        pending.clear()
+        for (const queryKey of all) void qc.invalidateQueries({ queryKey })
+      }, 150)
+    }
     source.addEventListener('open', () => {
       setConnected(true)
       // 连上之前推送的任务状态收不到（例如演示模式几秒就跑完一步），连上时重新拉一次
@@ -32,12 +44,12 @@ export function useMeeting(bookId: string) {
     })
     source.addEventListener('error', () => setConnected(false))
     source.addEventListener('book', () => {
-      for (const key of [keys.book(bookId), keys.books, keys.nodes(bookId), keys.bible(bookId), keys.outline(bookId), keys.threads(bookId), keys.secrets(bookId), libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), libraryKeys.candidates(bookId), libraryKeys.versions(bookId), ['outline-tree', bookId]]) {
+      for (const key of [keys.book(bookId), keys.books, keys.nodes(bookId), keys.bible(bookId), keys.outline(bookId), keys.threads(bookId), keys.secrets(bookId), libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), libraryKeys.candidates(bookId), libraryKeys.versions(bookId), ['outline-tree', bookId], ['workspace', bookId]]) {
         void qc.invalidateQueries({ queryKey: key })
       }
     })
     source.addEventListener('library', () => {
-      for (const key of [libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), libraryKeys.candidates(bookId), libraryKeys.versions(bookId), ['outline-tree', bookId], keys.bible(bookId)]) void qc.invalidateQueries({ queryKey: key })
+      for (const key of [libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), libraryKeys.candidates(bookId), libraryKeys.versions(bookId), ['outline-tree', bookId], ['workspace', bookId], keys.bible(bookId)]) void qc.invalidateQueries({ queryKey: key })
     })
     source.addEventListener('message', (event) => {
       const message = JSON.parse((event as MessageEvent).data) as MeetingMessage
@@ -46,22 +58,20 @@ export function useMeeting(bookId: string) {
         if (base.length && base[base.length - 1].id >= message.id) return prev
         return { bookId, messages: [...base, message] }
       })
-      void qc.invalidateQueries({ queryKey: settingsKeys.requirements(bookId) })
-      for (const key of [keys.book(bookId), keys.outline(bookId), libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), ['outline-tree', bookId]]) void qc.invalidateQueries({ queryKey: key })
+      refresh([settingsKeys.requirements(bookId), keys.book(bookId), keys.outline(bookId), libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), ['outline-tree', bookId], ['workspace', bookId]])
       if (message.kind === 'artifact' && REFRESH_ON.has(message.payload?.type ?? '')) {
-        for (const key of [libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), libraryKeys.candidates(bookId), libraryKeys.versions(bookId), ['outline-tree', bookId]]) void qc.invalidateQueries({ queryKey: key })
-        for (const key of [keys.chapters(bookId), keys.outline(bookId), keys.book(bookId)]) qc.invalidateQueries({ queryKey: key })
-        if (['spine', 'segment', 'segment_volumes'].includes(message.payload?.type ?? '')) qc.invalidateQueries({ queryKey: keys.nodes(bookId) })
+        refresh([libraryKeys.candidates(bookId), libraryKeys.versions(bookId), keys.chapters(bookId)])
+        if (['spine', 'segment', 'segment_volumes'].includes(message.payload?.type ?? '')) refresh([keys.nodes(bookId)])
         if (message.payload?.type === 'chapter_final' || ['lore', 'world', 'segment', 'segment_volumes'].includes(message.payload?.type ?? '')) {
-          for (const key of [keys.bible(bookId), keys.secrets(bookId), keys.nodes(bookId)]) qc.invalidateQueries({ queryKey: key })
+          refresh([keys.bible(bookId), keys.secrets(bookId), keys.nodes(bookId)])
         }
-        if (['threads', 'segment_volumes'].includes(message.payload?.type ?? '')) qc.invalidateQueries({ queryKey: keys.threads(bookId) })
+        if (['threads', 'segment_volumes'].includes(message.payload?.type ?? '')) refresh([keys.threads(bookId)])
       }
     })
     source.addEventListener('message_update', event => {
       const message = JSON.parse((event as MessageEvent).data) as MeetingMessage
       setState(prev => prev.bookId === bookId ? { bookId, messages: prev.messages.map(m => m.id === message.id ? message : m) } : prev)
-      void qc.invalidateQueries({ queryKey: settingsKeys.requirements(bookId) })
+      refresh([settingsKeys.requirements(bookId)])
     })
     source.addEventListener('chat_typing', event => {
       const value = JSON.parse((event as MessageEvent).data) as ChatTyping
@@ -75,13 +85,16 @@ export function useMeeting(bookId: string) {
       qc.setQueryData<BookDetail>(keys.book(bookId), (old) => (old ? { ...old, active_job: job } : old))
       if (SETTLED.has(job.status)) {
         setDraft({ bookId, draft: null })
-        const all = [keys.book(bookId), keys.outline(bookId), keys.bible(bookId), keys.threads(bookId), keys.nodes(bookId), keys.secrets(bookId), keys.chapters(bookId), keys.usage(bookId), keys.books, libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), libraryKeys.candidates(bookId), libraryKeys.versions(bookId), ['outline-tree', bookId]]
+        const all = [keys.book(bookId), keys.outline(bookId), keys.bible(bookId), keys.threads(bookId), keys.nodes(bookId), keys.secrets(bookId), keys.chapters(bookId), keys.usage(bookId), keys.books, libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), libraryKeys.candidates(bookId), libraryKeys.versions(bookId), ['outline-tree', bookId], ['workspace', bookId]]
         for (const key of all) {
           qc.invalidateQueries({ queryKey: key })
         }
       }
     })
-    return () => source.close()
+    return () => {
+      source.close()
+      clearTimeout(timer)
+    }
   }, [bookId, qc])
 
   return {
