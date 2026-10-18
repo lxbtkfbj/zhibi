@@ -1,8 +1,9 @@
 /** 工作台里各页共用的小部件：点上去就能改的字、小菜单、左边目录的壳、中间那一页纸。 */
 
 import clsx from 'clsx'
-import { MoreHorizontal, Plus, Search, X } from 'lucide-react'
-import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { ChevronDown, MoreHorizontal, Search, X } from 'lucide-react'
+import { type ReactNode, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { COLUMN_KEY, COLUMN_MAX, COLUMN_MIN, ColumnWidthContext, zoomOf } from './column'
 import type { VField } from './model'
 import { menuItem, paperCard, readText } from './styles'
 
@@ -179,25 +180,68 @@ export function CardMenu({ locked, onLock, onDelete, deleteLabel = '删掉这一
 
 /* ---------------- 左边目录 ---------------- */
 
+/** 左边一栏的壳：每一页（简介、设定、大纲、正文）同一个宽度，右边缘能拖。 */
+export function SideColumn({ children }: { children: ReactNode }) {
+  const { width, setWidth } = useContext(ColumnWidthContext)
+  const ref = useRef<HTMLElement>(null)
+  const [dragging, setDragging] = useState(false)
+  useEffect(() => {
+    if (!dragging) return
+    const move = (e: PointerEvent) => {
+      const el = ref.current
+      if (!el) return
+      const z = zoomOf(el)
+      const left = el.getBoundingClientRect().left
+      setWidth(Math.round(Math.min(Math.max(COLUMN_MIN, (e.clientX - left) / z), COLUMN_MAX)))
+    }
+    const up = () => setDragging(false)
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    return () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+    }
+  }, [dragging, setWidth])
+  useEffect(() => {
+    if (dragging) return
+    try {
+      localStorage.setItem(COLUMN_KEY, String(width))
+    } catch { /* 存不了就只管这一次 */ }
+  }, [dragging, width])
+  return (
+    <aside ref={ref} className="relative flex shrink-0 flex-col border-r border-line bg-paper-2" style={{ width }}>
+      {children}
+      <div onPointerDown={(e) => { e.preventDefault(); setDragging(true) }} title="拖动调宽窄"
+        className={clsx('absolute inset-y-0 -right-1.5 z-10 w-3 cursor-col-resize after:absolute after:inset-y-0 after:left-1.5 after:w-0.5 after:transition-colors', dragging ? 'after:bg-chief/60' : 'hover:after:bg-chief/40')} />
+      {dragging && <div className="fixed inset-0 z-50 cursor-col-resize" />}
+    </aside>
+  )
+}
+
+/** 目录顶上「新增」：只有一件事就直接做，有几件才弹一个小菜单。 */
+function AddAction({ items }: { items: { label: string; onClick: () => void }[] }) {
+  const style = 'flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-xs text-ink-3 transition-colors hover:bg-line/60 hover:text-ink'
+  if (items.length === 1) return <button type="button" onClick={items[0].onClick} className={style}>{items[0].label}</button>
+  return (
+    <Menu trigger={(_, toggle) => (
+      <button type="button" onClick={toggle} className={style}>新建<ChevronDown className="size-3" /></button>
+    )}>
+      {(close) => items.map((item) => (
+        <button key={item.label} type="button" onClick={() => { close(); item.onClick() }} className={menuItem}>{item.label}</button>
+      ))}
+    </Menu>
+  )
+}
+
 export function DirectoryShell({ title, search, query, onQuery, onTitle, children, footer, addMenu }: {
   title: string; search: string; query: string; onQuery: (query: string) => void; onTitle?: () => void
   children: ReactNode; footer?: ReactNode; addMenu?: { label: string; onClick: () => void }[]
 }) {
   return (
-    <aside className="flex w-72 shrink-0 flex-col border-r border-line bg-paper-2 2xl:w-80">
-      <div className="flex items-center justify-between px-5 pt-5 pb-3">
+    <SideColumn>
+      <div className="flex h-14 items-end justify-between px-5 pb-3">
         <button type="button" onClick={onTitle} className="text-xs tracking-[0.25em] text-ink-3 hover:text-ink">{title}</button>
-        {!!addMenu?.length && (
-          <Menu trigger={(_, toggle) => (
-            <button type="button" onClick={toggle} className="rounded-md p-1 text-ink-3 transition-colors hover:bg-line/60 hover:text-ink" aria-label="新建" title="新建">
-              <Plus className="size-4" />
-            </button>
-          )}>
-            {(close) => addMenu.map((item) => (
-              <button key={item.label} type="button" onClick={() => { close(); item.onClick() }} className={menuItem}>{item.label}</button>
-            ))}
-          </Menu>
-        )}
+        {!!addMenu?.length && <AddAction items={addMenu} />}
       </div>
       <label className="mx-4 mb-3 flex h-9 items-center gap-2 rounded-lg border border-line bg-card/70 px-3 text-sm text-ink-3 focus-within:border-line-2">
         <Search className="size-4 shrink-0" />
@@ -208,7 +252,7 @@ export function DirectoryShell({ title, search, query, onQuery, onTitle, childre
         {children}
         {footer}
       </div>
-    </aside>
+    </SideColumn>
   )
 }
 

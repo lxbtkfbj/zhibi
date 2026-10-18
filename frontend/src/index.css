@@ -130,9 +130,11 @@
 @media (min-width: 2200px) { :root { --desk-zoom: 1.2; } }
 @media (min-width: 2500px) { :root { --desk-zoom: 1.25; } }
 @media (min-width: 3200px) { :root { --desk-zoom: 1.5; } }
+:root { --desk-scale: 1; }
+/* --desk-scale 是外观里的「界面大小」，乘在按屏幕宽度算的倍数上 */
 .desk-zoom {
-  zoom: var(--desk-zoom);
-  height: calc(100dvh / var(--desk-zoom));
+  zoom: calc(var(--desk-zoom) * var(--desk-scale));
+  height: calc(100dvh / var(--desk-zoom) / var(--desk-scale));
 }
 /* 正文那一页：比外观里的正文字号大 2 号，页宽跟着字走，一行四十字上下。 */
 .chapter-sheet {

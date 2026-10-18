@@ -20,8 +20,9 @@ import { type WritingControl, gateTarget } from './writing'
 import { SplitPanel } from './Split'
 import { useSplit } from './useSplit'
 import {
-  AskButton, CardMenu, Crumb, DirectoryShell, Editable, LinkChip, Menu, Prose, Section, Sheet,
+  AskButton, CardMenu, Crumb, DirectoryShell, Editable, LinkChip, Menu, Prose, Section, Sheet, SideColumn,
 } from './widgets'
+import { ColumnWidthContext, useColumnWidth, zoomOf } from './column'
 import { menuItem, paperCard, readText, rowSelected, smallButton, titleClass } from './styles'
 
 export type Tab = '简介' | '设定' | '大纲' | '正文'
@@ -82,10 +83,10 @@ export function SampleInbox({ book }: { book: VBook }) {
   )
 }
 
-function TopBar({ book, tab, onTab, right, manuscriptHref, manuscript, directory, rightOffset }: {
+function TopBar({ book, tab, onTab, right, manuscriptHref, manuscript, leftOffset, rightOffset }: {
   book: VBook; tab: Tab; onTab: (tab: Tab) => void; right: ReactNode; manuscriptHref?: string; manuscript?: boolean
-  /** 这一页左边有没有目录、右边贴着的编辑部多宽：四个入口对准中间那一栏 */
-  directory: boolean; rightOffset: number
+  /** 左边那一栏、右边贴着的编辑部各多宽：四个入口对准中间那一栏，换页签时不跳 */
+  leftOffset: number; rightOffset: number
 }) {
   const item = 'flex h-8 items-center rounded-lg px-5 text-[15px] transition-colors 2xl:px-6'
   return (
@@ -99,7 +100,7 @@ function TopBar({ book, tab, onTab, right, manuscriptHref, manuscript, directory
       <span className="max-w-64 truncate font-serif text-[17px] font-bold tracking-wide 2xl:text-lg">{book.title}</span>
 
       {/* 四个入口对准中间那一栏，正好在那页纸上方 */}
-      <nav className={clsx('pointer-events-none absolute inset-y-0 flex items-center justify-center', directory ? 'left-72 2xl:left-80' : 'left-0')} style={{ right: rightOffset }}>
+      <nav className="pointer-events-none absolute inset-y-0 flex items-center justify-center" style={{ left: leftOffset, right: rightOffset }}>
         <div className="pointer-events-auto flex items-center gap-0.5 rounded-xl bg-paper-2 p-1 ring-1 ring-line">
           {(manuscript ? ['简介', '设定', '大纲', '正文'] as const : ['简介', '设定', '大纲'] as const).map((key) => (
             <button key={key} type="button" onClick={() => onTab(key)} aria-current={tab === key ? 'page' : undefined}
@@ -267,16 +268,15 @@ function SettingsDirectory({ book, selected, onSelect, onCreateCategory, onNewEn
   const current = selected.startsWith('cat:') ? selected.slice(4) : findEntry(book, selected)?.category
   return (
     <DirectoryShell title="设定" search="找人物、地方、规矩……" query={query} onQuery={setQuery} onTitle={() => onSelect('overview')}
-      addMenu={[
-        ...(current ? [{ label: `新增${nounOf(current)}`, onClick: () => onNewEntry(current) }] : []),
-        { label: '新建一类', onClick: () => setCreating(true) },
-      ]}
+      addMenu={current ? [{ label: `新增${nounOf(current)}`, onClick: () => onNewEntry(current) }] : undefined}
       footer={q ? null : creating ? (
         <NewCategoryForm taken={book.categories.map((c) => c.name)} onCancel={() => setCreating(false)}
           onCreate={(name, style, fields) => { setCreating(false); onCreateCategory(name, style, fields) }} />
       ) : (
-        <button type="button" onClick={() => setCreating(true)} className={clsx(smallButton, 'mt-4 w-full bg-card/70')}>
-          新建一类
+        // 和上面的类别同一种行，排在最后，不另做按钮
+        <button type="button" onClick={() => setCreating(true)}
+          className="mt-1.5 flex w-full items-center rounded-md py-1.5 pl-7 text-left text-sm text-ink-3 transition-colors hover:bg-line/50 hover:text-ink">
+          新建一类…
         </button>
       )}>
       {q ? (
@@ -362,7 +362,7 @@ function OutlineTreeView({ node, depth, selected, onSelect, open, toggle, onAdd,
         <button type="button" onClick={() => expandable && toggle(node.id)} className={clsx('flex size-7 shrink-0 items-center justify-center text-ink-3', !expandable && 'invisible')} aria-label={expanded ? '收起' : '展开'}>
           {expanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
         </button>
-        <button type="button" onClick={() => onSelect(node.id)} title={node.title}
+        <button type="button" onClick={() => (selected === node.id && expandable ? toggle(node.id) : onSelect(node.id))} title={node.title}
           className={clsx('min-w-0 flex-1 truncate py-[7px] pr-2 text-left',
             node.kind === '章' ? 'text-sm' : 'font-serif text-[15px] 2xl:text-base',
             node.later ? 'text-ink-3' : selected === node.id ? 'font-bold text-ink' : 'text-ink-2 group-hover:text-ink')}>
@@ -1326,17 +1326,9 @@ function BlurbPage({ book }: { book: VBook }) {
   const { actions } = useWorkspace()
   const save = useSave()
   const meta = useBookMeta()
-  const chapters = book.length ? Math.round((book.length * 10000) / book.chapterWords) : null
-  const facts = [book.genre, ...book.tags].filter(Boolean).join(' · ')
   return (
     <div className="flex min-h-full items-center justify-center px-6 py-10">
-      <div className="grid w-full max-w-[1000px] rounded-2xl border border-line bg-card shadow-[var(--shadow-lift)] md:grid-cols-[300px_minmax(0,1fr)]">
-        <aside className="hidden flex-col items-center justify-center rounded-l-2xl border-r border-line bg-paper-2 px-8 py-12 md:flex">
-          <BookCover title={book.title} seed={book.id === 'sample' ? '开新书' : book.id} size="lg" className="shadow-[0_22px_34px_-18px_rgb(40_25_10/0.55)]" />
-          <p className="mt-7 max-w-full truncate font-serif text-xl font-bold">{book.title}</p>
-          <p className="mt-1.5 text-center text-[13px] text-ink-3">{facts || '还没分类'}</p>
-          {chapters && <p className="mt-0.5 text-[13px] text-ink-3">{book.length} 万字 · 约 {chapters} 章</p>}
-        </aside>
+      <div className="w-full max-w-[780px] rounded-2xl border border-line bg-card shadow-[var(--shadow-lift)]">
         <div className="px-12 py-10">
           <Editable value={book.title} placeholder="书名" className="font-serif text-[34px] font-bold"
             onSave={(title) => save(actions.saveBook({ title: title.trim() }))} />
@@ -1359,6 +1351,51 @@ function BlurbPage({ book }: { book: VBook }) {
         </div>
       </div>
     </div>
+  )
+}
+
+function countKinds(node: VNode, counts: Record<string, number> = {}): Record<string, number> {
+  counts[node.kind] = (counts[node.kind] ?? 0) + 1
+  if (node.kind === '章' && node.body?.status === 'done') {
+    counts.written = (counts.written ?? 0) + 1
+    counts.words = (counts.words ?? 0) + node.body.words
+  }
+  for (const child of node.children ?? []) countKinds(child, counts)
+  return counts
+}
+
+/** 简介页左边那一栏：这本书的样子，和设定、大纲、正文各写了多少，点了过去。和别的页同宽，换页签时顶栏不跳。 */
+function BookColumn({ book, outline, onTab, manuscript }: { book: VBook; outline: VNode; onTab: (tab: Tab) => void; manuscript: boolean }) {
+  const facts = [book.genre, ...book.tags].filter(Boolean).join(' · ')
+  const chapters = book.length ? Math.round((book.length * 10000) / book.chapterWords) : null
+  const entries = book.categories.reduce((n, c) => n + c.entries.length, (book.world ? 1 : 0))
+  const counts = countKinds(outline)
+  const plan = [counts['篇'] && `${counts['篇']} 篇`, counts['卷'] && `${counts['卷']} 卷`, counts['章'] && `${counts['章']} 章`].filter(Boolean).join(' · ')
+  const written = counts.written ? `已写 ${counts.written} 章 · ${counts.words >= 10000 ? `${(counts.words / 10000).toFixed(1)} 万字` : `${counts.words.toLocaleString()} 字`}` : '还没开写'
+  const rows: [Tab, string, boolean][] = [['设定', entries ? `${entries} 条` : '还空着', true], ['大纲', plan || '还空着', true], ['正文', written, manuscript]]
+  return (
+    <SideColumn>
+      <div className="flex h-14 items-end px-5 pb-3">
+        <span className="text-xs tracking-[0.25em] text-ink-3">本书</span>
+      </div>
+      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-3 pb-20">
+        <div className="flex flex-col items-center px-4 pt-5 pb-7 text-center">
+          <BookCover title={book.title} seed={book.id === 'sample' ? '开新书' : book.id} size="md" className="shadow-[0_18px_28px_-16px_rgb(40_25_10/0.55)]" />
+          <p className="mt-5 max-w-full truncate font-serif text-lg font-bold">{book.title || '未命名'}</p>
+          <p className="mt-1 text-[13px] text-ink-3">{facts || '还没分类'}</p>
+          {chapters && <p className="mt-0.5 text-[13px] text-ink-3">{book.length} 万字 · 约 {chapters} 章</p>}
+        </div>
+        <div className="border-t border-line pt-2">
+          {rows.map(([tab, note, enabled]) => (
+            <button key={tab} type="button" disabled={!enabled} onClick={() => onTab(tab)} title={enabled ? `去${tab}` : '开写以后才有'}
+              className="flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-left text-sm transition-colors enabled:hover:bg-line/50 disabled:cursor-not-allowed">
+              <span className={enabled ? 'text-ink-2' : 'text-ink-3/60'}>{tab}</span>
+              <span className="ml-auto truncate text-xs text-ink-3 tabular-nums">{note}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </SideColumn>
   )
 }
 
@@ -1460,7 +1497,7 @@ function FloatingEditorial({ setDock, children, size }: { setDock: (dock: Dock) 
       {nearEdge && <div className="pointer-events-none fixed top-14 right-0 bottom-0 z-30 w-[380px] border-l-2 border-chief/40 bg-chief-soft/40" />}
       <div ref={ref}
         className="fixed z-40 flex flex-col overflow-hidden rounded-2xl border border-line bg-paper shadow-[0_24px_60px_-20px_rgb(40_25_10/0.45),0_2px_6px_rgb(40_25_10/0.08)]"
-        style={{ ...(pos ? { left: pos.x, top: pos.y } : { right: 24, bottom: 24 }), width: size.width, height: size.height, resize: 'both', minWidth: 320, minHeight: 360, maxWidth: 820, maxHeight: 'calc(85vh / var(--desk-zoom))' }}>
+        style={{ ...(pos ? { left: pos.x, top: pos.y } : { right: 24, bottom: 24 }), width: size.width, height: size.height, resize: 'both', minWidth: 320, minHeight: 360, maxWidth: 820, maxHeight: 'calc(85vh / var(--desk-zoom) / var(--desk-scale))' }}>
         <ChatHeader dock="float" setDock={setDock} onDragStart={start} />
         {children}
       </div>
@@ -1469,11 +1506,6 @@ function FloatingEditorial({ setDock, children, size }: { setDock: (dock: Dock) 
 }
 
 const SIDE_KEY = 'zhibi-prototype-chat-width'
-
-/** 这一块放大了几倍（大屏上整页等比放大）：屏幕上的坐标除以它，才是页面里的位置 */
-function zoomOf(el: Element | null): number {
-  return (el as (Element & { currentCSSZoom?: number }) | null)?.currentCSSZoom ?? 1
-}
 
 function savedSideWidth(fallback: number): number {
   try {
@@ -1767,6 +1799,8 @@ export function Workspace({ book: base, actions, right, chat, chatBadge, openCha
   const [dock, setDock] = useState<Dock>('ball')
   // 贴边时编辑部多宽：记住上次拖的宽度；顶栏的四个入口要让开它
   const [sideWidth, setSideWidth] = useState(() => savedSideWidth(actions.live ? 520 : 460))
+  const [columnWidth, setColumnWidth] = useColumnWidth()
+  const column = useMemo(() => ({ width: columnWidth, setWidth: setColumnWidth }), [columnWidth, setColumnWidth])
   const [toast, setToast] = useState('')
   // 一打开就滚到选中的那一条
   const [scrollReq, setScrollReq] = useState<ScrollReq | null>(() => ({ id: entry, smooth: false, n: 0 }))
@@ -1975,12 +2009,14 @@ export function Workspace({ book: base, actions, right, chat, chatBadge, openCha
 
   return (
     <ActionsContext.Provider value={tools}>
+      <ColumnWidthContext.Provider value={column}>
       <div className="desk-zoom flex flex-col bg-paper text-ink">
         <TopBar book={book} tab={tab} onTab={setTab} right={right} manuscriptHref={manuscriptHref} manuscript={!!writing}
-          directory={tab !== '简介'} rightOffset={dock === 'side' ? sideWidth : 0} />
+          leftOffset={columnWidth} rightOffset={dock === 'side' ? sideWidth : 0} />
         {notice}
         {writing && <WritingStrip writing={writing} nav={nav} />}
         <div className="flex min-h-0 flex-1">
+          {tab === '简介' && <BookColumn book={book} outline={base.outline} onTab={setTab} manuscript={!!writing} />}
           {tab === '设定' && (
             <SettingsDirectory book={book} selected={entry} onSelect={nav.openEntry} onNewEntry={newEntry}
               onCreateCategory={(name, style, fields) => {
@@ -2048,6 +2084,7 @@ export function Workspace({ book: base, actions, right, chat, chatBadge, openCha
           </div>
         )}
       </div>
+      </ColumnWidthContext.Provider>
     </ActionsContext.Provider>
   )
 }

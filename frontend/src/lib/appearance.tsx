@@ -8,10 +8,13 @@ export interface Appearance {
   readingSize: number
   readingLeading: 'compact' | 'standard' | 'relaxed'
   uiScale: 'standard' | 'large'
+  /** 书里那几页（简介、设定、大纲、正文）整体放大缩小，百分之几 */
+  deskScale: number
   reducedMotion: boolean
 }
-const defaults: Appearance = { theme: 'paper', font: 'song', readingSize: 17, readingLeading: 'standard', uiScale: 'standard', reducedMotion: false }
+const defaults: Appearance = { theme: 'paper', font: 'song', readingSize: 17, readingLeading: 'standard', uiScale: 'standard', deskScale: 100, reducedMotion: false }
 const KEY = 'zhibi:appearance'
+export const DESK_SCALES = [80, 90, 100, 110, 120]
 function saved(): Appearance {
   try {
     const a = JSON.parse(localStorage.getItem(KEY) ?? '{}')
@@ -21,6 +24,7 @@ function saved(): Appearance {
       readingSize: Number.isInteger(a.readingSize) && a.readingSize >= 15 && a.readingSize <= 20 ? a.readingSize : 17,
       readingLeading: ['compact', 'standard', 'relaxed'].includes(a.readingLeading) ? a.readingLeading : defaults.readingLeading,
       uiScale: a.uiScale === 'large' ? 'large' : 'standard', reducedMotion: a.reducedMotion === true,
+      deskScale: DESK_SCALES.includes(a.deskScale) ? a.deskScale : 100,
     }
   } catch { return defaults }
 }
@@ -38,6 +42,7 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
       root.style.setProperty('--reading-size', `${appearance.readingSize}px`)
       root.style.setProperty('--reading-leading', String({ compact: 1.65, standard: 2, relaxed: 2.35 }[appearance.readingLeading]))
       root.style.setProperty('--ui-scale', appearance.uiScale === 'large' ? '1.12' : '1')
+      root.style.setProperty('--desk-scale', String(appearance.deskScale / 100))
     }
     apply()
     media.addEventListener('change', apply)

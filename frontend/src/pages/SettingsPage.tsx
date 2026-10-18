@@ -12,7 +12,7 @@ import { ModelSelector } from '../components/ModelSelector'
 import { Segmented, SettingsButton, SettingsGroup, SettingsRow, Stepper, Toggle } from '../components/settings/SettingsList'
 import { RulesPreview, WritingSettings } from '../components/settings/WritingSettings'
 import { ROLE_KEY_LABEL, ROLE_KEYS } from '../lib/roles'
-import { useAppearance } from '../lib/appearance'
+import { DESK_SCALES, useAppearance } from '../lib/appearance'
 
 const PRESETS = [
   { name: 'DeepSeek', base_url: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
@@ -101,6 +101,7 @@ function AppearancePanel() {
       <SettingsRow label="行距"><Segmented label="行距" value={appearance.readingLeading} options={[{ value: 'compact', label: '紧凑' }, { value: 'standard', label: '标准' }, { value: 'relaxed', label: '宽松' }]} onChange={readingLeading => setAppearance({ readingLeading })} /></SettingsRow>
     </SettingsGroup>
     <SettingsGroup title="界面">
+      <SettingsRow label="书页大小" hint="书里的简介、设定、大纲、正文整体放大缩小；大屏上会先按屏幕宽度放大，这里在那个基础上再调"><Segmented label="书页大小" value={String(appearance.deskScale)} options={DESK_SCALES.map(v => ({ value: String(v), label: `${v}%` }))} onChange={v => setAppearance({ deskScale: Number(v) })} /></SettingsRow>
       <SettingsRow label="界面文字"><Segmented label="界面文字" value={appearance.uiScale} options={[{ value: 'standard', label: '标准' }, { value: 'large', label: '大一号' }]} onChange={uiScale => setAppearance({ uiScale })} /></SettingsRow>
       <SettingsRow label="减少动效" hint="关掉打字机、滑入这些动画"><Toggle label="减少动效" checked={appearance.reducedMotion} onChange={reducedMotion => setAppearance({ reducedMotion })} /></SettingsRow>
     </SettingsGroup>
