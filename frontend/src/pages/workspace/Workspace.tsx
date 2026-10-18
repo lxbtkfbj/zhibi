@@ -24,7 +24,7 @@ import {
 } from './widgets'
 import { menuItem, paperCard, readText, rowSelected, smallButton, titleClass } from './styles'
 
-type Tab = '简介' | '设定' | '大纲' | '正文'
+export type Tab = '简介' | '设定' | '大纲' | '正文'
 type Dock = 'ball' | 'float' | 'side'
 /** 点了左边：滚到哪一张；同一类里平滑滚，换类直接跳 */
 interface ScrollReq { id: string; smooth: boolean; n: number }
@@ -1700,9 +1700,11 @@ export interface WorkspaceProps {
   viewingRef?: React.MutableRefObject<(() => ChatViewing | null) | null>
   /** 写作：开写、停下、拍板。给了就有正文页签；真书还没接，先不给 */
   writing?: WritingControl
+  /** 一打开先看哪一页：原型的链接能直接带到正文某一章、大纲某一段 */
+  start?: { tab?: Tab; node?: string; chapter?: string }
 }
 
-export function Workspace({ book: base, actions, right, chat, chatBadge, openChat, notice, manuscriptHref, openRef, viewingRef, writing }: WorkspaceProps) {
+export function Workspace({ book: base, actions, right, chat, chatBadge, openChat, notice, manuscriptHref, openRef, viewingRef, writing, start }: WorkspaceProps) {
   // 新增了还没起名字的条目：只在这一页，起了名字才存
   const [drafts, setDrafts] = useState<VEntry[]>([])
   const draftsRef = useRef(drafts)
@@ -1719,21 +1721,22 @@ export function Workspace({ book: base, actions, right, chat, chatBadge, openCha
     })),
   }), [base, drafts])
 
-  const [tab, setTab] = useState<Tab>('设定')
+  const [tab, setTab] = useState<Tab>(start?.tab === '正文' && !writing ? '设定' : start?.tab ?? '设定')
   const [entry, setEntry] = useState(() => (base.categories.some((c) => c.entries.length) ? firstSelection(base) : 'overview'))
   const [fresh, setFresh] = useState('')
   const firstChild = base.outline.children?.[0]
-  const [node, setNode] = useState(firstChild?.children?.[0]?.id ?? firstChild?.id ?? 'book')
+  const firstNode = start?.node && findNode(base.outline, start.node) ? start.node : firstChild?.children?.[0]?.id ?? firstChild?.id ?? 'book'
+  const [node, setNode] = useState(firstNode)
   const [freshNode, setFreshNode] = useState('')
   // 章号跟着位置走：插在第 1 章前面的新章还是 c1，要让大纲页重新来一遍
   const [nodeNonce, setNodeNonce] = useState(0)
   const [open, setOpen] = useState(() => {
-    const path = findNode(base.outline, firstChild?.children?.[0]?.id ?? 'book') ?? []
+    const path = findNode(base.outline, firstNode) ?? []
     return ['book', ...path.map((n) => n.id)]
   })
   const [outlineQuery, setOutlineQuery] = useState('')
   // 正文里看的是哪一章；home 是正文首页（开写）
-  const [chapter, setChapter] = useState('home')
+  const [chapter, setChapter] = useState(start?.chapter && findNode(base.outline, start.chapter) ? start.chapter : 'home')
   const [dock, setDock] = useState<Dock>('ball')
   const [toast, setToast] = useState('')
   // 一打开就滚到选中的那一条

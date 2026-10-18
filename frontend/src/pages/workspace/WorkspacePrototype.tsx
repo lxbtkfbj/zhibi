@@ -13,7 +13,7 @@ import { useLocalBook } from './actions'
 import { type ApiParts, bookFromApi } from './fromApi'
 import type { VBook, VNode } from './model'
 import { SAMPLE_BOOK, emptyBook } from './sampleBook'
-import { SampleChat, SampleInbox, Workspace } from './Workspace'
+import { SampleChat, SampleInbox, type Tab, Workspace } from './Workspace'
 import { DEMOS, type DemoKind, useWritingSim } from './writingSim'
 
 const SNAPSHOTS = [
@@ -109,7 +109,12 @@ function DemoMenu({ onPick }: { onPick: (kind: DemoKind) => void }) {
   )
 }
 
+/** 链接上的 ?tab=text（正文）、outline（大纲）、blurb（简介），node=大纲那一段，chapter=正文那一章 */
+const TABS: Record<string, Tab> = { text: '正文', outline: '大纲', blurb: '简介', settings: '设定' }
+
 function PrototypeDesk({ book: initial, switcher, source }: { book: VBook; switcher: React.ReactNode; source: string }) {
+  const [params] = useSearchParams()
+  const [start] = useState(() => ({ tab: TABS[params.get('tab') ?? ''], node: params.get('node') ?? undefined, chapter: params.get('chapter') ?? undefined }))
   const [book, actions, setBook] = useLocalBook(initial)
   const sim = useWritingSim(book, setBook, initial)
   const openRef = useRef<((type: string, id: string) => void) | null>(null)
@@ -131,7 +136,7 @@ function PrototypeDesk({ book: initial, switcher, source }: { book: VBook; switc
   )
   return (
     <>
-      <Workspace book={book} actions={actions} right={right} chat={<SampleChat />} writing={writing} openRef={openRef} />
+      <Workspace book={book} actions={actions} right={right} chat={<SampleChat />} writing={writing} openRef={openRef} start={start} />
       {initial.id === 'sample' && (
         <DemoMenu onPick={(kind) => {
           const go = sim.demo(kind)
@@ -149,6 +154,7 @@ export function WorkspacePrototype() {
   const source = params.get('book') ?? 'sample'
   const { book, loading, error } = useBookSource(source)
   const choose = (next: string) => setParams(next === 'sample' ? {} : { book: next })
+  // 换书的时候不带 tab、node 这些：只认刚打开时链接上的
   if (book) return <PrototypeDesk key={source} book={book} source={source} switcher={<BookSwitcher inline source={source} onSource={choose} />} />
   return (
     <>
