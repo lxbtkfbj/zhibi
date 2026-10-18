@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { ArrowLeft, ArrowUp, BookOpen, ChevronDown, ChevronRight, ChevronUp, Globe, Inbox, Lock, Minus, PanelRight, PictureInPicture2, Plus, Sparkles, Wand2, X } from 'lucide-react'
+import { ArrowLeft, ArrowUp, BookOpen, Check, ChevronDown, ChevronRight, ChevronUp, Globe, Inbox, Lock, Minus, PanelRight, PictureInPicture2, Plus, Sparkles, Wand2, X } from 'lucide-react'
 import { type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { ChatViewing } from '../../api/types'
@@ -23,7 +23,7 @@ import {
   AskButton, CardMenu, Crumb, DirectoryShell, Editable, LinkChip, Menu, Prose, Section, Sheet, SideColumn,
 } from './widgets'
 import { ColumnWidthContext, useColumnWidth, zoomOf } from './column'
-import { menuItem, paperCard, readText, rowSelected, smallButton, titleClass } from './styles'
+import { paperCard, readText, rowSelected, smallButton, titleClass } from './styles'
 
 export type Tab = '简介' | '设定' | '大纲' | '正文'
 type Dock = 'ball' | 'float' | 'side'
@@ -415,17 +415,34 @@ function MetaRow({ items, readOnly }: { items: MetaItem[]; readOnly?: boolean })
   )
 }
 
-/** 角色的定位：从几种里挑，按它分组。 */
-function RolePicker({ value, onPick, readOnly }: { value: string; onPick: (role: string) => void; readOnly?: boolean }) {
+const ROLE_HINTS: Record<string, string> = {
+  主角: '故事跟着他走',
+  女主: '和主角走感情线的那一位（男频）',
+  男主: '和主角走感情线的那一位（女频）',
+  班底: '跟着主角一起干的自己人',
+  对手: '和主角作对的，大反派小反派都算',
+  导师: '教主角、带主角的人',
+  配角: '其余有名有姓、会再出场的',
+}
+
+/** 角色的定位：从几种里挑，按它分组。男频只给女主、女频只给男主（已经选了另一个的照样显示）。 */
+function RolePicker({ value, onPick, readOnly, channel }: { value: string; onPick: (role: string) => void; readOnly?: boolean; channel?: string }) {
   if (readOnly) return <span className="font-serif text-[16px] text-ink">{value}</span>
+  const hide = channel === '男频' ? '男主' : channel === '女频' ? '女主' : ''
+  const roles = ROLE_ORDER.filter((role) => role !== hide || role === value)
   return (
     <Menu align="left" trigger={(_, toggle) => (
       <button type="button" onClick={toggle} className="-mx-2 flex items-center gap-1 rounded-md px-2 font-serif text-[16px] text-ink hover:bg-subtle">
         {value}<ChevronDown className="size-3.5 text-ink-3" />
       </button>
     )}>
-      {(close) => ROLE_ORDER.map((role) => (
-        <button key={role} type="button" onClick={() => { close(); if (role !== value) onPick(role) }} className={clsx(menuItem, role === value && 'font-medium text-ink')}>{role}</button>
+      {(close) => roles.map((role) => (
+        <button key={role} type="button" onClick={() => { close(); if (role !== value) onPick(role) }}
+          className={clsx('flex w-72 items-baseline gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-subtle', role === value && 'bg-subtle')}>
+          <span className={clsx('w-8 shrink-0', role === value ? 'font-medium text-ink' : 'text-ink-2')}>{role}</span>
+          <span className="text-xs text-ink-3">{ROLE_HINTS[role]}</span>
+          {role === value && <Check className="ml-auto size-3.5 shrink-0 self-center text-ink-2" />}
+        </button>
       ))}
     </Menu>
   )
@@ -554,7 +571,7 @@ function CharacterCard({ book, entry, nav, fresh }: { book: VBook; entry: VEntry
         <CardMenu locked={entry.locked} onLock={draft ? undefined : () => saveEntry({ locked: !entry.locked })} onFill={fill}
           onDelete={() => save(actions.deleteEntry(entry))} deleteLabel={draft ? '不要这一条了' : '删掉这一条'} />
       )}
-      <div className="flex flex-wrap items-center gap-3 pr-8">
+      <div className="flex flex-wrap items-center gap-3 pr-28">
         <Editable autoFocus={fresh} value={entry.name} readOnly={readOnly} placeholder="起个名字" className={titleClass}
           onSave={(name) => { if (name.trim()) saveEntry({ name }) }} />
         <Tags entry={entry} />
@@ -566,7 +583,7 @@ function CharacterCard({ book, entry, nav, fresh }: { book: VBook; entry: VEntry
       <Editable value={entry.oneLine} readOnly={readOnly} onSave={(oneLine) => saveEntry({ oneLine })} spot={`e|${entry.id}|@oneLine`} placeholder="一句话说清这是谁、这是什么" className="mt-3 font-serif text-lg leading-relaxed text-ink-2 2xl:text-xl" />
       <MetaRow readOnly={readOnly} items={[
         ...facts.map(([label, value, placeholder, key]) => ((key ?? label) === '定位' && people
-          ? { label, value, picker: <RolePicker value={value || '配角'} readOnly={readOnly} onPick={(role) => saveEntry({ fields: { 定位: role } })} /> }
+          ? { label, value, picker: <RolePicker value={value || '配角'} readOnly={readOnly} channel={book.channel} onPick={(role) => saveEntry({ fields: { 定位: role } })} /> }
           : { label, value, placeholder, onSave: field(key ?? label) })),
         ...(holder ? [{ label: '谁在用', value: holder.name, link: () => nav.openEntry(holder.id) }] : []),
       ]} />
@@ -611,7 +628,7 @@ function PlainCard({ book, entry, category, nav, fresh }: { book: VBook; entry: 
     <section id={`entry-${entry.id}`} data-entry={entry.id} className={clsx(paperCard, 'group/card relative scroll-mt-6')}>
       <CardMenu locked={entry.locked} onLock={draft ? undefined : () => saveEntry({ locked: !entry.locked })} onFill={fill}
         onDelete={() => save(actions.deleteEntry(entry))} deleteLabel={draft ? '不要这一条了' : '删掉这一条'} />
-      <div className="flex flex-wrap items-center gap-3 pr-8">
+      <div className="flex flex-wrap items-center gap-3 pr-28">
         <Editable autoFocus={fresh} value={entry.name} placeholder={example ? `起个名字，比如「${example.name}」` : '起个名字'} className={titleClass}
           onSave={(name) => { if (name.trim()) saveEntry({ name }) }} />
         <Tags entry={entry} />

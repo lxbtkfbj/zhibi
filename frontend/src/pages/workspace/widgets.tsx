@@ -1,7 +1,7 @@
 /** 工作台里各页共用的小部件：点上去就能改的字、小菜单、左边目录的壳、中间那一页纸。 */
 
 import clsx from 'clsx'
-import { ChevronDown, MoreHorizontal, Search, X } from 'lucide-react'
+import { ChevronDown, Lock, LockOpen, MoreHorizontal, Search, Sparkles, Trash2, X } from 'lucide-react'
 import { type ReactNode, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { COLUMN_KEY, COLUMN_MAX, COLUMN_MIN, ColumnWidthContext, zoomOf } from './column'
 import type { VField } from './model'
@@ -144,13 +144,45 @@ export function Menu({ trigger, children, align = 'right', className }: { trigge
   )
 }
 
-/** 卡片右上角的「⋯」：锁住、删掉。删要点两次。 */
+/** 设定卡片右上角：补齐、锁住、删掉三个小图标，鼠标移到卡上才出来（锁住的一直显示锁）。删要点两次。 */
+function CardIcons({ locked, onLock, onDelete, deleteLabel, onFill }: {
+  locked?: boolean; onLock?: () => void; onDelete?: () => void; deleteLabel: string; onFill?: () => void
+}) {
+  const [sure, setSure] = useState(false)
+  const icon = 'flex size-8 items-center justify-center rounded-md text-ink-3 transition-colors hover:bg-line/60 hover:text-ink'
+  const hidden = 'opacity-0 transition-opacity group-hover/card:opacity-100 focus-visible:opacity-100'
+  return (
+    <div className="absolute top-5 right-5 z-10 flex items-center gap-0.5" onMouseLeave={() => setSure(false)}>
+      {onFill && (
+        <button type="button" onClick={onFill} title="让编辑部补齐空着的栏目" aria-label="让编辑部补齐空着的栏目" className={clsx(icon, hidden)}>
+          <Sparkles className="size-4" />
+        </button>
+      )}
+      {onLock && (
+        <button type="button" onClick={onLock} title={locked ? '锁住了，AI 不改；点一下解锁' : '锁住，AI 不改'} aria-label={locked ? '解锁' : '锁住'}
+          className={clsx(icon, locked ? 'text-ink-2' : hidden)}>
+          {locked ? <Lock className="size-4" /> : <LockOpen className="size-4" />}
+        </button>
+      )}
+      {onDelete && (
+        <button type="button" onClick={() => { if (!sure) return setSure(true); setSure(false); onDelete() }}
+          title={sure ? '再点一次，真删了' : deleteLabel} aria-label={sure ? '再点一次，真删了' : deleteLabel}
+          className={clsx(icon, sure ? 'w-auto gap-1 bg-seal-soft px-2 text-[13px] text-seal hover:bg-seal-soft hover:text-seal' : hidden)}>
+          <Trash2 className="size-4" />{sure && '再点一次删掉'}
+        </button>
+      )}
+    </div>
+  )
+}
+
+/** 卡片右上角：设定卡片是三个小图标；大纲、正文那种有好几项的，是一个「⋯」小菜单。删要点两次。 */
 export function CardMenu({ locked, onLock, onDelete, deleteLabel = '删掉这一条', onFill, items = [] }: {
   locked?: boolean; onLock?: () => void; onDelete?: () => void; deleteLabel?: string; onFill?: () => void
   /** 再多几项：大纲上的在前面插、在后面插、上移、下移 */
   items?: { label: string; onClick: () => void }[]
 }) {
   const [sure, setSure] = useState(false)
+  if (!items.length) return <CardIcons locked={locked} onLock={onLock} onDelete={onDelete} deleteLabel={deleteLabel} onFill={onFill} />
   return (
     <div className="absolute top-5 right-5 z-10">
     <Menu
