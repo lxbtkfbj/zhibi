@@ -261,6 +261,8 @@ class LibraryContext:
         )
 
     def find_target(self, name: str) -> Character | WorldEntry | None:
+        # 模型照着目录抄名字时会带上「（主角）」「（已锁）」这种后缀
+        name = re.sub(r"（[^）]*）|\([^)]*\)", "", name or "").strip()
         if not name:
             return None
         tests = (

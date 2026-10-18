@@ -20,7 +20,10 @@ test('处理结果采用当前要求文字和范围，删除后不会显示旧�
   assert.equal(outcomeCopy({ kind: 'chat' }).text, '只是聊天，没有记')
   assert.deepEqual(outcomeCopy({ kind: 'chat' }).actions, ['其实要记下'])
   assert.equal(outcomeCopy({ kind: 'to_job' }, row).text, '已交给编辑部：做完手头这一步就照办')
-  assert.deepEqual(outcomeCopy({ kind: 'edit', mode: 'options', target_label: '境界' }).actions, ['去选一个'])
+  // 2026-10-18：三种写法就在消息下面挑，不再跳去设定库
+  assert.deepEqual(outcomeCopy({ kind: 'edit', mode: 'options', target_label: '境界' }).actions, [])
+  assert.deepEqual(outcomeCopy({ kind: 'fill', target_label: '封不觉', filled: ['外貌', '身世'] }), { text: '补好了「封不觉」空着的 2 栏：外貌、身世', actions: ['去看看', '撤销'] })
+  assert.equal(outcomeCopy({ kind: 'working', text: '设定师在补「封不觉」空着的栏目' }).text, '设定师在补「封不觉」空着的栏目…')
   assert.deepEqual(outcomeCopy({ kind: 'edit', mode: 'instruction', target_label: '境界' }).actions, ['去看看', '撤销'])
   assert.equal(outcomeCopy({ kind: 'later' }).text, '编辑部写完再改：在待处理的建议里')
   assert.deepEqual(outcomeCopy({ kind: 'not_found' }).actions, [])

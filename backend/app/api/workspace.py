@@ -18,51 +18,24 @@ from app.api.deps import SessionDep, ensure_idle, get_book
 from app.api.library_ai import call_model
 from app.library_config import BUILTIN_CATEGORIES, CHARACTER_CATEGORY, GOLDFINGER, LEGACY_ROLE_TYPES, ROLE_TYPES
 from app.models import Book, Chapter, Character, PlotUnit, SettingCategory, StoryNode, Volume, WorldEntry
-from app.schemas import ArcCreate, CardLayoutIn, ChapterCreate, DraftRequest
+from app.schemas import ArcCreate, CardLayoutIn, ChapterCreate, DraftRequest, FillRequest
 from app.services import outline_structure
+from app.services.desk import (
+    CHARACTER_COLUMNS,
+    ENTRY_CATEGORIES,
+    LADDER,
+    PLACE_HINT,
+    WORLD_OVERVIEW,
+    content_key,
+    fill_entry,
+    is_goldfinger,
+)
 from app.services.library import lock_book
 from app.services.library_context import load_context
 from app.services.requirements import active_requirements, requirement_text
 from app.services.versions import record_version
 
 router = APIRouter(tags=["workspace"])
-
-# 角色卡上有专门一列的栏目
-CHARACTER_COLUMNS = {
-    "定位": "role_type",
-    "性别": "gender",
-    "年龄": "age",
-    "别名": "aliases",
-    "外貌": "appearance",
-    "性格与说话方式": "personality",
-    "身世": "background",
-    "想要什么": "goal",
-    "能力": "abilities",
-    "备注": "notes",
-}
-# 工作台上的类别 → 设定库里的类别
-ENTRY_CATEGORIES = {
-    "地点列表": "世界与地图",
-    "势力列表": "势力划分",
-    "物品功法": "物品与功法",
-    "往事秘密": "往事与秘密",
-    "特殊规则": "特殊规则",
-    "金手指": GOLDFINGER,
-}
-WORLD_OVERVIEW = "世界概况"
-
-
-def content_key(category: str) -> str:
-    """哪一栏存在条目的 content 里。"""
-    return "能做什么" if category == GOLDFINGER else "内容"
-
-
-def is_goldfinger(row: WorldEntry) -> bool:
-    """金手指这一类，加上别的内置类别里带「金手指」标签的段落条目（和前端一样都摆在金手指里）。"""
-    if row.category == GOLDFINGER:
-        return True
-    return GOLDFINGER in (row.tags or []) and row.style == "paragraph" and not row.category.startswith("custom:")
-
 
 async def entry_rows(session: AsyncSession, book_id, category: str) -> list[WorldEntry]:
     rows = list(await session.scalars(select(WorldEntry).where(WorldEntry.book_id == book_id)))
@@ -311,9 +284,6 @@ async def delete_chapter(index: int, book: Book = Depends(get_book), session: As
 
 # ---------- 编辑部帮写：在一类里写几条候选 ----------
 
-LADDER = "等级体系"
-# 地点这一类不要「第一条是世界概况」那句：世界概况在新书页上单独一页
-PLACE_HINT = "一个个地方：这是什么地方，给人什么感觉；属于哪里；谁说了算；有什么规矩或危险；主角在这里处境如何；这里能得到什么。用得上的写，用不上的不写。"
 SAME_KIND_BUDGET = 5000
 
 
@@ -414,3 +384,9 @@ async def draft_entries(body: DraftRequest, book: Book = Depends(get_book), sess
         if len(entries) >= body.count:
             break
     return {"entries": entries, "note": result.note}
+
+
+@router.post("/books/{book_id}/fill-entry")
+async def fill_one_entry(body: FillRequest, book: Book = Depends(get_book), session: AsyncSession = SessionDep) -> dict:
+    """让编辑部把这一条空着的栏目补上（卡片右上角「⋯」里点的）。"""
+    return await fill_entry(session, book, body.target_type, body.target_id, body.request)

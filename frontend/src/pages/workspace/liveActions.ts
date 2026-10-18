@@ -259,6 +259,12 @@ export function useLiveBook(bookId: string) {
       },
       chooseOption: async (candidateId, index) => (await done(post<{ revert_version_id?: string | null }>(`/candidates/${candidateId}/choose`, { index }))).revert_version_id ?? null,
       revert: (versionId) => done(post(`/versions/${versionId}/revert`)).then(() => undefined),
+      fillEntry: async (entry) => {
+        const reply = await done(post<{ filled: string[]; revert_version_id?: string | null }>(`/books/${bookId}/fill-entry`, {
+          target_type: isCharacter(entry) ? 'character' : 'entry', target_id: entry.id,
+        }))
+        return { filled: reply.filled, revertVersionId: reply.revert_version_id }
+      },
       canDelete: (node) => {
         if (node.ref?.type === 'volume' || node.ref?.type === 'unit') return true
         if (node.kind === '章') return !!node.ref && node.progress === '已规划'

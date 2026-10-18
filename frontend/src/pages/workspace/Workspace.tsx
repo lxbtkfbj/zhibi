@@ -179,7 +179,7 @@ function Menu({ trigger, children, align = 'right', className }: { trigger: (ope
 const menuItem = 'block w-full rounded-lg px-3 py-2 text-left text-sm text-ink-2 hover:bg-subtle hover:text-ink'
 
 /** 卡片右上角的「⋯」：锁住、删掉。删要点两次。 */
-function CardMenu({ locked, onLock, onDelete, deleteLabel = '删掉这一条' }: { locked?: boolean; onLock?: () => void; onDelete: () => void; deleteLabel?: string }) {
+function CardMenu({ locked, onLock, onDelete, deleteLabel = '删掉这一条', onFill }: { locked?: boolean; onLock?: () => void; onDelete: () => void; deleteLabel?: string; onFill?: () => void }) {
   const [sure, setSure] = useState(false)
   return (
     <div className="absolute top-5 right-5 z-10">
@@ -192,6 +192,7 @@ function CardMenu({ locked, onLock, onDelete, deleteLabel = '删掉这一条' }:
       )}>
       {(close) => (
         <>
+          {onFill && <button type="button" className={menuItem} onClick={() => { close(); onFill() }}>让编辑部补齐空着的栏目</button>}
           {onLock && <button type="button" className={menuItem} onClick={() => { close(); onLock() }}>{locked ? '解锁，AI 可以改' : '锁住，AI 不改'}</button>}
           <button type="button" className={clsx(menuItem, sure && 'text-seal hover:text-seal')}
             onClick={() => { if (!sure) return setSure(true); close(); onDelete() }}>
@@ -642,6 +643,25 @@ function AppearsRow({ items, nav }: { items: VEntry['appears']; nav: Nav }) {
   )
 }
 
+/** 让编辑部把这一条空着的栏目补上：补的时候卡上说一声，补好底下能撤销。不能补的（推出来的、没起名的、锁住的、阶梯）不给。 */
+function useFill(entry: VEntry): { fill?: () => void; filling: boolean } {
+  const { actions, notify } = useWorkspace()
+  const [filling, setFilling] = useState(false)
+  if (!actions.fillEntry || entry.readonly || entry.locked || entry.kind === 'ladder' || entry.id.startsWith('draft-')) return { filling }
+  const fill = () => {
+    setFilling(true)
+    actions.fillEntry!(entry)
+      .then((r) => notify?.(r.filled.length ? `补好了 ${r.filled.length} 栏：${r.filled.join('、')}` : '每一栏都写了，没补', r.revertVersionId))
+      .catch((error: unknown) => notify?.(`没补成：${errorText(error)}`))
+      .finally(() => setFilling(false))
+  }
+  return { fill, filling }
+}
+
+function FillingNote({ filling }: { filling: boolean }) {
+  return filling ? <p className="mt-2 flex items-center gap-1.5 text-[13px] text-lore"><Sparkles className="size-3.5" />设定师在补空着的栏目…</p> : null
+}
+
 /** 卡片上的几处改动都走这里：存哪一栏由工作台决定。 */
 function useEntrySaver(entry: VEntry) {
   const { actions } = useWorkspace()
@@ -729,10 +749,11 @@ function CharacterCard({ book, entry, nav, fresh }: { book: VBook; entry: VEntry
   const relations = entry.relations ?? []
   const people = entry.kind === 'character'
   const field = (key: string) => (text: string) => saveEntry({ fields: { [key]: text } })
+  const { fill, filling } = useFill(entry)
   return (
     <section id={`entry-${entry.id}`} data-entry={entry.id} className={clsx(paperCard, 'group/card relative scroll-mt-6')}>
       {!readOnly && (
-        <CardMenu locked={entry.locked} onLock={draft ? undefined : () => saveEntry({ locked: !entry.locked })}
+        <CardMenu locked={entry.locked} onLock={draft ? undefined : () => saveEntry({ locked: !entry.locked })} onFill={fill}
           onDelete={() => save(actions.deleteEntry(entry))} deleteLabel={draft ? '不要这一条了' : '删掉这一条'} />
       )}
       <div className="flex flex-wrap items-center gap-3 pr-8">
@@ -742,6 +763,7 @@ function CharacterCard({ book, entry, nav, fresh }: { book: VBook; entry: VEntry
         {entry.dead && <span className="rounded-full bg-ink/80 px-2.5 py-0.5 text-xs text-paper-2">已死</span>}
       </div>
       <DraftNote entry={entry} />
+      <FillingNote filling={filling} />
       {readOnly && <p className="mt-2 text-[13px] text-ink-3">这一条从「{holder?.name}」的角色卡推出来，到角色卡上去改。</p>}
       <Editable value={entry.oneLine} readOnly={readOnly} onSave={(oneLine) => saveEntry({ oneLine })} spot={`e|${entry.id}|@oneLine`} placeholder="一句话说清这是谁、这是什么" className="mt-3 font-serif text-lg leading-relaxed text-ink-2 2xl:text-xl" />
       <MetaRow readOnly={readOnly} items={[
@@ -786,9 +808,10 @@ function PlainCard({ book, entry, category, nav, fresh }: { book: VBook; entry: 
   const [newLevel, setNewLevel] = useState(-1)
   const onlyContent = entry.sections.length === 1 && (entry.sections[0].key ?? entry.sections[0].label) === '内容'
   const setLevel = (i: number, part: 'name' | 'text', value: string) => saveEntry({ levels: levels.map((l, j) => (j === i ? { ...l, [part]: value } : l)) })
+  const { fill, filling } = useFill(entry)
   return (
     <section id={`entry-${entry.id}`} data-entry={entry.id} className={clsx(paperCard, 'group/card relative scroll-mt-6')}>
-      <CardMenu locked={entry.locked} onLock={draft ? undefined : () => saveEntry({ locked: !entry.locked })}
+      <CardMenu locked={entry.locked} onLock={draft ? undefined : () => saveEntry({ locked: !entry.locked })} onFill={fill}
         onDelete={() => save(actions.deleteEntry(entry))} deleteLabel={draft ? '不要这一条了' : '删掉这一条'} />
       <div className="flex flex-wrap items-center gap-3 pr-8">
         <Editable autoFocus={fresh} value={entry.name} placeholder={example ? `起个名字，比如「${example.name}」` : '起个名字'} className={titleClass}
@@ -796,6 +819,7 @@ function PlainCard({ book, entry, category, nav, fresh }: { book: VBook; entry: 
         <Tags entry={entry} />
       </div>
       <DraftNote entry={entry} />
+      <FillingNote filling={filling} />
       <MetaRow items={[
         ...(parent ? [{ label: '属于', value: parent.name, link: () => nav.openEntry(parent.id) }] : []),
         ...entry.facts.map(([label, value, placeholder, key]) => ({ label, value, placeholder, onSave: (text: string) => saveEntry({ fields: { [key ?? label]: text } }) })),
@@ -1774,9 +1798,11 @@ export interface WorkspaceProps {
   notice?: ReactNode
   /** 正文还没做：有正文时先链到旧版 */
   manuscriptHref?: string
+  /** 外面（比如聊天里点「去看看」）要打开书里的某一条：工作台把打开的办法放进来 */
+  openRef?: React.MutableRefObject<((type: string, id: string) => void) | null>
 }
 
-export function Workspace({ book: base, actions, right, chat, chatBadge, openChat, notice, manuscriptHref }: WorkspaceProps) {
+export function Workspace({ book: base, actions, right, chat, chatBadge, openChat, notice, manuscriptHref, openRef }: WorkspaceProps) {
   // 新增了还没起名字的条目：只在这一页，起了名字才存
   const [drafts, setDrafts] = useState<VEntry[]>([])
   const draftsRef = useRef(drafts)
@@ -1878,8 +1904,8 @@ export function Workspace({ book: base, actions, right, chat, chatBadge, openCha
         else await actions.deleteEntry(target)
       },
     }
-    return { actions: wrapped, report }
-  }, [actions, book.categories, report])
+    return { actions: wrapped, report, notify: onUndo }
+  }, [actions, book.categories, report, onUndo])
 
   const nav: Nav = {
     openEntry: (id) => {
@@ -1900,6 +1926,16 @@ export function Workspace({ book: base, actions, right, chat, chatBadge, openCha
     },
     toast: setToast,
   }
+  useEffect(() => {
+    if (!openRef) return
+    openRef.current = (type, id) => {
+      if (type === 'character' || type === 'entry') nav.openEntry(id)
+      else if (type === 'segment') nav.openNode(`a:${id}`)
+      else if (type === 'volume') nav.openNode(`v:${id}`)
+      else if (type === 'unit') nav.openNode(`u:${id}`)
+      else if (type === 'concept') setTab('简介')
+    }
+  })
 
   const categoryName = categoryOf(entry)
   const categoryIndex = book.categories.findIndex((c) => c.name === categoryName)
@@ -2005,8 +2041,8 @@ export function Workspace({ book: base, actions, right, chat, chatBadge, openCha
         <SelectionActions pageRef={pageRef} onToast={setToast} onUndo={onUndo} />
         {undo && (
           <div className="fixed bottom-8 left-1/2 z-50 flex max-w-[min(640px,90vw)] -translate-x-1/2 items-center gap-3 rounded-full bg-ink px-5 py-2.5 text-[13px] text-paper-2 shadow-[var(--shadow-lift)]">
-            <Wand2 className="size-3.5 shrink-0" />{undo.text}
-            <button type="button" className="underline underline-offset-4 hover:text-white" onClick={() => {
+            <Wand2 className="size-3.5 shrink-0" /><span className="line-clamp-2">{undo.text}</span>
+            <button type="button" className="shrink-0 whitespace-nowrap underline underline-offset-4 hover:text-white" onClick={() => {
               const versionId = undo.versionId
               setUndo(null)
               actions.revert?.(versionId).then(() => setToast('撤销了，换回了原来的')).catch(report)

@@ -219,7 +219,8 @@ async def test_idle_chat_routes_rewrite_not_requirement_and_other_persists(clien
         assert list(await session.scalars(select(AuthorRequirement))) == []
         assert len(list(await session.scalars(select(SettingCandidate)))) == 1
         messages = list(await session.scalars(select(MeetingMessage).order_by(MeetingMessage.id)))
-        assert [row.speaker for row in messages] == ["author", "lorekeeper", "chief"]
+        # 2026-10-18：群聊里改设定，结果就挂在作者那句话下面，设定师不再另说「去设定库挑一个」
+        assert [row.speaker for row in messages] == ["author", "chief"]
         assert all(row.job_id is None for row in messages)
     response = await client.post(f"/api/books/{book_id}/notes", json={"content": "下一章节奏快一点"})
     assert response.status_code == 201, response.text

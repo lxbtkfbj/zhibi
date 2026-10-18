@@ -455,6 +455,14 @@ class ChapterCreate(BaseModel):
     outline: ChapterOutlineIn = Field(default_factory=ChapterOutlineIn)
 
 
+class FillRequest(BaseModel):
+    """让编辑部把一条设定空着的栏目补上。"""
+
+    target_type: Literal["character", "entry"]
+    target_id: uuid.UUID
+    request: str = Field(default="", max_length=1000)
+
+
 class ArcCreate(BaseModel):
     title: str = Field(default="", max_length=100)
     text: str = Field(default="", max_length=4000)

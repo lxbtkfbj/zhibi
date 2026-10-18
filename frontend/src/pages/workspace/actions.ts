@@ -74,12 +74,16 @@ export interface WorkspaceActions {
   chooseOption?(candidateId: string, index: number): Promise<string | null>
   /** 退回到某一版（撤销编辑部刚改的） */
   revert?(versionId: string): Promise<void>
+  /** 让编辑部把这一条空着的栏目补上，写过的不动 */
+  fillEntry?(entry: VEntry): Promise<{ filled: string[]; revertVersionId?: string | null }>
 }
 
 interface WorkspaceTools {
   actions: WorkspaceActions
   /** 存不上时在页面底下说一声 */
   report: (error: unknown) => void
+  /** 编辑部做完一件事在页面底下说一声；带版本的可以撤销 */
+  notify?: (text: string, versionId?: string | null) => void
 }
 
 export const ActionsContext = createContext<WorkspaceTools | null>(null)

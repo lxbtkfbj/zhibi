@@ -160,3 +160,71 @@ async def test_rewrite_finds_the_quote_when_offsets_drift(client):
         json={"target_type": "entry", "target_id": entry["id"], "path": "content@0:3", "mode": "expand", "quote": "没有这句", "quiet": True},
     )
     assert res.status_code == 409
+
+
+# ---------- 补齐一条 ----------
+
+
+async def test_fill_entry_only_fills_empty_columns_and_can_be_undone(client):
+    book = await blank_book(client)
+    hero = (
+        await client.post(f"/api/books/{book}/characters", json={"name": "封不觉", "role_type": "主角", "gender": "男", "age": "19"})
+    ).json()
+    assert hero["status"] == "later"
+    res = await client.post(f"/api/books/{book}/fill-entry", json={"target_type": "character", "target_id": hero["id"]})
+    assert res.status_code == 200, res.text
+    body = res.json()
+    # 定位、性别、年龄写过了不补；所属、别名和正文栏目补上
+    assert body["filled"] == ["所属", "别名", "外貌", "性格与说话方式", "身世", "想要什么", "软肋", "能力", "成长与结局", "备注"]
+    library = (await client.get(f"/api/books/{book}/library")).json()
+    person = library["characters"][0]
+    assert person["gender"] == "男" and person["age"] == "19" and person["role_type"] == "主角"
+    assert person["appearance"] == "（演示）补上的外貌" and person["extra"]["软肋"] == "（演示）补上的软肋"
+    assert person["aliases"] == ["（演示）补上的别名"] and person["status"] == "must"
+    res = await client.post(f"/api/versions/{body['revert_version_id']}/revert")
+    assert res.status_code == 200, res.text
+    library = (await client.get(f"/api/books/{book}/library")).json()
+    assert library["characters"][0]["appearance"] == ""
+
+    # 每一栏都写了：什么也不补
+    rule = (
+        await client.post(f"/api/books/{book}/world-entries", json={"category": "特殊规则", "name": "借寿", "content": "寿命能借。"})
+    ).json()
+    res = await client.post(f"/api/books/{book}/fill-entry", json={"target_type": "entry", "target_id": rule["id"]})
+    assert res.json()["filled"] == []
+    # 锁住的不补
+    await client.patch(f"/api/characters/{hero['id']}", json={"locked": True})
+    res = await client.post(f"/api/books/{book}/fill-entry", json={"target_type": "character", "target_id": hero["id"]})
+    assert res.status_code == 409
+
+
+async def test_group_chat_fill_and_unclear_part_never_renames(client, sessionmaker, monkeypatch):
+    from app.agents import schemas as s
+    from app.services import group_notes
+    from tests.test_chat_task6 import final_message
+
+    book = await blank_book(client)
+    hero = (await client.post(f"/api/books/{book}/characters", json={"name": "封不觉", "role_type": "主角"})).json()
+
+    async def fill_intent(*args, **kwargs):
+        return s.LibraryIntent(kind="改设定", target_name="封不觉", mode="补齐空着的", reply="好")
+
+    monkeypatch.setattr(group_notes, "call_model", fill_intent)
+    res = await client.post(f"/api/books/{book}/notes", json={"content": "帮我把封不觉的设定补齐"})
+    outcome = (await final_message(client, book, res.json()["id"]))["payload"]["outcome"]
+    assert outcome["kind"] == "fill" and outcome["target_label"] == "封不觉" and "外貌" in outcome["filled"]
+
+    # 上一回的情形：说不清改哪一栏、模式是给几个写法，卡又是空的——以前会给名字出改名方案
+    other = (await client.post(f"/api/books/{book}/characters", json={"name": "苏小蝶", "role_type": "女主"})).json()
+
+    async def unclear_intent(*args, **kwargs):
+        return s.LibraryIntent(kind="改设定", target_name="苏小蝶", part="角色卡各字段", mode="给几个写法")
+
+    monkeypatch.setattr(group_notes, "call_model", unclear_intent)
+    res = await client.post(f"/api/books/{book}/notes", json={"content": "苏小蝶写全一点"})
+    outcome = (await final_message(client, book, res.json()["id"]))["payload"]["outcome"]
+    assert outcome["kind"] == "fill"
+    library = (await client.get(f"/api/books/{book}/library")).json()
+    assert {c["name"] for c in library["characters"]} == {"封不觉", "苏小蝶"}
+    assert other["id"] in {c["id"] for c in library["characters"]}
+    assert hero["id"] in {c["id"] for c in library["characters"]}

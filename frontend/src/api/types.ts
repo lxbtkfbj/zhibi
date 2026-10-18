@@ -577,8 +577,12 @@ export interface Health {
 }
 
 export interface ChatOutcome {
-  kind: 'requirement' | 'to_job' | 'edit' | 'not_found' | 'later' | 'chat' | 'pending' | 'too_late' | 'failed' | 'plan_apply' | 'plan_made' | 'plan_pending' | 'created' | 'suggestion' | 'feedback'
+  kind: 'requirement' | 'to_job' | 'edit' | 'fill' | 'working' | 'not_found' | 'later' | 'chat' | 'pending' | 'too_late' | 'failed' | 'plan_apply' | 'plan_made' | 'plan_pending' | 'created' | 'suggestion' | 'feedback'
   reason?: string
+  /** working：编辑部判断完、正在做的那件事 */
+  text?: string
+  /** fill：补上的几栏 */
+  filled?: string[]
   plan_id?: number
   label?: string
   undone?: boolean

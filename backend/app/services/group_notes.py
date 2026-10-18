@@ -23,6 +23,7 @@ from app.services.chat_context import (
     wants_new_pitches,
     wants_plan,
 )
+from app.services.desk import column_in, fill_entry, path_of, value_of
 from app.services.library import lock_book
 from app.services.library_context import load_context
 from app.services.meeting import message_dict, post_message, publish
@@ -174,6 +175,12 @@ async def receive_note(body, background_tasks, book, session, redis):
     return MeetingMessageOut(**data)
 
 
+# 作者明说要改名时，part 才会是这几种说法
+NAME_PARTS = {"名称", "名字", "姓名", "名"}
+# 判断完以后真正去改、去补：最多等这么久，到了就停手，不改
+ACTION_TIMEOUT = 150
+
+
 async def apply_intent(session, redis, message, intent):
     book_id, text, message_id = message.book_id, message.content, message.id
     # State checked at classification completion, with the same lock as manual edits/start writing.
@@ -215,27 +222,73 @@ async def apply_intent(session, redis, message, intent):
             outcome = {"kind": "not_found", "target_name": intent.target_name}
             reply = f"没找到「{intent.target_name}」这一条。去设定库点那一处改，或者告诉我它在哪一类。"
         else:
-            body = RewriteIn(
-                target_type=target_type_of(target),
-                target_id=target.id,
-                path=ctx.route_path(target, intent.part, intent.quote),
-                mode="options" if intent.mode == "给几个写法" else "instruction",
-                instruction=intent.instruction or text,
-            )
-            outcome = {
-                "kind": "edit",
-                "target_type": body.target_type,
-                "target_id": str(body.target_id),
-                "target_label": ctx.target_label(target, body.path),
-                "mode": body.mode,
-            }
-            result = await rewrite_target(session, redis, book, body, require_idle=True)
-            message = await session.get(MeetingMessage, message_id)
-            if body.mode == "options":
-                outcome["candidate_id"] = str(result["candidate"].id)
+            # 先按新书页上这一条的栏目认改哪一栏：模型写的 part，或者作者话里提到的栏目名
+            key = None if intent.part.strip() in NAME_PARTS else await column_in(session, book, target, intent.part, text)
+            if key is not None:
+                path = path_of(target, key)
+                value = value_of(target, key)
+                if intent.quote and intent.quote in value:
+                    start = value.index(intent.quote)
+                    path = f"{path}@{start}:{start + len(intent.quote)}"
             else:
-                outcome["revert_version_id"] = await revert_id(session, body.target_type, body.target_id)
-            reply = intent.reply or "改好了，去看看。"
+                path = ctx.route_path(target, intent.part, intent.quote)
+            # 说不清改哪一栏时，程序会退到名字上：除非作者明说改名，不拿名字开刀，当成补齐
+            unclear = path.split("@", 1)[0] == "name" and intent.part.strip() not in NAME_PARTS
+            target_type, target_id, name = target_type_of(target), target.id, target.name
+            if intent.mode == "补齐空着的" or unclear:
+                await update_message(
+                    session, redis, message, outcome={"kind": "working", "text": f"设定师在补「{name}」空着的栏目"}
+                )
+                result = await fill_entry(session, book, target_type, target_id, intent.instruction or text)
+                message = await session.get(MeetingMessage, message_id)
+                outcome = {
+                    "kind": "fill",
+                    "target_type": target_type,
+                    "target_id": str(target_id),
+                    "target_label": name,
+                    "filled": result["filled"],
+                    "revert_version_id": result["revert_version_id"],
+                }
+                if not result["filled"]:
+                    reply = f"「{name}」每一栏都写了。想改哪一栏就直接说，比如「{name}的身世改成……」。"
+                elif unclear and intent.mode != "补齐空着的":
+                    reply = f"你没说改「{name}」哪一栏，我先把空着的 {len(result['filled'])} 栏补上了，在卡上看。想改别的就说具体哪一栏。"
+                else:
+                    reply = f"补好了「{name}」空着的 {len(result['filled'])} 栏：{'、'.join(result['filled'])}。在卡上看，不满意可以撤销。"
+            else:
+                body = RewriteIn(
+                    target_type=target_type,
+                    target_id=target_id,
+                    path=path,
+                    mode="options" if intent.mode == "给几个写法" else "instruction",
+                    instruction=intent.instruction or text,
+                    quiet=True,
+                )
+                outcome = {
+                    "kind": "edit",
+                    "target_type": body.target_type,
+                    "target_id": str(body.target_id),
+                    "target_label": ctx.target_label(target, body.path),
+                    "mode": body.mode,
+                }
+                doing = "出三种写法" if body.mode == "options" else "改"
+                await update_message(
+                    session, redis, message, outcome={"kind": "working", "text": f"设定师在{doing}「{outcome['target_label']}」"}
+                )
+                try:
+                    result = await asyncio.wait_for(
+                        rewrite_target(session, redis, book, body, require_idle=True), timeout=ACTION_TIMEOUT
+                    )
+                except TimeoutError as exc:
+                    raise HTTPException(504, "这次编辑部太慢了，两分半还没写完，没改。再试一次") from exc
+                message = await session.get(MeetingMessage, message_id)
+                if body.mode == "options":
+                    outcome["candidate_id"] = str(result["candidate"].id)
+                else:
+                    outcome["revert_version_id"] = result.get("revert_version_id") or await revert_id(
+                        session, body.target_type, body.target_id
+                    )
+                reply = intent.reply or ("三种写法在这条消息下面，挑一个换上。" if body.mode == "options" else "改好了，去看看。")
     await update_message(session, redis, message, outcome=outcome)
     if reply:
         await say(session, redis, book_id, "chief", reply)
@@ -290,7 +343,7 @@ async def clean_pending(redis):
             await session.scalars(
                 select(MeetingMessage).where(
                     MeetingMessage.created_at < datetime.now(UTC) - timedelta(minutes=2),
-                    MeetingMessage.payload["outcome"]["kind"].astext == "pending",
+                    MeetingMessage.payload["outcome"]["kind"].astext.in_(["pending", "working"]),
                 )
             )
         )

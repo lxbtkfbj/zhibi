@@ -644,9 +644,9 @@ class LibraryIntent(Lenient):
         default="", description="改设定时才写：改这一条的哪一处：卡片的字段名、等级的级名、「名称」「一句话」「一段话」"
     )
     quote: str = Field(default="", description="改设定、只改其中一句时，把那一句从原文里照抄出来；否则留空")
-    mode: Literal["给几个写法", "照作者的意思改"] = Field(
+    mode: Literal["给几个写法", "照作者的意思改", "补齐空着的"] = Field(
         default="给几个写法",
-        description="改设定时才写：作者只说了不满意、没说怎么改的，选给几个写法；说清了怎么改的，选照作者的意思改",
+        description="改设定时才写：作者只说了不满意、没说怎么改的，选给几个写法；说清了怎么改的，选照作者的意思改；要把这一条补齐、写全、补完整的，选补齐空着的",
     )
     instruction: str = Field(default="", description="改设定时才写：作者想怎么改，用作者的话概括一句")
     requirement: str = Field(
@@ -971,3 +971,8 @@ class DraftEntry(Lenient):
 class DraftSet(Lenient):
     entries: list[DraftEntry] = Field(description="写出来的几条，条数照【写几条】，彼此要有实质差别")
     note: str = Field(default="", description="给作者的一两句话：这几条各自是什么思路")
+
+
+class FillEntry(Lenient):
+    values: list[FieldValue] = Field(default_factory=list, description="只写【要补的栏目】里的那几栏，栏目名照抄")
+    note: str = Field(default="", description="给作者的一句话：这次补了什么思路")

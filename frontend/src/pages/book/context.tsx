@@ -28,6 +28,8 @@ export interface BookContextValue {
   resumeFollow: () => void
   followTarget: WorkspaceTarget | null
   manualNavigate: (path: string) => void
+  /** 新书页上有：聊天里点「去看看」直接打开那一条，不跳回旧版 */
+  openTarget?: (type: string, id: string) => void
   focusComposer: number
   focusChat: () => void
   requestFeedback: () => void

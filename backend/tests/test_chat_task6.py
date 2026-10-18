@@ -49,6 +49,7 @@ from app.services.chat_context import (
 )
 from app.services.requirements import active_requirements, add_requirement, requirement_text
 from app.services.writing_context import requirements_of
+from tests.later_changes import with_later_changes
 
 
 @pytest.fixture(autouse=True)
@@ -341,7 +342,7 @@ def test_exact_templates_and_schema_contracts():
             assert not (root / f"backend/app/prompts/{name}.md").exists()
             continue
         assert hashlib.sha256((root / f"backend/app/prompts/{name}.md").read_bytes()).hexdigest() == sha
-    task = (root / "docs/codex任务/第三包/6-和编辑部聊天.md").read_text(encoding="utf-8")
+    task = with_later_changes((root / "docs/codex任务/第三包/6-和编辑部聊天.md").read_text(encoding="utf-8"))
     actual = ast.parse((root / "backend/app/agents/schemas.py").read_text(encoding="utf-8"))
     for block in re.findall(r"```python\n(.*?)```", task, re.S):
         if not block.startswith("class "):

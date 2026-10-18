@@ -26,6 +26,10 @@ export function outcomeCopy(outcome: ChatOutcome, requirement?: AuthorRequiremen
     return { text: outcome.kind === 'to_job' ? '已交给编辑部：做完手头这一步就照办' : `已记成要求：「${requirement.text}」（${requirement.label}）`, actions: outcome.kind === 'to_job' ? ['撤销'] : ['撤销', '改一下'] }
   }
   if (outcome.kind === 'pending') return { text: '主编在看…', actions: [] }
+  if (outcome.kind === 'working') return { text: `${outcome.text ?? '编辑部在做'}…`, actions: [] }
+  if (outcome.kind === 'fill') return outcome.filled?.length
+    ? { text: `补好了「${outcome.target_label}」空着的 ${outcome.filled.length} 栏：${outcome.filled.join('、')}`, actions: ['去看看', '撤销'] }
+    : { text: `「${outcome.target_label}」每一栏都写了，没补`, actions: ['去看看'] }
   if (outcome.kind === 'plan_pending') return { text: '正在整理方案…', actions: [] }
   if (outcome.kind === 'too_late') return { text: '编辑部这时在等你拍板，这句话没有记，也没有改。要改的话，在拍板的地方提意见，或者让我总结成方案。', actions: [] }
   if (outcome.kind === 'failed') return { text: `没判断出来（${outcome.reason}），这句话没有记，也没有改。`, actions: ['其实要记下'] }
@@ -35,7 +39,7 @@ export function outcomeCopy(outcome: ChatOutcome, requirement?: AuthorRequiremen
   if (outcome.kind === 'feedback') return { text: outcome.label ?? '', actions: [] }
   if (outcome.kind === 'chat') return { text: '只是聊天，没有记', actions: ['其实要记下'] }
   if (outcome.kind === 'later') return { text: '编辑部写完再改：在待处理的建议里', actions: ['去看看'] }
-  if (outcome.kind === 'edit') return { text: `${outcome.mode === 'options' ? '给了三个写法' : '已改'}：${outcome.target_label}`, actions: outcome.mode === 'options' ? ['去选一个'] : ['去看看', '撤销'] }
+  if (outcome.kind === 'edit') return { text: `${outcome.mode === 'options' ? '三种写法，挑一个换上' : '已改'}：${outcome.target_label}`, actions: outcome.mode === 'options' ? [] : ['去看看', '撤销'] }
   return { text: '', actions: [] }
 }
 
@@ -55,6 +59,10 @@ export function libraryQuoteWhere(item: LibraryItem, path: string, config: Libra
 }
 
 
+/** 判断两分钟没结果算超时；判断完在做的，后台最多做两分半，过了三分半还没回音也算没等到。 */
 export function pendingOutcome(outcome: ChatOutcome, createdAt: string | null, now: number): ChatOutcome {
-  return outcome.kind === 'pending' && createdAt && now - Date.parse(createdAt) >= 120000 ? { kind: 'failed', reason: '判断超时' } : outcome
+  const waited = createdAt ? now - Date.parse(createdAt) : 0
+  if (outcome.kind === 'pending' && waited >= 120000) return { kind: 'failed', reason: '判断超时' }
+  if (outcome.kind === 'working' && waited >= 210000) return { kind: 'failed', reason: '没等到结果' }
+  return outcome
 }

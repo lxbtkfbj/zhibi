@@ -2,7 +2,7 @@
 
 import { useIsMutating } from '@tanstack/react-query'
 import { Settings } from 'lucide-react'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useBook, useJobActions, useOutline } from '../../api/hooks'
 import type { BookDetail, Conversation } from '../../api/types'
@@ -96,6 +96,8 @@ function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
   const [openChat, setOpenChat] = useState(0)
   const onOpen = useCallback(() => setOpenChat((n) => n + 1), [])
   const { ctx, unread } = useEditorial(bookId, detail, onOpen)
+  const openRef = useRef<((type: string, id: string) => void) | null>(null)
+  const context = useMemo(() => ({ ...ctx, openTarget: (type: string, id: string) => openRef.current?.(type, id) }), [ctx])
   if (loading) return <div className="flex h-dvh items-center justify-center bg-paper text-[15px] text-ink-3">正在读这本书…</div>
   if (error || !book) return <EmptyState title="这本书没读出来"><Link to="/" className="text-seal underline">回到书房</Link></EmptyState>
   const right = (
@@ -113,8 +115,8 @@ function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
     </>
   )
   return (
-    <BookContext.Provider value={ctx}>
-      <Workspace book={book} actions={actions} right={right} notice={<JobNotice book={detail} />}
+    <BookContext.Provider value={context}>
+      <Workspace book={book} actions={actions} right={right} notice={<JobNotice book={detail} />} openRef={openRef}
         chat={<div className="@container/chat flex min-h-0 flex-1 bg-pane-mid"><ConversationPanel /></div>}
         chatBadge={unread} openChat={openChat}
         manuscriptHref={raw?.chapters.length ? `/books/${bookId}/chapters` : undefined} />
