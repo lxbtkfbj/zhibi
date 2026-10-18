@@ -68,7 +68,7 @@ function MoreMenu({ disabled, onReset, showGroup, setShowGroup }: { disabled: bo
 
 /** 每个会话保留自己的草稿；切稿件路由不会重挂载这块区域。 */
 function NoteComposer() {
-  const { job, working, waiting, asking, bookId, conversation, focusComposer, composerNode, setComposerNode, composerDrafts: drafts, setComposerDrafts: setDrafts, segmentReview, chatQuotes, setChatQuotes, resumeFollow } = useBookContext()
+  const { job, working, waiting, asking, bookId, conversation, focusComposer, composerNode, setComposerNode, composerDrafts: drafts, setComposerDrafts: setDrafts, segmentReview, chatQuotes, setChatQuotes, resumeFollow, viewing } = useBookContext()
   const feedback = useGroupFeedback()
   const [sendError, setSendError] = useState<unknown>(null)
   const [sendingNote, setSendingNote] = useState(false)
@@ -108,7 +108,11 @@ function NoteComposer() {
     try {
       setSendError(null); setSendingNote(true)
       await sendChatFirst(
-        () => post<MeetingMessage>(`/books/${bookId}/notes`, { content, ...(direct ? { to: conversation } : {}), ...(chatQuotes[conversation] ? { quote: chatQuotes[conversation] } : {}) }),
+        () => {
+          // 群聊里带上作者正在看的那一页：说「帮我写这一篇」就写这一页
+          const seeing = direct ? null : viewing?.() ?? null
+          return post<MeetingMessage>(`/books/${bookId}/notes`, { content, ...(direct ? { to: conversation } : {}), ...(chatQuotes[conversation] ? { quote: chatQuotes[conversation] } : {}), ...(seeing ? { viewing: seeing } : {}) })
+        },
         () => feedback(content), direct)
       setChatQuotes(previous => ({ ...previous, [sentConversation]: null }))
       setDrafts((previous) => previous[sentConversation] === text ? { ...previous, [sentConversation]: '' } : previous)

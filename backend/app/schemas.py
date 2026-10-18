@@ -470,6 +470,14 @@ class OutlineWriteIn(BaseModel):
     request: str = Field(default="", max_length=1000)
 
 
+class OutlineRestoreIn(BaseModel):
+    """撤销编辑部帮写的那一段：把改之前的样子存回去。"""
+
+    target_type: Literal["book", "segment", "volume", "unit", "chapter"]
+    target_id: str = Field(max_length=64)
+    before: dict
+
+
 class FillRequest(BaseModel):
     """让编辑部把一条设定空着的栏目补上。"""
 
@@ -992,10 +1000,19 @@ class ChatQuote(BaseModel):
     where: str = Field(min_length=1, max_length=300)
 
 
+class ChatViewing(BaseModel):
+    """作者发话时正在看的那一页（新书页上带）：群聊里说「帮我写这一篇」就按它来。"""
+
+    target_type: Literal["book", "segment", "volume", "unit", "chapter", "character", "entry", "concept"]
+    target_id: str = Field(max_length=64)
+    label: str = Field(default="", max_length=200)
+
+
 class NoteIn(BaseModel):
     content: str = Field(min_length=1, max_length=5000)
     to: Literal["chief", "lorekeeper", "writer", "reviewer"] | None = None
     quote: ChatQuote | None = None
+    viewing: ChatViewing | None = None
 
 
 class MeetingMessageOut(BaseModel):

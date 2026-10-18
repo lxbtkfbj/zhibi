@@ -27,6 +27,7 @@ from app.services.desk import column_in, fill_entry, path_of, value_of
 from app.services.library import lock_book
 from app.services.library_context import load_context
 from app.services.meeting import message_dict, post_message, publish
+from app.services.outline_write import resolve_outline_target, write_outline_node
 from app.services.requirements import SCOPE_INPUTS, add_requirement
 from app.services.versions import target_type_of
 
@@ -58,12 +59,19 @@ async def update_message(session, redis, message, **payload):
     return data
 
 
-async def classify(session, book_id, text):
+def viewing_text(viewing):
+    """作者发话时正在看哪一页：给分流看，「这一篇」「这一条」指的就是它。"""
+    if not viewing:
+        return "（没说，或者在旧版页面上）"
+    return viewing.get("label") or "（作者在看某一页，没有名字）"
+
+
+async def classify(session, book_id, text, viewing=None):
     book = await session.get(Book, book_id)
     ctx = await load_context(session, book)
     state = await thread_of(session, book_id, "group")
     recent = dialogue_text((await dialogue(session, book_id, "group", state.reset_after))[-6:])
-    library = ctx.library
+    library, outline = ctx.library, ctx.outline
     await session.commit()
     return await asyncio.wait_for(
         call_model(
@@ -72,7 +80,9 @@ async def classify(session, book_id, text):
             LibraryIntent,
             "library_route",
             library=library,
+            outline=outline,
             recent=recent,
+            viewing=viewing_text(viewing),
             note=text,
             single_attempt=True,
         ),
@@ -108,6 +118,8 @@ async def receive_note(body, background_tasks, book, session, redis):
         "requirement_saved": True,
         **({"thread": thread} if body.to else {}),
         **({"quote": body.quote.model_dump()} if body.quote else {}),
+        # 新书页上带：作者正在看哪一页（只在群聊里用来认「这一篇」「这一条」）
+        **({"viewing": body.viewing.model_dump()} if body.viewing and not body.to else {}),
     }
     plan = None
     if wants_plan(text):
@@ -128,7 +140,7 @@ async def receive_note(body, background_tasks, book, session, redis):
             raise HTTPException(409, {"code": "use_feedback", "message": "等你拍板时请直接提意见"})
         if waiting_feedback(job):
             try:
-                intent = await classify(session, book_id, text)
+                intent = await classify(session, book_id, text, payload.get("viewing"))
             except Exception as exc:
                 raise HTTPException(502, f"模型出错了：{exc}") from exc
             session.expire_all()
@@ -196,6 +208,8 @@ async def apply_intent(session, redis, message, intent):
         await update_message(session, redis, message, outcome={"kind": "chat"}, chat_role=ROLES[intent.who])
         return True
     working = job is not None and job.status in jobs.BUSY_STATUSES
+    if intent.kind == "写大纲":
+        return await write_outline_from_chat(session, redis, book, message, intent)
     if intent.kind == "改设定" and working and job.kind != "book_setup":
         title = text[:40] + ("……" if len(text) > 40 else "")
         suggestion = SettingSuggestion(
@@ -295,6 +309,35 @@ async def apply_intent(session, redis, message, intent):
     return False
 
 
+async def write_outline_from_chat(session, redis, book, message, intent):
+    """群聊里说「帮我写一下这一篇」：认出大纲上哪一段，主编直接写进去，消息下面能撤销。
+    编辑部正在干活时写不了，write_outline_node 会报出来，消息上显示没做成。"""
+    book_id, message_id = book.id, message.id
+    viewing = (message.payload or {}).get("viewing")
+    found = await resolve_outline_target(session, book, intent.outline_target, viewing)
+    if found is None:
+        said = intent.outline_target if intent.outline_target and intent.outline_target != "正在看的" else ""
+        await update_message(session, redis, message, outcome={"kind": "not_found", "target_name": said or "这一段"})
+        head = f"没认出要写大纲上的「{said}」。" if said else "没认出要写大纲上的哪一段。"
+        await say(session, redis, book_id, "chief", head + "先在新书页打开那一页再说「帮我写这一段」，或者说清是第几篇、第几卷、第几章。")
+        return False
+    target_type, target_id, label = found
+    await update_message(session, redis, message, outcome={"kind": "working", "text": f"主编在写{label}"})
+    result = await write_outline_node(session, book, target_type, target_id, intent.instruction or message.content)
+    message = await session.get(MeetingMessage, message_id)
+    outcome = {
+        "kind": "outline",
+        "target_type": target_type,
+        "target_id": target_id,
+        "target_label": label,
+        "before": result["before"],
+    }
+    await update_message(session, redis, message, outcome=outcome)
+    note = result.get("note", "").strip()
+    await say(session, redis, book_id, "chief", f"{label}写好了，已经换上去，在大纲上看。" + (f"这次的思路：{note}" if note else ""))
+    return False
+
+
 async def revert_id(session, target_type, target_id):
     versions = list(
         await session.scalars(
@@ -323,9 +366,9 @@ async def route_background(book_id, redis, known_id=None, known_intent=None):
             )
             if message is None:
                 break
-            mid, text = message.id, message.content
+            mid, text, viewing = message.id, message.content, (message.payload or {}).get("viewing")
             try:
-                intent = known_intent if mid == known_id else await classify(session, book_id, text)
+                intent = known_intent if mid == known_id else await classify(session, book_id, text, viewing)
                 needs_reply |= await apply_intent(session, redis, message, intent)
             except Exception as exc:
                 await session.rollback()

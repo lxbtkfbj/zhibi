@@ -292,7 +292,7 @@ def test_schemas_preserve_task_ast_and_prompt_catalog():
         ),
         "library_fill_gaps": ("chief", "concept genre_defaults library requirements"),
         "library_review": ("reviewer", "concept library_full outline scope"),
-        "library_route": ("router", "library recent note"),
+        "library_route": ("router", "library outline recent viewing note"),
     }
     for name, (role, keys) in prompts.items():
         assert BY_NAME[name][3] == role

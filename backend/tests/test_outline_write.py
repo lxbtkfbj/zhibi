@@ -122,3 +122,61 @@ async def test_the_editor_sees_where_the_paragraph_sits(client, monkeypatch):
     assert any("第 1 章「初入青阳」" in line for line in lines)
     assert lines[0].startswith("第 1 篇「青阳城篇」") and lines[-1].startswith("结局")
     assert "多点打脸" in seen["request"] and "章数还没定" in seen["write_rule"]
+
+
+async def test_group_chat_writes_the_page_the_author_is_looking_at(client):
+    from tests.test_chat_task6 import final_message
+
+    book, _, volume, unit = await outline_book(client)
+    viewing = {"target_type": "unit", "target_id": unit["id"], "label": "大纲 · 单元 1「入城」"}
+    res = await client.post(f"/api/books/{book}/notes", json={"content": "帮我写一下这个单元的剧情概要", "viewing": viewing})
+    assert res.status_code == 201, res.text
+    assert res.json()["payload"]["viewing"] == viewing
+    message = await final_message(client, book, res.json()["id"])
+    outcome = message["payload"]["outcome"]
+    assert outcome["kind"] == "outline" and outcome["target_type"] == "unit" and outcome["target_label"] == "单元 1「入城」"
+    assert outcome["before"] == {"name": "入城", "text": ""}
+    tree = (await client.get(f"/api/books/{book}/outline-tree")).json()
+    assert tree["arcs"][0]["volumes"][0]["units"][0]["summary"].startswith("（演示）")
+    messages = (await client.get(f"/api/books/{book}/meeting")).json()
+    assert any(m["speaker"] == "chief" and "写好了" in m["content"] for m in messages)
+
+    # 消息下面点撤销：换回原来的
+    res = await client.post(
+        f"/api/books/{book}/outline/restore",
+        json={"target_type": "unit", "target_id": unit["id"], "before": outcome["before"]},
+    )
+    assert res.status_code == 200, res.text
+    tree = (await client.get(f"/api/books/{book}/outline-tree")).json()
+    assert tree["arcs"][0]["volumes"][0]["units"][0]["summary"] == ""
+
+    # 说了第几卷的照说的找；没在看大纲又说「这一篇」的认不出，不乱写
+    res = await client.post(f"/api/books/{book}/notes", json={"content": "帮我写一下第1卷"})
+    outcome = (await final_message(client, book, res.json()["id"]))["payload"]["outcome"]
+    assert outcome["kind"] == "outline" and outcome["target_type"] == "volume" and outcome["target_id"] == volume["id"]
+    res = await client.post(f"/api/books/{book}/notes", json={"content": "帮我写一下这一篇"})
+    outcome = (await final_message(client, book, res.json()["id"]))["payload"]["outcome"]
+    assert outcome["kind"] == "not_found"
+
+
+async def test_resolving_which_paragraph(client, sessionmaker):
+    from app.services.outline_write import resolve_outline_target
+
+    book, arc, volume, unit = await outline_book(client)
+    async with sessionmaker() as session:
+        row = await session.get(Book, uuid.UUID(book))
+
+        async def find(words, viewing=None):
+            found = await resolve_outline_target(session, row, words, viewing)
+            return found and found[:2]
+
+        assert await find("第一篇") == ("segment", arc["id"])
+        assert await find("青阳城篇") == ("segment", arc["id"])
+        assert await find("结局") == ("book", "book")
+        assert await find("第 2 章") == ("chapter", "2")
+        assert await find("初入青阳") == ("chapter", "1")
+        assert await find("单元一", {"target_type": "volume", "target_id": volume["id"]}) == ("unit", unit["id"])
+        assert await find("正在看的", {"target_type": "volume", "target_id": volume["id"]}) == ("volume", volume["id"])
+        # 正在看的是设定卡，不是大纲：认不出
+        assert await find("正在看的", {"target_type": "character", "target_id": str(uuid.uuid4())}) is None
+        assert await find("第九卷") is None

@@ -387,6 +387,10 @@ def obvious_question(text):
             "记住",
             "照这个",
             "按这个",
+            "写一下",
+            "写写",
+            "细化",
+            "重写",
         )
     ):
         return None

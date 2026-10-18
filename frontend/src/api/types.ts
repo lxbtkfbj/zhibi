@@ -516,7 +516,7 @@ export interface MeetingMessage {
   /** note：作者在编辑部工作时插的话 */
   kind: 'plan' | 'speech' | 'artifact' | 'status' | 'decision' | 'error' | 'note'
   content: string
-  payload: { type?: string; data?: unknown; thread?: Speaker | 'group'; reply_to?: number[]; quote?: { text: string; where: string }; outcome?: ChatOutcome; plan?: ChatPlan; status?: 'open' | 'superseded' | 'applying' | 'applied'; results?: ChatOutcome[] } | null
+  payload: { type?: string; data?: unknown; thread?: Speaker | 'group'; reply_to?: number[]; quote?: { text: string; where: string }; viewing?: ChatViewing; outcome?: ChatOutcome; plan?: ChatPlan; status?: 'open' | 'superseded' | 'applying' | 'applied'; results?: ChatOutcome[] } | null
   created_at: string | null
 }
 
@@ -576,13 +576,22 @@ export interface Health {
   components: Record<string, { ok: boolean; detail: string }>
 }
 
+/** 作者发话时正在看的那一页（新书页上带）：群聊里说「帮我写这一篇」「把这一条补齐」就按它来 */
+export interface ChatViewing {
+  target_type: 'book' | 'segment' | 'volume' | 'unit' | 'chapter' | 'character' | 'entry' | 'concept'
+  target_id: string
+  label: string
+}
+
 export interface ChatOutcome {
-  kind: 'requirement' | 'to_job' | 'edit' | 'fill' | 'working' | 'not_found' | 'later' | 'chat' | 'pending' | 'too_late' | 'failed' | 'plan_apply' | 'plan_made' | 'plan_pending' | 'created' | 'suggestion' | 'feedback'
+  kind: 'requirement' | 'to_job' | 'edit' | 'fill' | 'outline' | 'working' | 'not_found' | 'later' | 'chat' | 'pending' | 'too_late' | 'failed' | 'plan_apply' | 'plan_made' | 'plan_pending' | 'created' | 'suggestion' | 'feedback'
   reason?: string
   /** working：编辑部判断完、正在做的那件事 */
   text?: string
   /** fill：补上的几栏 */
   filled?: string[]
+  /** outline：编辑部写大纲上的那一段之前的样子，撤销就存回去 */
+  before?: Record<string, unknown>
   plan_id?: number
   label?: string
   undone?: boolean

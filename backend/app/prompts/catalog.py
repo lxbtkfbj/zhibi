@@ -83,6 +83,7 @@ VARIABLE_LABELS = {
     "count": "写几条",
     "target_name": "要补的那一条",
     "node_name": "要写的那一段",
+    "viewing": "作者正在看的那一页",
     "write_rule": "这一层写什么",
     "mode": "怎么改",
     "genre_defaults": "题材和常建的条目",

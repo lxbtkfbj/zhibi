@@ -934,6 +934,14 @@ def _library_intent(user: str) -> s.LibraryIntent:
     note = _match(r"【作者的话】\n(.*?)(?=\n\n要求：|\Z)", user).strip()
     if "测试分流出错" in note:
         raise RuntimeError("演示分流出错")
+    # 写大纲：「帮我写一下这篇」「把第三卷写一下」
+    if any(w in note for w in ("写一下", "写写", "帮我写", "细化", "重写")) and any(
+        w in note for w in ("篇", "卷", "章", "单元", "结局", "这一段", "这段", "大纲")
+    ):
+        target = (re.search(r"第\s*[0-9一二两三四五六七八九十]+\s*[篇卷章]|结局", note) or [None])[0]
+        return s.LibraryIntent(
+            kind="写大纲", outline_target=target or "正在看的", instruction="", reply="好，这一段我来写。"
+        )
     if note.endswith(("？", "?")) or any(word in note for word in ("吗", "为什么", "怎么样", "什么")):
         who = (
             "设定师"

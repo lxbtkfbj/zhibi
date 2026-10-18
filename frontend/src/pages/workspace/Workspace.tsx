@@ -2,6 +2,7 @@ import clsx from 'clsx'
 import { ArrowLeft, ArrowUp, BookOpen, ChevronDown, ChevronRight, ChevronUp, Globe, Inbox, Lock, Minus, MoreHorizontal, PanelRight, PictureInPicture2, Plus, Search, Sparkles, Wand2, X } from 'lucide-react'
 import { type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import type { ChatViewing } from '../../api/types'
 import { useBookMeta } from '../../api/newBook'
 import { CategoryPicker, LengthInput, Row, TagPicker } from '../../components/BookFields'
 import { BookCover } from '../../components/BookCover'
@@ -1899,9 +1900,11 @@ export interface WorkspaceProps {
   manuscriptHref?: string
   /** 外面（比如聊天里点「去看看」）要打开书里的某一条：工作台把打开的办法放进来 */
   openRef?: React.MutableRefObject<((type: string, id: string) => void) | null>
+  /** 作者正在看哪一页：群聊发话时带上 */
+  viewingRef?: React.MutableRefObject<(() => ChatViewing | null) | null>
 }
 
-export function Workspace({ book: base, actions, right, chat, chatBadge, openChat, notice, manuscriptHref, openRef }: WorkspaceProps) {
+export function Workspace({ book: base, actions, right, chat, chatBadge, openChat, notice, manuscriptHref, openRef, viewingRef }: WorkspaceProps) {
   // 新增了还没起名字的条目：只在这一页，起了名字才存
   const [drafts, setDrafts] = useState<VEntry[]>([])
   const draftsRef = useRef(drafts)
@@ -2035,7 +2038,25 @@ export function Workspace({ book: base, actions, right, chat, chatBadge, openCha
       else if (type === 'segment') nav.openNode(`a:${id}`)
       else if (type === 'volume') nav.openNode(`v:${id}`)
       else if (type === 'unit') nav.openNode(`u:${id}`)
+      else if (type === 'chapter') nav.openNode(`c${id}`)
+      else if (type === 'book') nav.openNode('book')
       else if (type === 'concept') setTab('简介')
+    }
+  })
+  useEffect(() => {
+    if (!viewingRef) return
+    viewingRef.current = () => {
+      if (tab === '简介') return { target_type: 'concept', target_id: base.id, label: '简介' }
+      if (tab === '大纲') {
+        const path = findNode(base.outline, node)
+        const here = path?.at(-1)
+        if (!here?.ref) return null
+        const names = path!.slice(1).map(shownTitle)
+        return { target_type: here.ref.type, target_id: here.ref.id, label: `大纲 · ${names.length ? names.join(' / ') : '全书（结局）'}` }
+      }
+      const picked = findEntry(base, entry)
+      if (!picked || picked.id.startsWith('draft-')) return null
+      return { target_type: picked.kind === 'character' ? 'character' : 'entry', target_id: picked.id, label: `设定 · ${picked.category} · ${picked.name}` }
     }
   })
 

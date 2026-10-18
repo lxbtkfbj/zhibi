@@ -5,7 +5,7 @@ import { Settings } from 'lucide-react'
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useBook, useJobActions, useOutline } from '../../api/hooks'
-import type { BookDetail, Conversation } from '../../api/types'
+import type { BookDetail, ChatViewing, Conversation } from '../../api/types'
 import { EmptyState } from '../../components/ui'
 import type { ChatQuote } from '../../lib/chat'
 import { useMeeting } from '../../lib/useMeeting'
@@ -97,7 +97,12 @@ function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
   const onOpen = useCallback(() => setOpenChat((n) => n + 1), [])
   const { ctx, unread } = useEditorial(bookId, detail, onOpen)
   const openRef = useRef<((type: string, id: string) => void) | null>(null)
-  const context = useMemo(() => ({ ...ctx, openTarget: (type: string, id: string) => openRef.current?.(type, id) }), [ctx])
+  const viewingRef = useRef<(() => ChatViewing | null) | null>(null)
+  const context = useMemo(() => ({
+    ...ctx,
+    openTarget: (type: string, id: string) => openRef.current?.(type, id),
+    viewing: () => viewingRef.current?.() ?? null,
+  }), [ctx])
   if (loading) return <div className="flex h-dvh items-center justify-center bg-paper text-[15px] text-ink-3">正在读这本书…</div>
   if (error || !book) return <EmptyState title="这本书没读出来"><Link to="/" className="text-seal underline">回到书房</Link></EmptyState>
   const right = (
@@ -116,7 +121,7 @@ function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
   )
   return (
     <BookContext.Provider value={context}>
-      <Workspace book={book} actions={actions} right={right} notice={<JobNotice book={detail} />} openRef={openRef}
+      <Workspace book={book} actions={actions} right={right} notice={<JobNotice book={detail} />} openRef={openRef} viewingRef={viewingRef}
         chat={<div className="@container/chat flex min-h-0 flex-1 bg-pane-mid"><ConversationPanel /></div>}
         chatBadge={unread} openChat={openChat}
         manuscriptHref={raw?.chapters.length ? `/books/${bookId}/chapters` : undefined} />

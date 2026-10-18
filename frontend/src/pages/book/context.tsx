@@ -1,5 +1,5 @@
 import { createContext, useContext, type Dispatch, type SetStateAction } from 'react'
-import type { BookDetail, Conversation, Job, LiveDraft, MeetingMessage, Outline, StoryNode } from '../../api/types'
+import type { BookDetail, ChatViewing, Conversation, Job, LiveDraft, MeetingMessage, Outline, StoryNode } from '../../api/types'
 import type { ChatQuote, ChatTyping } from '../../lib/chat'
 import type { NodeFeedback, WorkspaceTarget } from '../../lib/workspace'
 
@@ -30,6 +30,8 @@ export interface BookContextValue {
   manualNavigate: (path: string) => void
   /** 新书页上有：聊天里点「去看看」直接打开那一条，不跳回旧版 */
   openTarget?: (type: string, id: string) => void
+  /** 新书页上有：作者这会儿正在看哪一页，群聊发话时带上 */
+  viewing?: () => ChatViewing | null
   focusComposer: number
   focusChat: () => void
   requestFeedback: () => void

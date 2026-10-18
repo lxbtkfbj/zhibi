@@ -634,8 +634,8 @@ class LibraryReview(Lenient):
 
 
 class LibraryIntent(Lenient):
-    kind: Literal["改设定", "写作要求", "提问闲聊"] = Field(
-        description="这句话是哪一种：要改设定库里的某一处选「改设定」；要编辑部以后规划、写作时照着做的选「写作要求」；提问、商量、出主意、闲聊选「提问闲聊」；拿不准时选「提问闲聊」"
+    kind: Literal["改设定", "写大纲", "写作要求", "提问闲聊"] = Field(
+        description="这句话是哪一种：要改设定库里的某一处选「改设定」；要编辑部现在就把大纲上的某一段（结局、某一篇、某一卷、某个单元、某一章）写出来或重写选「写大纲」；要编辑部以后规划、写作时照着做的选「写作要求」；提问、商量、出主意、闲聊选「提问闲聊」；拿不准时选「提问闲聊」"
     )
     target_name: str = Field(
         default="", description="改设定时才写：要改哪一条，条目或角色卡片的名称，照设定库目录里的写法"
@@ -644,11 +644,15 @@ class LibraryIntent(Lenient):
         default="", description="改设定时才写：改这一条的哪一处：卡片的字段名、等级的级名、「名称」「一句话」「一段话」"
     )
     quote: str = Field(default="", description="改设定、只改其中一句时，把那一句从原文里照抄出来；否则留空")
+    outline_target: str = Field(
+        default="",
+        description="写大纲时才写：写大纲上的哪一段。作者说「这一篇」「这一章」「这段」「这里」这种指着正在看的那一页的，写「正在看的」；说了哪一段的照作者的说法写，比如「第三卷」「结局」「青阳城篇」「第 12 章」",
+    )
     mode: Literal["给几个写法", "照作者的意思改", "补齐空着的"] = Field(
         default="给几个写法",
         description="改设定时才写：作者只说了不满意、没说怎么改的，选给几个写法；说清了怎么改的，选照作者的意思改；要把这一条补齐、写全、补完整的，选补齐空着的",
     )
-    instruction: str = Field(default="", description="改设定时才写：作者想怎么改，用作者的话概括一句")
+    instruction: str = Field(default="", description="改设定、写大纲时才写：作者想怎么改、想写成什么样，用作者的话概括一句")
     requirement: str = Field(
         default="",
         description="写作要求时才写：写成一句清楚的要求，说清做什么、不写理由，「这样」「那个」换成具体内容，60 字以内",
@@ -661,7 +665,7 @@ class LibraryIntent(Lenient):
         default="主编",
         description="提问闲聊时才写：谁来回答最合适：问设定、前后对不对、谁知道什么找设定师；问怎么写、文风找写手；要挑毛病找审稿；其余找主编",
     )
-    reply: str = Field(default="", description="改设定、写作要求时，主编在群聊里回作者的一句话；提问闲聊留空")
+    reply: str = Field(default="", description="改设定、写大纲、写作要求时，主编在群聊里回作者的一句话；提问闲聊留空")
 
 
 class BookDraft(Lenient):

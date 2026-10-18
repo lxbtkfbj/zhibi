@@ -292,3 +292,124 @@ async def write_outline_node(
         await record_version(session, book_id, target.kind, row, "ai", note, before=snapshot)
     await session.commit()
     return {"title": title, "text": text, "note": _text(result.note), "before": before}
+
+
+# 群聊里作者指着正在看的那一页说的
+HERE_WORDS = ("正在看", "这一篇", "这篇", "这一卷", "这卷", "这个单元", "这单元", "这一章", "这章", "这一段", "这段", "这里", "这儿", "这个")
+CN_NUMBERS = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+OUTLINE_TYPES = ("book", "segment", "volume", "unit", "chapter")
+
+
+def _number(text: str) -> int | None:
+    if text.isdigit():
+        return int(text)
+    if text and all(ch in CN_NUMBERS for ch in text):
+        # 十一、二十、二十三
+        if "十" in text:
+            head, _, tail = text.partition("十")
+            return (CN_NUMBERS.get(head, 1) if head else 1) * 10 + (CN_NUMBERS.get(tail, 0) if tail else 0)
+        return CN_NUMBERS[text] if len(text) == 1 else None
+    return None
+
+
+async def resolve_outline_target(
+    session: AsyncSession, book: Book, words: str, viewing: dict | None
+) -> tuple[str, str, str] | None:
+    """群聊里说「帮我写一下这一篇」：认出是大纲上哪一段。指着正在看的就用作者正在看的那一页；
+    说了第几篇、第几卷、第几章、结局或名字的照着找。返回 (target_type, target_id, 叫法)。"""
+    import re
+
+    ctx = await load_context(session, book)
+    state = await outline_structure.load_structure(session, book.id)
+
+    async def named(target_type: str, target_id: str) -> tuple[str, str, str] | None:
+        try:
+            target = await find_target(session, book, ctx, state, target_type, target_id)
+        except HTTPException:
+            return None
+        return target_type, target_id, target.name
+
+    words = re.sub(r"（[^）]*）|\([^)]*\)", "", words or "").strip()
+    seeing = viewing if viewing and viewing.get("target_type") in OUTLINE_TYPES else None
+    if (not words or any(word in words for word in HERE_WORDS)) and seeing:
+        return await named(seeing["target_type"], str(seeing["target_id"]))
+    if not words:
+        return None
+    if "结局" in words or words in ("全书", "整本书"):
+        return await named("book", "book")
+    arcs = [node for node in ctx.nodes if node.kind not in ("opening", "ending")]
+    match = re.search(r"第\s*([0-9一二两三四五六七八九十]+)\s*(篇|卷|章)", words)
+    if match and (n := _number(match.group(1))):
+        kind = match.group(2)
+        if kind == "篇" and 0 < n <= len(arcs):
+            return await named("segment", str(arcs[n - 1].id))
+        if kind == "卷":
+            volume = next((v for v in state.volumes if v.index == n), None)
+            return await named("volume", str(volume.id)) if volume else None
+        if kind == "章":
+            return await named("chapter", str(n))
+        return None
+    match = re.search(r"单元\s*([0-9一二两三四五六七八九十]+)", words)
+    if match and (n := _number(match.group(1))) and seeing and seeing["target_type"] in ("volume", "unit", "chapter"):
+        # 单元几：在作者正在看的那一卷里找
+        volume_id = None
+        if seeing["target_type"] == "volume":
+            volume_id = seeing["target_id"]
+        elif seeing["target_type"] == "unit":
+            volume_id = next((str(u.volume_id) for u in state.units if str(u.id) == seeing["target_id"]), None)
+        else:
+            chapter = next((c for c in state.chapters if str(c.index) == str(seeing["target_id"])), None)
+            volume_id = str(chapter.volume_id) if chapter and chapter.volume_id else None
+        unit = next((u for u in state.units if str(u.volume_id) == volume_id and u.index == n), None)
+        return await named("unit", str(unit.id)) if unit else None
+    # 照名字找：篇、卷、单元、章，先找一模一样的，再找包含的
+    candidates = [("segment", str(node.id), _arc_title(node)) for node in arcs]
+    candidates += [("volume", str(v.id), _text(v.title)) for v in state.volumes]
+    candidates += [("unit", str(u.id), _text(u.title)) for u in state.units]
+    candidates += [("chapter", str(c.index), _text(c.title)) for c in state.chapters]
+    for test in (lambda title: title == words, lambda title: len(title) >= 2 and (title in words or words in title)):
+        hit = next((c for c in candidates if c[2] and test(c[2])), None)
+        if hit:
+            return await named(hit[0], hit[1])
+    return None
+
+
+async def restore_outline_node(
+    session: AsyncSession, book: Book, target_type: str, target_id: str, before: dict
+) -> None:
+    """撤销编辑部帮写的那一段：把改之前的样子存回去（before 和 write_outline_node 返回的同形）。"""
+    book_id = book.id
+    await lock_book(session, book_id)
+    await ensure_idle(session, book_id)
+    ctx = await load_context(session, book)
+    state = await outline_structure.load_structure(session, book_id)
+    target = await find_target(session, book, ctx, state, target_type, target_id)
+    ensure_writable(target, state)
+    row = target.row
+    title, text = _text(before.get("name"))[:200], _text(before.get("text"))
+    if target.kind == "chapter":
+        sections = before.get("sections") or {}
+        lines = [line.strip() for line in str(sections.get("发生什么", "")).split("\n") if line.strip()]
+        row.title = title
+        row.outline = {**(row.outline or {}), "goal": lines[0] if lines else "", "scenes": lines[1:],
+                       "cool_point": _text(sections.get("看点")), "hook": _text(sections.get("结尾钩子"))}
+        await session.commit()
+        return
+    snapshot = snapshot_of(row)
+    if target.kind == "ending":
+        if isinstance(row, Book):
+            row.concept = {**(row.concept or {}), "ending": text}
+            await record_version(session, book_id, "concept", row, "author", "撤销编辑部帮写的结局", before=snapshot)
+        else:
+            row.event = text
+            await record_version(session, book_id, "segment", row, "author", "撤销编辑部帮写的结局", before=snapshot)
+    elif target.kind == "arc":
+        if row.segment is not None:
+            row.segment = {**row.segment, "title": title, "text": text}
+        else:
+            row.title, row.event = title, text
+        await record_version(session, book_id, "segment", row, "author", "撤销编辑部帮写的这一篇", before=snapshot)
+    else:
+        row.title, row.summary = title, text
+        await record_version(session, book_id, target.kind, row, "author", "撤销编辑部帮写的这一段", before=snapshot)
+    await session.commit()
