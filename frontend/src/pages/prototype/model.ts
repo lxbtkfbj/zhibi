@@ -41,6 +41,8 @@ export interface VCategory {
   hints: string[]
   starters?: string[]
   entries: VEntry[]
+  /** 作者自建的类别：样式和卡片的栏目 */
+  custom?: { style: 'paragraph' | 'card' | 'ladder'; fields: string[] }
 }
 
 export interface VNode {
@@ -67,22 +69,17 @@ export interface VBook {
   chapterWords: number
   blurb: string
   categories: VCategory[]
-  /** 按题材先收起来的类别（没内容才会收起） */
-  folded: string[]
   outline: VNode
   pending: number
 }
 
 export const ALL_CATEGORIES = ['角色', '金手指', '等级体系', '世界与地图', '势力划分', '物品与功法', '往事与秘密', '特殊规则']
 
-/** 按题材挑默认显示的类别：用不上的先收起，想要随时加。有内容的类别不会被收起。 */
-export function defaultCategories(genre: string): string[] {
-  if (/都市|现实|现代言情|浪漫青春|体育|职场|娱乐|悬疑|推理|灵异|刑侦/.test(genre)) {
-    return ['角色', '金手指', '世界与地图', '势力划分', '往事与秘密', '特殊规则']
-  }
-  if (/历史|古代言情|宫斗|宅斗|官场|架空/.test(genre)) {
-    return ['角色', '金手指', '等级体系', '世界与地图', '势力划分', '往事与秘密', '特殊规则']
-  }
+/**
+ * 默认显示哪几类。原本按题材收起用不上的，但题材猜不准：《神秘复苏》是都市却有鬼的等级，
+ * 《惊悚乐园》有专精等级和纸并强凶狂神。空类别只占目录一行，所以八类一律全显示。
+ */
+export function defaultCategories(_genre: string): string[] {
   return ALL_CATEGORIES
 }
 

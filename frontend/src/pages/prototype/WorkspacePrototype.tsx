@@ -61,7 +61,7 @@ function useBookSource(source: string): { book?: VBook; loading: boolean; error?
   return { book: query.data, loading: query.isPending, error: query.error ? String(query.error) : undefined }
 }
 
-function BookSwitcher({ source, onSource }: { source: string; onSource: (source: string) => void }) {
+function BookSwitcher({ source, onSource, inline }: { source: string; onSource: (source: string) => void; inline?: boolean }) {
   const [open, setOpen] = useState(false)
   const shelf = useQuery({ queryKey: ['books'], queryFn: () => get<BookSummary[]>('/books') })
   const label = source === 'empty' ? '刚开的空书'
@@ -75,11 +75,11 @@ function BookSwitcher({ source, onSource }: { source: string; onSource: (source:
     </button>
   )
   return (
-    <div className="fixed bottom-4 left-4 z-30">
+    <div className={inline ? 'relative' : 'fixed bottom-4 left-4 z-30'}>
       {open && (
-        <div className="scroll-thin absolute bottom-[calc(100%+8px)] left-0 max-h-[70vh] w-80 overflow-y-auto rounded-xl border border-line bg-card p-2 shadow-[var(--shadow-lift)]">
+        <div className={clsx('scroll-thin absolute z-40 max-h-[70vh] w-80 overflow-y-auto rounded-xl border border-line bg-card p-2 shadow-[var(--shadow-lift)]', inline ? 'top-[calc(100%+8px)] right-0' : 'bottom-[calc(100%+8px)] left-0')}>
           {item('sample', '示例书 · 窥命长生', '我挑过的理想内容')}
-          {item('empty', '刚开的空书', '点完「下一步」看到的样子（设成都市）')}
+          {item('empty', '刚开的空书', '点完「下一步」看到的样子')}
           <p className="mt-2 px-3 pb-1 text-xs tracking-wider text-ink-3">你书架上的书 · 只读</p>
           {shelf.isPending && <p className="px-3 py-2 text-[13px] text-ink-3">正在读书架…</p>}
           {shelf.data?.map((b) => item(`live:${b.id}`, b.title || '未命名', [b.genre, b.idea].filter(Boolean).join(' · ').slice(0, 40) || '没有简介'))}
@@ -92,7 +92,7 @@ function BookSwitcher({ source, onSource }: { source: string; onSource: (source:
         className="flex items-center gap-2 rounded-full border border-writer/30 bg-writer-soft py-1.5 pr-3 pl-3.5 text-xs text-writer shadow-[var(--shadow-paper)] transition-colors hover:border-writer/60">
         <Library className="size-3.5" />
         原型 · 正在看：{label}
-        <ChevronUp className={clsx('size-3.5 transition-transform', !open && 'rotate-180')} />
+        <ChevronUp className={clsx('size-3.5 transition-transform', inline ? open || 'rotate-180' : !open && 'rotate-180')} />
       </button>
     </div>
   )
@@ -222,7 +222,7 @@ function AskButton({ children, onClick }: { children: ReactNode; onClick: () => 
 
 /* ---------------- 顶栏 ---------------- */
 
-function TopBar({ book, tab, onTab }: { book: VBook; tab: Tab; onTab: (tab: Tab) => void }) {
+function TopBar({ book, tab, onTab, switcher }: { book: VBook; tab: Tab; onTab: (tab: Tab) => void; switcher: ReactNode }) {
   const [inbox, setInbox] = useState(false)
   return (
     <header className="relative z-20 flex h-14 shrink-0 items-center gap-3 border-b border-line bg-paper px-4 2xl:h-16 2xl:px-6">
@@ -246,6 +246,7 @@ function TopBar({ book, tab, onTab }: { book: VBook; tab: Tab; onTab: (tab: Tab)
       </nav>
 
       <div className="ml-auto flex items-center gap-1">
+        <div className="mr-3">{switcher}</div>
         {book.pending > 0 && (
           <div className="relative">
             <button type="button" onClick={() => setInbox(!inbox)} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm text-ink-2 transition-colors hover:bg-line/50 hover:text-ink">
@@ -280,14 +281,25 @@ function TopBar({ book, tab, onTab }: { book: VBook; tab: Tab; onTab: (tab: Tab)
 
 /* ---------------- 左边目录 ---------------- */
 
-function DirectoryShell({ title, search, onTitle, children, footer }: { title: string; search: string; onTitle?: () => void; children: ReactNode; footer?: ReactNode }) {
+function DirectoryShell({ title, search, onTitle, children, footer, addMenu }: { title: string; search: string; onTitle?: () => void; children: ReactNode; footer?: ReactNode; addMenu?: { label: string; onClick: () => void }[] }) {
+  const [menu, setMenu] = useState(false)
   return (
     <aside className="flex w-72 shrink-0 flex-col border-r border-line bg-paper-2 2xl:w-80">
-      <div className="flex items-center justify-between px-5 pt-5 pb-3">
+      <div className="relative flex items-center justify-between px-5 pt-5 pb-3">
         <button type="button" onClick={onTitle} className="text-xs tracking-[0.25em] text-ink-3 hover:text-ink">{title}</button>
-        <button type="button" className="rounded-md p-1 text-ink-3 transition-colors hover:bg-line/60 hover:text-ink" aria-label="新建" title="新建">
+        <button type="button" onClick={() => setMenu(!menu)} className="rounded-md p-1 text-ink-3 transition-colors hover:bg-line/60 hover:text-ink" aria-label="新建" title="新建">
           <Plus className="size-4" />
         </button>
+        {menu && addMenu && (
+          <div className="absolute top-[calc(100%-4px)] right-4 z-30 w-40 rounded-xl border border-line bg-card p-1 shadow-[var(--shadow-lift)]">
+            {addMenu.map((item) => (
+              <button key={item.label} type="button" onClick={() => { setMenu(false); item.onClick() }}
+                className="block w-full rounded-lg px-3 py-2 text-left text-sm text-ink-2 hover:bg-subtle hover:text-ink">
+                {item.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
       <label className="mx-4 mb-3 flex h-9 items-center gap-2 rounded-lg border border-line bg-card/70 px-3 text-sm text-ink-3 focus-within:border-line-2">
         <Search className="size-4 shrink-0" />
@@ -367,26 +379,77 @@ function CharacterGroups({ entries, selected, onSelect }: { entries: VEntry[]; s
   )
 }
 
-function SettingsDirectory({ book, selected, onSelect, unfolded, onUnfold }: { book: VBook; selected: string; onSelect: (id: string) => void; unfolded: string[]; onUnfold: (name: string) => void }) {
+type CategoryStyle = NonNullable<VCategory['custom']>['style']
+
+const CATEGORY_STYLES: [CategoryStyle, string, string][] = [
+  ['card', '卡片', '一栏一栏填，栏目自己定，像角色卡'],
+  ['paragraph', '段落', '一句话加一段话，像地方、势力'],
+  ['ladder', '阶梯', '一级一级往上排，像境界'],
+]
+
+/** 自建类别：起名、选每一条长什么样；选卡片就自己定有哪几栏。 */
+function NewCategoryForm({ taken, onCreate, onCancel }: { taken: string[]; onCreate: (name: string, style: CategoryStyle, fields: string[]) => void; onCancel: () => void }) {
+  const [name, setName] = useState('')
+  const [style, setStyle] = useState<CategoryStyle>('card')
+  const [fields, setFields] = useState('')
+  const clean = name.trim()
+  const error = taken.includes(clean) ? '已经有这一类了' : ''
+  const create = () => {
+    if (clean && !error) onCreate(clean, style, fields.split(/[、,，;；\s]+/).map((f) => f.trim()).filter(Boolean))
+  }
+  return (
+    <div className="mt-3 rounded-xl border border-line bg-card p-3.5 shadow-[var(--shadow-paper)]">
+      <p className="mb-2 text-xs text-ink-3">新建一类</p>
+      <input autoFocus value={name} onChange={(e) => setName(e.target.value)} maxLength={20} placeholder="起个名字，比如：厉鬼、剧本、副本"
+        onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) create() }}
+        className="h-9 w-full rounded-lg border border-line-2 bg-card px-3 text-sm text-ink placeholder:text-ink-3 focus:border-ink-3 focus:outline-none" />
+      <p className="mt-3 mb-1.5 text-xs text-ink-3">每一条长什么样</p>
+      <div className="space-y-1">
+        {CATEGORY_STYLES.map(([key, label, desc]) => (
+          <button key={key} type="button" onClick={() => setStyle(key)}
+            className={clsx('block w-full rounded-lg border px-3 py-2 text-left transition-colors', style === key ? 'border-ink-3 bg-subtle' : 'border-line hover:border-line-2')}>
+            <span className="text-sm text-ink">{label}</span>
+            <span className="block text-xs text-ink-3">{desc}</span>
+          </button>
+        ))}
+      </div>
+      {style === 'card' && (
+        <>
+          <p className="mt-3 mb-1.5 text-xs text-ink-3">每条有哪几栏</p>
+          <input value={fields} onChange={(e) => setFields(e.target.value)} placeholder="用顿号隔开：杀人规律、关押方法、等级"
+            className="h-9 w-full rounded-lg border border-line-2 bg-card px-3 text-sm text-ink placeholder:text-ink-3 focus:border-ink-3 focus:outline-none" />
+        </>
+      )}
+      {error && <p className="mt-2 text-xs text-seal">{error}</p>}
+      <div className="mt-3 flex justify-end gap-2">
+        <button type="button" onClick={onCancel} className="h-8 rounded-lg px-3 text-sm text-ink-2 hover:bg-subtle">取消</button>
+        <button type="button" onClick={create} disabled={!clean || !!error}
+          className="h-8 rounded-lg bg-ink px-4 text-sm text-paper-2 transition-colors hover:bg-ink-2 disabled:opacity-40">建好</button>
+      </div>
+    </div>
+  )
+}
+
+function SettingsDirectory({ book, selected, onSelect, onCreateCategory, onToast }: { book: VBook; selected: string; onSelect: (id: string) => void; onCreateCategory: (name: string, style: CategoryStyle, fields: string[]) => void; onToast: (text: string) => void }) {
   const [closed, setClosed] = useState<string[]>([])
-  const folded = book.folded.filter((name) => !unfolded.includes(name))
+  const [creating, setCreating] = useState(false)
   return (
     <DirectoryShell title="设定" search="找人物、地方、规矩……" onTitle={() => onSelect('overview')}
-      footer={folded.length > 0 && (
-        <div className="mt-6 border-t border-line px-2 pt-4">
-          <p className="mb-2 text-xs leading-relaxed text-ink-3">按题材先收起来的：</p>
-          <div className="flex flex-wrap gap-1.5">
-            {folded.map((name) => (
-              <button key={name} type="button" onClick={() => onUnfold(name)}
-                className="flex items-center gap-1 rounded-full border border-dashed border-line-2 px-2.5 py-1 text-xs text-ink-2 hover:border-ink-3/60 hover:text-ink">
-                <Plus className="size-3" />{name}
-              </button>
-            ))}
-          </div>
-        </div>
+      addMenu={[
+        { label: '新建一条', onClick: () => onToast('原型：会先问你放进哪一类，再建一条空的') },
+        { label: '新建一类', onClick: () => setCreating(true) },
+      ]}
+      footer={creating ? (
+        <NewCategoryForm taken={book.categories.map((c) => c.name)} onCancel={() => setCreating(false)}
+          onCreate={(name, style, fields) => { setCreating(false); onCreateCategory(name, style, fields) }} />
+      ) : (
+        <button type="button" onClick={() => setCreating(true)}
+          className="mt-4 flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-line-2 py-2 text-[13px] text-ink-3 transition-colors hover:border-ink-3/60 hover:text-ink">
+          <Plus className="size-3.5" />新建一类
+        </button>
       )}>
       {selected === 'overview' && <div className="mb-1 rounded-md bg-card px-3 py-1.5 text-sm font-medium text-ink shadow-[0_1px_2px_rgb(60_40_20/0.08)]">设定总览</div>}
-      {[...book.categories, ...unfolded.filter((n) => book.folded.includes(n)).map((name) => ({ name, hints: CATEGORY_HINTS[name] ?? [], entries: [] }))].map((cat) => {
+      {book.categories.map((cat) => {
         const open = !closed.includes(cat.name)
         const catId = `cat:${cat.name}`
         return (
@@ -398,6 +461,7 @@ function SettingsDirectory({ book, selected, onSelect, unfolded, onUnfold }: { b
               </button>
               <button type="button" onClick={() => onSelect(catId)} className={clsx('flex-1 py-1.5 text-left text-sm', selected === catId ? 'font-medium text-ink' : cat.entries.length ? 'text-ink-2' : 'text-ink-3')}>
                 {cat.name}
+                {cat.custom && <span className="ml-1.5 text-[11px] text-ink-3">自建</span>}
               </button>
               <span className="pr-3 text-xs text-ink-3 tabular-nums">{cat.entries.length || '空'}</span>
             </div>
@@ -650,11 +714,6 @@ function SettingsOverview({ book, nav, onSelect }: { book: VBook; nav: Nav; onSe
           </button>
         ))}
       </div>
-      {book.folded.length > 0 && (
-        <p className="mt-6 text-[13px] leading-relaxed text-ink-3">
-          这本书是{book.genre}，「{book.folded.join('」「')}」一般用不上，先收起来了；要用就在左边目录最下面加上。
-        </p>
-      )}
     </Sheet>
   )
 }
@@ -923,7 +982,17 @@ function firstSelection(book: VBook): string {
   return lead?.id ?? (book.categories.find((c) => c.entries.length)?.entries[0]?.id ?? 'overview')
 }
 
-function Workspace({ book }: { book: VBook }) {
+/** 自建类别的提示：照作者选的样子说清每条写什么。 */
+function customHints(style: CategoryStyle, fields: string[]): string[] {
+  if (style === 'card') return fields.length ? [`每条有这几栏：${fields.join('、')}`] : ['每条有哪几栏，自己定']
+  if (style === 'ladder') return ['一级一级往上排，每级一个名称加一段介绍', '高阶的可以先只列名字，以后再补']
+  return ['一句话说清是什么', '再用一段话写细']
+}
+
+function Workspace({ book: base, switcher }: { book: VBook; switcher: ReactNode }) {
+  // 原型里自建的类别只放在这一页，不存
+  const [customCats, setCustomCats] = useState<VCategory[]>([])
+  const book = useMemo(() => ({ ...base, categories: [...base.categories, ...customCats] }), [base, customCats])
   const [tab, setTab] = useState<Tab>('设定')
   const [entry, setEntry] = useState(() => (book.categories.some((c) => c.entries.length) ? firstSelection(book) : 'overview'))
   const firstChild = book.outline.children?.[0]
@@ -932,7 +1001,6 @@ function Workspace({ book }: { book: VBook }) {
     const path = findNode(book.outline, firstChild?.children?.[0]?.id ?? 'book') ?? []
     return ['book', ...path.map((n) => n.id)]
   })
-  const [unfolded, setUnfolded] = useState<string[]>([])
   const [dock, setDock] = useState<Dock>('ball')
   const [toast, setToast] = useState('')
   const pageRef = useRef<HTMLElement>(null)
@@ -967,9 +1035,15 @@ function Workspace({ book }: { book: VBook }) {
 
   return (
     <div className="flex h-dvh flex-col bg-paper text-ink">
-      <TopBar book={book} tab={tab} onTab={setTab} />
+      <TopBar book={book} tab={tab} onTab={setTab} switcher={switcher} />
       <div className="flex min-h-0 flex-1">
-        {tab === '设定' && <SettingsDirectory book={book} selected={entry} onSelect={nav.openEntry} unfolded={unfolded} onUnfold={(name) => { setUnfolded([...unfolded, name]); nav.openEntry(`cat:${name}`) }} />}
+        {tab === '设定' && (
+          <SettingsDirectory book={book} selected={entry} onSelect={nav.openEntry} onToast={setToast}
+            onCreateCategory={(name, style, fields) => {
+              setCustomCats([...customCats, { name, hints: customHints(style, fields), entries: [], custom: { style, fields } }])
+              nav.openEntry(`cat:${name}`)
+            }} />
+        )}
         {tab === '大纲' && (
           <DirectoryShell title="大纲" search="找篇、卷、单元、章……">
             <OutlineTreeView node={book.outline} depth={0} selected={node} onSelect={nav.openNode} open={open} toggle={(id) => setOpen(open.includes(id) ? open.filter((x) => x !== id) : [...open, id])} />
@@ -1013,15 +1087,14 @@ export function WorkspacePrototype() {
   const [params, setParams] = useSearchParams()
   const source = params.get('book') ?? 'sample'
   const { book, loading, error } = useBookSource(source)
+  const choose = (next: string) => setParams(next === 'sample' ? {} : { book: next })
+  if (book) return <Workspace key={source} book={book} switcher={<BookSwitcher inline source={source} onSource={choose} />} />
   return (
     <>
-      {book ? <Workspace key={source} book={book} />
-        : (
-          <div className="flex h-dvh items-center justify-center bg-paper text-[15px] text-ink-3">
-            {loading ? '正在读这本书…' : `这本书没读出来：${error ?? ''}`}
-          </div>
-        )}
-      <BookSwitcher source={source} onSource={(next) => setParams(next === 'sample' ? {} : { book: next })} />
+      <div className="flex h-dvh items-center justify-center bg-paper text-[15px] text-ink-3">
+        {loading ? '正在读这本书…' : `这本书没读出来：${error ?? ''}`}
+      </div>
+      <BookSwitcher source={source} onSource={choose} />
     </>
   )
 }

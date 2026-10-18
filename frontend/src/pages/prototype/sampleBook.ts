@@ -188,13 +188,12 @@ export const SAMPLE_BOOK: VBook = {
   chapterWords: 2500,
   blurb: '头顶还剩三天寿命的传功执事，正一脸慈祥地递来一枚“筑基丹”。\n底层杂役陈默一睁眼，就能看破所有人的剩余寿数。\n在这座表面仙风道骨、暗地敲骨吸髓的吃人宗门里，别人的死期，就是他的生机。\n所有人都以为他平平无奇，直到某天，他撞见了那位号称与天地同寿的宗门老祖——\n老祖头顶上的数字，赫然只剩一个时辰。',
   categories,
-  folded: [],
   outline,
   pending: 2,
 }
 linkMentions(SAMPLE_BOOK)
 
-/** 刚点完「下一步」的书：只有新建页填的几项。设成都市，看「按题材收起用不上的类别」。 */
+/** 刚点完「下一步」的书：只有新建页填的几项。 */
 export function emptyBook(): VBook {
   const genre = '都市'
   const shown = defaultCategories(genre)
@@ -208,7 +207,6 @@ export function emptyBook(): VBook {
     chapterWords: 2500,
     blurb: '重生回高考前一晚，这次我只想安安静静当个学渣。',
     categories: shown.map((name) => ({ name, hints: CATEGORY_HINTS[name] ?? [], entries: [] })),
-    folded: ['等级体系', '物品与功法'],
     outline: { id: 'book', kind: '全书', title: '全书', text: '', uses: [] },
     pending: 0,
   }

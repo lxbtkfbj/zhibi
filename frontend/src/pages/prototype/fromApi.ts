@@ -129,14 +129,9 @@ export function bookFromApi(parts: ApiParts): VBook {
   const shown = defaultCategories(genre)
   const order = [...ALL_CATEGORIES, ...custom]
   const categories: VCategory[] = []
-  const folded: string[] = []
   for (const name of order) {
     const entries = name === '角色' ? characters : name === '金手指' ? goldfinger : byCategory.get(name) ?? []
-    // 有内容的类别永远显示；空的按题材决定显示还是先收起
-    if (!entries.length && !shown.includes(name) && !custom.includes(name)) {
-      folded.push(name)
-      continue
-    }
+    if (!entries.length && !shown.includes(name) && !custom.includes(name)) continue
     const hint = library.categories.find((c) => c.name === name)?.hint ?? ''
     categories.push({ name, hints: CATEGORY_HINTS[name] ?? hint.split(/[；;。]/).filter(Boolean), entries })
   }
@@ -152,7 +147,6 @@ export function bookFromApi(parts: ApiParts): VBook {
     chapterWords: typeof concept.chapter_words === 'number' && concept.chapter_words > 0 ? concept.chapter_words : 2500,
     blurb: text(concept.story) || text(concept.logline),
     categories,
-    folded,
     outline: outlineNodes(parts.outline, parts.chapters),
     pending: library.suggestions_pending ?? 0,
   }
