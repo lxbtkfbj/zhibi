@@ -175,7 +175,8 @@ const menuItem = 'block w-full rounded-lg px-3 py-2 text-left text-sm text-ink-2
 function CardMenu({ locked, onLock, onDelete, deleteLabel = '删掉这一条' }: { locked?: boolean; onLock?: () => void; onDelete: () => void; deleteLabel?: string }) {
   const [sure, setSure] = useState(false)
   return (
-    <Menu className="absolute top-5 right-5"
+    <div className="absolute top-5 right-5 z-10">
+    <Menu
       trigger={(open, toggle) => (
         <button type="button" onClick={() => { setSure(false); toggle() }} aria-label="更多" title="更多"
           className={clsx('rounded-md p-1.5 text-ink-3 transition-opacity hover:bg-line/60 hover:text-ink', open ? 'opacity-100' : 'opacity-0 group-hover/card:opacity-100 focus-visible:opacity-100')}>
@@ -192,6 +193,7 @@ function CardMenu({ locked, onLock, onDelete, deleteLabel = '删掉这一条' }:
         </>
       )}
     </Menu>
+    </div>
   )
 }
 
