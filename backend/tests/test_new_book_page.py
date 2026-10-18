@@ -160,6 +160,13 @@ async def test_revise_keeps_what_author_did_not_mention(client, queued):
     assert draft["target_length"] is None
 
 
+async def test_blank_page_can_ask_without_an_idea(client, queued):
+    current = {"title": "", "blurb": "", "channel": "女频", "genre": "古代言情", "tags": [], "target_length": None}
+    res = await client.post("/api/book-drafts", json={"idea": "", "current": current, "feedback": "帮我把简介写完整"})
+    assert res.status_code == 200, res.text
+    assert res.json()["genre"] == "古代言情"
+
+
 @pytest.mark.parametrize(
     "body",
     [{"idea": ""}, {"idea": "x"}, {"idea": "点子", "feedback": "改改"}],

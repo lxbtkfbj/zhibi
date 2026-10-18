@@ -2,9 +2,9 @@ import clsx from 'clsx'
 import { ArrowLeft, ArrowRight, ChevronDown, Plus, X } from 'lucide-react'
 import { type FormEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { type BookMeta, type Channel, type NewBookFields, useBookMeta, useCreateBlankBook, useDraftBook } from '../api/newBook'
+import { type Channel, type NewBookFields, useBookMeta, useCreateBlankBook, useDraftBook } from '../api/newBook'
 import { BookCover } from '../components/BookCover'
-import { Button, ErrorText, Segmented, TypingDots } from '../components/ui'
+import { Button, ErrorText, TypingDots } from '../components/ui'
 
 const EMPTY: NewBookFields = { title: '', blurb: '', channel: '', genre: '', tags: [], target_length: null }
 const MAX_LENGTH = 5000
@@ -51,12 +51,39 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 }
 
 const fieldClass = 'flex h-9 items-center rounded-lg border border-line-2 bg-card px-3 text-sm transition-colors hover:border-ink-3/50'
+// 浮层里的小按钮用淡一点的焦点框，不用全局那道朱砂线
+const softFocus = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/15'
 
-function CategoryPicker({ meta, value, onChange }: { meta: BookMeta | undefined; value: Pick<NewBookFields, 'channel' | 'genre'>; onChange: (next: Pick<NewBookFields, 'channel' | 'genre'>) => void }) {
+type MetaQuery = ReturnType<typeof useBookMeta>
+
+function ChannelToggle({ value, onChange }: { value: Channel; onChange: (channel: Channel) => void }) {
+  return (
+    <div role="radiogroup" aria-label="频道" className="inline-flex gap-0.5 rounded-lg bg-line/60 p-0.5">
+      {(['男频', '女频'] as const).map((key) => (
+        <button key={key} type="button" role="radio" aria-checked={value === key} onClick={() => onChange(key)}
+          className={clsx('rounded-md px-3.5 py-1 text-[13px] transition-colors', softFocus, value === key ? 'bg-card font-medium text-ink shadow-[0_1px_2px_rgb(0_0_0/0.06)]' : 'text-ink-2 hover:text-ink')}>
+          {key}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** 类别、标签的选项还没读到：读不到时给个重试，别只剩一个输入框。 */
+function MetaState({ meta }: { meta: MetaQuery }) {
+  if (meta.isPending) return <p className="py-4 text-center text-[13px] text-ink-3">正在读选项…</p>
+  return (
+    <p className="py-4 text-center text-[13px] text-ink-3">
+      选项没读出来。<button type="button" onClick={() => void meta.refetch()} className="text-chief hover:underline">再读一次</button>
+    </p>
+  )
+}
+
+function CategoryPicker({ meta, value, onChange }: { meta: MetaQuery; value: Pick<NewBookFields, 'channel' | 'genre'>; onChange: (next: Pick<NewBookFields, 'channel' | 'genre'>) => void }) {
   const [open, setOpen] = useState(false)
   const [channel, setChannel] = useState<Channel>(value.channel || '男频')
   const [custom, setCustom] = useState('')
-  const categories = meta?.channels.find((c) => c.key === channel)?.categories ?? []
+  const categories = meta.data?.channels.find((c) => c.key === channel)?.categories ?? []
   const pick = (genre: string) => {
     onChange({ channel, genre })
     setOpen(false)
@@ -69,13 +96,14 @@ function CategoryPicker({ meta, value, onChange }: { meta: BookMeta | undefined;
       </button>
       <Popover open={open} onClose={() => setOpen(false)} className="w-[min(26rem,calc(100vw-4rem))]">
         <div className="mb-3 flex items-center justify-between">
-          <Segmented label="频道" value={channel} options={[['男频', '男频'], ['女频', '女频']] as const} onChange={setChannel} />
+          <ChannelToggle value={channel} onChange={setChannel} />
           {value.genre && <button type="button" onClick={() => { onChange({ channel: '', genre: '' }); setOpen(false) }} className="text-xs text-ink-3 hover:text-ink">不选了</button>}
         </div>
+        {!meta.data && <MetaState meta={meta} />}
         <div className="grid grid-cols-3 gap-1 sm:grid-cols-4">
           {categories.map((genre) => (
             <button key={genre} type="button" onClick={() => pick(genre)}
-              className={clsx('rounded-md px-2 py-1.5 text-[13px] transition-colors', value.genre === genre && value.channel === channel ? 'bg-ink text-paper-2' : 'text-ink-2 hover:bg-subtle hover:text-ink')}>
+              className={clsx('rounded-md px-2 py-1.5 text-[13px] transition-colors', softFocus, value.genre === genre && value.channel === channel ? 'bg-ink text-paper-2' : 'text-ink-2 hover:bg-subtle hover:text-ink')}>
               {genre}
             </button>
           ))}
@@ -90,12 +118,12 @@ function CategoryPicker({ meta, value, onChange }: { meta: BookMeta | undefined;
   )
 }
 
-function TagPicker({ meta, channel, value, onChange }: { meta: BookMeta | undefined; channel: Channel | ''; value: string[]; onChange: (tags: string[]) => void }) {
+function TagPicker({ meta, channel, value, onChange }: { meta: MetaQuery; channel: Channel | ''; value: string[]; onChange: (tags: string[]) => void }) {
   const [open, setOpen] = useState(false)
   const [viewing, setViewing] = useState<Channel>(channel || '男频')
   const [custom, setCustom] = useState('')
-  const max = meta?.max_tags ?? 10
-  const groups = meta?.channels.find((c) => c.key === (channel || viewing))?.tag_groups ?? []
+  const max = meta.data?.max_tags ?? 10
+  const groups = meta.data?.channels.find((c) => c.key === (channel || viewing))?.tag_groups ?? []
   const toggle = (tag: string) => onChange(value.includes(tag) ? value.filter((t) => t !== tag) : value.length < max ? [...value, tag] : value)
   const addCustom = () => {
     const tag = custom.trim().slice(0, 20)
@@ -120,9 +148,10 @@ function TagPicker({ meta, channel, value, onChange }: { meta: BookMeta | undefi
       <Popover open={open} onClose={() => setOpen(false)} className="w-[min(36rem,calc(100vw-4rem))]">
         {!channel && (
           <div className="mb-3">
-            <Segmented label="频道" value={viewing} options={[['男频', '男频'], ['女频', '女频']] as const} onChange={setViewing} />
+            <ChannelToggle value={viewing} onChange={setViewing} />
           </div>
         )}
+        {!meta.data && <MetaState meta={meta} />}
         <div className="space-y-2.5">
           {groups.map((group) => (
             <div key={group.name} className="grid grid-cols-[3.25rem_minmax(0,1fr)] items-baseline gap-2">
@@ -132,7 +161,7 @@ function TagPicker({ meta, channel, value, onChange }: { meta: BookMeta | undefi
                   const on = value.includes(tag)
                   return (
                     <button key={tag} type="button" onClick={() => toggle(tag)} aria-pressed={on}
-                      className={clsx('rounded-full px-2.5 py-1 text-[13px] transition-colors', on ? 'bg-ink text-paper-2' : 'text-ink-2 hover:bg-line/60 hover:text-ink')}>
+                      className={clsx('rounded-full px-2.5 py-1 text-[13px] transition-colors', softFocus, on ? 'bg-ink text-paper-2' : 'text-ink-2 hover:bg-line/60 hover:text-ink')}>
                       {tag}
                     </button>
                   )
@@ -159,6 +188,8 @@ export function NewBookPage() {
   const [idea, setIdea] = useState('')
   const [feedback, setFeedback] = useState('')
   const [reply, setReply] = useState('')
+  // 这次叫编辑部是起草还是按意见改，等待时的提示跟着变
+  const [asking, setAsking] = useState<'draft' | 'revise'>('draft')
   const meta = useBookMeta()
   const draft = useDraftBook()
   const create = useCreateBlankBook()
@@ -174,14 +205,19 @@ export function NewBookPage() {
     setReply(said)
   }
 
+  const startDraft = (text: string) => {
+    setIdea(text)
+    setAsking('draft')
+    draft.mutate({ idea: text }, { onSuccess: (result) => { applyDraft(result); setFeedback('') } })
+  }
+
   // 从首页带着点子过来：编辑部先起草一版。只起一次，刷新后就是空白页。
   useEffect(() => {
     const fromHome = (location.state as { idea?: string } | null)?.idea?.trim()
     if (!fromHome || started.current) return
     started.current = true
-    setIdea(fromHome)
     navigate(location.pathname, { replace: true, state: null })
-    draft.mutate({ idea: fromHome }, { onSuccess: applyDraft })
+    startDraft(fromHome)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -191,9 +227,16 @@ export function NewBookPage() {
   const shownTitle = fields.title.trim() || '未命名'
   const facts = [fields.genre, ...fields.tags].join(' · ')
 
-  const revise = () => {
-    if (!feedback.trim() || draft.isPending) return
-    draft.mutate({ idea, current: fields, feedback: feedback.trim() }, { onSuccess: (result) => { applyDraft(result); setFeedback('') } })
+  const filled = Boolean(fields.title.trim() || fields.blurb.trim() || fields.genre || fields.tags.length || fields.target_length)
+  // 空白页第一次叫编辑部：这句话就当点子，让它起草
+  const freshAsk = !idea && !filled
+
+  const ask = () => {
+    const text = feedback.trim()
+    if (!text || draft.isPending) return
+    if (freshAsk) return startDraft(text)
+    setAsking('revise')
+    draft.mutate({ idea, current: fields, feedback: text }, { onSuccess: (result) => { applyDraft(result); setFeedback('') } })
   }
 
   const submit = async (event?: FormEvent) => {
@@ -256,14 +299,14 @@ export function NewBookPage() {
 
           <div className="mt-5 divide-y divide-line border-y border-line">
             <Row label="类别">
-              <CategoryPicker meta={meta.data} value={fields} onChange={(next) => set(next)} />
+              <CategoryPicker meta={meta} value={fields} onChange={(next) => set(next)} />
             </Row>
             <Row label="标签">
-              <TagPicker meta={meta.data} channel={fields.channel} value={fields.tags} onChange={(tags) => set({ tags })} />
+              <TagPicker meta={meta} channel={fields.channel} value={fields.tags} onChange={(tags) => set({ tags })} />
             </Row>
             <Row label="篇幅">
               <div className="flex flex-wrap items-center gap-3">
-                <label className={clsx(fieldClass, 'gap-2 focus-within:border-ink-3')}>
+                <label className={clsx(fieldClass, 'gap-1.5 px-2.5 focus-within:border-ink-3')}>
                   <input
                     value={lengthText}
                     onChange={(e) => {
@@ -275,7 +318,7 @@ export function NewBookPage() {
                     inputMode="numeric"
                     aria-label="篇幅（万字）"
                     placeholder="200"
-                    className="w-14 bg-transparent text-right text-sm text-ink tabular-nums placeholder:text-ink-3/70 focus:outline-none"
+                    className="w-10 bg-transparent text-right text-sm text-ink tabular-nums placeholder:text-ink-3/70 focus:outline-none"
                   />
                   <span className="text-ink-3">万字</span>
                 </label>
@@ -286,25 +329,23 @@ export function NewBookPage() {
             </Row>
           </div>
 
-          {idea && (
-            <div className="mt-6">
-              <div className="flex items-center gap-2 rounded-xl border border-line bg-subtle/70 py-1.5 pr-1.5 pl-2 focus-within:border-line-2">
-                <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-chief font-serif text-[13px] text-on-role">编</span>
-                <input
-                  value={feedback}
-                  onChange={(e) => setFeedback(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.nativeEvent.isComposing) { e.preventDefault(); revise() } }}
-                  maxLength={2000}
-                  aria-label="告诉编辑部怎么改"
-                  placeholder="不满意？告诉编辑部怎么改，比如：书名再短一点"
-                  className="h-8 min-w-0 flex-1 bg-transparent text-sm text-ink placeholder:text-ink-3 focus:outline-none"
-                />
-                <Button type="button" size="sm" variant="outline" onClick={revise} disabled={!feedback.trim()} loading={draft.isPending && !!feedback}>改一改</Button>
-              </div>
-              {reply && !draft.isPending && <p className="mt-2 pl-1 text-xs leading-relaxed text-ink-3">编辑部：{reply}</p>}
-              {draft.isError && (fields.title || fields.blurb) && <div className="mt-2 pl-1"><ErrorText error={draft.error} /></div>}
+          <div className="mt-6">
+            <div className="flex items-center gap-2 rounded-xl border border-line bg-subtle/70 py-1.5 pr-1.5 pl-2 focus-within:border-line-2">
+              <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-chief font-serif text-[13px] text-on-role">编</span>
+              <input
+                value={feedback}
+                onChange={(e) => setFeedback(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.nativeEvent.isComposing) { e.preventDefault(); ask() } }}
+                maxLength={2000}
+                aria-label="告诉编辑部"
+                placeholder={freshAsk ? '想让编辑部帮你写？说说你想写个什么故事' : idea ? '不满意？告诉编辑部怎么改，比如：书名再短一点' : '想让编辑部帮忙？比如：帮我把简介写完整'}
+                className="h-8 min-w-0 flex-1 bg-transparent text-sm text-ink placeholder:text-ink-3 focus:outline-none"
+              />
+              <Button type="button" size="sm" variant="outline" onClick={ask} disabled={!feedback.trim()} loading={draft.isPending}>{freshAsk ? '帮我写' : '改一改'}</Button>
             </div>
-          )}
+            {reply && !draft.isPending && <p className="mt-2 pl-1 text-xs leading-relaxed text-ink-3">编辑部：{reply}</p>}
+            {draft.isError && filled && <div className="mt-2 pl-1"><ErrorText error={draft.error} /></div>}
+          </div>
 
           <div className="mt-7 flex flex-wrap items-center justify-between gap-4">
             <p className="text-[13px] text-ink-3">每一项都可以先空着，进去以后随时改。</p>
@@ -323,18 +364,18 @@ export function NewBookPage() {
             <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-2xl bg-card/85 px-10 text-center backdrop-blur-[2px] md:rounded-l-none">
               <span className="flex size-10 items-center justify-center rounded-full bg-chief font-serif text-base text-on-role">编</span>
               <p className="flex items-center gap-2 text-[15px] text-ink">
-                {feedback ? '编辑部正在按你的意见改' : '编辑部正在按你的点子起草'}
+                {asking === 'revise' ? '编辑部正在按你的意见改' : '编辑部正在按你的点子起草'}
                 <TypingDots className="text-ink-3" />
               </p>
-              <p className="line-clamp-2 max-w-md font-serif text-sm leading-relaxed text-ink-3">「{feedback || idea}」</p>
+              <p className="line-clamp-2 max-w-md font-serif text-sm leading-relaxed text-ink-3">「{asking === 'revise' ? feedback : idea}」</p>
             </div>
           )}
-          {idea && draft.isError && !fields.title && !fields.blurb && (
+          {asking === 'draft' && draft.isError && !filled && (
             <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-2xl bg-card/90 px-10 text-center md:rounded-l-none">
               <p className="text-[15px] text-ink">编辑部这次没起草出来</p>
               <ErrorText error={draft.error} />
               <div className="flex gap-2">
-                <Button type="button" variant="outline" onClick={() => draft.mutate({ idea }, { onSuccess: applyDraft })}>再试一次</Button>
+                <Button type="button" variant="outline" onClick={() => startDraft(idea)}>再试一次</Button>
                 <Button type="button" variant="ghost" onClick={() => { draft.reset(); setIdea('') }}>我自己写</Button>
               </div>
             </div>
