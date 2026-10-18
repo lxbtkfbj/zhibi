@@ -31,6 +31,8 @@ const router = createBrowserRouter([
       { path: '/prompts', lazy: async () => ({ Component: (await import('./pages/PromptsPage')).PromptsPage }) },
     ],
   },
+  // 工作台原型：只看样子，内容是假的
+  { path: '/prototype/workspace', lazy: async () => ({ Component: (await import('./pages/prototype/WorkspacePrototype')).WorkspacePrototype }) },
   {
     path: '/books/:bookId',
     element: <BookLayout />,
