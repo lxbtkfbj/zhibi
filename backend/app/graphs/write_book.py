@@ -83,7 +83,7 @@ ASPECT_NAMES = {
 NODE_CONTENT = ("title", "event", "prerequisite", "consequence")
 # 新书写完前几章请作者试读
 TRIAL_READ_AFTER = 3
-UNTIL = ("count", "volume", "book", "segment")
+UNTIL = ("count", "unit", "volume", "book", "segment")
 # 写完后检查：字数不到目标的七成就让写手接着写（最多两次）；结尾写成总结就改写结尾（一次）
 SHORT_RATIO = 0.7
 MAX_EXTENSIONS = 2
@@ -149,6 +149,8 @@ class WriteState(TypedDict, total=False):
     segment_automatic: bool
     # 作者自己加的、还没有卷的篇：写到它时先给它分卷
     arc_id: str
+    # 「写完这个单元」：这一轮从哪个单元写起，写到别的单元就停
+    start_unit: str
     chapters_revision: str
     chapters_pending: bool
 
@@ -209,6 +211,14 @@ async def decide(session: AsyncSession, book_id: uuid.UUID, state: WriteState) -
     decision = await _next_step(session, book, state)
     if until == "count" and written >= target and decision["step"] not in RECAP_STEPS:
         return {"step": "done", "reason": f"这一轮计划的 {target} 章都定稿了。"}
+    if until == "unit" and decision["step"] != "done":
+        start = state.get("start_unit")
+        # 回顾照样写完再停；写到别的单元、或者要拆下一卷了，这个单元就写完了
+        if start and decision.get("unit_id") != start and decision["step"] not in RECAP_STEPS:
+            unit = await session.get(PlotUnit, uuid.UUID(start))
+            return {"step": "done", "reason": f"「{unit.title if unit else '这个单元'}」写完了。"}
+        if not start and decision.get("unit_id"):
+            decision["start_unit"] = decision["unit_id"]
     return decision
 
 
@@ -217,6 +227,19 @@ async def _has_finals(session: AsyncSession, volume_id: uuid.UUID) -> bool:
         select(Chapter.id).where(Chapter.volume_id == volume_id, Chapter.status == "final").limit(1)
     )
     return found is not None
+
+
+async def _has_unfinished(session: AsyncSession, volume_id: uuid.UUID) -> bool:
+    """这一卷还有没写完的单元或章"""
+    unit = await session.scalar(
+        select(PlotUnit.id).where(PlotUnit.volume_id == volume_id, PlotUnit.status != "done").limit(1)
+    )
+    if unit is not None:
+        return True
+    chapter = await session.scalar(
+        select(Chapter.id).where(Chapter.volume_id == volume_id, Chapter.status != "final").limit(1)
+    )
+    return chapter is not None
 
 
 async def _last_segment(session: AsyncSession, book_id: uuid.UUID) -> StoryNode | None:
@@ -254,6 +277,10 @@ async def _next_step(session: AsyncSession, book: Book, state: WriteState) -> di
     empty = await _empty_author_arc(session, book.id)
     for volume in volumes:
         here = {"volume_id": str(volume.id), "volume_index": volume.index, "volume_title": volume.title}
+        if volume.status == "done" and await _has_unfinished(session, volume.id):
+            # 写完以后作者又往这一卷里加了单元、章：重新打开接着写，卷回顾等写完再重写
+            volume.status = "approved"
+            volume.recap = ""
         if volume.status == "done":
             if not volume.recap.strip() and await _has_finals(session, volume.id):
                 return {**here, "step": "recap_volume"}  # 早先写完、还没有卷回顾的卷，补上

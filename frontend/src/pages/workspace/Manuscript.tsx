@@ -7,7 +7,7 @@ import { useSave, useWorkspace } from './actions'
 import { chapterNodes, cn, countWords, findEntry, findNode, splitTitle, type VBook, type VGate, type VNode, type WritePlan, type WritingGates } from './model'
 import { CardMenu, DirectoryShell, Editable, LinkChip, Sheet } from './widgets'
 import { rowSelected, smallButton, titleClass } from './styles'
-import { GATE_LABELS, type WritingControl, chapterLabel, gateTarget, placeOf, readyToWrite, upcomingSteps, writePlans } from './writing'
+import { type ChapterDetail, GATE_LABELS, type WritingControl, chapterLabel, gateTarget, placeOf, readyToWrite, upcomingSteps, writePlans } from './writing'
 
 /** 正文这几页要跳去的地方 */
 export interface ManuscriptNav {
@@ -18,6 +18,22 @@ export interface ManuscriptNav {
 }
 
 const primaryButton = 'h-9 rounded-lg bg-ink px-5 text-sm text-paper-2 transition-colors hover:bg-ink-2 disabled:opacity-40'
+const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error))
+
+/** 存成一个 TXT 文件下载 */
+function download(name: string, content: string): void {
+  const url = URL.createObjectURL(new Blob([content], { type: 'text/plain;charset=utf-8' }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = name.replace(/[<>:"/\\|?*]/g, '_')
+  link.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+/** 等后台做完：带回的那句话、或者出的错，在页面底下说一声 */
+function say(nav: ManuscriptNav, task: Promise<string | void>): void {
+  task.then((text) => { if (text) nav.toast(text) }).catch((error: unknown) => nav.toast(errorText(error)))
+}
 
 /** 试读的卡片挂在前 3 章上，别的挂在它自己那一页。 */
 function gateOn(gate: VGate | undefined, id: string, root: VNode): boolean {
@@ -44,15 +60,20 @@ export function WritingStrip({ writing, nav }: { writing: WritingControl; nav: M
     actions = (
       <>
         {s.chapter && <button type="button" className={link} onClick={() => nav.openChapter(s.chapter!)}>去看</button>}
-        {!s.stopping && <button type="button" className={button} onClick={() => nav.toast(writing.stop())}>停下</button>}
+        {!s.stopping && <button type="button" className={button} onClick={() => say(nav, writing.stop())}>停下</button>}
       </>
     )
   } else if (s.state === 'waiting' && s.gate) {
     text = `${s.gate.kind === 'stuck' ? '要你定夺' : '等你拍板'}：${s.gate.title}`
-    actions = <button type="button" className={link} onClick={() => (go.chapter ? nav.openChapter(go.chapter) : nav.openNode(go.node!))}>去看</button>
+    actions = (
+      <>
+        <button type="button" className={link} onClick={() => (go.chapter ? nav.openChapter(go.chapter) : nav.openNode(go.node!))}>去看</button>
+        <button type="button" className={button} onClick={() => say(nav, writing.stop())}>停下</button>
+      </>
+    )
   } else if (s.state === 'stopped' || s.state === 'failed') {
     text = s.state === 'failed' ? <>出错停下了：{s.error} {s.note}</> : s.note
-    actions = <button type="button" className={button} onClick={() => writing.resume()}>接着写</button>
+    actions = <button type="button" className={button} onClick={() => say(nav, writing.resume())}>接着写</button>
   } else if (s.state === 'finished') {
     actions = <button type="button" className={button} onClick={() => writing.dismiss()}>好</button>
   }
@@ -90,8 +111,7 @@ export function GateCard({ gate, writing, nav, where }: { gate: VGate; writing: 
   const off = GATE_OFF[gate.kind]
   const who = gate.kind === 'stuck' ? '写手' : gate.kind === 'trial' ? '编辑部' : '主编'
   const send = () => {
-    const reply = writing.revise(text)
-    if (reply) nav.toast(reply)
+    say(nav, writing.revise(text))
     setText('')
     setAsking(false)
   }
@@ -102,6 +122,17 @@ export function GateCard({ gate, writing, nav, where }: { gate: VGate; writing: 
         {gate.kind === 'stuck' ? '要你定夺' : '等你拍板'} · {gate.title}{where && <span className="text-ink-3">· {where}</span>}
       </p>
       <p className="mt-2.5 text-[15px] leading-relaxed text-ink">{gate.hint}</p>
+      {gate.detail && (
+        <div className="mt-3.5 rounded-lg border border-line bg-card px-5 py-4">
+          {gate.detail.title && <p className="font-serif text-[17px] font-bold text-ink">{gate.detail.title}</p>}
+          {gate.detail.text && <p className="mt-1.5 font-serif text-[15px] leading-[1.9] whitespace-pre-line text-ink-2">{gate.detail.text}</p>}
+          {!!gate.detail.items?.length && (
+            <ul className="mt-2.5 space-y-1 border-t border-line pt-2.5 text-[14px] leading-relaxed text-ink-2">
+              {gate.detail.items.map((item) => <li key={item}>{item}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
       {!!gate.issues?.length && (
         <ul className="mt-3 space-y-1.5 text-[14px] leading-relaxed text-ink-2">
           {gate.issues.map((issue) => <li key={issue} className="flex gap-2.5"><span className="mt-0.5 shrink-0 text-xs text-reviewer">审稿</span>{issue}</li>)}
@@ -120,9 +151,9 @@ export function GateCard({ gate, writing, nav, where }: { gate: VGate; writing: 
         </div>
       ) : (
         <div className="mt-4 flex flex-wrap items-center gap-3">
-          <button type="button" className={primaryButton} onClick={() => { const reply = writing.approve(); if (reply) nav.toast(reply) }}>{APPROVE[gate.kind]}</button>
+          <button type="button" className={primaryButton} onClick={() => say(nav, writing.approve())}>{APPROVE[gate.kind]}</button>
           <button type="button" className={clsx(smallButton, 'h-9 px-4 text-sm')} onClick={() => setAsking(true)}>{REVISE[gate.kind]}</button>
-          {off && <button type="button" className="ml-auto text-[13px] text-ink-3 hover:text-ink" onClick={() => nav.toast(writing.setGate(off[0], false))}>{off[1]}</button>}
+          {off && <button type="button" className="ml-auto text-[13px] text-ink-3 hover:text-ink" onClick={() => say(nav, writing.setGate(off[0], false))}>{off[1]}</button>}
         </div>
       )}
     </div>
@@ -239,7 +270,7 @@ function GateToggles({ writing, nav }: { writing: WritingControl; nav: Manuscrip
       <div className="divide-y divide-line border-y border-line">
         {GATE_LABELS.map((g) => (
           <label key={g.key} className="flex cursor-pointer items-start gap-3 py-3">
-            <input type="checkbox" checked={writing.gates[g.key]} onChange={(e) => nav.toast(writing.setGate(g.key, e.target.checked))}
+            <input type="checkbox" checked={writing.gates[g.key]} onChange={(e) => say(nav, writing.setGate(g.key, e.target.checked))}
               className="mt-1 size-4 shrink-0 accent-[var(--color-ink)]" />
             <span className="text-[15px] text-ink">
               {g.label}
@@ -272,7 +303,7 @@ export function ManuscriptHome({ book, writing, nav }: { book: VBook; writing: W
       <p className="mt-4 text-[15px] text-ink-2">
         {done.length
           ? <>已写 {done.length} 章 · {words.toLocaleString()} 字{next && where.volume && <> · 写到 {[where.volume, where.unit].filter(Boolean).map((n) => n!.title.replace('　', ' ')).join(' / ')}</>}</>
-          : '还没开写。点了开写，编辑部照大纲一层层往下拆，再一章章写正文。'}
+          : busy ? '第一章还在写，写完一章这里记一章。' : '还没开写。点了开写，编辑部照大纲一层层往下拆，再一章章写正文。'}
       </p>
       <div className="mt-8 border-t border-line pt-8">
         {missing ? (
@@ -281,14 +312,20 @@ export function ManuscriptHome({ book, writing, nav }: { book: VBook; writing: W
             <button type="button" className={clsx(primaryButton, 'mt-4')} onClick={() => nav.openNode(book.outline.children?.[0]?.id ?? 'book')}>去大纲</button>
           </div>
         ) : busy ? (
-          <p className="text-[15px] leading-relaxed text-ink-2">
-            {s.state === 'working' ? `编辑部正在写：${s.doing ?? ''}。` : `编辑部在等你拍板：${s.gate?.title ?? ''}。`}
-            这一轮写完或停下以后，才能开新的一轮。
-          </p>
+          <div>
+            <p className="text-[15px] leading-relaxed text-ink-2">
+              {s.state === 'working' ? `编辑部正在写：${s.doing ?? ''}。` : `编辑部在等你拍板：${s.gate?.title ?? ''}。`}
+              这一轮写完或停下以后，才能开新的一轮。
+            </p>
+            {!s.stopping && (
+              <button type="button" className="mt-4 h-9 rounded-lg border border-line-2 bg-card px-5 text-sm text-ink-2 transition-colors hover:border-ink-3/50 hover:text-ink"
+                onClick={() => say(nav, writing.stop())}>停下这一轮</button>
+            )}
+          </div>
         ) : s.state === 'stopped' || s.state === 'failed' ? (
           <div>
             <p className="text-[15px] leading-relaxed text-ink-2">{s.state === 'failed' ? `出错停下了：${s.error} ` : ''}{s.note}</p>
-            <button type="button" className={clsx(primaryButton, 'mt-4')} onClick={() => writing.resume()}>接着写</button>
+            <button type="button" className={clsx(primaryButton, 'mt-4')} onClick={() => say(nav, writing.resume())}>接着写</button>
           </div>
         ) : (
           <div>
@@ -304,7 +341,7 @@ export function ManuscriptHome({ book, writing, nav }: { book: VBook; writing: W
             <p className="mt-2.5 text-[13px] text-ink-3">{picked.hint}</p>
             {writing.blocked
               ? <p className="mt-5 text-[14px] text-ink-3">{writing.blocked}</p>
-              : <button type="button" className={clsx(primaryButton, 'mt-5 h-10 px-7')} onClick={() => writing.start(plan)}>{done.length ? '接着写' : '开写'}</button>}
+              : <button type="button" className={clsx(primaryButton, 'mt-5 h-10 px-7')} onClick={() => say(nav, writing.start(plan))}>{done.length ? '接着写' : '开写'}</button>}
             <h3 className="mt-9 mb-2.5 text-[13px] tracking-[0.15em] text-ink-3">开写以后会这样走</h3>
             <ol className="list-decimal space-y-1.5 pl-5 text-[15px] leading-relaxed text-ink-2 marker:text-ink-3">
               {upcomingSteps(book.outline, writing.gates, writing.trialDone).map((step) => <li key={step}>{step}</li>)}
@@ -423,17 +460,18 @@ export function ChapterPage({ book, id, writing, nav }: { book: VBook; id: strin
   const save = useSave()
   const path = findNode(book.outline, id) ?? []
   const node = path.at(-1)
-  const [loaded, setLoaded] = useState<string>()
+  const [loaded, setLoaded] = useState<ChapterDetail>()
   const [rewriting, setRewriting] = useState(false)
   const [previous, setPrevious] = useState<string>()
   const body = node?.body
-  // 真书点开才去读正文
+  // 真书点开才去读正文、审稿、设定的变化；写完、改完以后再读一遍
+  const loadChapter = writing.loadChapter
   useEffect(() => {
-    if (!node || body?.text !== undefined || (body?.status ?? 'planned') === 'planned' || !writing.loadText) return
+    if (!node || body?.text !== undefined || (body?.status ?? 'planned') === 'planned' || !loadChapter) return
     let alive = true
-    writing.loadText(node).then((text) => { if (alive) setLoaded(text) }).catch(() => { if (alive) setLoaded('') })
+    loadChapter(node).then((detail) => { if (alive) setLoaded(detail) }).catch(() => { if (alive) setLoaded({ text: '' }) })
     return () => { alive = false }
-  }, [node, body?.text, body?.status, writing])
+  }, [node, body?.text, body?.status, body?.words, loadChapter])
   if (!node || node.kind !== '章') return <Sheet narrow><p className="text-ink-3">这一章找不到了。</p></Sheet>
 
   const chapters = chapterNodes(book.outline)
@@ -445,7 +483,7 @@ export function ChapterPage({ book, id, writing, nav }: { book: VBook; id: strin
   const live = s.chapter === id ? s.live : undefined
   const gate = s.state === 'waiting' && gateOn(s.gate, id, book.outline) ? s.gate : undefined
   const status = body?.status ?? 'planned'
-  const text = body?.text ?? loaded
+  const text = body?.text ?? loaded?.text
   const busy = s.state === 'working' || s.state === 'waiting'
   const later = chapters.slice(at + 1).filter((c) => c.body?.status === 'done').length
   const [prefix, name] = splitTitle(node.title)
@@ -454,11 +492,12 @@ export function ChapterPage({ book, id, writing, nav }: { book: VBook; id: strin
     ? `写手在写 · 已写 ${countWords(live)} 字`
     : status === 'done' ? `${(body?.words ?? 0).toLocaleString()} 字`
       : status === 'writing' ? (gate?.kind === 'stuck' ? `写好了 ${(body?.words ?? 0).toLocaleString()} 字，审稿没过` : '写到一半') : '还没写'
-  const review = body?.review
+  const review = body?.review ?? loaded?.review
+  const changes = body?.changes ?? loaded?.changes
   const menu = status === 'done' && text ? [
     { label: '按意见重写这一章', onClick: () => (busy ? nav.toast('编辑部手上还有活，停下或写完以后再重写') : writing.blocked ? nav.toast(writing.blocked) : setRewriting(true)) },
-    { label: '让设定师照改过的重看一遍', onClick: () => nav.toast('原型：设定师会照你改过的正文，重新记这一章让人物、设定变了什么') },
-    { label: '导出这一章 TXT', onClick: () => nav.toast('原型：会下载这一章的 TXT') },
+    ...(writing.redigest ? [{ label: '让设定师照改过的重看一遍', onClick: () => say(nav, writing.redigest!(node)) }] : []),
+    { label: '导出这一章 TXT', onClick: () => download(`${node.title.replace('　', ' ')}.txt`, `${node.title.replace('　', ' ')}\n\n${text}\n`) },
   ] : []
   const cast = node.uses.map((entryId) => findEntry(book, entryId)).filter((e) => !!e)
 
@@ -479,7 +518,7 @@ export function ChapterPage({ book, id, writing, nav }: { book: VBook; id: strin
         {previous !== undefined && status === 'done' && s.state !== 'working' && (
           <p className="mt-2 text-[13px] text-ink-3">
             这是照你的意见重写的一版。
-            <button type="button" className="ml-2 text-chief hover:underline" onClick={() => { writing.setText(node, previous); setPrevious(undefined); nav.toast('换回了原来的') }}>换回原来的</button>
+            <button type="button" className="ml-2 text-chief hover:underline" onClick={() => { say(nav, writing.setText(node, previous).then(() => '换回了原来的')); setPrevious(undefined) }}>换回原来的</button>
           </p>
         )}
       </header>
@@ -489,10 +528,10 @@ export function ChapterPage({ book, id, writing, nav }: { book: VBook; id: strin
         {rewriting && (
           <RewritePanel node={node} later={later} onCancel={() => setRewriting(false)}
             onGo={(request) => {
-              const before = writing.rewrite(node, request)
               setRewriting(false)
-              if (before !== undefined) setPrevious(before)
-              else nav.toast(writing.blocked ?? '原型里只有前 5 章能演示重写')
+              writing.rewrite(node, request)
+                .then((before) => (before === null ? nav.toast('交给写手了：写好会在这里换上，照样过审稿') : setPrevious(before)))
+                .catch((error: unknown) => nav.toast(errorText(error)))
             }} />
         )}
         {live !== undefined ? (
@@ -501,7 +540,7 @@ export function ChapterPage({ book, id, writing, nav }: { book: VBook; id: strin
             <LiveText text={live} />
           </>
         ) : text !== undefined && status !== 'planned' ? (
-          <ChapterText text={text} spot={`t|${id}`} onSave={(value) => { writing.setText(node, value); nav.toast('存好了') }} />
+          <ChapterText text={text} spot={`t|${id}`} onSave={(value) => say(nav, writing.setText(node, value).then(() => '存好了'))} />
         ) : status !== 'planned' ? (
           <p className="text-ink-3">正在读这一章…</p>
         ) : (
@@ -515,11 +554,11 @@ export function ChapterPage({ book, id, writing, nav }: { book: VBook; id: strin
         )}
       </div>
 
-      {(!!body?.changes?.length || !!review?.good.length || !!review?.issues.length || cast.length > 0) && (
+      {(!!changes?.length || !!review?.good.length || !!review?.issues.length || cast.length > 0) && (
       <div className="mt-10 border-t border-line pt-3">
-        {!!body?.changes?.length && (
-          <Fold title="设定师记下的变化" count={`${body.changes.length} 处`}>
-            <ul className="space-y-1.5 text-[14px] leading-relaxed text-ink-2">{body.changes.map((c) => <li key={c} className="flex gap-2"><span className="text-lore">·</span>{c}</li>)}</ul>
+        {!!changes?.length && (
+          <Fold title="设定师记下的变化" count={`${changes.length} 处`}>
+            <ul className="space-y-1.5 text-[14px] leading-relaxed text-ink-2">{changes.map((c) => <li key={c} className="flex gap-2"><span className="text-lore">·</span>{c}</li>)}</ul>
           </Fold>
         )}
         {review && (review.good.length > 0 || review.issues.length > 0) && (

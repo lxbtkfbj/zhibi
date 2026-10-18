@@ -618,7 +618,17 @@ async def export_book(book: Book = Depends(get_book), session: AsyncSession = Se
     )
 
 
-WRITE_LABEL = {"count": "写 {count} 章", "volume": "写完这一卷", "book": "一直写到完本"}
+async def _has_outline(session: AsyncSession, book_id) -> bool:
+    """大纲上有没有东西可写：有卷，或者有作者写了一段话的篇。"""
+    if await session.scalar(select(Volume.id).where(Volume.book_id == book_id).limit(1)):
+        return True
+    nodes = await session.scalars(
+        select(StoryNode).where(StoryNode.book_id == book_id, StoryNode.segment.is_not(None))
+    )
+    return any(str((node.segment or {}).get("text") or "").strip() for node in nodes)
+
+
+WRITE_LABEL = {"count": "写 {count} 章", "unit": "写完这个单元", "volume": "写完这一卷", "book": "一直写到完本"}
 
 
 @router.post("/books/{book_id}/plan-segment", response_model=JobOut, status_code=201)
@@ -671,11 +681,15 @@ async def start_writing(
     book = await session.scalar(
         select(Book).where(Book.id == book.id).with_for_update().execution_options(populate_existing=True)
     )
-    if book.status not in ("ready", "writing"):
-        raise HTTPException(409, "全书已经写完了" if book.status == "completed" else "开书方案还没定稿")
     current = await jobs.active_job(session, book.id)
     if current is not None and current.status in jobs.ACTIVE_STATUSES:
         raise HTTPException(409, "编辑部手上还有没做完的事，先处理完再开写")
+    # 新书页建的书不走开书流程，状态一直是「设定中」：大纲里有篇或卷就能开写
+    if book.status == "setting_up" and book.source == "new":
+        if not await _has_outline(session, book.id):
+            raise HTTPException(409, "大纲还空着：先在大纲里写好第一篇那段话，编辑部照它一层层往下拆")
+    elif book.status not in ("ready", "writing"):
+        raise HTTPException(409, "全书已经写完了" if book.status == "completed" else "开书方案还没定稿")
     job = jobs.new_write_job(book, body.until, body.count)
     session.add(job)
     book.status = "writing"

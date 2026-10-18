@@ -9,6 +9,11 @@ import type { Draft, Split } from './useSplit'
 import { Editable } from './widgets'
 
 const CHAPTER_FIELDS = ['发生什么', '看点', '结尾钩子'] as const
+/** 章名写成「第3章「药铺」」，还没起名的就写「第3章」 */
+const chapterName = (title: string) => {
+  const [number, name] = title.split('　')
+  return name?.trim() ? `${number}「${name.trim()}」` : number
+}
 const primaryButton = 'h-9 rounded-lg bg-ink px-5 text-sm text-paper-2 transition-colors hover:bg-ink-2 disabled:opacity-40'
 
 
@@ -87,7 +92,7 @@ export function SplitPanel({ node, split }: { node: VNode; split: Split }) {
   if (state.step === 'working') {
     return (
       <div className="mt-5 rounded-2xl border-2 border-dashed border-chief/25 bg-chief-soft/30 p-5">
-        <p className="flex items-center gap-1.5 text-[14px] text-chief"><Sparkles className="size-4" />主编在{chapter ? '出章纲' : '拆单元'}，一般一分钟上下，出好了在这里给你看…</p>
+        <p className="flex items-center gap-1.5 text-[14px] text-chief"><Sparkles className="size-4" />主编在{chapter ? '出章纲' : '拆单元'}，一般要两三分钟，拆一整卷要四五分钟，出好了在这里给你看…</p>
         <div className="mt-4 space-y-3">
           {[0, 1, 2].map((i) => <div key={i} className="h-20 rounded-xl bg-card/70 motion-safe:animate-pulse" />)}
         </div>
@@ -114,7 +119,7 @@ export function SplitPanel({ node, split }: { node: VNode; split: Split }) {
       </p>
       {(result.keeps.length > 0 || result.replaces.length > 0) && (
         <p className="mt-2 rounded-lg bg-card/80 px-3.5 py-2 text-[13px] leading-relaxed text-seal-dark">
-          收下以后：{result.replaces.length ? `${result.replaces.map((t) => t.replace('　', '「') + '」').join('、')}的章纲换成下面的` : '下面的接在后面'}
+          收下以后：{result.replaces.length ? `${result.replaces.map(chapterName).join('、')}的章纲换成下面的` : '下面的接在后面'}
           {result.keeps.length > 0 && `；${result.keeps.map((t) => t.split('　')[0]).join('、')}已经写好了，不动`}。
         </p>
       )}

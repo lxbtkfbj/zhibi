@@ -42,6 +42,28 @@ CHARACTER_STATE = ("location", "condition", "want", "abilities", "power", "is_al
 # 「此刻」里的实力与地位存在角色的 extra 里，按这个栏目名
 POWER = "实力与地位"
 
+STATE_LABELS = {"location": "在哪", "condition": "处境", "want": "眼下想要", "abilities": "能力", "power": POWER}
+CATEGORY_LABELS = {"世界与地图": "地点", "势力划分": "势力", "物品与功法": "物品", "往事与秘密": "往事", "特殊规则": "规则", "等级体系": "等级", "金手指": "金手指"}
+
+
+def changes_text(log: dict[str, Any] | None) -> list[str]:
+    """一章写完设定师记下的变化，写成给作者看的一行行：谁的什么变成了什么、新建了哪几条。伏笔这类作者不看的不列。"""
+    log = log or {}
+    lines = []
+    for item in log.get("characters") or []:
+        before, after = item.get("before") or {}, item.get("after") or {}
+        for key, label in STATE_LABELS.items():
+            value = after.get(key)
+            if value and value != before.get(key):
+                lines.append(f"{item.get('name', '')} · {label}：{value}")
+        if after.get("is_alive") is False and before.get("is_alive") is not False:
+            lines.append(f"{item.get('name', '')} · 死了")
+    lines.extend(f"新的人物：{name}" for name in log.get("created") or [])
+    for entry in log.get("created_entries") or []:
+        snapshot = entry.get("snapshot") or {}
+        lines.append(f"新的一条：{snapshot.get('name', '')}（{CATEGORY_LABELS.get(snapshot.get('category', ''), '设定')}）")
+    return lines
+
 
 def char_state(row: Character, key: str) -> Any:
     if key == "power":
@@ -674,7 +696,11 @@ async def apply_digest(
         )
         if not left:
             unit = await session.get(PlotUnit, chapter.unit_id)
-            if unit is not None:
+            total = await session.scalar(
+                select(func.count()).select_from(Chapter).where(Chapter.unit_id == chapter.unit_id)
+            )
+            # 作者定了章数、章纲还没列够的单元先不收：接着写时编辑部会把缺的章补出来
+            if unit is not None and not (unit.status == "planned" and total < unit.chapter_count):
                 unit.status = "done"
     return {
         "characters_updated": updated,

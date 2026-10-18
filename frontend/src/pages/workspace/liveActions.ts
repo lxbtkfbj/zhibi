@@ -6,7 +6,7 @@ import { del, get, patch, post, put } from '../../api/client'
 import type { LibraryItem, LibrarySnapshot } from '../../api/library'
 import type { ChapterBrief } from '../../api/types'
 import type { OutlineTree } from '../../lib/outlineTree'
-import type { NodeChange, RewriteOutcome, WorkspaceActions } from './actions'
+import type { NodeChange, RewriteOutcome, SplitResult, WorkspaceActions } from './actions'
 import { type ApiParts, CHARACTER_COLUMNS, ENTRY_CATEGORY, WORLD_OVERVIEW, bookFromApi, contentKey } from './fromApi'
 import { findEntry, findNode, type VBook, type VEntry } from './model'
 
@@ -305,6 +305,18 @@ export function useLiveBook(bookId: string) {
         if (!ref) throw new Error('这一段还不能让编辑部写')
         const reply = await done(post<{ note: string; before: NodeChange }>(`/books/${bookId}/outline/write`, { target_type: ref.type, target_id: ref.id, request }))
         return { note: reply.note, before: reply.before }
+      },
+      splitNode: async (node, request, _round, current) => {
+        const ref = node.ref
+        if (!ref || (ref.type !== 'unit' && ref.type !== 'volume')) throw new Error('这一段还不能让编辑部拆')
+        return post<SplitResult>(`/books/${bookId}/outline/split`, { target_type: ref.type, target_id: ref.id, request, current: current ?? null })
+      },
+      acceptSplit: async (node, drafts, plan) => {
+        const ref = node.ref
+        if (!ref) throw new Error('这一段还不能让编辑部拆')
+        const body = { target_type: ref.type, target_id: ref.id }
+        const reply = await done(post<{ undo: Record<string, unknown> }>(`/books/${bookId}/outline/split/accept`, { ...body, drafts, plan: plan ?? null }))
+        return async () => { await done(post(`/books/${bookId}/outline/split/undo`, { ...body, undo: reply.undo })) }
       },
       // 开写了的章、卷、单元不写；章纲只有还没开写的能写
       canWrite: (node) => !!node.ref && (node.kind === '章' ? node.progress === '已规划' : !node.progress || node.progress === '已规划'),

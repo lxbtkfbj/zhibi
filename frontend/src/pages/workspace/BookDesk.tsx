@@ -1,11 +1,11 @@
-/** 新书页：接真书。编辑部浮窗里先放现有的聊天，拍板、正文这些还没搬过来的先去旧版。 */
+/** 新书页：接真书。编辑部浮窗里先放现有的聊天；开写、正文、拍板在新书页上，待处理、历史版本还在旧版。 */
 
 import { useIsMutating } from '@tanstack/react-query'
 import { Settings } from 'lucide-react'
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useBook, useJobActions, useOutline } from '../../api/hooks'
-import type { BookDetail, ChatViewing, Conversation } from '../../api/types'
+import type { BookDetail, ChatViewing, Conversation, LiveDraft, MeetingMessage } from '../../api/types'
 import { EmptyState } from '../../components/ui'
 import type { ChatQuote } from '../../lib/chat'
 import { useMeeting } from '../../lib/useMeeting'
@@ -15,10 +15,11 @@ import { segmentReviewKey } from '../../lib/outlineWriting'
 import { BookContext, type BookContextValue, type PitchChoice } from '../book/context'
 import { ConversationPanel } from '../book/ConversationPanel'
 import { useLiveBook } from './liveActions'
+import { useLiveWriting } from './liveWriting'
 import { InboxButton, Workspace } from './Workspace'
 
 /** 现有聊天要的那一套状态：和旧版书页一样，只是不跟着编辑部跳页面。 */
-function useEditorial(bookId: string, book: BookDetail, onOpen: () => void): { ctx: BookContextValue; unread: number } {
+function useEditorial(bookId: string, book: BookDetail, onOpen: () => void): { ctx: BookContextValue; unread: number; messages: MeetingMessage[]; draft: LiveDraft | null } {
   const navigate = useNavigate()
   const { messages, connected, draft, typing: chatTyping } = useMeeting(bookId)
   const { data: outline } = useOutline(bookId)
@@ -71,13 +72,13 @@ function useEditorial(bookId: string, book: BookDetail, onOpen: () => void): { c
       },
     },
   }
-  return { ctx, unread: Object.values(unread).reduce((sum, n) => sum + n, 0) }
+  return { ctx, unread: Object.values(unread).reduce((sum, n) => sum + n, 0), messages, draft }
 }
 
-/** 编辑部在干活或在等拍板：新书页还改不了，说一声。 */
+/** 开书这类还没搬到新书页的活在干、在等拍板：说一声，指去旧版。写书的活顶栏下面有写作条，不用这一条。 */
 function JobNotice({ book }: { book: BookDetail }) {
   const job = book.active_job
-  if (!job || !['queued', 'running', 'waiting_author', 'failed'].includes(job.status)) return null
+  if (!job || ['write_book', 'rewrite_chapter'].includes(job.kind) || !['queued', 'running', 'waiting_author', 'failed'].includes(job.status)) return null
   const text = job.status === 'waiting_author'
     ? '编辑部在等你拍板。新书页还没有拍板的地方，先去旧版处理；处理完之前这里改不了。'
     : job.status === 'failed'
@@ -95,7 +96,8 @@ function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
   const { book, actions, loading, error, raw } = useLiveBook(bookId)
   const [openChat, setOpenChat] = useState(0)
   const onOpen = useCallback(() => setOpenChat((n) => n + 1), [])
-  const { ctx, unread } = useEditorial(bookId, detail, onOpen)
+  const { ctx, unread, messages, draft } = useEditorial(bookId, detail, onOpen)
+  const writing = useLiveWriting({ bookId, detail, parts: raw, messages, draft })
   const openRef = useRef<((type: string, id: string) => void) | null>(null)
   const viewingRef = useRef<(() => ChatViewing | null) | null>(null)
   const context = useMemo(() => ({
@@ -123,8 +125,7 @@ function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
     <BookContext.Provider value={context}>
       <Workspace book={book} actions={actions} right={right} notice={<JobNotice book={detail} />} openRef={openRef} viewingRef={viewingRef}
         chat={<div className="@container/chat flex min-h-0 flex-1 bg-pane-mid"><ConversationPanel /></div>}
-        chatBadge={unread} openChat={openChat}
-        manuscriptHref={raw?.chapters.length ? `/books/${bookId}/chapters` : undefined} />
+        chatBadge={unread} openChat={openChat} writing={writing} />
     </BookContext.Provider>
   )
 }

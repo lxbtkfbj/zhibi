@@ -18,7 +18,19 @@ from app.api.deps import SessionDep, ensure_idle, get_book
 from app.api.library_ai import call_model
 from app.library_config import BUILTIN_CATEGORIES, CHARACTER_CATEGORY, GOLDFINGER, LEGACY_ROLE_TYPES, ROLE_TYPES
 from app.models import Book, Chapter, Character, PlotUnit, SettingCategory, StoryNode, Volume, WorldEntry
-from app.schemas import ArcCreate, CardLayoutIn, ChapterCreate, DraftRequest, FillRequest, OutlineMove, OutlineRestoreIn, OutlineWriteIn
+from app.schemas import (
+    ArcCreate,
+    CardLayoutIn,
+    ChapterCreate,
+    DraftRequest,
+    FillRequest,
+    OutlineMove,
+    OutlineRestoreIn,
+    OutlineWriteIn,
+    SplitAcceptIn,
+    SplitIn,
+    SplitUndoIn,
+)
 from app.services import outline_structure
 from app.services.desk import (
     CHARACTER_COLUMNS,
@@ -33,6 +45,7 @@ from app.services.desk import (
 )
 from app.services.library import lock_book
 from app.services.library_context import load_context
+from app.services.outline_split import accept_split, draft_split, undo_split
 from app.services.outline_write import restore_outline_node, write_outline_node
 from app.services.requirements import active_requirements, requirement_text
 from app.services.versions import record_version, snapshot_of
@@ -251,7 +264,8 @@ async def create_chapter(unit_id: uuid.UUID, body: ChapterCreate, session: Async
     state = await outline_structure.load_structure(session, unit.book_id)
     unit = next(row for row in state.units if row.id == unit_id)
     volume = next(row for row in state.volumes if row.id == unit.volume_id)
-    if unit.status == "done" or volume.status == "done":
+    # 卷写完以后新加的单元还能加章：接着写时这一卷会重新打开
+    if unit.status == "done":
         raise HTTPException(409, "这个单元已经写完了，不能再加章")
     own = state.own_chapters(unit)
     if len(own) >= 50:
@@ -444,6 +458,29 @@ async def restore_outline(
 ) -> dict:
     """群聊里点「撤销」：把编辑部帮写之前的那一段存回去。"""
     await restore_outline_node(session, book, body.target_type, body.target_id, body.before)
+    return {"ok": True}
+
+
+@router.post("/books/{book_id}/outline/split")
+async def split_outline(body: SplitIn, book: Book = Depends(get_book), session: AsyncSession = SessionDep) -> dict:
+    """编辑部帮拆：单元出章纲、卷拆成单元。只出一版给作者看，不存。"""
+    return await draft_split(session, book, body.target_type, body.target_id, body.request, body.current)
+
+
+@router.post("/books/{book_id}/outline/split/accept")
+async def accept_outline_split(
+    body: SplitAcceptIn, book: Book = Depends(get_book), session: AsyncSession = SessionDep
+) -> dict:
+    """收下帮拆的这一版：放进大纲，带回撤销用的记录。"""
+    return await accept_split(session, book, body.target_type, body.target_id, body.drafts, body.plan)
+
+
+@router.post("/books/{book_id}/outline/split/undo")
+async def undo_outline_split(
+    body: SplitUndoIn, book: Book = Depends(get_book), session: AsyncSession = SessionDep
+) -> dict:
+    """撤销刚收下的那一版：换回原来的样子。"""
+    await undo_split(session, book, body.target_type, body.target_id, body.undo)
     return {"ok": True}
 
 

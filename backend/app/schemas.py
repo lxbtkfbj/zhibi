@@ -435,6 +435,16 @@ class ChapterOut(ChapterBrief):
     review: dict
     materials: dict = {}
     updated_at: datetime
+    # 设定师记下的变化：原样不给前端，给的是下面整理好的一行行
+    bible_changes: dict | None = Field(default=None, exclude=True)
+
+    @computed_field
+    @property
+    def changes(self) -> list[str]:
+        """这一章写完设定师记下的变化（新书页正文末尾那一块）。"""
+        from app.services.writing_store import changes_text
+
+        return changes_text(self.bible_changes)
 
 
 class ChapterOutlineIn(BaseModel):
@@ -478,6 +488,32 @@ class OutlineRestoreIn(BaseModel):
     before: dict
 
 
+class SplitIn(BaseModel):
+    """编辑部帮拆：单元出章纲、卷拆成单元。只出一版给作者看，不存。current 是上一版（再出一版时带上）。"""
+
+    target_type: Literal["unit", "volume"]
+    target_id: str = Field(max_length=64)
+    request: str = Field(default="", max_length=1000)
+    current: list[dict] | None = Field(default=None, max_length=60)
+
+
+class SplitAcceptIn(BaseModel):
+    """收下帮拆的这一版：drafts 是作者改过、删过以后留下的那几条（带着模型原来给的全部字段）；拆卷时 plan 是整份卷纲。"""
+
+    target_type: Literal["unit", "volume"]
+    target_id: str = Field(max_length=64)
+    drafts: list[dict] = Field(min_length=1, max_length=60)
+    plan: dict | None = None
+
+
+class SplitUndoIn(BaseModel):
+    """撤销刚收下的那一版：undo 是收下时带回来的。"""
+
+    target_type: Literal["unit", "volume"]
+    target_id: str = Field(max_length=64)
+    undo: dict
+
+
 class FillRequest(BaseModel):
     """让编辑部把一条设定空着的栏目补上。"""
 
@@ -510,8 +546,8 @@ class RewriteRequest(BaseModel):
 
 
 class WriteRequest(BaseModel):
-    # count：写够 count 章；volume：写完当前这一卷；book：一直写到完本（中间遇到卷纲拍板会停下等你）
-    until: Literal["count", "volume", "book"] = "count"
+    # count：写够 count 章；unit：写完眼下这个单元；volume：写完当前这一卷；book：一直写到完本（中间遇到卷纲拍板会停下等你）
+    until: Literal["count", "unit", "volume", "book"] = "count"
     count: int = Field(3, ge=1, le=500)
 
 

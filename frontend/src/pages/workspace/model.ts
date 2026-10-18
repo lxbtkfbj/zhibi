@@ -137,6 +137,8 @@ export interface VGate {
   issues?: string[]
   /** 主编正在按作者的意见改 */
   revising?: boolean
+  /** 还没放进大纲的那一版（下一篇怎么走）：直接摆在卡片里看 */
+  detail?: { title?: string; text?: string; items?: string[] }
 }
 
 export interface VWriting {

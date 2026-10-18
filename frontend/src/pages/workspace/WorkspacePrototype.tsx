@@ -120,11 +120,11 @@ function PrototypeDesk({ book: initial, switcher, source }: { book: VBook; switc
   const openRef = useRef<((type: string, id: string) => void) | null>(null)
   // 书架上的真书：点开一章才去读正文；快照的正文已经在书里
   const live = source.startsWith('live:') ? source.slice(5) : ''
-  const loadText = useCallback(async (node: VNode) => {
-    if (!live || !node.ref) return ''
-    return (await get<Chapter>(`/books/${live}/chapters/${node.ref.id}`)).content
+  const loadChapter = useCallback(async (node: VNode) => {
+    if (!live || !node.ref) return { text: '' }
+    return { text: (await get<Chapter>(`/books/${live}/chapters/${node.ref.id}`)).content }
   }, [live])
-  const writing = useMemo(() => (live ? { ...sim, loadText } : sim), [sim, live, loadText])
+  const writing = useMemo(() => (live ? { ...sim, loadChapter } : sim), [sim, live, loadChapter])
   const right = (
     <>
       <div className="mr-3">{switcher}</div>

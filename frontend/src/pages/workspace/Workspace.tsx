@@ -1996,7 +1996,7 @@ export function Workspace({ book: base, actions, right, chat, chatBadge, openCha
           )}
           {tab === '正文' && writing && (
             <ManuscriptDirectory book={book} selected={chapter} onSelect={nav.openChapter} writing={writing}
-              onExport={() => setToast('原型：会把写好的章按卷、按章导出成一个 TXT 文件')} />
+              onExport={() => (live ? window.open(`/api/books/${base.id}/export.txt`, '_blank') : setToast('原型：会把写好的章按卷、按章导出成一个 TXT 文件'))} />
           )}
           <main ref={pageRef} className="scroll-thin min-w-0 flex-1 overflow-y-auto">
             {tab === '简介' && <BlurbPage book={book} />}

@@ -18,6 +18,9 @@ const IDLE: SplitState = { step: 'idle', request: '', round: 0, drafts: [], erro
 /** 出好的草稿先记在这里：去别的页再回来还在 */
 const memory = new Map<string, SplitState>()
 
+/** 交给后台的一条：去掉页面上才有的「不要了」 */
+const plain = (d: Draft): SplitDraft => ({ name: d.name, text: d.text, sections: d.sections, chapters: d.chapters, raw: d.raw })
+
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
 /** 这一页能不能让编辑部帮拆：单元出章纲（写好的章不动，只换没写的）；卷还没有单元时拆成单元（已经有单元的卷不整个重拆）。 */
@@ -36,16 +39,16 @@ export function useSplit(node: VNode) {
   })
   const label = splitLabel(node)
   const available = !!label && !!actions.splitNode && !!actions.acceptSplit
-  const run = (request: string, round: number) => {
+  const run = (request: string, round: number, current?: SplitDraft[]) => {
     update({ step: 'working', error: '', request })
-    actions.splitNode!(node, request, round)
+    actions.splitNode!(node, request, round, current)
       .then((result) => update({ step: 'review', result, round, drafts: result.drafts.map((d) => ({ ...d })), request: '' }))
       .catch((error: unknown) => update((s) => ({ ...s, step: s.result ? 'review' : 'ask', error: errorText(error) })))
   }
   const accept = () => {
-    const kept = state.drafts.filter((d) => !d.dropped).map((d): SplitDraft => ({ name: d.name, text: d.text, sections: d.sections, chapters: d.chapters }))
+    const kept = state.drafts.filter((d) => !d.dropped).map(plain)
     if (!kept.length) return
-    actions.acceptSplit!(node, kept)
+    actions.acceptSplit!(node, kept, state.result?.plan)
       .then((undo) => {
         memory.delete(node.id)
         setState(IDLE)
@@ -59,7 +62,7 @@ export function useSplit(node: VNode) {
     close: () => { memory.delete(node.id); setState(IDLE) },
     setRequest: (request: string) => update({ request }),
     start: () => run(state.request, 1),
-    again: (request: string) => run(request, state.round + 1),
+    again: (request: string) => run(request, state.round + 1, state.drafts.filter((d) => !d.dropped).map(plain)),
     edit: (index: number, change: Partial<Draft>) => update((s) => ({ ...s, drafts: s.drafts.map((d, i) => (i === index ? { ...d, ...change } : d)) })),
     accept,
   }

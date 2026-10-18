@@ -43,10 +43,20 @@ export interface SplitDraft {
   sections?: Record<string, string>
   /** 单元几章，0 是还没定 */
   chapters?: number
+  /** 模型原来给的全部字段：收下时带回去，作者改过的名字和几栏写回去 */
+  raw?: Record<string, unknown>
 }
 
 /** 编辑部帮拆的一版：还没放进大纲。first 是第一章的章号；keeps、replaces 是收下以后不动的、会被换掉的（章的名字）。 */
-export interface SplitResult { drafts: SplitDraft[]; note: string; first?: number; keeps: string[]; replaces: string[] }
+export interface SplitResult {
+  drafts: SplitDraft[]
+  note: string
+  first?: number
+  keeps: string[]
+  replaces: string[]
+  /** 拆卷时整份卷纲里单元以外的部分（这一卷想做成什么、新埋的伏笔……），收下时一起带回去 */
+  plan?: Record<string, unknown>
+}
 
 export interface BookChange {
   title?: string
@@ -101,10 +111,10 @@ export interface WorkspaceActions {
   writeNode?(node: VNode, request: string): Promise<{ note: string; before: NodeChange }>
   /** 这一段能不能让编辑部写：开写了的不行 */
   canWrite?(node: VNode): boolean
-  /** 编辑部帮拆：单元出章纲、卷拆成单元。只出一版给作者看，不存；round 是第几版 */
-  splitNode?(node: VNode, request: string, round: number): Promise<SplitResult>
+  /** 编辑部帮拆：单元出章纲、卷拆成单元。只出一版给作者看，不存；round 是第几版，current 是上一版（再出一版时） */
+  splitNode?(node: VNode, request: string, round: number, current?: SplitDraft[]): Promise<SplitResult>
   /** 收下帮拆的这一版：放进大纲，带回撤销的办法 */
-  acceptSplit?(node: VNode, drafts: SplitDraft[]): Promise<() => Promise<void>>
+  acceptSplit?(node: VNode, drafts: SplitDraft[], plan?: Record<string, unknown>): Promise<() => Promise<void>>
 }
 
 /** 大纲上一段要改的地方。sections 是章纲那几栏，键是栏目名（发生什么、看点、结尾钩子）；chapters 是章数，0 是还没定 */

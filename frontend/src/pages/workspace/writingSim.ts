@@ -224,18 +224,18 @@ export function useWritingSim(book: VBook, setBook: Dispatch<SetStateAction<VBoo
     }
     return {
       status, gates, trialDone, blocked,
-      setGate: (key, on) => {
+      setGate: async (key, on) => {
         setGates((g) => ({ ...g, [key]: on }))
         return on ? '好，写到那里会停下来请你看' : '好，写到那里编辑部自己定，不停下来'
       },
-      start: (plan) => {
+      start: async (plan) => {
         if (blocked) return
         round.current = { plan, wrote: [] }
         stopping.current = false
         setStatus({ state: 'working', who: '主编', doing: '主编在排这一轮写哪几章' })
         kick()
       },
-      stop: () => {
+      stop: async () => {
         if (status.state === 'working') {
           stopping.current = true
           setStatus((s) => ({ ...s, stopping: true }))
@@ -245,14 +245,14 @@ export function useWritingSim(book: VBook, setBook: Dispatch<SetStateAction<VBoo
         setStatus({ state: 'stopped', note: '停下了，写好的都留着。' })
         return '停下了'
       },
-      resume: () => {
+      resume: async () => {
         round.current ??= { plan: '3', wrote: [] }
         setStatus({ state: 'working', who: '主编', doing: '主编在接着排' })
         kick()
       },
-      approve: () => {
+      approve: async () => {
         const gate = status.gate
-        if (!gate) return undefined
+        if (!gate) return
         if (gate.kind === 'trial') {
           setTrialDone(true)
           trialRef.current = true
@@ -271,9 +271,9 @@ export function useWritingSim(book: VBook, setBook: Dispatch<SetStateAction<VBoo
         kick()
         return gate.kind === 'trial' ? '好，接着写' : '好，开写'
       },
-      revise: (text) => {
+      revise: async (text) => {
         const gate = status.gate
-        if (!gate || !text.trim()) return undefined
+        if (!gate || !text.trim()) return
         if (gate.kind === 'trial') {
           setTrialDone(true)
           trialRef.current = true
@@ -284,7 +284,7 @@ export function useWritingSim(book: VBook, setBook: Dispatch<SetStateAction<VBoo
         }
         if (gate.kind === 'stuck') {
           const node = findNode(bookRef.current.outline, gate.node)?.at(-1)
-          if (!node) return undefined
+          if (!node) return
           const token = ++run.current
           void writeChapter(node, token, true).then((ok) => {
             if (!ok) return
@@ -301,8 +301,9 @@ export function useWritingSim(book: VBook, setBook: Dispatch<SetStateAction<VBoo
         })
         return '好，主编在改'
       },
-      rewrite: (node, request) => {
-        if (blocked || !SAMPLE_TEXTS[textKey(node)] || !request.trim()) return undefined
+      rewrite: async (node, request) => {
+        if (blocked) throw new Error(blocked)
+        if (!SAMPLE_TEXTS[textKey(node)] || !request.trim()) throw new Error('原型里只有前 5 章能演示重写')
         const before = node.body?.text ?? ''
         const token = ++run.current
         round.current = null
@@ -311,7 +312,8 @@ export function useWritingSim(book: VBook, setBook: Dispatch<SetStateAction<VBoo
         })
         return before
       },
-      setText: (node, text) => setBody(node.id, { text, words: countWords(text) }),
+      setText: async (node, text) => setBody(node.id, { text, words: countWords(text) }),
+      redigest: async () => '原型：设定师会照你改过的正文，重新记这一章让人物、设定变了什么',
       dismiss: () => setStatus({ state: 'idle' }),
       demo: (kind) => {
         reset()

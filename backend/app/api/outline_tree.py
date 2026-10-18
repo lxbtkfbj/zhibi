@@ -33,7 +33,8 @@ async def outline_tree(book: Book = Depends(get_book), session: AsyncSession = S
         )
         # 与前端一致：done 不能掩盖重写中的草稿；已拆单元以单元章数为准。
         if all(chapter.status == "final" for chapter in own) and (
-            volume.status == "done" or (planned > 0 and len(own) >= planned)
+            (volume.status == "done" and all(unit.status == "done" for unit in by_volume[volume.id]))
+            or (planned > 0 and len(own) >= planned)
         ):
             return "done"
         if any(chapter.status in {"final", "drafting"} for chapter in own):

@@ -1,30 +1,36 @@
 /** 写作：开写、停下、拍板这些事，界面只认这一套；原型用 writingSim 演示，真书以后接后台的写作任务。 */
 
-import { chapterNodes, findNode, splitTitle, type VGate, type VNode, type VWriting, type WritePlan, type WritingGates } from './model'
+import { chapterNodes, findNode, splitTitle, type VChapterBody, type VGate, type VNode, type VWriting, type WritePlan, type WritingGates } from './model'
 
+/** 读一章：正文、审稿、设定师记下的变化 */
+export interface ChapterDetail { text: string; review?: VChapterBody['review']; changes?: string[] }
+
+/** 写作的这几个动作都要等后台：做完带回一句话（页面底下说一声），出错就报错 */
 export interface WritingControl {
   status: VWriting
   /** 写的时候停在哪几处请作者看 */
   gates: WritingGates
-  setGate(key: keyof WritingGates, on: boolean): string
+  setGate(key: keyof WritingGates, on: boolean): Promise<string | void>
   /** 前 3 章试读过了没有 */
   trialDone: boolean
   /** 开不了写时说为什么 */
   blocked?: string
-  start(plan: WritePlan): void
+  start(plan: WritePlan): Promise<string | void>
   /** 等手上这一章写完再停 */
-  stop(): string
-  resume(): void
+  stop(): Promise<string | void>
+  resume(): Promise<string | void>
   /** 拍板：就这样 */
-  approve(): string | undefined
+  approve(): Promise<string | void>
   /** 拍板：说哪里不对（试读、卡住时是给写手的话） */
-  revise(text: string): string | undefined
-  /** 按作者的意见重写一章，带回原来的正文（撤销用） */
-  rewrite(node: VNode, request: string): string | undefined
-  /** 撤销重写、作者改正文：把这一章的正文换成这些字 */
-  setText(node: VNode, text: string): void
-  /** 真书、快照：点开一章才去读正文 */
-  loadText?(node: VNode): Promise<string>
+  revise(text: string): Promise<string | void>
+  /** 按作者的意见重写一章：带回原来的正文（能换回去）；交给编辑部去写的带回 null */
+  rewrite(node: VNode, request: string): Promise<string | null>
+  /** 作者改正文、换回原来的：把这一章的正文换成这些字 */
+  setText(node: VNode, text: string): Promise<void>
+  /** 真书、快照：点开一章才去读正文、审稿、设定的变化 */
+  loadChapter?(node: VNode): Promise<ChapterDetail>
+  /** 作者改了正文以后，让设定师照改过的重新记这一章的变化（还没接后台的不给） */
+  redigest?(node: VNode): Promise<string | void>
   /** 写完一轮、停下后收起写作条 */
   dismiss(): void
 }
@@ -71,12 +77,17 @@ export function upcomingSteps(root: VNode, gates: WritingGates, trialDone: boole
   const stop = (on: boolean) => (on ? '，停下来请你看' : '')
   const steps: string[] = []
   if (!next) {
-    const parts = (root.children ?? []).filter((n) => n.kind === '篇')
-    const firstVolume = findFirst(root, '卷')
-    if (!firstVolume) steps.push(`主编照${parts[0] ? quoted(parts[0]) : '第一篇'}那段话，把它分成几卷`)
-    steps.push(`把${firstVolume ? quoted(firstVolume) : '第一卷'}拆成几个单元，写出卷纲${stop(gates.volume)}`)
-    steps.push(`给第一个单元出章纲${stop(gates.chapters)}`)
-    steps.push('写手从第 1 章写起，一章一章往下写')
+    // 排好的章都写完了（或者还一章没排）：从大纲里第一处还空着的地方往下拆
+    const empty = firstEmpty(root)
+    if (empty?.kind === '单元') {
+      steps.push(`给${quoted(empty)}出章纲${stop(gates.chapters)}`)
+    } else {
+      const parts = (root.children ?? []).filter((n) => n.kind === '篇')
+      if (empty?.kind !== '卷') steps.push(`主编照${empty?.kind === '篇' ? quoted(empty) : parts[0] ? quoted(parts[0]) : '第一篇'}那段话，把它分成几卷`)
+      steps.push(`把${empty?.kind === '卷' ? quoted(empty) : done ? '下一卷' : '第一卷'}拆成几个单元，写出卷纲${stop(gates.volume)}`)
+      steps.push(`给第一个单元出章纲${stop(gates.chapters)}`)
+    }
+    steps.push(done ? `写手从第 ${done + 1} 章接着写，一章一章往下写` : '写手从第 1 章写起，一章一章往下写')
   } else {
     steps.push(`写手从${chapterLabel(next)}${done ? '接着' : '开始'}写，一章一章往下写`)
   }
@@ -88,10 +99,11 @@ export function upcomingSteps(root: VNode, gates: WritingGates, trialDone: boole
   return steps
 }
 
-function findFirst(node: VNode, kind: VNode['kind']): VNode | undefined {
-  if (node.kind === kind) return node
+/** 按顺序第一处还没往下拆的篇、卷、单元 */
+function firstEmpty(node: VNode): VNode | undefined {
+  if (node.kind !== '全书' && node.kind !== '章' && !node.children?.length) return node
   for (const child of node.children ?? []) {
-    const found = findFirst(child, kind)
+    const found = firstEmpty(child)
     if (found) return found
   }
   return undefined
