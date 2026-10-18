@@ -5,6 +5,7 @@ import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom'
 import { SiteLayout } from './components/Layout'
 // 自带思源宋体：Windows 上没装的话会退回又细又飘的老宋体。只下载页面上用到的字
 import '@fontsource/noto-serif-sc/400.css'
+import '@fontsource/noto-serif-sc/500.css'
 import '@fontsource/noto-serif-sc/700.css'
 import './index.css'
 import { BookLayout } from './pages/book/BookLayout'

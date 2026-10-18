@@ -124,6 +124,24 @@
   font-size: var(--reading-size);
   line-height: var(--reading-leading);
 }
+/* 正文那一页：字跟着屏幕放大（外观里的正文字号是起点，大屏最多再大 6px），页宽跟着字走，一行四十字上下。 */
+.chapter-sheet {
+  font-size: clamp(calc(var(--reading-size) + 1px), calc(var(--reading-size) - 4px + 0.35vw), calc(var(--reading-size) + 6px));
+}
+/* 正文：像书一样，一段一块，首行空两格，两端对齐，段与段之间留一点空，最后一行不单吊一个字；笔画用中等粗细，屏幕上不发灰。 */
+.chapter-prose {
+  font-family: var(--reading-font);
+  font-weight: 500;
+  line-height: calc(var(--reading-leading) * 0.92);
+  color: var(--color-ink);
+}
+.chapter-prose > * {
+  margin-bottom: 0.45em;
+  text-indent: 2em;
+  text-align: justify;
+  text-wrap: pretty;
+}
+.chapter-prose > *:last-child { margin-bottom: 0; }
 .chat-text { font-size: calc(15px * var(--ui-scale)); }
 html { font-size: calc(16px * var(--ui-scale)); }
 [data-reduced-motion="true"] *, [data-reduced-motion="true"] *::before, [data-reduced-motion="true"] *::after {

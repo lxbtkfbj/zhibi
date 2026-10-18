@@ -4,8 +4,8 @@ import clsx from 'clsx'
 import { ChevronDown, ChevronLeft, ChevronRight, PenLine, Sparkles } from 'lucide-react'
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useSave, useWorkspace } from './actions'
-import { chapterNodes, countWords, findEntry, findNode, splitTitle, type VBook, type VGate, type VNode, type WritePlan, type WritingGates } from './model'
-import { CardMenu, Crumb, DirectoryShell, Editable, LinkChip, Sheet } from './widgets'
+import { chapterNodes, cn, countWords, findEntry, findNode, splitTitle, type VBook, type VGate, type VNode, type WritePlan, type WritingGates } from './model'
+import { CardMenu, DirectoryShell, Editable, LinkChip, Sheet } from './widgets'
 import { rowSelected, smallButton, titleClass } from './styles'
 import { GATE_LABELS, type WritingControl, chapterLabel, gateTarget, placeOf, readyToWrite, upcomingSteps, writePlans } from './writing'
 
@@ -321,8 +321,11 @@ export function ManuscriptHome({ book, writing, nav }: { book: VBook; writing: W
 
 /* ---------------- 一章 ---------------- */
 
-/** 正文排版：像书一样，一段一块，首行空两格、两端对齐、段与段之间留一点空，最后一行不单吊一个字；字比别处大一号。 */
-const proseClass = 'reading-prose text-[calc(var(--reading-size)+2px)] text-ink [&>*]:mb-[0.6em] [&>*]:indent-[2em] [&>*]:text-justify [&>*]:text-pretty [&>*:last-child]:mb-0'
+/** 「第3章」写成「第三章」，放在标题上面 */
+function chapterNumber(prefix: string): string {
+  const n = Number(/第(\d+)章/.exec(prefix)?.[1])
+  return n ? `第${cn(n)}章` : prefix
+}
 
 const paragraphsOf = (text: string) => text.split('\n').map((p) => p.replace(/^[\s　]+/, '').trim()).filter(Boolean)
 const escapeHtml = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -360,7 +363,7 @@ function ChapterText({ text, onSave, readOnly, spot }: { text: string; onSave?: 
           onSave(value)
         }
       }}
-      className={clsx(proseClass, 'outline-none')} />
+      className="chapter-prose outline-none" />
   )
 }
 
@@ -368,7 +371,7 @@ function ChapterText({ text, onSave, readOnly, spot }: { text: string; onSave?: 
 function LiveText({ text }: { text: string }) {
   const paragraphs = paragraphsOf(text)
   return (
-    <div aria-live="polite" className={proseClass}>
+    <div aria-live="polite" className="chapter-prose">
       {paragraphs.length ? paragraphs.map((p, i) => (
         <p key={i}><span className={clsx(i === paragraphs.length - 1 && 'caret')}>{p}</span></p>
       )) : <p className="caret" />}
@@ -461,27 +464,28 @@ export function ChapterPage({ book, id, writing, nav }: { book: VBook; id: strin
   const cast = node.uses.map((entryId) => findEntry(book, entryId)).filter((e) => !!e)
 
   return (
-    <Sheet narrow>
+    <div className="mx-auto w-full px-8 py-10 2xl:py-14">
+      <article className="chapter-sheet group/card relative mx-auto max-w-[45em] rounded-xl border border-line bg-manuscript px-[2.6em] pt-[2.4em] pb-[2em] shadow-[var(--shadow-paper)]">
       {menu.length > 0 && <CardMenu items={menu} />}
-      <Crumb items={['正文', ...[volume, unit].filter(Boolean).map((n) => n!.title.replace('　', ' '))]} />
-      <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 pr-8">
-        <span className={clsx(titleClass, 'shrink-0')}>{prefix}</span>
-        <Editable value={name} placeholder="给这一章起个名字" className={clsx(titleClass, 'min-w-24')}
+      <header className="text-center">
+        {(volume || unit) && <p className="text-[13px] tracking-[0.2em] text-ink-3">{[volume, unit].filter(Boolean).map((n) => n!.title.replace('　', ' ')).join(' · ')}</p>}
+        <p className="mt-[1.6em] font-serif text-[0.85em] tracking-[0.5em] text-ink-3">{chapterNumber(prefix)}</p>
+        <Editable value={name} placeholder="给这一章起个名字" className="mx-auto mt-[0.3em] w-fit min-w-40 font-serif text-[1.75em] leading-snug font-bold text-ink"
           onSave={(value) => { if (value.trim()) save(actions.saveNode(node, { name: value.trim() })) }} />
-      </div>
-      <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-[14px] text-ink-3">
-        <span className={clsx(live !== undefined && 'text-writer')}>{meta}</span>
-        {!!body?.attempts && <span>审稿退回重写过 {body.attempts} 次</span>}
-        <button type="button" onClick={() => nav.openNode(id)} className="text-chief hover:underline">去大纲看章纲</button>
-      </div>
-      {previous !== undefined && status === 'done' && s.state !== 'working' && (
-        <p className="mt-3 text-[13px] text-ink-3">
-          这是照你的意见重写的一版。
-          <button type="button" className="ml-2 text-chief hover:underline" onClick={() => { writing.setText(node, previous); setPrevious(undefined); nav.toast('换回了原来的') }}>换回原来的</button>
-        </p>
-      )}
+        <div className="mt-[0.9em] flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-[13px] text-ink-3">
+          <span className={clsx(live !== undefined && 'text-writer')}>{meta}</span>
+          {!!body?.attempts && <span>审稿退回重写过 {body.attempts} 次</span>}
+          <button type="button" onClick={() => nav.openNode(id)} className="text-chief hover:underline">去大纲看章纲</button>
+        </div>
+        {previous !== undefined && status === 'done' && s.state !== 'working' && (
+          <p className="mt-2 text-[13px] text-ink-3">
+            这是照你的意见重写的一版。
+            <button type="button" className="ml-2 text-chief hover:underline" onClick={() => { writing.setText(node, previous); setPrevious(undefined); nav.toast('换回了原来的') }}>换回原来的</button>
+          </p>
+        )}
+      </header>
 
-      <div className="mt-8 border-t border-line pt-9">
+      <div className="mt-[2.2em]">
         {gate && <GateCard gate={gate} writing={writing} nav={nav} where={gate.kind === 'trial' ? `这是第 ${at + 1} 章` : undefined} />}
         {rewriting && (
           <RewritePanel node={node} later={later} onCancel={() => setRewriting(false)}
@@ -545,6 +549,7 @@ export function ChapterPage({ book, id, writing, nav }: { book: VBook; id: strin
         {prev ? <button type="button" onClick={() => nav.openChapter(prev.id)} className="flex items-center gap-1 hover:text-seal"><ChevronLeft className="size-4" />{prev.title.replace('　', ' ')}</button> : <span />}
         {next ? <button type="button" onClick={() => nav.openChapter(next.id)} className="flex items-center gap-1 hover:text-seal">{next.title.replace('　', ' ')}<ChevronRight className="size-4" /></button> : <span />}
       </nav>
-    </Sheet>
+      </article>
+    </div>
   )
 }
