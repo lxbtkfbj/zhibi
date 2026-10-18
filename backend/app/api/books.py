@@ -317,6 +317,9 @@ async def create_unit(volume_id: uuid.UUID, body: UnitCreate, session: AsyncSess
         index=max((u.index for u in units), default=0) + 1,
         **body.model_dump(exclude={"after_unit_id"}),
     )
+    # 卷上定过章数、这是第一个单元：章数先给它，免得作者定的数一拆就没了
+    if not units and not unit.chapter_count and 0 < volume.chapter_count <= 50:
+        unit.chapter_count = volume.chapter_count
     ordered = _insert_after(units, unit, body.after_unit_id, "指定单元不属于这一卷")
     session.add(unit)
     await session.flush()

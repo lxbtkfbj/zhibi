@@ -101,6 +101,11 @@ async def assign_indices(session: AsyncSession, rows: list, numbers: list[int]) 
 async def resize_unit(session: AsyncSession, state: Structure, unit: PlotUnit, count: int) -> None:
     state.ensure_unwritten(unit, "这个单元已经开写了，不能改章数")
     own = state.own_chapters(unit)
+    if count == 0:
+        # 改回「还没定」：已有的章纲留着，有几章算几章
+        unit.chapter_count = 0
+        await session.flush()
+        return
     # 缩短只裁掉末尾的计划章纲；扩长保留原章纲，写到后面时补出缺少的章纲。
     for chapter in own[count:]:
         state.chapters.remove(chapter)
@@ -119,6 +124,10 @@ async def resize_target(session: AsyncSession, state: Structure, target: Volume 
         return
     state.ensure_unwritten(target, "这一卷已经开写了，不能改章数")
     units = state.own_units(target.id)
+    if count == 0:
+        # 卷改回「还没定」：拆了单元的按单元算，没拆的写到这里再定
+        target.chapter_count = sum(u.chapter_count for u in units)
+        return
     if units and count < len(units):
         raise HTTPException(422, "章数不能少于单元数，每个单元至少一章")
     plans = fit_chapter_counts([{"chapter_count": unit.chapter_count} for unit in units], count, minimum=1)

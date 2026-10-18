@@ -122,9 +122,9 @@ async def expand_volume(volume_id: uuid.UUID, session: AsyncSession = SessionDep
         result = await editorial.plan_volume(d.llm, blocks, {}, "", purpose="大纲·提前拆卷")
         plan = result.model_dump()
         volume = await session.get(Volume, volume_id)
-        units_plan = fit_chapter_counts(
-            (plan.get("units") or [])[: max(1, volume.chapter_count)], volume.chapter_count, minimum=1
-        )
+        units_plan = plan.get("units") or []
+        if volume.chapter_count > 0:
+            units_plan = fit_chapter_counts(units_plan[: volume.chapter_count], volume.chapter_count, minimum=1)
         units_plan = clean_reveals(units_plan, await setup_store.load_secrets(session, job.book_id))
         ledger = await setup_store.load_ledger(session, job.book_id)
         fresh = setup_store.assign_seqs(

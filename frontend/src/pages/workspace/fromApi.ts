@@ -116,11 +116,13 @@ function outlineNodes(tree: OutlineTree, chapters: ChapterBrief[], ending?: stri
   const volumes = (arcVolumes: OutlineTree['arcs'][number]['volumes']) =>
     arcVolumes.map((v): VNode => ({
       id: `v:${v.id}`, kind: '卷', title: `第${cn(v.index)}卷　${v.title}`, text: text(v.summary), locked: v.locked, uses: [], ref: { type: 'volume', id: v.id },
-      chapters: v.units.length ? v.units.reduce((sum, u) => sum + Math.max(0, u.chapter_count), 0) : v.chapter_count || undefined,
+      // 章数：拆了单元的按单元加起来；单元章数没定的按已有的章算
+      chapters: (v.units.length ? v.units.reduce((sum, u) => sum + Math.max(u.chapter_count, u.chapters.length), 0) : v.chapter_count) || undefined,
+      count: v.units.length ? undefined : v.chapter_count,
       later: v.status === 'later', progress: outlineStatusText(v.status),
       children: v.units.map((u): VNode => ({
         id: `u:${u.id}`, kind: '单元', title: `单元${cn(u.index)}　${u.title}`, text: text(u.summary), locked: u.locked, uses: [], ref: { type: 'unit', id: u.id },
-        chapters: u.chapter_count || undefined, progress: outlineStatusText(unitStatus(u)),
+        chapters: Math.max(u.chapter_count, u.chapters.length) || undefined, count: u.chapter_count, progress: outlineStatusText(unitStatus(u)),
         children: u.chapters.map((c) => chapterNode(c.index, c.title, c.status)),
       })),
     }))

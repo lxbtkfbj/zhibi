@@ -825,11 +825,11 @@ def _library_options(user: str) -> s.RewriteOptions:
     return s.RewriteOptions(options=options, note="三种写法都备好了，推荐先看最贴近原意的稳妥写法。")
 
 
-def _library_fill(user: str) -> s.FillEntry:
+def _library_fill(user: str) -> s.EntryFill:
     """补齐一条：要补的栏目逐栏填演示文字。"""
     labels = [label for label in _match(r"【要补的栏目】\n(.*?)\n", user).split("、") if label]
     values = [s.FieldValue(name=label, value=f"（演示）补上的{label}") for label in labels]
-    return s.FillEntry(values=values, note=f"（演示）补了 {len(values)} 栏。")
+    return s.EntryFill(values=values, note=f"（演示）补了 {len(values)} 栏。")
 
 
 def _library_draft(user: str) -> s.DraftSet:
@@ -1094,7 +1094,7 @@ async def respond(schema: type[BaseModel], system: str, user: str) -> BaseModel:
         ),
         s.GapReport: lambda: _library_gaps(user),
         s.DraftSet: lambda: _library_draft(user),
-        s.FillEntry: lambda: _library_fill(user),
+        s.EntryFill: lambda: _library_fill(user),
         s.LibraryReview: lambda: _library_review(user),
         s.LibraryIntent: lambda: _library_intent(user),
         s.ChatReply: lambda: _chat_reply(system, user),

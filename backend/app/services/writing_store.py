@@ -468,14 +468,15 @@ async def unit_next_chapter_index(session: AsyncSession, book_id: uuid.UUID, uni
     if not any(chapter.unit_id in later_ids for chapter in chapters):
         return await next_chapter_index(session, book_id)
     cursor = max((chapter.index for chapter in chapters if chapter.volume_id is None), default=0) + 1
+    # 和 outline_structure.chapter_positions 一样：章数没定或比已有的章少时，按已有的章算
     for volume in volumes:
         own_units = [row for row in units if row.volume_id == volume.id]
         if not own_units:
-            cursor += volume.chapter_count
+            cursor += max(volume.chapter_count, sum(1 for c in chapters if c.volume_id == volume.id))
         for row in own_units:
             if row.id == unit.id:
                 return cursor
-            cursor += row.chapter_count
+            cursor += max(row.chapter_count, sum(1 for c in chapters if c.unit_id == row.id))
     return cursor
 
 
@@ -485,7 +486,10 @@ async def create_chapters(
     """把章纲建成章节行（只有章纲、还没有正文），章号接着全书往后排。"""
     start = await unit_next_chapter_index(session, book_id, unit)
     existing = int(await session.scalar(select(func.count()).select_from(Chapter).where(Chapter.unit_id == unit.id)))
-    if existing + len(chapters) > unit.chapter_count:
+    if unit.chapter_count <= 0:
+        # 章数原来没定：编辑部这回出了几章，就是几章
+        unit.chapter_count = existing + len(chapters)
+    elif existing + len(chapters) > unit.chapter_count:
         raise ValueError("章纲数量超过作者已定的章数，原章数和章纲已保留")
     rows = []
     for offset, plan in enumerate(chapters):

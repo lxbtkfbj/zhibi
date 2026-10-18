@@ -281,7 +281,8 @@ class UnitPatch(BaseModel):
     title: str | None = None
     summary: str | None = None
     locked: bool | None = None
-    chapter_count: int | None = Field(None, ge=1, le=50)
+    # 0 表示还没定：有几章算几章，写到这里编辑部再按剧情定
+    chapter_count: int | None = Field(None, ge=0, le=50)
     goal: str | None = None
     conflict: str | None = None
     climax: str | None = None
@@ -310,7 +311,8 @@ class UnitPatch(BaseModel):
 class UnitCreate(BaseModel):
     title: str = Field(default="", max_length=200)
     summary: str = ""
-    chapter_count: int = Field(8, ge=1, le=50)
+    # 新建的单元章数先不定（0）：有几章算几章，写到这里编辑部再按剧情定
+    chapter_count: int = Field(0, ge=0, le=50)
     after_unit_id: uuid.UUID | None = None
 
 
@@ -321,7 +323,8 @@ class UnitOrder(BaseModel):
 class VolumeCreate(BaseModel):
     title: str = Field(default="", max_length=200)
     summary: str = ""
-    chapter_count: int = Field(60, ge=1, le=1000)
+    # 新建的卷章数先不定（0）：拆单元时编辑部按剧情定
+    chapter_count: int = Field(0, ge=0, le=1000)
     target_node_id: uuid.UUID | None = None
     after_volume_id: uuid.UUID | None = None
 
@@ -453,6 +456,9 @@ class ChapterPatch(BaseModel):
 class ChapterCreate(BaseModel):
     title: str = Field(default="", max_length=200)
     outline: ChapterOutlineIn = Field(default_factory=ChapterOutlineIn)
+    # 插在哪：这一章之前或之后（同一个单元里的章号）；都不给就接在单元最后
+    before_index: int | None = None
+    after_index: int | None = None
 
 
 class FillRequest(BaseModel):
@@ -466,6 +472,18 @@ class FillRequest(BaseModel):
 class ArcCreate(BaseModel):
     title: str = Field(default="", max_length=100)
     text: str = Field(default="", max_length=4000)
+    # 插在哪一篇前面或后面（节点编号）；都不给就接在已定的篇后面
+    before_node_id: uuid.UUID | None = None
+    after_node_id: uuid.UUID | None = None
+
+
+class OutlineMove(BaseModel):
+    """大纲里一个篇、卷、单元或章往前或往后挪一格。"""
+
+    kind: Literal["arc", "volume", "unit", "chapter"]
+    # 篇是节点编号，卷和单元是它们的编号，章是章号
+    id: str = Field(min_length=1, max_length=60)
+    direction: Literal["up", "down"]
 
 
 class RewriteRequest(BaseModel):

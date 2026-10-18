@@ -130,6 +130,8 @@ VARIABLE_LABELS = {
     "chapter_title": "章节标题",
     "chapter_words": "目标字数",
     "chapter_count": "章节数量",
+    "chapter_line": "这个单元几章、从第几章起",
+    "chapter_rule": "章数要求",
     "chapter_catalog": "章节目录",
     "chapters": "各章内容",
     "first_chapter": "起始章号",

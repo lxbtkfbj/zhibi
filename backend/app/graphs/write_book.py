@@ -1123,9 +1123,9 @@ async def save_volume_node(state: WriteState, runtime: Runtime[GraphDeps]) -> di
         volume = await session.get(Volume, uuid.UUID(state["volume_id"]))
         index = volume.index
         ledger = await setup_store.load_ledger(session, d.book_id)
-        units = fit_chapter_counts(
-            (plan.get("units") or [])[: max(1, volume.chapter_count)], volume.chapter_count, minimum=1
-        )
+        units = plan.get("units") or []
+        if volume.chapter_count > 0:
+            units = fit_chapter_counts(units[: volume.chapter_count], volume.chapter_count, minimum=1)
         units = clean_reveals(units, await setup_store.load_secrets(session, d.book_id))
         fresh = setup_store.assign_seqs(
             [
@@ -1284,13 +1284,15 @@ async def prepare_unit_chapters(state: WriteState, runtime: Runtime[GraphDeps], 
         )
         exists = len(existing)
         replaced = _revisable_chapters(existing) if replacing else []
-        if not replacing and exists and (unit.status != "planned" or exists >= unit.chapter_count):
+        # 章数还没定（0）的单元：有章纲就按已有的算；一章都没有，由编辑部按剧情定几章
+        undecided = unit.chapter_count <= 0 and not replacing
+        if not replacing and exists and (unit.status != "planned" or undecided or exists >= unit.chapter_count):
             return {"chapters_pending": True}  # 提交后检查点前中断，仍应进入同一拍板点
         volume = await session.get(Volume, unit.volume_id)
         book = await session.get(Book, d.book_id)
         first = replaced[0].index if replaced else await writing_store.unit_next_chapter_index(session, d.book_id, unit)
-        expected = unit.chapter_count - exists + len(replaced)
-        blocks = await chapter_plan_blocks(session, book, volume, unit, first, chapter_count=expected)
+        expected = None if undecided else unit.chapter_count - exists + len(replaced)
+        blocks = await chapter_plan_blocks(session, book, volume, unit, first, chapter_count=expected or 0)
         blocks["revision"] = state.get("chapters_revision", "")
         key = pick(book.concept, settings_of(book)["playbook"]).key
         history = list(
@@ -1312,8 +1314,10 @@ async def prepare_unit_chapters(state: WriteState, runtime: Runtime[GraphDeps], 
         result = await editorial.plan_chapters(d.llm, blocks)
         plans = [c.model_dump() for c in result.chapters if c.title.strip() or c.goal.strip()]
         issues = _chapter_plan_issues(plans, first, key, prior, ledger, secrets)
-        if len(plans) != expected:
+        if expected is not None and len(plans) != expected:
             issues.insert(0, f"这一单元需要出 {expected} 章章纲，现在是 {len(plans)} 章；必须照作者已定的章数重出。")
+        elif expected is None and not 1 <= len(plans) <= 30:
+            issues.insert(0, f"这一单元出了 {len(plans)} 章章纲；章数按剧情定，一般 5 到 15 章。")
         if not issues or attempt:
             break
         blocks["revision"] = format_revision(
@@ -1323,8 +1327,8 @@ async def prepare_unit_chapters(state: WriteState, runtime: Runtime[GraphDeps], 
         )
         await d.emit.status("chief", f"{label}章纲有 {len(issues)} 处问题，主编按检查结果重出一次…")
         await d.check_cancel()
-    if len(plans) != expected:
-        raise LLMError(f"章纲数量不符：需要 {expected} 章，主编给了 {len(plans)} 章。原章数和章纲已保留，请重试。")
+    if (expected is not None and len(plans) != expected) or not plans:
+        raise LLMError(f"章纲数量不符：需要 {expected or '若干'} 章，主编给了 {len(plans)} 章。原章数和章纲已保留，请重试。")
     if not persist:
         return {"plans": plans, "issues": issues, "remark": result.remark, "label": label}
     async with d.sessionmaker() as session:

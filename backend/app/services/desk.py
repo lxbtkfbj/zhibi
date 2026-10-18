@@ -178,7 +178,7 @@ async def fill_entry(
     await session.rollback()
     try:
         result = await asyncio.wait_for(
-            call_model(book_id, "lorekeeper", s.FillEntry, "library_fill_entry", **blocks), timeout=FILL_TIMEOUT
+            call_model(book_id, "lorekeeper", s.EntryFill, "library_fill_entry", **blocks), timeout=FILL_TIMEOUT
         )
     except TimeoutError as exc:
         raise HTTPException(504, "这次编辑部太慢了，两分半还没写完，没改。再试一次") from exc

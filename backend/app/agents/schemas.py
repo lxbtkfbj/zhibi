@@ -973,6 +973,6 @@ class DraftSet(Lenient):
     note: str = Field(default="", description="给作者的一两句话：这几条各自是什么思路")
 
 
-class FillEntry(Lenient):
+class EntryFill(Lenient):
     values: list[FieldValue] = Field(default_factory=list, description="只写【要补的栏目】里的那几栏，栏目名照抄")
     note: str = Field(default="", description="给作者的一句话：这次补了什么思路")

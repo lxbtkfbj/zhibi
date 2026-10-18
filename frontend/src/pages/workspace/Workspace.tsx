@@ -179,7 +179,11 @@ function Menu({ trigger, children, align = 'right', className }: { trigger: (ope
 const menuItem = 'block w-full rounded-lg px-3 py-2 text-left text-sm text-ink-2 hover:bg-subtle hover:text-ink'
 
 /** 卡片右上角的「⋯」：锁住、删掉。删要点两次。 */
-function CardMenu({ locked, onLock, onDelete, deleteLabel = '删掉这一条', onFill }: { locked?: boolean; onLock?: () => void; onDelete: () => void; deleteLabel?: string; onFill?: () => void }) {
+function CardMenu({ locked, onLock, onDelete, deleteLabel = '删掉这一条', onFill, items = [] }: {
+  locked?: boolean; onLock?: () => void; onDelete?: () => void; deleteLabel?: string; onFill?: () => void
+  /** 再多几项：大纲上的在前面插、在后面插、上移、下移 */
+  items?: { label: string; onClick: () => void }[]
+}) {
   const [sure, setSure] = useState(false)
   return (
     <div className="absolute top-5 right-5 z-10">
@@ -192,12 +196,15 @@ function CardMenu({ locked, onLock, onDelete, deleteLabel = '删掉这一条', o
       )}>
       {(close) => (
         <>
+          {items.map((item) => <button key={item.label} type="button" className={menuItem} onClick={() => { close(); item.onClick() }}>{item.label}</button>)}
           {onFill && <button type="button" className={menuItem} onClick={() => { close(); onFill() }}>让编辑部补齐空着的栏目</button>}
           {onLock && <button type="button" className={menuItem} onClick={() => { close(); onLock() }}>{locked ? '解锁，AI 可以改' : '锁住，AI 不改'}</button>}
-          <button type="button" className={clsx(menuItem, sure && 'text-seal hover:text-seal')}
-            onClick={() => { if (!sure) return setSure(true); close(); onDelete() }}>
-            {sure ? '再点一次，真删了' : deleteLabel}
-          </button>
+          {onDelete && (
+            <button type="button" className={clsx(menuItem, sure && 'text-seal hover:text-seal')}
+              onClick={() => { if (!sure) return setSure(true); close(); onDelete() }}>
+              {sure ? '再点一次，真删了' : deleteLabel}
+            </button>
+          )}
         </>
       )}
     </Menu>
@@ -1321,25 +1328,69 @@ function NodeTitle({ node, fresh }: { node: VNode; fresh: boolean }) {
   )
 }
 
-function OutlinePage({ book, outline, id, nav, onAdd, fresh }: { book: VBook; outline: VNode; id: string; nav: Nav; onAdd: (id: string) => void; fresh: boolean }) {
+/** 章数：单元和没拆单元的卷可以自己定，空着就是还没定（有几章算几章，写到这里编辑部按剧情定）。 */
+function CountField({ node }: { node: VNode }) {
+  const { actions } = useWorkspace()
+  const save = useSave()
+  const [editing, setEditing] = useState(false)
+  const [text, setText] = useState('')
+  const have = node.children?.length ?? 0
+  const range = node.range ? `第 ${node.range[0]}–${node.range[1]} 章` : ''
+  const commit = () => {
+    setEditing(false)
+    const value = text.trim() ? Math.max(0, Math.floor(Number(text))) : 0
+    if (!Number.isNaN(value) && value !== (node.count ?? 0)) save(actions.saveNode(node, { chapters: value }))
+  }
+  if (editing) {
+    return (
+      <span className="flex items-baseline gap-2">
+        <input autoFocus type="number" min={have} max={node.kind === '单元' ? 50 : 1000} value={text} onChange={(e) => setText(e.target.value)}
+          onBlur={commit} onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false) }}
+          placeholder="还没定" className="h-8 w-24 rounded-md border border-line-2 bg-card px-2 text-[15px] text-ink focus:border-ink-3 focus:outline-none" />
+        <span className="text-[13px] text-ink-3">章；空着就是还没定，写到这里编辑部按剧情定</span>
+      </span>
+    )
+  }
+  return (
+    <button type="button" onClick={() => { setText(node.count ? String(node.count) : ''); setEditing(true) }}
+      className="-mx-1.5 rounded-md px-1.5 text-[15px] text-ink transition-colors hover:bg-subtle" title="点一下自己定章数">
+      {node.count ? `${node.count} 章` : have ? `${have} 章（章数还没定，有几章算几章）` : '还没定'}
+      {range && <span className="ml-2 text-ink-3">{range}</span>}
+    </button>
+  )
+}
+
+function OutlinePage({ book, outline, id, nav, onAdd, onInsert, onMove, fresh }: {
+  book: VBook; outline: VNode; id: string; nav: Nav; onAdd: (id: string) => void
+  onInsert: (node: VNode, where: 'before' | 'after') => void; onMove: (node: VNode, direction: 'up' | 'down') => void; fresh: boolean
+}) {
   const { actions } = useWorkspace()
   const save = useSave()
   const path = findNode(outline, id) ?? [outline]
   const node = path[path.length - 1]
   const child = childKind(node)
   const canAdd = actions.canAdd(node)
-  const meta: { label: string; value: string }[] = []
+  const meta: { label: string; value: ReactNode }[] = []
+  const editableCount = node.count !== undefined && actions.canEdit(node, 'name') && (node.kind === '单元' || node.kind === '卷')
   // 章号已经在章的标题里，不再列章数
-  if (node.kind !== '章' && node.range) meta.push({ label: '章数', value: `${node.range[1] - node.range[0] + 1} 章 · 第 ${node.range[0]}–${node.range[1]} 章` })
-  else if (node.kind !== '章' && node.chapters) meta.push({ label: '章数', value: `${node.chapters} 章` })
+  if (editableCount) meta.push({ label: '章数', value: <CountField node={node} /> })
+  else if (node.kind !== '章' && node.range) meta.push({ label: '章数', value: `${node.range[1] - node.range[0] + 1} 章 · 第 ${node.range[0]}–${node.range[1]} 章` })
+  else if (node.kind === '卷' || node.kind === '单元') meta.push({ label: '章数', value: '还没定' })
   if (node.progress && node.progress !== '已规划') meta.push({ label: '写到', value: node.progress })
+  const one = ONE[node.kind]
+  const arrange = actions.canArrange(node) ? [
+    { label: `在前面插${one}`, onClick: () => onInsert(node, 'before') },
+    { label: `在后面插${one}`, onClick: () => onInsert(node, 'after') },
+    { label: '上移', onClick: () => onMove(node, 'up') },
+    { label: '下移', onClick: () => onMove(node, 'down') },
+  ] : []
   return (
     <Sheet narrow>
-      {actions.canDelete(node) && (
-        <CardMenu onDelete={() => {
+      {(actions.canDelete(node) || arrange.length > 0) && (
+        <CardMenu items={arrange} onDelete={actions.canDelete(node) ? () => {
           nav.openNode(path.at(-2)?.id ?? 'book')
           save(actions.deleteNode(node))
-        }} deleteLabel={`删掉这${ONE[node.kind].slice(1)}`} />
+        } : undefined} deleteLabel={`删掉这${one.slice(1)}`} />
       )}
       <Crumb items={['大纲', ...path.slice(0, -1).map(shownTitle)]} />
       <div className="flex flex-wrap items-center gap-3 pr-8">
@@ -1825,6 +1876,8 @@ export function Workspace({ book: base, actions, right, chat, chatBadge, openCha
   const firstChild = base.outline.children?.[0]
   const [node, setNode] = useState(firstChild?.children?.[0]?.id ?? firstChild?.id ?? 'book')
   const [freshNode, setFreshNode] = useState('')
+  // 章号跟着位置走：插在第 1 章前面的新章还是 c1，要让大纲页重新来一遍
+  const [nodeNonce, setNodeNonce] = useState(0)
   const [open, setOpen] = useState(() => {
     const path = findNode(base.outline, firstChild?.children?.[0]?.id ?? 'book') ?? []
     return ['book', ...path.map((n) => n.id)]
@@ -1976,6 +2029,17 @@ export function Workspace({ book: base, actions, right, chat, chatBadge, openCha
       setTab('大纲')
     }).catch(report)
   }
+  const insertNode = (sibling: VNode, where: 'before' | 'after') => {
+    tools.actions.insertNode(sibling, where).then((id) => {
+      if (!id) return
+      setNode(id)
+      setFreshNode(id)
+      setNodeNonce((n) => n + 1)
+    }).catch(report)
+  }
+  const moveNode = (target: VNode, direction: 'up' | 'down') => {
+    tools.actions.moveNode(target, direction).then((id) => { if (id) setNode(id) }).catch(report)
+  }
   const selectedNode = findNode(base.outline, node)?.at(-1)
   const outlineAdd = [
     ...(actions.canAdd(base.outline) ? [{ label: `新建${ONE[childKind(base.outline) ?? '篇']}`, onClick: () => addNode('book') }] : []),
@@ -2022,7 +2086,7 @@ export function Workspace({ book: base, actions, right, chat, chatBadge, openCha
                 )
                   : <SettingsOverview book={book} nav={nav} onSelect={nav.openEntry} />
             )}
-            {tab === '大纲' && <OutlinePage key={node} book={book} outline={base.outline} id={node} nav={nav} onAdd={addNode} fresh={freshNode === node} />}
+            {tab === '大纲' && <OutlinePage key={`${node}:${nodeNonce}`} book={book} outline={base.outline} id={node} nav={nav} onAdd={addNode} onInsert={insertNode} onMove={moveNode} fresh={freshNode === node} />}
           </main>
           {dock === 'side' && <DockedEditorial setDock={setDock} initial={live ? 520 : 460}>{chat}</DockedEditorial>}
         </div>

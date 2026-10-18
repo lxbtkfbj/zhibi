@@ -12,7 +12,8 @@ from app.prompts.catalog import BY_NAME, VARIABLE_LABELS, variables
 PROMPT_BLOBS = {
     "volume_directions": "dd76ef2a771b108b923fafbc9efd42ec9a08a93f",
     "audit_volume": "8d4298085a876e4a750cecc30431108c0010bbb6",
-    "plan_chapters": "7b84e9a4b3d1f71788947a0b3b90fe264c19a616",
+    # 2026-10-18 新书页：单元章数可以还没定，开头和第 2 条改成按变量说
+    "plan_chapters": "9b3e9631161e4f5253b9f9f60b13ef822a730637",
     "prepare_chapter": "1f2246e3568111f6f18cbb30f50347bec9804152",
     "write_chapter": "552334325a50476fa570fe5e17c3fc90d1702624",
     "check_consistency": "bace136fa067545cf03089c955a4aaf4a182c704",

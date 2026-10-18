@@ -67,6 +67,8 @@ export interface VNode {
   /** 章纲：发生什么、看点、结尾钩子 */
   sections?: VField[]
   chapters?: number
+  /** 自己定的章数，0 是还没定（有几章算几章，写到这里编辑部再定）；只有单元和没拆单元的卷能改 */
+  count?: number
   /** 第几章到第几章，程序按顺序算 */
   range?: [number, number]
   /** 写到哪了：没写 / 正在写 / 写完 */
@@ -226,10 +228,12 @@ export function findNode(node: VNode, id: string, path: VNode[] = []): VNode[] |
   return null
 }
 
-/** 按顺序给每个卷、单元、章算出「第几章到第几章」。 */
+/** 按顺序给每个卷、单元、章算出「第几章到第几章」。和后台一样：单元（或没拆单元的卷）定了章数、
+ *  章纲还没出全的，给没出的章留着号；章数没定的有几章算几章。 */
 export function numberChapters(root: VNode): void {
   let next = 1
   const visit = (node: VNode) => {
+    node.range = undefined
     if (node.kind === '章') {
       const n = Number(/第(\d+)章/.exec(node.title)?.[1] ?? next)
       node.range = [n, n]
@@ -237,8 +241,9 @@ export function numberChapters(root: VNode): void {
       return
     }
     const start = next
-    if (node.children?.length) node.children.forEach(visit)
-    else if (node.chapters) next += node.chapters
+    node.children?.forEach(visit)
+    const leaf = node.kind === '单元' || (node.kind === '卷' && !node.children?.length)
+    if (leaf && node.chapters && next - start < node.chapters) next = start + node.chapters
     if (next > start) node.range = [start, next - 1]
   }
   visit(root)

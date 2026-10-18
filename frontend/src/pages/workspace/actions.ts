@@ -58,10 +58,16 @@ export interface WorkspaceActions {
   resetTemplate(category: VCategory): Promise<void>
   createCategory(name: string, style: CategoryStyle, fields: string[], about: string): Promise<void>
   /** sections 是章纲那几栏，键是栏目名（发生什么、看点、结尾钩子） */
-  saveNode(node: VNode, change: { name?: string; text?: string; sections?: Record<string, string> }): Promise<void>
+  saveNode(node: VNode, change: { name?: string; text?: string; sections?: Record<string, string>; chapters?: number }): Promise<void>
   /** 在这个节点下面加一个下一层，返回新节点的 id */
   addNode(parent: VNode): Promise<string | undefined>
   deleteNode(node: VNode): Promise<void>
+  /** 在这一个的前面或后面插一个同一层的，返回新的 id */
+  insertNode(sibling: VNode, where: 'before' | 'after'): Promise<string | undefined>
+  /** 往前或往后挪一格，返回挪完以后的 id（章挪了章号会变） */
+  moveNode(node: VNode, direction: 'up' | 'down'): Promise<string | undefined>
+  /** 能不能在它前后插、能不能挪 */
+  canArrange(node: VNode): boolean
   canAdd(parent: VNode): boolean
   canEdit(node: VNode, part: 'name' | 'text'): boolean
   canDelete(node: VNode): boolean
@@ -172,6 +178,11 @@ export function useLocalBook(initial: VBook): [VBook, WorkspaceActions] {
         if (change.text !== undefined) target.text = change.text
         if (change.name !== undefined) target.title = `${splitTitle(target.title)[0]}　${change.name}`
         if (change.sections) target.sections = target.sections?.map((f) => (f.label in change.sections! ? { ...f, text: change.sections![f.label] } : f))
+        if (change.chapters !== undefined) {
+          target.count = change.chapters
+          target.chapters = Math.max(change.chapters, target.children?.length ?? 0) || undefined
+          numberChapters(outline)
+        }
         return { ...b, outline }
       }),
       addNode: async (parent) => {
@@ -189,6 +200,27 @@ export function useLocalBook(initial: VBook): [VBook, WorkspaceActions] {
         numberChapters(outline)
         return { ...b, outline }
       }),
+      insertNode: async (sibling, where) => {
+        const result = insertOutlineSibling(book.outline, sibling.id, where)
+        if (!result) return undefined
+        setBook((b) => ({ ...b, outline: result.root }))
+        return result.id
+      },
+      moveNode: async (node, direction) => {
+        setBook((b) => {
+          const outline = structuredClone(b.outline)
+          const parent = findNode(outline, node.id)?.at(-2)
+          const list = parent?.children
+          const i = list?.findIndex((c) => c.id === node.id) ?? -1
+          const j = i + (direction === 'up' ? -1 : 1)
+          if (!list || i < 0 || j < 0 || j >= list.length) return b
+          ;[list[i], list[j]] = [list[j], list[i]]
+          numberChapters(outline)
+          return { ...b, outline }
+        })
+        return node.id
+      },
+      canArrange: (node) => node.kind !== '全书',
       canAdd: (parent) => !!childKind(parent),
       canEdit: () => true,
       canDelete: (node) => node.kind !== '全书',
@@ -213,6 +245,23 @@ function addOutlineChild(root: VNode, parentId: string): { root: VNode; id: stri
   const title = kind === '篇' ? `第${cn(siblings.length + 1)}篇　` : kind === '卷' ? `第${cn(all('卷') + 1)}卷　` : kind === '单元' ? `单元${cn(siblings.length + 1)}　` : '新的一章'
   const id = `added-${nextLocal++}`
   parent.children = [...siblings, { id, kind, title, text: '', uses: [], ...(kind === '章' ? { sections: [{ label: '发生什么', text: '' }, { label: '看点', text: '' }, { label: '结尾钩子', text: '' }] } : {}) }]
+  numberChapters(copy)
+  return { root: copy, id }
+}
+
+/** 在某一个的前面或后面插一个同一层的：原型用。 */
+function insertOutlineSibling(root: VNode, siblingId: string, where: 'before' | 'after'): { root: VNode; id: string } | null {
+  const copy: VNode = structuredClone(root)
+  const path = findNode(copy, siblingId)
+  const sibling = path?.at(-1)
+  const parent = path?.at(-2)
+  if (!sibling || !parent?.children) return null
+  const id = `added-${nextLocal++}`
+  const kind = sibling.kind
+  const title = kind === '章' ? '新的一章' : `${splitTitle(sibling.title)[0]}　`
+  const node: VNode = { id, kind, title, text: '', uses: [], ...(kind === '章' ? { sections: [{ label: '发生什么', text: '' }, { label: '看点', text: '' }, { label: '结尾钩子', text: '' }] } : {}) }
+  const at = parent.children.indexOf(sibling) + (where === 'after' ? 1 : 0)
+  parent.children = [...parent.children.slice(0, at), node, ...parent.children.slice(at)]
   numberChapters(copy)
   return { root: copy, id }
 }

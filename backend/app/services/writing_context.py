@@ -742,7 +742,10 @@ async def chapter_plan_blocks(
     ]
     ledger = await load_ledger(session, book.id)
     refs = [a.get("ref", "") for a in unit.foreshadow_actions or []]
-    count = max(1, unit.chapter_count if chapter_count is None else chapter_count)
+    count = unit.chapter_count if chapter_count is None else chapter_count
+    # 章数没定（0）：让编辑部按剧情定
+    undecided = count <= 0
+    count = max(1, count)
     library = await load_context(session, book)
     characters = public_library(library).characters
     mentioned = " ".join([*(unit.key_events or []), *(volume.new_characters or [])])
@@ -781,6 +784,10 @@ async def chapter_plan_blocks(
         "chapter_count": str(count),
         "first_chapter": str(first_chapter),
         "last_chapter": str(first_chapter + count - 1),
+        "chapter_line": f"这个单元的章数还没定，你按剧情定，一般 5 到 15 章，从第 {first_chapter} 章起"
+        if undecided
+        else f"这个单元共 {count} 章（第 {first_chapter}-{first_chapter + count - 1} 章）",
+        "chapter_rule": "章数按剧情定，一般 5 到 15 章，宁可紧凑也不要注水，" if undecided else f"正好 {count} 章，",
         "concept": format_concept({**(book.concept or {}), "chapter_words": chapter_words(book)}),
         "volume": format_volume_card(card),
         "unit": format_unit(unit_dict(unit)),

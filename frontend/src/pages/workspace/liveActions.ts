@@ -198,8 +198,9 @@ export function useLiveBook(bookId: string) {
       saveNode: async (node, change) => {
         const ref = node.ref
         if (!ref) return
-        if (ref.type === 'volume') await done(patch(`/volumes/${ref.id}`, { ...(change.name !== undefined ? { title: change.name } : {}), ...(change.text !== undefined ? { summary: change.text } : {}) }))
-        else if (ref.type === 'unit') await done(patch(`/units/${ref.id}`, { ...(change.name !== undefined ? { title: change.name } : {}), ...(change.text !== undefined ? { summary: change.text } : {}) }))
+        const count = change.chapters !== undefined ? { chapter_count: change.chapters } : {}
+        if (ref.type === 'volume') await done(patch(`/volumes/${ref.id}`, { ...(change.name !== undefined ? { title: change.name } : {}), ...(change.text !== undefined ? { summary: change.text } : {}), ...count }))
+        else if (ref.type === 'unit') await done(patch(`/units/${ref.id}`, { ...(change.name !== undefined ? { title: change.name } : {}), ...(change.text !== undefined ? { summary: change.text } : {}), ...count }))
         else if (ref.type === 'chapter') {
           const body: Record<string, unknown> = {}
           if (change.name) body.title = change.name
@@ -226,6 +227,47 @@ export function useLiveBook(bookId: string) {
         if (parent.kind === '单元' && ref) return `c${(await done(post<{ index: number }>(`/units/${ref.id}/chapters`, {}))).index}`
         return undefined
       },
+      insertNode: async (sibling, where) => {
+        const ref = sibling.ref
+        const tree = parts.current?.outline
+        if (!ref || !tree) return undefined
+        const volumes = tree.arcs.flatMap((a) => a.volumes)
+        if (sibling.kind === '篇') {
+          const body = where === 'before' ? { before_node_id: ref.id } : { after_node_id: ref.id }
+          return `a:${(await done(post<{ id: string }>(`/books/${bookId}/arcs`, body))).id}`
+        }
+        if (sibling.kind === '卷') {
+          const arc = tree.arcs.find((a) => a.volumes.some((v) => v.id === ref.id))
+          const i = volumes.findIndex((v) => v.id === ref.id)
+          const after = where === 'after' ? ref.id : volumes[i - 1]?.id ?? null
+          return `v:${(await done(post<{ id: string }>(`/books/${bookId}/volumes`, { target_node_id: arc?.node_id ?? null, after_volume_id: after }))).id}`
+        }
+        if (sibling.kind === '单元') {
+          const volume = volumes.find((v) => v.units.some((u) => u.id === ref.id))
+          if (!volume) return undefined
+          const i = volume.units.findIndex((u) => u.id === ref.id)
+          const after = where === 'after' ? ref.id : volume.units[i - 1]?.id ?? null
+          return `u:${(await done(post<{ id: string }>(`/volumes/${volume.id}/units`, { after_unit_id: after }))).id}`
+        }
+        if (sibling.kind === '章') {
+          const index = Number(ref.id)
+          const unit = volumes.flatMap((v) => v.units).find((u) => u.chapters.some((c) => c.index === index))
+          if (!unit) return undefined
+          const body = where === 'before' ? { before_index: index } : { after_index: index }
+          return `c${(await done(post<{ index: number }>(`/units/${unit.id}/chapters`, body))).index}`
+        }
+        return undefined
+      },
+      moveNode: async (node, direction) => {
+        const ref = node.ref
+        if (!ref) return undefined
+        const kind = { 篇: 'arc', 卷: 'volume', 单元: 'unit', 章: 'chapter' }[node.kind as string]
+        if (!kind) return undefined
+        const reply = await done(post<{ id: string }>(`/books/${bookId}/outline/move`, { kind, id: ref.id, direction }))
+        return node.kind === '章' ? `c${reply.id}` : node.id
+      },
+      // 篇、卷、单元、章都能在前后插、能挪；「后面的篇」（结局前还没定的那一段）不行
+      canArrange: (node) => ['篇', '卷', '单元', '章'].includes(node.kind) && !!node.ref,
       deleteNode: async (node) => {
         if (node.ref?.type === 'volume') await done(del(`/volumes/${node.ref.id}`))
         else if (node.ref?.type === 'unit') await done(del(`/units/${node.ref.id}`))

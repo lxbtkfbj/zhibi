@@ -258,6 +258,9 @@ async def _validate_changed_target(session, book_id, target, before, *, category
         schema = VolumePatch if isinstance(target, Volume) else UnitPatch
         values = snapshot_of(target)
         schema.model_validate({key: value for key, value in values.items() if key in schema.model_fields})
+        # 0 是作者自己留的「还没定」；编辑部的建议要改章数就得给个实数
+        if values.get("chapter_count") != before.get("chapter_count") and values.get("chapter_count", 1) < 1:
+            raise ValueError("章数至少一章")
         if isinstance(target, Volume):
             await validate_node(session, book_id, target.target_node_id)
     elif isinstance(target, StoryNode):

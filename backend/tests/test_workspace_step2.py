@@ -294,8 +294,11 @@ async def test_new_arc_goes_after_planned_arcs_and_later_arcs_plan_in_order(clie
         row = await session.get(StoryNode, uuid.UUID(ending["id"]))
         row.segment = {"title": "最后一篇", "text": ""}
         await session.commit()
+    # 已经规划到结局也能再加：插在结局前面
     res = await client.post(f"/api/books/{book}/arcs", json={"title": "再加一篇"})
-    assert res.status_code == 409
+    assert res.status_code == 201, res.text
+    nodes = (await client.get(f"/api/books/{book}/nodes")).json()
+    assert [node["title"] for node in nodes][-2:] == ["再加一篇", "结局"]
 
 
 async def test_writing_splits_an_author_arc_before_planning_the_next(client, sessionmaker):

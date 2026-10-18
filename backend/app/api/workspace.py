@@ -18,7 +18,7 @@ from app.api.deps import SessionDep, ensure_idle, get_book
 from app.api.library_ai import call_model
 from app.library_config import BUILTIN_CATEGORIES, CHARACTER_CATEGORY, GOLDFINGER, LEGACY_ROLE_TYPES, ROLE_TYPES
 from app.models import Book, Chapter, Character, PlotUnit, SettingCategory, StoryNode, Volume, WorldEntry
-from app.schemas import ArcCreate, CardLayoutIn, ChapterCreate, DraftRequest, FillRequest
+from app.schemas import ArcCreate, CardLayoutIn, ChapterCreate, DraftRequest, FillRequest, OutlineMove
 from app.services import outline_structure
 from app.services.desk import (
     CHARACTER_COLUMNS,
@@ -33,7 +33,7 @@ from app.services.desk import (
 from app.services.library import lock_book
 from app.services.library_context import load_context
 from app.services.requirements import active_requirements, requirement_text
-from app.services.versions import record_version
+from app.services.versions import record_version, snapshot_of
 
 router = APIRouter(tags=["workspace"])
 
@@ -161,19 +161,39 @@ async def _ordered_nodes(session: AsyncSession, book_id) -> list[StoryNode]:
     )
 
 
+async def plan_earlier_arcs(session: AsyncSession, book_id, nodes: list[StoryNode]) -> None:
+    """定下来的篇前面不能夹着「写到再定」的篇（写的时候会被跳过）：前面的都按节点上写的定下来。"""
+    last = max((i for i, node in enumerate(nodes) if node.segment is not None), default=-1)
+    for node in nodes[:last]:
+        if node.kind == "milestone" and node.segment is None:
+            before = snapshot_of(node)
+            node.segment = {"title": node.title, "text": node.event}
+            await record_version(session, book_id, "segment", node, "author", before=before)
+
+
 @router.post("/books/{book_id}/arcs", status_code=201)
 async def create_arc(body: ArcCreate, book: Book = Depends(get_book), session: AsyncSession = SessionDep) -> dict:
-    """在已规划的篇后面加一篇：只有名字和一段话，写到它时编辑部照这段话分卷。"""
+    """加一篇：只有名字和一段话，写到它时编辑部照这段话分卷。可以插在任何一篇的前面或后面；
+    不说插哪就接在已经定下来的篇后面。开篇前面、结局后面不能插。"""
     await lock_book(session, book.id)
     await ensure_idle(session, book.id)
     nodes = await _ordered_nodes(session, book.id)
     planned = [i for i, node in enumerate(nodes) if node.segment is not None]
     if not planned and await session.scalar(select(Volume.id).where(Volume.book_id == book.id).limit(1)):
         raise HTTPException(409, "这本书的卷没有分篇，不能再加篇")
-    if any(node.kind == "ending" and node.segment is not None for node in nodes):
-        raise HTTPException(409, "全书已经规划到结局了，不能再往后加篇")
-    if planned:
-        at = planned[-1] + 1
+    ending = next((i for i, node in enumerate(nodes) if node.kind == "ending"), len(nodes))
+    if body.before_node_id or body.after_node_id:
+        anchor = body.before_node_id or body.after_node_id
+        found = next((i for i, node in enumerate(nodes) if node.id == anchor), None)
+        if found is None:
+            raise HTTPException(422, "插入位置的那一篇不属于这本书")
+        if body.before_node_id and nodes[found].kind == "opening":
+            raise HTTPException(422, "开篇前面不能插")
+        if body.after_node_id and nodes[found].kind == "ending":
+            raise HTTPException(422, "结局后面不能插")
+        at = found if body.before_node_id else found + 1
+    elif planned:
+        at = min(planned[-1] + 1, ending)
     else:
         at = next((i + 1 for i, node in enumerate(nodes) if node.kind == "opening"), 0)
     title = body.title.strip()
@@ -193,6 +213,7 @@ async def create_arc(body: ArcCreate, book: Book = Depends(get_book), session: A
     session.add(node)
     await session.flush()
     await record_version(session, book.id, "segment", node, "author")
+    await plan_earlier_arcs(session, book.id, nodes)
     await session.commit()
     return {"id": str(node.id)}
 
@@ -233,6 +254,12 @@ async def create_chapter(unit_id: uuid.UUID, body: ChapterCreate, session: Async
     own = state.own_chapters(unit)
     if len(own) >= 50:
         raise HTTPException(422, "每个单元最多 50 章，请先增加单元")
+    anchor = None
+    if body.before_index is not None or body.after_index is not None:
+        wanted = body.before_index if body.before_index is not None else body.after_index
+        anchor = next((row for row in own if row.index == wanted), None)
+        if anchor is None:
+            raise HTTPException(422, "插入位置的那一章不在这个单元里")
     outline = body.outline.model_dump(exclude_none=True)
     outline["scenes"] = [scene.strip() for scene in outline.get("scenes") or [] if scene.strip()]
     chapter = Chapter(
@@ -247,8 +274,14 @@ async def create_chapter(unit_id: uuid.UUID, body: ChapterCreate, session: Async
     )
     session.add(chapter)
     await session.flush()
-    state.chapters.append(chapter)
-    if len(own) + 1 > unit.chapter_count:
+    # 章号按 state.chapters 里的先后排：插在那一章前面或后面，不给位置就接在这个单元最后
+    if anchor is not None:
+        at = state.chapters.index(anchor) + (0 if body.before_index is not None else 1)
+    else:
+        at = state.chapters.index(own[-1]) + 1 if own else len(state.chapters)
+    state.chapters.insert(at, chapter)
+    # 章数定了、又填满了，就多算一章；章数没定（0）的有几章算几章
+    if unit.chapter_count > 0 and len(own) + 1 > unit.chapter_count:
         unit.chapter_count = len(own) + 1
         volume.chapter_count = sum(row.chapter_count for row in state.own_units(volume.id))
     await outline_structure.finish_structure(
@@ -276,7 +309,8 @@ async def delete_chapter(index: int, book: Book = Depends(get_book), session: As
     state.chapters.remove(chapter)
     await session.delete(chapter)
     await session.flush()
-    unit.chapter_count = max(1, unit.chapter_count - 1)
+    if unit.chapter_count > 0:
+        unit.chapter_count = max(1, unit.chapter_count - 1)
     volume.chapter_count = sum(row.chapter_count for row in state.own_units(volume.id))
     await outline_structure.finish_structure(session, book.id, state, "删掉一章", affected={unit.id, volume.id})
     await session.commit()
@@ -390,3 +424,89 @@ async def draft_entries(body: DraftRequest, book: Book = Depends(get_book), sess
 async def fill_one_entry(body: FillRequest, book: Book = Depends(get_book), session: AsyncSession = SessionDep) -> dict:
     """让编辑部把这一条空着的栏目补上（卡片右上角「⋯」里点的）。"""
     return await fill_entry(session, book, body.target_type, body.target_id, body.request)
+
+
+@router.post("/books/{book_id}/outline/move")
+async def move_outline(body: OutlineMove, book: Book = Depends(get_book), session: AsyncSession = SessionDep) -> dict:
+    """篇、卷、单元、章往前或往后挪一格。卷跟着篇走；已经开写的章节不能被挪动。"""
+    await lock_book(session, book.id)
+    await ensure_idle(session, book.id)
+    step = -1 if body.direction == "up" else 1
+    edge = "已经在最前面了" if step < 0 else "已经在最后面了"
+
+    def swap(rows: list, row, other) -> list:
+        rows = list(rows)
+        a, b = rows.index(row), rows.index(other)
+        rows[a], rows[b] = rows[b], rows[a]
+        return rows
+
+    if body.kind == "arc":
+        nodes = await _ordered_nodes(session, book.id)
+        node = next((row for row in nodes if str(row.id) == body.id), None)
+        if node is None or node.kind != "milestone":
+            raise HTTPException(404, "这一篇不存在")
+        arcs = [row for row in nodes if row.kind == "milestone"]
+        j = arcs.index(node) + step
+        if not 0 <= j < len(arcs):
+            raise HTTPException(422, edge)
+        nodes = swap(nodes, node, arcs[j])
+        for position, row in enumerate(nodes, 1):
+            row.position = position
+        await plan_earlier_arcs(session, book.id, nodes)
+        # 卷跟着篇的顺序走：写作按卷号往下写
+        state = await outline_structure.load_structure(session, book.id)
+        order = {row.id: i for i, row in enumerate(nodes)}
+        ordered = sorted(state.volumes, key=lambda v: (order.get(v.target_node_id, len(order)), v.index))
+        if ordered != state.volumes:
+            await outline_structure.assign_indices(session, ordered, list(range(1, len(ordered) + 1)))
+            state.volumes = ordered
+        await outline_structure.finish_structure(session, book.id, state, "挪动篇的顺序")
+        await session.commit()
+        return {"id": body.id}
+
+    state = await outline_structure.load_structure(session, book.id)
+    if body.kind == "volume":
+        volume = next((row for row in state.volumes if str(row.id) == body.id), None)
+        if volume is None:
+            raise HTTPException(404, "这一卷不存在")
+        siblings = [row for row in state.volumes if row.target_node_id == volume.target_node_id]
+        j = siblings.index(volume) + step
+        if not 0 <= j < len(siblings):
+            raise HTTPException(422, edge)
+        ordered = swap(state.volumes, volume, siblings[j])
+        await outline_structure.assign_indices(session, ordered, list(range(1, len(ordered) + 1)))
+        state.volumes = ordered
+        await outline_structure.finish_structure(
+            session, book.id, state, "挪动卷的顺序", affected={volume.id, siblings[j].id}
+        )
+        await session.commit()
+        return {"id": body.id}
+    if body.kind == "unit":
+        unit = next((row for row in state.units if str(row.id) == body.id), None)
+        if unit is None:
+            raise HTTPException(404, "这个单元不存在")
+        siblings = state.own_units(unit.volume_id)
+        j = siblings.index(unit) + step
+        if not 0 <= j < len(siblings):
+            raise HTTPException(422, edge)
+        ordered = swap(siblings, unit, siblings[j])
+        await outline_structure.assign_indices(session, ordered, list(range(1, len(ordered) + 1)))
+        await outline_structure.finish_structure(
+            session, book.id, state, "挪动单元的顺序", affected={unit.id, siblings[j].id, unit.volume_id}
+        )
+        await session.commit()
+        return {"id": body.id}
+    chapter = next((row for row in state.chapters if str(row.index) == body.id), None)
+    if chapter is None or chapter.unit_id is None:
+        raise HTTPException(404, "这一章不存在")
+    unit = next(row for row in state.units if row.id == chapter.unit_id)
+    siblings = state.own_chapters(unit)
+    j = siblings.index(chapter) + step
+    if not 0 <= j < len(siblings):
+        raise HTTPException(422, edge)
+    if outline_structure.started(chapter) or outline_structure.started(siblings[j]):
+        raise HTTPException(409, "已经开写的章不能挪")
+    state.chapters = swap(state.chapters, chapter, siblings[j])
+    await outline_structure.finish_structure(session, book.id, state, "挪动章的顺序", affected={unit.id})
+    await session.commit()
+    return {"id": str(chapter.index)}
