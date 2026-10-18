@@ -17,6 +17,8 @@ import {
 import { CHAT, PENDING } from './sampleBook'
 import { ChapterPage, GateCard, ManuscriptDirectory, ManuscriptHome, WritingStrip } from './Manuscript'
 import { type WritingControl, gateTarget } from './writing'
+import { SplitPanel } from './Split'
+import { useSplit } from './useSplit'
 import {
   AskButton, CardMenu, Crumb, DirectoryShell, Editable, LinkChip, Menu, Prose, Section, Sheet,
 } from './widgets'
@@ -1215,6 +1217,7 @@ function OutlinePage({ book, outline, id, nav, onAdd, onInsert, onMove, fresh, w
       value: <button type="button" onClick={() => nav.openChapter(node.id)} className="text-chief hover:underline">{node.body.status === 'done' ? `${node.body.words.toLocaleString()} 字 · 去读` : '写手在写 · 去看'}</button>,
     })
   }
+  const split = useSplit(node)
   const status = writing?.status
   const gate = status?.state === 'waiting' && status.gate && gateTarget(status.gate).node === node.id ? status.gate : undefined
   const one = ONE[node.kind]
@@ -1274,9 +1277,9 @@ function OutlinePage({ book, outline, id, nav, onAdd, onInsert, onMove, fresh, w
                   新增{child}
                 </button>
               )}
-              {/* 编辑部帮拆：第三步接上 */}
-              {!actions.live && <AskButton onClick={() => nav.toast(`原型：编辑部会按上面这段话和设定，拆出几个${child}给你挑`)}>编辑部帮拆</AskButton>}
+              {split.available && split.state.step === 'idle' && <AskButton onClick={split.open}>{split.label}</AskButton>}
             </div>
+            <SplitPanel node={node} split={split} />
           </section>
         )}
       </div>

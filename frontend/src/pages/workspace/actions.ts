@@ -5,6 +5,7 @@ import {
   CHARACTER_FIELDS, applyTemplate, cn, findEntry, findNode, numberChapters, splitTitle,
   type CardTemplate, type VBook, type VCategory, type VEntry, type VNode,
 } from './model'
+import { sampleSplit } from './sampleChapters'
 
 export type CategoryStyle = NonNullable<VCategory['custom']>['style']
 
@@ -32,6 +33,20 @@ export interface RewriteOutcome {
 }
 
 export type RewriteMode = 'instruction' | 'options' | 'expand'
+
+/** 编辑部帮拆出来的一条：章是名字加章纲三栏，单元是名字、一段话、章数。 */
+export interface SplitDraft {
+  name: string
+  /** 单元的那段话 */
+  text?: string
+  /** 章纲：发生什么、看点、结尾钩子 */
+  sections?: Record<string, string>
+  /** 单元几章，0 是还没定 */
+  chapters?: number
+}
+
+/** 编辑部帮拆的一版：还没放进大纲。first 是第一章的章号；keeps、replaces 是收下以后不动的、会被换掉的（章的名字）。 */
+export interface SplitResult { drafts: SplitDraft[]; note: string; first?: number; keeps: string[]; replaces: string[] }
 
 export interface BookChange {
   title?: string
@@ -86,6 +101,10 @@ export interface WorkspaceActions {
   writeNode?(node: VNode, request: string): Promise<{ note: string; before: NodeChange }>
   /** 这一段能不能让编辑部写：开写了的不行 */
   canWrite?(node: VNode): boolean
+  /** 编辑部帮拆：单元出章纲、卷拆成单元。只出一版给作者看，不存；round 是第几版 */
+  splitNode?(node: VNode, request: string, round: number): Promise<SplitResult>
+  /** 收下帮拆的这一版：放进大纲，带回撤销的办法 */
+  acceptSplit?(node: VNode, drafts: SplitDraft[]): Promise<() => Promise<void>>
 }
 
 /** 大纲上一段要改的地方。sections 是章纲那几栏，键是栏目名（发生什么、看点、结尾钩子）；chapters 是章数，0 是还没定 */
@@ -231,9 +250,83 @@ export function useLocalBook(initial: VBook): [VBook, WorkspaceActions, Dispatch
       canAdd: (parent) => !!childKind(parent),
       canEdit: () => true,
       canDelete: (node) => node.kind !== '全书',
+      splitNode: async (node, request, round) => {
+        await new Promise((resolve) => setTimeout(resolve, 2400))
+        const plan = sampleSplit(node.id, round, request)
+        if (!plan) throw new Error('原型里只有示例书的单元和第二卷能演示帮拆')
+        if (node.kind !== '单元') return { ...plan, keeps: [], replaces: [] }
+        const chapters = node.children ?? []
+        const kept = chapters.filter((c) => c.body && c.body.status !== 'planned')
+        const last = kept.at(-1)
+        const first = last ? chapterNumber(last) + 1 : node.range?.[0] ?? lastChapterBefore(book.outline, node.id) + 1
+        return { ...plan, first, keeps: kept.map((c) => c.title), replaces: chapters.filter((c) => !kept.includes(c)).map((c) => c.title) }
+      },
+      acceptSplit: async (node, drafts) => {
+        const before = findNode(book.outline, node.id)?.at(-1)
+        const snapshot = before ? structuredClone(before) : undefined
+        setBook((b) => {
+          const outline = structuredClone(b.outline)
+          const target = findNode(outline, node.id)?.at(-1)
+          if (!target) return b
+          if (target.kind === '单元') {
+            numberChapters(outline)
+            const kept = (target.children ?? []).filter((c) => c.body && c.body.status !== 'planned')
+            const last = kept.at(-1)
+            const first = last ? chapterNumber(last) + 1 : target.range?.[0] ?? lastChapterBefore(outline, target.id) + 1
+            target.children = [...kept, ...drafts.map((d, i): VNode => ({
+              id: `c${first + i}`, kind: '章', title: `第${first + i}章　${d.name}`, text: '', uses: [],
+              sections: ['发生什么', '看点', '结尾钩子'].map((label) => ({ label, text: d.sections?.[label] ?? '' })),
+              body: { status: 'planned', words: 0 },
+            }))]
+            target.chapters = Math.max(target.count ?? 0, target.children.length) || undefined
+          } else {
+            target.later = false
+            target.children = drafts.map((d, i): VNode => ({
+              id: `added-${nextLocal++}`, kind: '单元', title: `单元${cn(i + 1)}　${d.name}`, text: d.text ?? '', uses: [],
+              chapters: d.chapters || undefined, count: d.chapters ?? 0, children: [],
+            }))
+          }
+          numberChapters(outline)
+          return { ...b, outline }
+        })
+        return async () => {
+          if (!snapshot) return
+          setBook((b) => {
+            const outline = structuredClone(b.outline)
+            const target = findNode(outline, node.id)?.at(-1)
+            if (!target) return b
+            Object.assign(target, structuredClone(snapshot))
+            numberChapters(outline)
+            return { ...b, outline }
+          })
+        }
+      },
     }
   }, [book.outline])
   return [book, actions, setBook]
+}
+
+/** 章标题里的章号：「第5章 井边的老刘」是 5。 */
+function chapterNumber(node: VNode): number {
+  return Number(/第(\d+)章/.exec(node.title)?.[1] ?? node.range?.[0] ?? 0)
+}
+
+/** 某个节点前面最后一章的章号：前面还没有章就是 0。 */
+function lastChapterBefore(root: VNode, id: string): number {
+  let last = 0
+  let found = false
+  const walk = (node: VNode) => {
+    if (found) return
+    if (node.id === id) {
+      found = true
+      return
+    }
+    if (node.kind === '章') last = node.range?.[1] ?? chapterNumber(node)
+    else if (node.range && !node.children?.length) last = Math.max(last, node.range[1])
+    node.children?.forEach(walk)
+  }
+  walk(root)
+  return last
 }
 
 /** 在节点下面加一个下一层，返回新的大纲树和新节点 id。 */

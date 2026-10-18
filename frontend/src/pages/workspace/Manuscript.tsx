@@ -2,7 +2,7 @@
 
 import clsx from 'clsx'
 import { ChevronDown, ChevronLeft, ChevronRight, PenLine, Sparkles } from 'lucide-react'
-import { type ReactNode, useEffect, useState } from 'react'
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useSave, useWorkspace } from './actions'
 import { chapterNodes, countWords, findEntry, findNode, splitTitle, type VBook, type VGate, type VNode, type WritePlan, type WritingGates } from './model'
 import { CardMenu, Crumb, DirectoryShell, Editable, LinkChip, Sheet } from './widgets'
@@ -321,24 +321,57 @@ export function ManuscriptHome({ book, writing, nav }: { book: VBook; writing: W
 
 /* ---------------- 一章 ---------------- */
 
-/** 正文：每段前面空两格，点上去就能改，离开就存。存的时候把空格去掉。 */
+/** 正文排版：像书一样，一段一块，首行空两格、两端对齐、段与段之间留一点空，最后一行不单吊一个字；字比别处大一号。 */
+const proseClass = 'reading-prose text-[calc(var(--reading-size)+2px)] text-ink [&>*]:mb-[0.6em] [&>*]:indent-[2em] [&>*]:text-justify [&>*]:text-pretty [&>*:last-child]:mb-0'
+
+const paragraphsOf = (text: string) => text.split('\n').map((p) => p.replace(/^[\s　]+/, '').trim()).filter(Boolean)
+const escapeHtml = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+const toHtml = (text: string) => paragraphsOf(text).map((p) => `<p>${escapeHtml(p)}</p>`).join('')
+
+/** 正文：点哪改哪，离开就存，Esc 撤回这次改的。页面上一段一个块，存的时候一段一行。 */
 function ChapterText({ text, onSave, readOnly, spot }: { text: string; onSave?: (text: string) => void; readOnly?: boolean; spot?: string }) {
-  const shown = text.split('\n').filter((p) => p.trim()).map((p) => `　　${p.trim()}`).join('\n')
+  const ref = useRef<HTMLDivElement>(null)
+  const saved = useRef(text)
+  // 外面的字变了：不在改的时候才换上
+  useLayoutEffect(() => {
+    const el = ref.current
+    saved.current = text
+    if (el && document.activeElement !== el && paragraphsOf(el.innerText).join('\n') !== paragraphsOf(text).join('\n')) el.innerHTML = toHtml(text)
+  }, [text])
+  const editable = !!onSave && !readOnly
   return (
-    <Editable multiline value={shown} readOnly={readOnly} spot={spot} placeholder="还没写"
-      onSave={onSave && ((value) => onSave(value.split('\n').map((line) => line.replace(/^[\s　]+/, '')).filter(Boolean).join('\n')))}
-      className="reading-prose text-ink hover:bg-transparent!" />
+    <div ref={ref} contentEditable={editable} suppressContentEditableWarning spellCheck={false}
+      role={editable ? 'textbox' : undefined} aria-multiline={editable || undefined} aria-label={editable ? '正文' : undefined} data-spot={spot}
+      // 回车另起一段，粘贴只要字
+      onFocus={() => document.execCommand('defaultParagraphSeparator', false, 'p')}
+      onPaste={(e) => {
+        e.preventDefault()
+        document.execCommand('insertText', false, e.clipboardData.getData('text/plain'))
+      }}
+      onKeyDown={(e) => {
+        if (e.key !== 'Escape') return
+        e.currentTarget.innerHTML = toHtml(saved.current)
+        e.currentTarget.blur()
+      }}
+      onBlur={(e) => {
+        const value = paragraphsOf(e.currentTarget.innerText).join('\n')
+        if (onSave && value !== paragraphsOf(saved.current).join('\n')) {
+          saved.current = value
+          onSave(value)
+        }
+      }}
+      className={clsx(proseClass, 'outline-none')} />
   )
 }
 
 /** 写手正在写：字一句句冒出来，最后一句后面跟着光标。 */
 function LiveText({ text }: { text: string }) {
-  const paragraphs = text.split('\n').filter((p) => p.trim())
+  const paragraphs = paragraphsOf(text)
   return (
-    <div aria-live="polite" className="reading-prose text-ink">
+    <div aria-live="polite" className={proseClass}>
       {paragraphs.length ? paragraphs.map((p, i) => (
-        <p key={i} className="indent-[2em]"><span className={clsx(i === paragraphs.length - 1 && 'caret')}>{p}</span></p>
-      )) : <p className="caret indent-[2em]" />}
+        <p key={i}><span className={clsx(i === paragraphs.length - 1 && 'caret')}>{p}</span></p>
+      )) : <p className="caret" />}
     </div>
   )
 }

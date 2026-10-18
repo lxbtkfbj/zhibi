@@ -1,5 +1,6 @@
 /** 示例书《窥命长生》的正文和写作演示用的剧本：前五章正文、写到后面编辑部会出的章纲、卷纲、下一篇。只给原型用。 */
 
+import type { SplitDraft } from './actions'
 import type { VChapterBody, VNode } from './model'
 
 const C1 = `青冥宗外门杂役院的早饭，是一勺稀粥，半个杂面馒头。
@@ -169,4 +170,50 @@ export const PART_TWO = {
     { title: '第三卷　讲经堂', text: '暂定：大长老借讲经收命，陈默混进讲经堂做杂役。' },
     { title: '第四卷　出关', text: '暂定：老祖出关的那一个时辰，整座青冥宗的寿命都在往后山流。' },
   ],
+}
+
+const chapterDraft = (name: string, happen: string, cool: string, hook: string): SplitDraft => ({ name, sections: { 发生什么: happen, 看点: cool, 结尾钩子: hook } })
+
+/** 编辑部帮拆的演示：示例书里能拆的几处，各备一两版。round 是第几版，request 是作者说的话。 */
+export function sampleSplit(id: string, round: number, request: string): { drafts: SplitDraft[]; note: string } | undefined {
+  if (id === 'u1') {
+    return {
+      note: '前两章已经写好了，不动；只把还没写的两章重新排了一下，把“上门送丹”和“看见白线”各自写足。',
+      drafts: [
+        chapterDraft('上门送丹', '赵长河一早亲自来柴房送丹，陈默拿断指的旧伤推说吃不了。', '装傻和算计，一句话差点露馅。', '执事走时回头一看，头顶的数字开始往上涨。'),
+        chapterDraft('第九息', '陈默去传功堂送水，咬牙盯着执事看到第九息，看见一缕白线把寿命收往后山。', '代价和真相一起来。', '白线的另一头，是闭关三百年的老祖。'),
+      ],
+    }
+  }
+  if (id === 'u2') {
+    const base = unitTwoChapters().map((c) => chapterDraft(c.title.split('　')[1], c.sections![0].text, c.sections![1].text, c.sections![2].text))
+    if (round < 2) return { note: '五章：死人、查线索、考场、截胡、收尾。最后一章把钩子留给赵长河的死期，接下一个单元。', drafts: base }
+    const [dead, shell, , steal, end] = base
+    return {
+      note: request.trim() ? `照你说的「${request.trim().slice(0, 20)}」改了：考场那场戏拆成两章，多一处陈默差点暴露。` : '换了个排法：考场那场戏拆成两章，多一处陈默差点暴露。',
+      drafts: [
+        dead, shell,
+        chapterDraft('考场上的数字', '外门考核开场，陈默不出头不垫底，盯着每个人头顶的数字找凶手。', '用眼睛在人堆里“查案”。', '有个师兄的数字，在他眼前一点点变少。'),
+        chapterDraft('差点露馅', '陈默为了看清那个师兄，盯过了十息，当场流鼻血，被监考的执事记下了名字。', '金手指的代价第一次当众发作。', '执事在名册上，把他的名字圈了起来。'),
+        steal, end,
+      ],
+    }
+  }
+  if (id === 'u3') {
+    return {
+      note: '三章收住第一卷：执事求命、陈默设局、拿到内门名额。',
+      drafts: [
+        chapterDraft('最后一夜', '赵长河只剩最后一夜，他找上陈默，要拿陈默手里那枚没吃的丹换自己的命。', '执事从猎人变成猎物。', '陈默答应了，开口却要一个内门名额。'),
+        chapterDraft('换丹', '陈默把真丹换成丹壳，当着全院的面让赵长河“吃下”，借老祖收命的那一刻脱身。', '小杂役设局，大执事入瓮。', '赵长河在众目睽睽之下，化成一具枯骨。'),
+        chapterDraft('内门名额', '执事一死，名额落到陈默头上；他第一次走出杂役院。', '苟到最后的翻身。', '内门的钟响了，所有人头顶的数字一起跳了一下。'),
+      ],
+    }
+  }
+  if (id === 'v2') {
+    return {
+      note: '三个单元：先认识内门的规矩，再查讲经堂，最后在老祖出关前停住，把孙婆婆的谜底留给第二篇。',
+      drafts: volumeTwoUnits().map((u) => ({ name: u.title.split('　')[1], text: u.text, chapters: u.chapters ?? 0 })),
+    }
+  }
+  return undefined
 }
