@@ -15,7 +15,8 @@ export function Popover({ open, onClose, children, className }: { open: boolean;
   useLayoutEffect(() => {
     if (!open || !ref.current) return
     const anchor = ref.current.parentElement!.getBoundingClientRect()
-    const height = ref.current.offsetHeight
+    // 新书页大屏上整页放大了：浮层的高度也按屏幕上的大小算
+    const height = ref.current.offsetHeight * ((ref.current as HTMLElement & { currentCSSZoom?: number }).currentCSSZoom ?? 1)
     setAbove(anchor.bottom + height + 12 > window.innerHeight && anchor.top - height - 12 > 0)
   }, [open])
   useEffect(() => {

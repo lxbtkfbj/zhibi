@@ -82,7 +82,12 @@ export function SampleInbox({ book }: { book: VBook }) {
   )
 }
 
-function TopBar({ book, tab, onTab, right, manuscriptHref, manuscript }: { book: VBook; tab: Tab; onTab: (tab: Tab) => void; right: ReactNode; manuscriptHref?: string; manuscript?: boolean }) {
+function TopBar({ book, tab, onTab, right, manuscriptHref, manuscript, directory, rightOffset }: {
+  book: VBook; tab: Tab; onTab: (tab: Tab) => void; right: ReactNode; manuscriptHref?: string; manuscript?: boolean
+  /** 这一页左边有没有目录、右边贴着的编辑部多宽：四个入口对准中间那一栏 */
+  directory: boolean; rightOffset: number
+}) {
+  const item = 'flex h-8 items-center rounded-lg px-5 text-[15px] transition-colors 2xl:px-6'
   return (
     <header className="relative z-20 flex h-14 shrink-0 items-center gap-3 border-b border-line bg-paper px-4 2xl:h-16 2xl:px-6">
       <Link to="/" className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm text-ink-3 transition-colors hover:bg-line/50 hover:text-ink">
@@ -93,18 +98,19 @@ function TopBar({ book, tab, onTab, right, manuscriptHref, manuscript }: { book:
       <BookCover title={book.title} seed={book.id === 'sample' ? '开新书' : book.id} size="xs" />
       <span className="max-w-64 truncate font-serif text-[17px] font-bold tracking-wide 2xl:text-lg">{book.title}</span>
 
-      {/* 四个入口放在整条顶栏正中 */}
-      <nav className="absolute inset-y-0 left-1/2 flex -translate-x-1/2 items-stretch">
-        {(manuscript ? ['简介', '设定', '大纲', '正文'] as const : ['简介', '设定', '大纲'] as const).map((key) => (
-          <button key={key} type="button" onClick={() => onTab(key)}
-            className={clsx('relative px-5 text-[15px] transition-colors 2xl:px-6 2xl:text-base', tab === key ? 'font-medium text-ink' : 'text-ink-3 hover:text-ink')}>
-            {key}
-            {tab === key && <span className="absolute inset-x-4 bottom-0 h-0.5 rounded-full bg-seal" />}
-          </button>
-        ))}
-        {manuscript ? null : manuscriptHref
-          ? <Link to={manuscriptHref} title="正文还没搬到新书页，先在旧版里看" className="flex items-center px-5 text-[15px] text-ink-3 transition-colors hover:text-ink 2xl:px-6 2xl:text-base">正文</Link>
-          : <span className="flex cursor-not-allowed items-center px-5 text-[15px] text-ink-3/50 2xl:px-6 2xl:text-base" title="开写以后才有">正文</span>}
+      {/* 四个入口对准中间那一栏，正好在那页纸上方 */}
+      <nav className={clsx('pointer-events-none absolute inset-y-0 flex items-center justify-center', directory ? 'left-72 2xl:left-80' : 'left-0')} style={{ right: rightOffset }}>
+        <div className="pointer-events-auto flex items-center gap-0.5 rounded-xl bg-paper-2 p-1 ring-1 ring-line">
+          {(manuscript ? ['简介', '设定', '大纲', '正文'] as const : ['简介', '设定', '大纲'] as const).map((key) => (
+            <button key={key} type="button" onClick={() => onTab(key)} aria-current={tab === key ? 'page' : undefined}
+              className={clsx(item, tab === key ? 'bg-card font-medium text-ink shadow-[0_1px_3px_rgb(60_40_20/0.14)]' : 'text-ink-3 hover:text-ink')}>
+              {key}
+            </button>
+          ))}
+          {manuscript ? null : manuscriptHref
+            ? <Link to={manuscriptHref} title="正文还没搬到新书页，先在旧版里看" className={clsx(item, 'text-ink-3 hover:text-ink')}>正文</Link>
+            : <span className={clsx(item, 'cursor-not-allowed text-ink-3/50')} title="开写以后才有">正文</span>}
+        </div>
       </nav>
 
       <div className="ml-auto flex items-center gap-1">{right}</div>
@@ -1417,11 +1423,12 @@ function FloatingEditorial({ setDock, children, size }: { setDock: (dock: Dock) 
   useEffect(() => {
     const move = (e: PointerEvent) => {
       if (!drag.current || !ref.current) return
-      const w = ref.current.offsetWidth
-      const h = ref.current.offsetHeight
+      const z = zoomOf(ref.current)
+      const w = ref.current.offsetWidth * z
+      const h = ref.current.offsetHeight * z
       setPos({
-        x: Math.min(Math.max(8, e.clientX - drag.current.dx), window.innerWidth - w - 8),
-        y: Math.min(Math.max(64, e.clientY - drag.current.dy), window.innerHeight - h - 8),
+        x: Math.min(Math.max(8, e.clientX - drag.current.dx), window.innerWidth - w - 8) / z,
+        y: Math.min(Math.max(64 * z, e.clientY - drag.current.dy), window.innerHeight - h - 8) / z,
       })
       setNearEdge(e.clientX > window.innerWidth - 48)
     }
@@ -1445,7 +1452,7 @@ function FloatingEditorial({ setDock, children, size }: { setDock: (dock: Dock) 
       {nearEdge && <div className="pointer-events-none fixed top-14 right-0 bottom-0 z-30 w-[380px] border-l-2 border-chief/40 bg-chief-soft/40" />}
       <div ref={ref}
         className="fixed z-40 flex flex-col overflow-hidden rounded-2xl border border-line bg-paper shadow-[0_24px_60px_-20px_rgb(40_25_10/0.45),0_2px_6px_rgb(40_25_10/0.08)]"
-        style={{ ...(pos ? { left: pos.x, top: pos.y } : { right: 24, bottom: 24 }), width: size.width, height: size.height, resize: 'both', minWidth: 320, minHeight: 360, maxWidth: 820, maxHeight: '85vh' }}>
+        style={{ ...(pos ? { left: pos.x, top: pos.y } : { right: 24, bottom: 24 }), width: size.width, height: size.height, resize: 'both', minWidth: 320, minHeight: 360, maxWidth: 820, maxHeight: 'calc(85vh / var(--desk-zoom))' }}>
         <ChatHeader dock="float" setDock={setDock} onDragStart={start} />
         {children}
       </div>
@@ -1455,19 +1462,29 @@ function FloatingEditorial({ setDock, children, size }: { setDock: (dock: Dock) 
 
 const SIDE_KEY = 'zhibi-prototype-chat-width'
 
+/** 这一块放大了几倍（大屏上整页等比放大）：屏幕上的坐标除以它，才是页面里的位置 */
+function zoomOf(el: Element | null): number {
+  return (el as (Element & { currentCSSZoom?: number }) | null)?.currentCSSZoom ?? 1
+}
+
+function savedSideWidth(fallback: number): number {
+  try {
+    return Number(localStorage.getItem(SIDE_KEY)) || fallback
+  } catch {
+    return fallback
+  }
+}
+
 /** 贴在右边的编辑部：左边缘可以拖宽拖窄，记住上次的宽度。 */
-function DockedEditorial({ setDock, children, initial }: { setDock: (dock: Dock) => void; children: ReactNode; initial: number }) {
-  const [width, setWidth] = useState(() => {
-    try {
-      return Number(localStorage.getItem(SIDE_KEY)) || initial
-    } catch {
-      return initial
-    }
-  })
+function DockedEditorial({ setDock, children, width, setWidth }: { setDock: (dock: Dock) => void; children: ReactNode; width: number; setWidth: (width: number) => void }) {
+  const ref = useRef<HTMLElement>(null)
   const [dragging, setDragging] = useState(false)
   useEffect(() => {
     if (!dragging) return
-    const move = (e: PointerEvent) => setWidth(Math.min(Math.max(320, window.innerWidth - e.clientX), Math.min(820, window.innerWidth * 0.55)))
+    const move = (e: PointerEvent) => {
+      const z = zoomOf(ref.current)
+      setWidth(Math.min(Math.max(320, (window.innerWidth - e.clientX) / z), Math.min(820, (window.innerWidth * 0.55) / z)))
+    }
     const up = () => setDragging(false)
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
@@ -1475,7 +1492,7 @@ function DockedEditorial({ setDock, children, initial }: { setDock: (dock: Dock)
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
     }
-  }, [dragging])
+  }, [dragging, setWidth])
   useEffect(() => {
     if (dragging) return
     try {
@@ -1483,7 +1500,7 @@ function DockedEditorial({ setDock, children, initial }: { setDock: (dock: Dock)
     } catch { /* 存不了就只管这一次 */ }
   }, [dragging, width])
   return (
-    <aside className="relative flex shrink-0 flex-col border-l border-line bg-paper" style={{ width }}>
+    <aside ref={ref} className="relative flex shrink-0 flex-col border-l border-line bg-paper" style={{ width }}>
       <div onPointerDown={(e) => { e.preventDefault(); setDragging(true) }} title="拖动调宽窄"
         className={clsx('absolute inset-y-0 -left-1.5 z-10 w-3 cursor-col-resize after:absolute after:inset-y-0 after:left-1.5 after:w-0.5 after:transition-colors', dragging ? 'after:bg-chief/60' : 'hover:after:bg-chief/40')} />
       {dragging && <div className="fixed inset-0 z-50 cursor-col-resize" />}
@@ -1495,7 +1512,8 @@ function DockedEditorial({ setDock, children, initial }: { setDock: (dock: Dock)
 
 /* ---------------- 选中文字后冒出的小按钮 ---------------- */
 
-type Picked = { x: number; top: number; bottom: number; spot?: string; start: number; end: number; text: string }
+/** 选中的字在哪：已经换算成页面里的位置；z 是那时候整页放大了几倍 */
+type Picked = { x: number; top: number; bottom: number; z: number; spot?: string; start: number; end: number; text: string }
 
 /** 选中的字在这一栏里从第几个字起：同样的字出现好几次时，挑离光标最近的那一处。 */
 function locate(host: HTMLElement, range: Range, picked: string): [number, number] | null {
@@ -1541,7 +1559,8 @@ function SelectionActions({ pageRef, onToast, onUndo }: {
       const rect = range.getBoundingClientRect()
       const common = range.commonAncestorContainer
       const host = (common instanceof Element ? common : common.parentElement)?.closest<HTMLElement>('[data-spot]')
-      const where = { x: rect.left + rect.width / 2, top: rect.top, bottom: rect.bottom, text }
+      const z = zoomOf(pageRef.current)
+      const where = { x: (rect.left + rect.width / 2) / z, top: rect.top / z, bottom: rect.bottom / z, z, text }
       if (!live) return setAt({ ...where, start: 0, end: 0 })
       // 只认一栏里的字：跨了几栏、或者这一处编辑部改不了，就不冒按钮
       const found = host && locate(host, range, text)
@@ -1602,10 +1621,10 @@ function SelectionActions({ pageRef, onToast, onUndo }: {
   const menuButton = 'rounded-lg px-2.5 py-1 text-[13px] text-ink-2 transition-colors hover:bg-subtle hover:text-ink'
   const panel = 'rounded-xl border border-line bg-card shadow-[var(--shadow-lift)]'
   // 宽的面板放在选中的字下面，别跑出屏幕
-  const left = Math.min(Math.max(at.x, 240), window.innerWidth - 240)
+  const left = Math.min(Math.max(at.x, 240), window.innerWidth / at.z - 240)
   return (
     <div ref={boxRef} className="fixed z-50 -translate-x-1/2"
-      style={step === 'menu' ? { left: at.x, top: at.top - 46 } : { left, top: Math.min(at.bottom + 10, window.innerHeight - 120) }}
+      style={step === 'menu' ? { left: at.x, top: at.top - 46 } : { left, top: Math.min(at.bottom + 10, window.innerHeight / at.z - 120) }}
       onMouseDown={(e) => { if (step === 'menu') e.preventDefault() }}>
       {step === 'menu' && (
         <div className={clsx(panel, 'flex items-center gap-0.5 p-1')}>
@@ -1738,6 +1757,8 @@ export function Workspace({ book: base, actions, right, chat, chatBadge, openCha
   // 正文里看的是哪一章；home 是正文首页（开写）
   const [chapter, setChapter] = useState(start?.chapter && findNode(base.outline, start.chapter) ? start.chapter : 'home')
   const [dock, setDock] = useState<Dock>('ball')
+  // 贴边时编辑部多宽：记住上次拖的宽度；顶栏的四个入口要让开它
+  const [sideWidth, setSideWidth] = useState(() => savedSideWidth(actions.live ? 520 : 460))
   const [toast, setToast] = useState('')
   // 一打开就滚到选中的那一条
   const [scrollReq, setScrollReq] = useState<ScrollReq | null>(() => ({ id: entry, smooth: false, n: 0 }))
@@ -1946,8 +1967,9 @@ export function Workspace({ book: base, actions, right, chat, chatBadge, openCha
 
   return (
     <ActionsContext.Provider value={tools}>
-      <div className="flex h-dvh flex-col bg-paper text-ink">
-        <TopBar book={book} tab={tab} onTab={setTab} right={right} manuscriptHref={manuscriptHref} manuscript={!!writing} />
+      <div className="desk-zoom flex flex-col bg-paper text-ink">
+        <TopBar book={book} tab={tab} onTab={setTab} right={right} manuscriptHref={manuscriptHref} manuscript={!!writing}
+          directory={tab !== '简介'} rightOffset={dock === 'side' ? sideWidth : 0} />
         {notice}
         {writing && <WritingStrip writing={writing} nav={nav} />}
         <div className="flex min-h-0 flex-1">
@@ -1985,7 +2007,7 @@ export function Workspace({ book: base, actions, right, chat, chatBadge, openCha
               ? <ManuscriptHome book={book} writing={writing} nav={nav} />
               : <ChapterPage key={chapter} book={book} id={chapter} writing={writing} nav={nav} />)}
           </main>
-          {dock === 'side' && <DockedEditorial setDock={setDock} initial={live ? 520 : 460}>{chat}</DockedEditorial>}
+          {dock === 'side' && <DockedEditorial setDock={setDock} width={sideWidth} setWidth={setSideWidth}>{chat}</DockedEditorial>}
         </div>
 
         {dock === 'float' && <FloatingEditorial setDock={setDock} size={chatSize}>{chat}</FloatingEditorial>}
