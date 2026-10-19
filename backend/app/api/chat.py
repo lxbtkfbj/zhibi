@@ -95,6 +95,43 @@ async def again_reply(
     return data
 
 
+class UndoneIn(BaseModel):
+    # 一句话拆成好几件事时，撤销的是第几件；没拆的不给
+    step: int | None = None
+
+
+@router.post("/books/{book_id}/notes/{message_id}/undone")
+async def mark_undone(
+    message_id: int,
+    body: UndoneIn | None = None,
+    book: Book = Depends(get_book),
+    session=SessionDep,
+    redis: Redis = Depends(get_redis),
+):
+    """作者在消息下面点了「撤销」：记在这条消息上。刷新后还显示已撤销，不会再撤一次；
+    给模型看的对话里也写明作者后来撤销了。"""
+    m = await session.get(MeetingMessage, message_id)
+    if m is None or m.book_id != book.id or m.speaker != "author":
+        raise HTTPException(404, "消息不存在")
+    payload = dict(m.payload or {})
+    step = body.step if body else None
+    if step is None:
+        if not payload.get("outcome"):
+            raise HTTPException(422, "这句话没让编辑部改过东西")
+        payload["outcome"] = {**payload["outcome"], "undone": True}
+    else:
+        steps = list(payload.get("steps") or [])
+        if not 0 <= step < len(steps):
+            raise HTTPException(422, "没有这一件")
+        steps[step] = {**steps[step], "undone": True}
+        payload["steps"] = steps
+    m.payload = payload
+    await session.commit()
+    data = message_dict(m)
+    await publish(redis, book.id, "message_update", data)
+    return data
+
+
 class ReceiptIn(BaseModel):
     message_id: int | None = None
     content: str = Field(default="", max_length=5000)

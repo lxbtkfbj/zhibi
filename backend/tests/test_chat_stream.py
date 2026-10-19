@@ -247,3 +247,46 @@ def test_done_note_lists_each_step():
     )
     assert done_note(SimpleNamespace(speaker="author", payload={"outcome": {"kind": "chat"}})) == ""
     assert done_note(SimpleNamespace(speaker="chief", payload={"outcome": {"kind": "edit"}})) == ""
+
+
+async def test_undo_is_recorded_on_the_message(client, sessionmaker, monkeypatch):
+    bid = await seed(sessionmaker)
+    seen = []
+
+    async def capture(book_id, role, template, **values):
+        seen.append(values["recent"])
+        yield "好。"
+
+    monkeypatch.setattr(chat, "stream_model", capture)
+    note = (await client.post(f"/api/books/{bid}/notes", json={"content": "以后每章都要有一场打斗"})).json()
+    requirement = (await final_message(client, bid, note["id"]))["payload"]["outcome"]["requirement_id"]
+    # 消息下面点「撤销」：先删了这条要求，再记到消息上
+    assert (await client.delete(f"/api/requirements/{requirement}")).status_code in (200, 204)
+    marked = await client.post(f"/api/books/{bid}/notes/{note['id']}/undone", json={})
+    assert marked.status_code == 200 and marked.json()["payload"]["outcome"]["undone"] is True
+    await client.post(f"/api/books/{bid}/notes", json={"content": "刚才那条还算数吗？"})
+    assert "（编辑部照这句做了：记成了写作要求（作者后来撤销了））" in seen[-1]
+
+    # 拆成好几件事的：撤销记在那一件上
+    async with sessionmaker() as session:
+        row = MeetingMessage(
+            book_id=bid,
+            speaker="author",
+            kind="note",
+            content="开局和结局都写一下",
+            payload={
+                "steps": [
+                    {"kind": "outline", "target_label": "第 1 篇"},
+                    {"kind": "outline", "target_label": "全书结局"},
+                ]
+            },
+        )
+        session.add(row)
+        await session.commit()
+        sid = row.id
+    res = await client.post(f"/api/books/{bid}/notes/{sid}/undone", json={"step": 1})
+    assert [s.get("undone") for s in res.json()["payload"]["steps"]] == [None, True]
+    assert (await client.post(f"/api/books/{bid}/notes/{sid}/undone", json={"step": 5})).status_code == 422
+    # 编辑部的话、别的书的消息不认
+    reply = next(m for m in await meeting(client, bid) if m["speaker"] != "author")
+    assert (await client.post(f"/api/books/{bid}/notes/{reply['id']}/undone", json={})).status_code == 404

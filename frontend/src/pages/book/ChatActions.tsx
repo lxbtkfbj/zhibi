@@ -9,7 +9,8 @@ import { ErrorText, TypingDots } from '../../components/ui'
 import { outcomeCopy, pendingOutcome, type RequirementScope } from '../../lib/chat'
 import { useBookContext } from './context'
 
-export function ChatOutcome({ message, result }: { message: MeetingMessage; result?: NonNullable<MeetingMessage["payload"]>["outcome"] }) {
+/** step：一句话拆成好几件事时，这是第几件（撤销时记在那一件上） */
+export function ChatOutcome({ message, result, step }: { message: MeetingMessage; result?: NonNullable<MeetingMessage["payload"]>["outcome"]; step?: number }) {
   const { bookId, manualNavigate, messages, openTarget } = useBookContext()
   const requirements = useAuthorRequirements(bookId)
   const library = useLibrary(bookId)
@@ -29,35 +30,42 @@ export function ChatOutcome({ message, result }: { message: MeetingMessage; resu
   const row = requirements.data?.find(item => item.id === outcome.requirement_id)
   if ((outcome.kind === 'requirement' || outcome.kind === 'to_job') && !requirements.data) return null
   const copy = outcomeCopy(outcome, row)
+  const gone = undone || !!rawOutcome.undone
   const act = async (action: string) => {
     if (busy) return
     if (action === '改一下' || action === '其实要记下') { setEditing(true); return }
     setBusy(true); setError(null)
     try {
       if (action === '撤销') {
-        if (outcome.requirement_id) { await del(`/requirements/${outcome.requirement_id}`); await qc.invalidateQueries({ queryKey: settingsKeys.requirements(bookId) }) }
+        let did = false
+        if (outcome.requirement_id) { await del(`/requirements/${outcome.requirement_id}`); await qc.invalidateQueries({ queryKey: settingsKeys.requirements(bookId) }); did = true }
         else if (outcome.kind === 'outline' && outcome.created_id) {
           // 这一篇是编辑部新加的：整篇删掉
           await del(`/arcs/${outcome.created_id}`)
-          setUndone(true)
+          did = true
           void qc.invalidateQueries({ queryKey: ['workspace', bookId] })
         }
         else if (outcome.kind === 'outline' && outcome.before && outcome.target_type && outcome.target_id) {
           // 大纲帮写：把改之前的样子存回去
           await post(`/books/${bookId}/outline/restore`, { target_type: outcome.target_type, target_id: outcome.target_id, before: outcome.before })
-          setUndone(true)
+          did = true
           void qc.invalidateQueries({ queryKey: ['workspace', bookId] })
         }
         else if (outcome.kind === 'created' && outcome.items?.length) {
           // 群聊里新建的：撤销就是删掉建的那几条
           for (const item of outcome.items) await del(`/${item.target_type === 'character' ? 'characters' : 'world-entries'}/${item.target_id}`)
-          setUndone(true)
+          did = true
           void qc.invalidateQueries({ queryKey: ['workspace', bookId] })
         }
         else if (outcome.revert_version_id) {
           await revert.mutateAsync(outcome.revert_version_id)
-          setUndone(true)
+          did = true
           void qc.invalidateQueries({ queryKey: ['workspace', bookId] })
+        }
+        if (did) {
+          setUndone(true)
+          // 记在消息上：刷新以后还是「已撤销」，不会再撤一次；编辑部回答时也知道你撤销了
+          await post(`/books/${bookId}/notes/${message.id}/undone`, step === undefined ? {} : { step })
         }
       } else if ((outcome.kind === 'later' || outcome.kind === 'suggestion')) manualNavigate(`/books/${bookId}/library?suggestions=1`)
       // 新书页上：直接打开那一条，不跳回旧版
@@ -74,7 +82,7 @@ export function ChatOutcome({ message, result }: { message: MeetingMessage; resu
     else await post(`/books/${bookId}/requirements`, { text, scope, message_id: message.id })
     await qc.invalidateQueries({ queryKey: settingsKeys.requirements(bookId) })
   }
-  return <div data-testid={`outcome-${message.id}`} className="mt-2 space-y-1 text-xs leading-relaxed text-ink-2"><div className="flex flex-wrap items-center gap-x-2"><span>{undone ? '已撤销' : copy.text}</span>{(outcome.kind === 'pending' || outcome.kind === 'working') && <TypingDots />}{outcome.kind === 'working' && <span className="text-ink-3 tabular-nums">{Math.max(0, Math.round((now - Date.parse(message.created_at ?? '')) / 1000))} 秒</span>}{!undone && copy.actions.map(action => <button key={action} disabled={busy} className="underline underline-offset-4 hover:text-chief disabled:opacity-40" onClick={() => void act(action)}>{action}</button>)}</div><ErrorText error={error} />{outcome.kind === 'edit' && outcome.mode === 'options' && outcome.candidate_id && outcome.target_type && outcome.target_id && <ChatOptions bookId={bookId} candidateId={outcome.candidate_id} targetType={outcome.target_type} targetId={outcome.target_id} />}{editing && <RequirementDialog initial={row?.text ?? message.content} scope={row?.scope === 'chapter' ? 'next_chapter' : row?.scope === 'volume' ? 'this_volume' : 'always'} onClose={() => setEditing(false)} onSave={save} />}</div>
+  return <div data-testid={`outcome-${message.id}`} className="mt-2 space-y-1 text-xs leading-relaxed text-ink-2"><div className="flex flex-wrap items-center gap-x-2"><span>{gone ? '已撤销' : copy.text}</span>{(outcome.kind === 'pending' || outcome.kind === 'working') && <TypingDots />}{outcome.kind === 'working' && <span className="text-ink-3 tabular-nums">{Math.max(0, Math.round((now - Date.parse(message.created_at ?? '')) / 1000))} 秒</span>}{!gone && copy.actions.map(action => <button key={action} disabled={busy} className="underline underline-offset-4 hover:text-chief disabled:opacity-40" onClick={() => void act(action)}>{action}</button>)}</div><ErrorText error={error} />{outcome.kind === 'edit' && outcome.mode === 'options' && outcome.candidate_id && outcome.target_type && outcome.target_id && <ChatOptions bookId={bookId} candidateId={outcome.candidate_id} targetType={outcome.target_type} targetId={outcome.target_id} />}{editing && <RequirementDialog initial={row?.text ?? message.content} scope={row?.scope === 'chapter' ? 'next_chapter' : row?.scope === 'volume' ? 'this_volume' : 'always'} onClose={() => setEditing(false)} onSave={save} />}</div>
 }
 
 type Candidate = { id: string; options: { label: string; text: string }[]; chosen: number | null }

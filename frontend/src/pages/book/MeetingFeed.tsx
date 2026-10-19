@@ -882,7 +882,7 @@ export function StepOutcomes({ message }: { message: MeetingMessage }) {
   const busy = current && (current.kind === 'working' || current.kind === 'pending')
   return (
     <>
-      {steps.map((step, index) => <ChatOutcome key={index} message={message} result={step} />)}
+      {steps.map((item, index) => <ChatOutcome key={index} message={message} result={item} step={index} />)}
       {busy && <ChatOutcome message={message} result={current} />}
     </>
   )

@@ -87,7 +87,11 @@ def done_note(message):
     payload = getattr(message, "payload", None) or {}
     if message.speaker != "author":
         return ""
-    parts = [t for o in payload.get("steps") or [payload.get("outcome") or {}] if (t := done_text(o))]
+    parts = [
+        t + ("（作者后来撤销了）" if o.get("undone") else "")
+        for o in payload.get("steps") or [payload.get("outcome") or {}]
+        if (t := done_text(o))
+    ]
     return f"（编辑部照这句做了：{'；'.join(parts)}）" if parts else ""
 
 
