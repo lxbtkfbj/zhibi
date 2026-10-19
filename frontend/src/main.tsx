@@ -26,9 +26,10 @@ const router = createBrowserRouter([
       { path: '/', element: <Home /> },
       { path: '/new', element: <NewBookPage /> },
       { path: '/settings', element: <Navigate to="/" replace state={{ openSettings: true }} /> },
-      { path: '/prompts', lazy: async () => ({ Component: (await import('./pages/PromptsPage')).PromptsPage }) },
     ],
   },
+  // 提示词与调用记录使用独立书页外壳；URL 中保留原书的返回上下文。
+  { path: '/prompts', lazy: async () => ({ Component: (await import('./pages/PromptsPage')).PromptsPage }) },
   // 书页：简介、设定、大纲、正文；编辑部、存档、待处理、本书设置都在这一页上
   { path: '/desk/:bookId', lazy: async () => ({ Component: (await import('./pages/workspace/BookDesk')).BookDesk }) },
   // 工作台原型：同一套界面，示例书和快照，改了不存

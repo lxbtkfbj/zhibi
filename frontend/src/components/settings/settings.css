@@ -50,8 +50,14 @@
 .settings-modal-nav button { text-align: left; padding: 9px 14px; font-size: 15px; border-radius: 8px; color: var(--color-ink-2); cursor: pointer; transition: background-color 150ms, color 150ms; }
 .settings-modal-nav button:hover { color: var(--color-ink); }
 .settings-modal-nav button[aria-selected=true] { background: var(--color-card); color: var(--color-ink); box-shadow: 0 1px 2px rgb(40 25 10 / 0.06); }
-.settings-modal-nav a { margin-top: auto; padding: 8px 6px; color: var(--color-ink-3); font-size: 13px; line-height: 1.8; }
-.settings-modal-nav a:hover { color: var(--color-seal); }
+.settings-tools-link { display: grid; grid-template-columns: 28px minmax(0, 1fr) 16px; align-items: center; gap: 9px 6px; margin-top: auto; padding: 12px 10px; border: 1px solid var(--color-line); border-radius: 10px; background: var(--color-card); color: var(--color-ink-2); text-decoration: none; transition: border-color 150ms, background-color 150ms, color 150ms; }
+.settings-tools-link:hover { border-color: var(--color-line-2); background: color-mix(in srgb, var(--color-card) 70%, var(--color-paper)); color: var(--color-ink); }
+.settings-tools-link:focus-visible { outline: 2px solid var(--color-seal); outline-offset: 3px; }
+.settings-tools-icon { display: flex; width: 28px; height: 28px; align-items: center; justify-content: center; border-radius: 7px; background: var(--color-paper-2); color: var(--color-ink-2); }
+.settings-tools-arrow { grid-column: 3; color: var(--color-ink-3); }
+.settings-tools-copy { grid-column: 1 / -1; min-width: 0; }
+.settings-tools-title { display: block; color: var(--color-ink); font-size: 13px; font-weight: 500; line-height: 1.6; }
+.settings-tools-hint { display: block; margin-top: 4px; color: var(--color-ink-3); font-size: 11px; line-height: 1.7; }
 .settings-modal-content { flex: 1; min-width: 0; overflow: auto; padding: 0 36px 36px; }
 .settings-modal .settings-group, .settings-modal .settings-group + .settings-group { margin-top: 32px; }
 .settings-modal .settings-group-heading { min-height: 32px; margin-bottom: 0; padding-bottom: 8px; border-bottom: 1px solid var(--color-line); color: var(--color-ink-3); font-size: 13px; letter-spacing: .15em; }
@@ -92,6 +98,7 @@
   .settings-modal-heading { padding: 20px 16px 14px; }
   .settings-modal-nav { width: 96px; padding: 10px 6px; }
   .settings-modal-nav button { padding: 8px; font-size: 14px; }
+  .settings-tools-link { padding: 10px 8px; gap: 7px 3px; }
   .settings-modal-content { padding: 0 14px 20px; }
   .settings-row-control { flex-wrap: wrap; }
   .settings-segmented button { padding-inline: 6px; }

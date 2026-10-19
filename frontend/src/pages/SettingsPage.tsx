@@ -1,7 +1,7 @@
-import { ArrowLeft, CheckCircle2, ChevronDown, Eye, EyeOff, X, XCircle } from 'lucide-react'
+import { ArrowLeft, ArrowRight, CheckCircle2, ChevronDown, Eye, EyeOff, FileText, X, XCircle } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { get } from '../api/client'
 import { useProfileMutations, useProfiles, useRoles } from '../api/hooks'
@@ -13,6 +13,7 @@ import { Segmented, SettingsButton, SettingsGroup, SettingsRow, Stepper, Toggle 
 import { WritingSettings } from '../components/settings/WritingSettings'
 import { ROLE_KEY_LABEL, ROLE_KEYS } from '../lib/roles'
 import { DESK_SCALES, useAppearance } from '../lib/appearance'
+import { promptsHref } from '../lib/promptNavigation'
 
 const PRESETS = [
   { name: 'DeepSeek', base_url: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
@@ -183,6 +184,7 @@ function UsagePanel() {
 
 const TABS = [{ key: 'models', label: '模型' }, { key: 'appearance', label: '外观' }, { key: 'defaults', label: '新书默认' }, { key: 'usage', label: '用量' }] as const
 function SettingsWindow({ onClose }: { onClose: () => void }) {
+  const location = useLocation()
   const [tab, setTab] = useState<(typeof TABS)[number]['key']>('models')
   const dialog = useRef<HTMLDivElement>(null)
   const closeRef = useRef(onClose)
@@ -207,7 +209,13 @@ function SettingsWindow({ onClose }: { onClose: () => void }) {
   }, [])
   return <div className="settings-modal-overlay" onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}><div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="settings-title" className="settings-modal">
     <header className="settings-modal-heading"><div><h2 id="settings-title">系统设置</h2><p>所有书共用：用哪些模型、界面样子、新开的书默认怎么写、用了多少。改了就存。</p></div><button type="button" className="settings-close" aria-label="关闭设置" title="关上（Esc）" onClick={onClose}><X className="size-5" /></button></header>
-    <div className="settings-modal-body"><nav className="settings-modal-nav" aria-label="设置分页"><div role="tablist" aria-orientation="vertical" className="flex flex-col gap-1">{TABS.map(item => <button key={item.key} id={`settings-tab-${item.key}`} role="tab" aria-selected={tab === item.key} aria-controls="settings-panel" onClick={() => setTab(item.key)}>{item.label}</button>)}</div><Link to="/prompts" onClick={onClose}>提示词与调用记录 →</Link></nav>
+    <div className="settings-modal-body"><nav className="settings-modal-nav" aria-label="设置分页"><div role="tablist" aria-orientation="vertical" className="flex flex-col gap-1">{TABS.map(item => <button key={item.key} id={`settings-tab-${item.key}`} role="tab" aria-selected={tab === item.key} aria-controls="settings-panel" onClick={() => setTab(item.key)}>{item.label}</button>)}</div>
+      <Link to={promptsHref(location)} onClick={onClose} className="settings-tools-link" aria-label="提示词与调用记录" data-testid="settings-prompts-link">
+        <span className="settings-tools-icon" aria-hidden="true"><FileText className="size-4" /></span>
+        <ArrowRight className="settings-tools-arrow size-4" aria-hidden="true" />
+        <span className="settings-tools-copy"><span className="settings-tools-title">提示词与调用记录</span><span className="settings-tools-hint">调整工作指令，查看模型调用</span></span>
+      </Link>
+    </nav>
       <div id="settings-panel" role="tabpanel" aria-labelledby={`settings-tab-${tab}`} className="settings-modal-content scroll-thin">{tab === 'models' && <ModelsPanel />}{tab === 'appearance' && <AppearancePanel />}{tab === 'defaults' && <DefaultsPanel />}{tab === 'usage' && <UsagePanel />}</div>
     </div>
   </div></div>
