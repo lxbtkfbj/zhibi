@@ -23,6 +23,8 @@ def main() -> None:
     by_index = {c["index"]: c for c in read}
     summary = json.loads((folder / "read" / "read_summary.json").read_text(encoding="utf-8"))
     units = json.loads((folder / "units.json").read_text(encoding="utf-8"))
+    vol_path = folder / "volumes.json"
+    volumes = json.loads(vol_path.read_text(encoding="utf-8")) if vol_path.exists() else {"volumes": [], "open_from": None, "calls": []}
     roster = summary["roster"]
 
     def who(name: str, known: str = "") -> str:
@@ -32,11 +34,11 @@ def main() -> None:
                     return p["name"]
         return name
 
-    calls = summary["calls"] + units["calls"]
+    calls = summary["calls"] + units["calls"] + volumes["calls"]
     ins = sum(c.get("usage", {}).get("input_tokens", 0) for c in calls)
     outs = sum(c.get("usage", {}).get("output_tokens", 0) for c in calls)
     fails = [c for c in summary["calls"] if c.get("error")]
-    unit_seconds = sum(c["seconds"] for c in units["calls"])
+    unit_seconds = sum(c["seconds"] for c in units["calls"] + volumes["calls"])
     money = {k: ins / 1e6 * a + outs / 1e6 * b for k, (a, b) in PRICE.items()}
     chars = sum(len(c["text"]) for c in source["chapters"])
 
@@ -44,15 +46,16 @@ def main() -> None:
     w = L.append
     w(f"# 《{source['book']}》前 {len(source['chapters'])} 章试拆")
     w("")
-    w("> 这是在执笔外面用脚本跑的试验，执笔里还没有「拆一本书」。用的是你的默认模型「A 3.8f」，思考调低。")
+    w("> 这是在执笔外面用脚本跑的试验，执笔里还没有「拆一本书」。用的是你的「A 3.8f」（A 中转站的 deepseek-v4.1-flash），思考调低；没用你的官方 DeepSeek 配置。")
     w("> 章号和原书一样（原书第 52、53 章之间的「上架感言」不算正文，跳过了）。")
     w("")
+    body_start = len(L)
     w("## 跑了多久、花了多少")
     w("")
     w(f"- 原文 {chars:,} 字，{len(source['chapters'])} 章，分 {summary['batches']} 批读，四批同时跑。")
-    w(f"- 逐章记 {summary['seconds'] / 60:.1f} 分钟；归单元 {len(units['calls'])} 次，{unit_seconds / 60:.1f} 分钟。")
-    w(f"- 调用模型 {len(calls)} 次，失败 {len(fails) + sum(1 for c in units['calls'] if c.get('error'))} 次" + (f"（{'；'.join(sorted({c['error'][:40] for c in fails}))}）" if fails else "") + f"；没读成跳过的章：{summary['skipped'] or '没有'}。")
-    w(f"- 输入 {ins:,} token，输出 {outs:,} token。按 DeepSeek V4-Flash 官方价：白天高峰时段约 {money['高峰']:.2f} 元，空闲时段约 {money['空闲']:.2f} 元（你用的是中转，实际按中转的价）。")
+    w(f"- 逐章记 {summary['seconds'] / 60:.1f} 分钟；归单元、归卷 {len(units['calls']) + len(volumes['calls'])} 次，{unit_seconds / 60:.1f} 分钟。")
+    w(f"- 调用模型 {len(calls)} 次，失败 {len(fails) + sum(1 for c in units['calls'] + volumes['calls'] if c.get('error'))} 次" + (f"（{'；'.join(sorted({c['error'][:40] for c in fails}))}）" if fails else "") + f"；没读成跳过的章：{summary['skipped'] or '没有'}。")
+    w(f"- 输入 {ins:,} token，输出 {outs:,} token。实际走的是 A 中转站，按中转的价算；拿 DeepSeek V4-Flash 官方价估个数：白天高峰时段约 {money['高峰']:.2f} 元，空闲时段约 {money['空闲']:.2f} 元。")
     per_char = (money["高峰"] / chars) if chars else 0
     w(f"- 照这个比例，整本 223 万字只拆大纲约 {per_char * 2229054:.0f} 元（高峰）、{summary['seconds'] / chars * 2229054 / 60:.0f} 分钟上下；以后拆设定、写「这本书好在哪」再多三成左右。")
     w("")
@@ -68,6 +71,9 @@ def main() -> None:
     w("　".join(f"{k} {feels.get(k, 0)} 章" for k in FEEL_MARK))
     w("")
 
+    stats = L[body_start:]
+    del L[body_start:]
+
     def chapter_block(i: int) -> None:
         c = by_index.get(i)
         if not c:
@@ -78,11 +84,7 @@ def main() -> None:
         w(f"  - 看点：{c['cool_point']}")
         w(f"  - 钩子：{c['hook']}")
 
-    w("## 大纲：单元和每章章纲")
-    w("")
-    w("单元那段话按「什么事找上门；怎么应对；叫好的那一下；拿到什么」写。")
-    w("")
-    for n, u in enumerate(units["units"], start=1):
+    def unit_block(n: int, u: dict) -> None:
         w(f"### 单元 {n}　{u['title']}（第 {u['first']}–{u['last']} 章，{u['last'] - u['first'] + 1} 章）")
         w("")
         w(u["text"])
@@ -90,6 +92,27 @@ def main() -> None:
         for i in range(u["first"], u["last"] + 1):
             chapter_block(i)
         w("")
+
+    w("## 大纲：卷、单元和每章章纲")
+    w("")
+    w("卷那段话按「想做成什么；被什么挡着；卷末高潮；卷末变成什么」写，单元那段话按「什么事找上门；怎么应对；叫好的那一下；拿到什么」写。")
+    w("")
+    numbered = list(enumerate(units["units"], start=1))
+    for k, v in enumerate(volumes["volumes"], start=1):
+        w(f"## 第 {k} 卷　{v['title']}（第 {v['first']}–{v['last']} 章）")
+        w("")
+        w(f"> {v['text']}")
+        w("")
+        for n, u in numbered:
+            if v["first"] <= u["first"] <= v["last"]:
+                unit_block(n, u)
+    rest_from = volumes["open_from"] or (volumes["volumes"][-1]["last"] + 1 if volumes["volumes"] else 1)
+    rest_units = [(n, u) for n, u in numbered if u["first"] >= rest_from]
+    if rest_units or units.get("open_from"):
+        w(f"## 还没归卷（第 {rest_from} 章起，这一卷还没收在大高潮上，等后面的章读了再归）")
+        w("")
+        for n, u in rest_units:
+            unit_block(n, u)
     if units.get("open_from"):
         w(f"### 还没归单元（第 {units['open_from']} 章起，故事还没收尾，等后面的章读了再归）")
         w("")
@@ -110,7 +133,10 @@ def main() -> None:
     for c in read:
         for m in c["moments"]:
             moments.setdefault(who(m["who"]), []).append((c["index"], m))
-    aliases = {p["name"]: p["aliases"] for p in roster}
+    alias_count = Counter(a for p in roster for a in set(p["aliases"]))
+    names = {p["name"] for p in roster}
+    shared = {a for a, n in alias_count.items() if n > 1 or a in names}
+    aliases = {p["name"]: [a for a in p["aliases"] if a not in shared] for p in roster}
     ranked = sorted(appear.items(), key=lambda kv: (-len(kv[1]), kv[1][0]))
     w("## 主要人物（出场章数最多的 15 个，程序按各章记录合的）")
     w("")
@@ -131,8 +157,10 @@ def main() -> None:
     w("## 别称（模型认成同一个人的叫法，请帮忙看认得对不对）")
     w("")
     for p in roster:
-        if p["aliases"]:
-            w(f"- {p['name']}：{'、'.join(p['aliases'])}")
+        if aliases[p["name"]]:
+            w(f"- {p['name']}：{'、'.join(aliases[p['name']])}")
+    if shared:
+        w(f"- 几个人共用、不算谁的别称：{'、'.join(sorted(shared))}")
     for c in read:
         for p in c["people"]:
             if p.get("was"):
@@ -172,6 +200,7 @@ def main() -> None:
     tropes = Counter(t for c in read for t in c["tropes"])
     w("、".join(f"{t}（{n}）" for t, n in tropes.most_common()))
     w("")
+    L.extend(stats)
     out.write_text("\n".join(L), encoding="utf-8")
     print(f"写好了：{out}，{len(L)} 行；高峰 {money['高峰']:.2f} 元，输入 {ins}，输出 {outs}")
 

@@ -64,8 +64,8 @@ class ReadChapter(BaseModel):
     index: int = Field(description="原文标的第几章")
     goal: str = Field(description="一句话：这一章要发生的事")
     scenes: list[str] = Field(description="两到四个场景，按先后，每个一句")
-    cool_point: str = Field(description="看点：读者爽在哪一下；没有就写在铺垫什么")
-    hook: str = Field(description="结尾钩子；没有写「平收」")
+    cool_point: str = Field(description="看点，「哪一种：怎么做出来的」；没有爽点写「铺垫：……」或「情感：……」")
+    hook: str = Field(description="结尾钩子，「哪一种：读者带着什么问题点下一章」；没有写「平收」")
     summary: str = Field(description="100-200 字摘要")
     feel: Literal["憋屈", "平", "爽", "大爽"]
     people: list[Person] = Field(default_factory=list)

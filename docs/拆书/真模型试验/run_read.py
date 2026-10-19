@@ -78,9 +78,19 @@ class Roster:
     def text(self) -> str:
         if not self.people:
             return "（还没有）"
+        shared = self.shared()
         return "\n".join(
-            f"- {p['name']}｜别称：{'、'.join(p['aliases']) or '无'}｜{p['note']}" for p in self.people
+            f"- {p['name']}｜别称：{'、'.join(a for a in p['aliases'] if a not in shared) or '无'}｜{p['note']}" for p in self.people
         )
+
+    def shared(self) -> set[str]:
+        """几个人都被这么叫过的（「校花」「老同学」），不算谁的别称。"""
+        seen: dict[str, int] = {}
+        for p in self.people:
+            for a in set(p["aliases"]):
+                seen[a] = seen.get(a, 0) + 1
+        names = {p["name"] for p in self.people}
+        return {a for a, n in seen.items() if n > 1 or a in names}
 
 
 class Reader:
