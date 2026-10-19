@@ -1240,6 +1240,13 @@ def _hook(user: str) -> str:
 
 
 async def stream_text(system: str, user: str) -> AsyncIterator[str]:
+    if "【作者这次说的】" in user:
+        # 聊天回答：和以前按固定格式交的那一段一样，只是一点点吐出来
+        text = _chat_reply(system, user).reply
+        for i in range(0, len(text), 8):
+            await asyncio.sleep(DELAY_S / 40)
+            yield text[i : i + 8]
+        return
     if "请接着往下写" in user:
         text = _continuation(user)
     elif "请只重写结尾" in user:

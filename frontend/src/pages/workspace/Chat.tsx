@@ -2,8 +2,8 @@
 
 import clsx from 'clsx'
 import { AlertTriangle, ArrowUp, AtSign, RotateCcw, Square, X } from 'lucide-react'
-import { useLayoutEffect, useRef, useState } from 'react'
-import { TypingDots } from '../../components/ui'
+import { type ReactNode, useLayoutEffect, useRef, useState } from 'react'
+import { Spinner, TypingDots } from '../../components/ui'
 import { CHAT_ROLES, type ChatControl, type ChatMessage, type ChatRole, latestReply, mentionAt, takeMention } from './chatModel'
 
 const ROLE_COLOR: Record<ChatRole, { dot: string; text: string; soft: string }> = {
@@ -21,13 +21,27 @@ function Avatar({ role, working, small }: { role: ChatRole; working?: boolean; s
   )
 }
 
+/** 编辑部某个人交的一整块（方案卡）：左边头像，右边名字和内容 */
+export function RoleRow({ role, children }: { role: ChatRole; children: ReactNode }) {
+  return (
+    <div className="flex gap-2.5">
+      <Avatar role={role} />
+      <div className="min-w-0 flex-1">
+        <p className={clsx('mb-1 text-xs font-medium', ROLE_COLOR[role].text)}>{role}</p>
+        {children}
+      </div>
+    </div>
+  )
+}
+
 function AuthorBubble({ message }: { message: ChatMessage }) {
   return (
-    <div className="flex justify-end">
+    <div className="flex flex-col items-end">
       <p className="max-w-[85%] rounded-[16px_4px_16px_16px] bg-author-bubble px-4 py-2.5 chat-text leading-[1.75] break-words whitespace-pre-wrap text-ink">
         {message.to && <span className={clsx('mr-1.5 font-medium', ROLE_COLOR[message.to].text)}>@{message.to}</span>}
         {message.text}
       </p>
+      {message.below && <div className="max-w-[85%]">{message.below}</div>}
     </div>
   )
 }
@@ -61,6 +75,7 @@ function Reply({ message, latest, answering, onAgain }: { message: ChatMessage; 
             <span className={clsx('break-words whitespace-pre-wrap', message.state === 'streaming' && 'caret')}>{message.text}</span>
           </div>
         ) : null}
+        {message.below}
         {message.state === 'stopped' && (
           <p className="mt-1.5 text-xs text-ink-3">{message.text ? '你让它停下了，写出来的留着' : '还没开口就停下了'}</p>
         )}
@@ -104,8 +119,8 @@ function Composer({ chat, to, setTo, focusKey }: { chat: ChatControl; to?: ChatR
   const caretAt = useRef<number | null>(null)
 
   useLayoutEffect(() => {
-    if (focusKey) ref.current?.focus()
-  }, [focusKey])
+    if (focusKey || chat.focusKey) ref.current?.focus()
+  }, [focusKey, chat.focusKey])
   useLayoutEffect(() => {
     if (caretAt.current === null || !ref.current) return
     ref.current.setSelectionRange(caretAt.current, caretAt.current)
@@ -126,15 +141,16 @@ function Composer({ chat, to, setTo, focusKey }: { chat: ChatControl; to?: ChatR
     setMention(null)
     ref.current?.focus()
   }
-  const send = () => {
-    if (chat.answering) return
+  const send = async () => {
+    if (chat.answering || chat.sending) return
     const taken = takeMention(text)
     const content = taken.text.trim()
     if (!content) return
-    chat.send(content, to ?? taken.to)
-    setText('')
-    setTo(undefined)
     setMention(null)
+    // 没发出去（返回 false）就留着原话
+    if ((await chat.send(content, to ?? taken.to)) === false) return
+    setText((now) => (now === text ? '' : now))
+    setTo(undefined)
   }
   const options = mention?.roles ?? []
 
@@ -154,6 +170,7 @@ function Composer({ chat, to, setTo, focusKey }: { chat: ChatControl; to?: ChatR
           ))}
         </div>
       )}
+      {chat.notice}
       <div className="rounded-[14px] border border-line-2 bg-card transition-[border-color,box-shadow] focus-within:border-ink-3/70 focus-within:shadow-[var(--shadow-paper)]">
         {to && (
           <div className="px-3 pt-2.5">
@@ -199,10 +216,10 @@ function Composer({ chat, to, setTo, focusKey }: { chat: ChatControl; to?: ChatR
               setTo(undefined)
             } else if (e.key === 'Enter' && !e.shiftKey && !composing) {
               e.preventDefault()
-              send()
+              void send()
             }
           }}
-          placeholder={to ? `想问${to}什么` : '想改哪儿、想问什么直接说；打 @ 点名找谁'}
+          placeholder={to ? `想问${to}什么` : chat.placeholder ?? '想改哪儿、想问什么直接说；打 @ 点名找谁'}
           aria-label="给编辑部发消息"
           className="block max-h-52 min-h-[60px] w-full resize-none bg-transparent px-4 pt-3 pb-1 chat-text leading-[1.75] text-ink [field-sizing:content] placeholder:text-ink-3 focus:outline-none"
         />
@@ -213,6 +230,7 @@ function Composer({ chat, to, setTo, focusKey }: { chat: ChatControl; to?: ChatR
             className="flex h-8 items-center gap-1 rounded-lg px-2 text-[13px] text-ink-3 transition-colors hover:bg-line/50 hover:text-ink">
             <AtSign className="size-4" />点名
           </button>
+          {chat.tools}
           {chat.answering && <span className="text-xs text-ink-3">在回答 · 按「停」或 Esc 停下</span>}
           {chat.answering ? (
             <button type="button" onClick={chat.stop} aria-label="停下" title="停下（Esc），写出来的留着"
@@ -220,13 +238,14 @@ function Composer({ chat, to, setTo, focusKey }: { chat: ChatControl; to?: ChatR
               <Square className="size-3.5 fill-current" />
             </button>
           ) : (
-            <button type="button" onClick={send} disabled={!takeMention(text).text.trim()} aria-label="发送" title="发送（Enter）；换行按 Shift + Enter"
+            <button type="button" onClick={() => void send()} disabled={!takeMention(text).text.trim() || chat.sending} aria-label="发送" title="发送（Enter）；换行按 Shift + Enter"
               className="press ml-auto flex size-[34px] shrink-0 items-center justify-center rounded-full bg-ink text-paper-2 transition-colors hover:bg-ink-2 disabled:cursor-not-allowed disabled:bg-line-2 disabled:text-card">
-              <ArrowUp className="size-[18px]" />
+              {chat.sending ? <Spinner className="size-4" /> : <ArrowUp className="size-[18px]" />}
             </button>
           )}
         </div>
       </div>
+      {chat.sendError}
       {chat.hint && <p className="mt-2 text-xs text-writer">{chat.hint}</p>}
     </div>
   )
@@ -251,9 +270,10 @@ export function EditorialChat({ chat }: { chat: ChatControl }) {
       <div ref={box} className="scroll-thin min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5"
         onScroll={(e) => { const el = e.currentTarget; pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48 }}>
         {count === 0 && <EmptyChat onPick={(role) => { setTo(role); setFocusKey((n) => n + 1) }} />}
-        {chat.messages.map((m) => (m.who === '作者'
-          ? <AuthorBubble key={m.id} message={m} />
-          : <Reply key={m.id} message={m} latest={m === latest} answering={chat.answering} onAgain={() => chat.again(m.id)} />))}
+        {chat.messages.map((m) => (m.custom ? <div key={m.id}>{m.custom}</div>
+          : m.who === '作者'
+            ? <AuthorBubble key={m.id} message={m} />
+            : <Reply key={m.id} message={m} latest={m === latest} answering={chat.answering} onAgain={() => chat.again(m.id)} />))}
       </div>
       <Composer chat={chat} to={to} setTo={setTo} focusKey={focusKey} />
     </div>

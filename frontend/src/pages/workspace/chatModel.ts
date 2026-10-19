@@ -1,5 +1,7 @@
 /** 编辑部聊天：只有一个聊天，想找谁就打 @ 点名；回答边写边显示，能停、能重新回答。原型和真书共用一套界面，回答从哪来由外面给。 */
 
+import type { ReactNode } from 'react'
+
 export type ChatRole = '主编' | '设定师' | '写手' | '审稿'
 
 export const CHAT_ROLES: { role: ChatRole; duty: string }[] = [
@@ -23,19 +25,35 @@ export interface ChatMessage {
   state?: ReplyState
   /** 没答上来的原因，说人话 */
   error?: string
+  /** 消息下面再放点东西：改了什么、去看看、撤销…… */
+  below?: ReactNode
+  /** 不是一问一答的（编辑部干活的进度、方案卡）：整条换成这个 */
+  custom?: ReactNode
 }
 
 export interface ChatControl {
   messages: ChatMessage[]
   /** 正在回答：发送键变成「停」 */
   answering: boolean
-  send: (text: string, to?: ChatRole) => void
+  /** 返回 false：没发出去，输入框里的话留着 */
+  send: (text: string, to?: ChatRole) => void | Promise<boolean>
   /** 停下正在写的回答，写出来的字留着 */
   stop: () => void
   /** 把这一条回答重新来一遍；没答上来的就是重试 */
   again: (id: string) => void
   /** 原型的说明：输入框下面一行小字 */
   hint?: string
+  /** 输入框左下「点名」旁边再放的按钮（总结一下） */
+  tools?: ReactNode
+  /** 输入框上面一行提醒（在等你拍板……） */
+  notice?: ReactNode
+  placeholder?: string
+  /** 正在发：发送键转圈 */
+  sending?: boolean
+  /** 没发出去的原因 */
+  sendError?: ReactNode
+  /** 外面要把光标放进输入框：每次加一 */
+  focusKey?: number
 }
 
 const ROLE_NAMES = CHAT_ROLES.map((r) => r.role)
@@ -55,8 +73,8 @@ export function mentionAt(text: string, caret: number): { start: number; query: 
   return roles.length ? { start: caret - match[0].length, query: match[1], roles } : null
 }
 
-/** 最新一条回答：只有它下面有「重新回答」 */
+/** 最新一条回答：只有它下面有「重新回答」。编辑部干活的进度这类不算一句话，跳过去看 */
 export function latestReply(messages: ChatMessage[]): ChatMessage | undefined {
-  const last = messages.at(-1)
+  const last = messages.findLast((m) => !m.custom)
   return last && last.who !== '作者' ? last : undefined
 }

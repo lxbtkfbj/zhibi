@@ -516,7 +516,11 @@ export interface MeetingMessage {
   /** note：作者在编辑部工作时插的话 */
   kind: 'plan' | 'speech' | 'artifact' | 'status' | 'decision' | 'error' | 'note'
   content: string
-  payload: { type?: string; data?: unknown; thread?: Speaker | 'group'; reply_to?: number[]; quote?: { text: string; where: string }; viewing?: ChatViewing; outcome?: ChatOutcome; steps?: ChatOutcome[]; plan?: ChatPlan; status?: 'open' | 'superseded' | 'applying' | 'applied'; results?: ChatOutcome[] } | null
+  payload: { type?: string; data?: unknown; thread?: Speaker | 'group'; reply_to?: number[]; quote?: { text: string; where: string }; viewing?: ChatViewing; outcome?: ChatOutcome; steps?: ChatOutcome[]; plan?: ChatPlan; status?: 'open' | 'superseded' | 'applying' | 'applied'; results?: ChatOutcome[]
+    /** 聊天回答：thinking 还没出字、streaming 在写、stopped 作者叫停了、failed 没答上来（error 是原因）；写完了没有这一项 */
+    state?: 'thinking' | 'streaming' | 'stopped' | 'failed'; error?: string
+    /** 新书页群聊里打 @ 点的名 */
+    ask?: TeamRole } | null
   created_at: string | null
 }
 

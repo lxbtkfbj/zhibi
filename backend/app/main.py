@@ -55,9 +55,11 @@ async def seed_default_profile() -> None:
 async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     application.state.redis = Redis.from_url(get_settings().redis_url, decode_responses=True)
     await seed_default_profile()
+    from app.services.chat import clean_live_replies
     from app.services.group_notes import clean_pending
 
     await clean_pending(application.state.redis)
+    await clean_live_replies(application.state.redis)
     yield
     await application.state.redis.aclose()
     await dispose_engine()

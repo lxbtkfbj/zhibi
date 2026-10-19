@@ -1,4 +1,4 @@
-/** 新书页：接真书。编辑部浮窗里先放现有的聊天；开写、正文、拍板在新书页上，待处理、历史版本还在旧版。 */
+/** 新书页：接真书。编辑部浮窗里只有一个聊天（第五步：@ 点名、边写边显示、停、重新回答）；开写、正文、拍板在新书页上，待处理、历史版本还在旧版。 */
 
 import { useIsMutating } from '@tanstack/react-query'
 import { Settings } from 'lucide-react'
@@ -13,7 +13,7 @@ import { useConversationReads } from '../../lib/useWorkspacePanels'
 import { currentTarget, type NodeFeedback, nodeFeedback } from '../../lib/workspace'
 import { segmentReviewKey } from '../../lib/outlineWriting'
 import { BookContext, type BookContextValue, type PitchChoice } from '../book/context'
-import { ConversationPanel } from '../book/ConversationPanel'
+import { LiveChat } from './LiveChat'
 import { useLiveBook } from './liveActions'
 import { useLiveWriting } from './liveWriting'
 import { InboxButton, Workspace } from './Workspace'
@@ -124,7 +124,7 @@ function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
   return (
     <BookContext.Provider value={context}>
       <Workspace book={book} actions={actions} right={right} notice={<JobNotice book={detail} />} openRef={openRef} viewingRef={viewingRef}
-        chat={<div className="@container/chat flex min-h-0 flex-1 bg-pane-mid"><ConversationPanel /></div>}
+        chat={<LiveChat />}
         chatBadge={unread} openChat={openChat} writing={writing} />
     </BookContext.Provider>
   )

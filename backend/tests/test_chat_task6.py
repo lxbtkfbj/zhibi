@@ -321,17 +321,17 @@ async def test_classification_failure_not_feedback(client, sessionmaker, monkeyp
 
 async def test_reply_error_and_summary_failure_dont_write_requirements(client, sessionmaker, monkeypatch):
     bid = await seed(sessionmaker)
-    original = chat.model
 
-    async def fail(book_id, role, schema, template, **values):
-        if schema is s.ChatReply:
-            raise ValueError("演示错误")
-        return await original(book_id, role, schema, template, **values)
+    async def fail(book_id, role, template, **values):
+        raise ValueError("演示错误")
+        yield ""
 
-    monkeypatch.setattr(chat, "model", fail)
+    # 第五步起回答边写边显示：没答上来记在这条回答上，给「重试」
+    monkeypatch.setattr(chat, "stream_model", fail)
     await client.post(f"/api/books/{bid}/notes", json={"content": "为什么？", "to": "writer"})
     messages = (await client.get(f"/api/books/{bid}/meeting")).json()
-    assert messages[-1]["content"] == "写手这会儿没答上来：演示错误。再问一次试试。"
+    assert messages[-1]["speaker"] == "writer" and messages[-1]["content"] == ""
+    assert messages[-1]["payload"]["state"] == "failed" and messages[-1]["payload"]["error"] == "演示错误"
 
 
 def test_exact_templates_and_schema_contracts():
@@ -441,17 +441,23 @@ async def test_summary_failure_uses_old_summary(client, sessionmaker, monkeypatc
             )
         await session.commit()
     original = chat.model
+    seen = []
 
     async def model(book_id, role, schema, template, **values):
         if schema is s.ChatSummary:
             raise ValueError("摘要失败")
-        assert values["summary"] == "旧摘要"
         return await original(book_id, role, schema, template, **values)
 
+    async def stream(book_id, role, template, **values):
+        seen.append(values["summary"])
+        yield "接着说。"
+
     monkeypatch.setattr(chat, "model", model)
+    monkeypatch.setattr(chat, "stream_model", stream)
     await client.post(f"/api/books/{bid}/notes", json={"content": "接着聊", "to": "chief"})
     messages = (await client.get(f"/api/books/{bid}/meeting")).json()
-    assert messages[-1]["speaker"] == "chief"
+    assert messages[-1]["speaker"] == "chief" and messages[-1]["content"] == "接着说。"
+    assert seen == ["旧摘要"]
 
 
 async def test_tidy_missing_items_keep_and_false_conclusion(client, sessionmaker, monkeypatch):

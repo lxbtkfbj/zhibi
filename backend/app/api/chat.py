@@ -10,9 +10,9 @@ from sqlalchemy import func, select
 from app.agents.schemas import PlanItem
 from app.api.deps import SessionDep, get_book, get_redis
 from app.models import Book, MeetingMessage, SettingSuggestion
-from app.services.chat import conversation_lock
+from app.services.chat import LIVE, again_background, conversation_lock, reply_state, stop_key
 from app.services.chat_context import THREADS, thread_of
-from app.services.meeting import SPEAKER_NAMES, message_dict, post_message
+from app.services.meeting import SPEAKER_NAMES, message_dict, post_message, publish
 
 router = APIRouter(tags=["chat"])
 
@@ -43,6 +43,56 @@ async def reset(thread: str, book: Book = Depends(get_book), session=SessionDep,
             payload={"thread": thread},
         )
     return {"reset_after": latest}
+
+
+async def reply_of(session, book, message_id):
+    m = await session.get(MeetingMessage, message_id)
+    if m is None or m.book_id != book.id or m.kind != "speech" or not (m.payload or {}).get("reply_to"):
+        raise HTTPException(404, "这条回答不存在")
+    return m
+
+
+@router.post("/books/{book_id}/chat/replies/{message_id}/stop")
+async def stop_reply(
+    message_id: int, book: Book = Depends(get_book), session=SessionDep, redis: Redis = Depends(get_redis)
+):
+    """作者点「停」：回答那边看到旗子就停，写出来的字留着。已经写完的不动。"""
+    m = await reply_of(session, book, message_id)
+    if reply_state(m) in LIVE:
+        await redis.set(stop_key(m.id), "1", ex=600)
+    return {"ok": True}
+
+
+@router.post("/books/{book_id}/chat/replies/{message_id}/again", status_code=202)
+async def again_reply(
+    message_id: int,
+    background_tasks: BackgroundTasks,
+    book: Book = Depends(get_book),
+    session=SessionDep,
+    redis: Redis = Depends(get_redis),
+):
+    """重新回答、重试：只认这个对话里最新的一条回答；这一条清空了重写，不留旧的。"""
+    m = await reply_of(session, book, message_id)
+    if reply_state(m) in LIVE:
+        raise HTTPException(409, "还在回答，先停下")
+    thread = (m.payload or {}).get("thread") or "group"
+    later = await session.scalars(
+        select(MeetingMessage).where(MeetingMessage.book_id == book.id, MeetingMessage.id > m.id)
+    )
+    if any(
+        ((x.payload or {}).get("thread") or "group") == thread
+        and (x.speaker == "author" or "reply_to" in (x.payload or {}))
+        for x in later
+    ):
+        raise HTTPException(409, "后面又聊了，只有最新的一条回答能重新回答")
+    payload = {k: v for k, v in (m.payload or {}).items() if k not in ("state", "error")}
+    m.content, m.payload = "", {**payload, "state": "thinking"}
+    await session.commit()
+    data = message_dict(m)
+    await redis.delete(stop_key(m.id))
+    await publish(redis, book.id, "message_update", data)
+    background_tasks.add_task(again_background, book.id, thread, m.id, redis)
+    return data
 
 
 class ReceiptIn(BaseModel):

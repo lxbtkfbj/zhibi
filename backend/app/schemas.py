@@ -1047,6 +1047,8 @@ class ChatViewing(BaseModel):
 class NoteIn(BaseModel):
     content: str = Field(min_length=1, max_length=5000)
     to: Literal["chief", "lorekeeper", "writer", "reviewer"] | None = None
+    # 新书页群聊里打 @ 点的名：这一句由他来答（to 是旧版的私聊）
+    ask: Literal["chief", "lorekeeper", "writer", "reviewer"] | None = None
     quote: ChatQuote | None = None
     viewing: ChatViewing | None = None
 

@@ -670,7 +670,7 @@ function GroupTag() {
 }
 
 /** 「按这个来」交给编辑部的方案：作者那一边只显示一行，点开看全文。 */
-function PlanSubmitted({ text }: { text: string }) {
+export function PlanSubmitted({ text }: { text: string }) {
   const [open, setOpen] = useState(false)
   const title = text.match(/【和作者商量定的方案：(.+?)】/)?.[1] ?? '方案'
   return <div className="w-full max-w-[min(85%,40rem)] rounded-[16px_4px_16px_16px] bg-author-bubble px-4 py-2.5 text-sm text-ink">
@@ -685,6 +685,17 @@ function PlanSubmitted({ text }: { text: string }) {
 function MessageRow({ message, fromGroup, continued }: { message: MeetingMessage; fromGroup?: boolean; continued?: boolean }) {
   const meta = ROLE_META[message.speaker] ?? ROLE_META.system
   const author = message.speaker === 'author'
+  // 聊天回答边写边显示（新书页那一套）：旧版还没出字时只看「正在想…」，没答上来照旧版的样子提示
+  const state = author ? undefined : message.payload?.state
+  if ((state === 'thinking' || state === 'streaming') && !message.content) return null
+  if (state === 'failed') {
+    return (
+      <div className="flex gap-2 rounded-lg border border-seal/30 bg-seal-soft px-3 py-2 text-sm text-seal-dark">
+        <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+        <span className="break-words">{meta.name}这会儿没答上来：{message.payload?.error}。再问一次试试。</span>
+      </div>
+    )
+  }
   if (message.kind === 'error') {
     return (
       <div className="flex gap-2 rounded-lg border border-seal/30 bg-seal-soft px-3 py-2 text-sm text-seal-dark">
@@ -864,7 +875,7 @@ export function MeetingFeed({
 }
 
 /** 一句话里做了好几件事：每件一行结果；最后一件还在做时，下面接着显示正在做什么。 */
-function StepOutcomes({ message }: { message: MeetingMessage }) {
+export function StepOutcomes({ message }: { message: MeetingMessage }) {
   const steps = message.payload?.steps
   if (!steps?.length) return <ChatOutcome message={message} />
   const current = message.payload?.outcome

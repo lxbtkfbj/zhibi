@@ -73,6 +73,15 @@ export function useMeeting(bookId: string) {
       setState(prev => prev.bookId === bookId ? { bookId, messages: prev.messages.map(m => m.id === message.id ? message : m) } : prev)
       refresh([settingsKeys.requirements(bookId)])
     })
+    // 聊天回答边写边推：每次带着到目前为止的全文
+    source.addEventListener('chat_delta', event => {
+      const { id, text } = JSON.parse((event as MessageEvent).data) as { id: number; text: string }
+      setState(prev => prev.bookId === bookId ? {
+        bookId,
+        messages: prev.messages.map(m => m.id === id && (m.payload?.state === 'thinking' || m.payload?.state === 'streaming')
+          ? { ...m, content: text, payload: { ...m.payload, state: 'streaming' } } : m),
+      } : prev)
+    })
     source.addEventListener('chat_typing', event => {
       const value = JSON.parse((event as MessageEvent).data) as ChatTyping
       setTyping(prev => ({ ...prev, [value.thread]: { ...value, at: Date.now() } }))

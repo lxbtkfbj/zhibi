@@ -52,6 +52,9 @@ async def dialogue(session, book_id, thread, reset_after=0):
                     m.kind in {"speech", "plan"}
                     and m.speaker in ROLES.values()
                     and (thread != "group" or m.kind == "plan" or "reply_to" in (m.payload or {}))
+                    # 还在写的、没答上来的回答不算说过的话
+                    and m.content
+                    and (m.payload or {}).get("state") not in {"thinking", "streaming", "failed"}
                 )
             )
         )

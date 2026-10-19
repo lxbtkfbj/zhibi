@@ -131,6 +131,7 @@ async def receive_note(body, background_tasks, book, session, redis):
         **({"quote": body.quote.model_dump()} if body.quote else {}),
         # 新书页上带：作者正在看哪一页（只在群聊里用来认「这一篇」「这一条」）
         **({"viewing": body.viewing.model_dump()} if body.viewing and not body.to else {}),
+        **({"ask": body.ask} if body.ask and not body.to else {}),
     }
     plan = None
     if wants_plan(text):
@@ -142,7 +143,8 @@ async def receive_note(body, background_tasks, book, session, redis):
         task = "apply"
     elif body.to or (role := obvious_question(text)):
         payload.update(
-            outcome={"kind": "chat", **({"shortcut": True} if not body.to else {})}, chat_role=body.to or role
+            outcome={"kind": "chat", **({"shortcut": True} if not body.to else {})},
+            chat_role=body.to or body.ask or role,
         )
         task = "reply"
     else:
@@ -216,7 +218,9 @@ async def apply_intent(session, redis, message, intent):
         await update_message(session, redis, message, outcome={"kind": "too_late"})
         return False
     if intent.kind == "提问闲聊":
-        await update_message(session, redis, message, outcome={"kind": "chat"}, chat_role=ROLES[intent.who])
+        # 作者点了名就由他答，没点名照分流挑的人
+        role = (message.payload or {}).get("ask") or ROLES[intent.who]
+        await update_message(session, redis, message, outcome={"kind": "chat"}, chat_role=role)
         return True
     working = job is not None and job.status in jobs.BUSY_STATUSES
     if intent.kind == "写大纲":
@@ -328,7 +332,7 @@ async def apply_intent(session, redis, message, intent):
                 )
     await update_message(session, redis, message, outcome=outcome)
     if reply:
-        await say(session, redis, book_id, "chief", reply)
+        await say(session, redis, book_id, (message.payload or {}).get("ask") or "chief", reply)
     return False
 
 
