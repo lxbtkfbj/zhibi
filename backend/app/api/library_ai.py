@@ -96,7 +96,9 @@ async def rewrite_target(
     allow_waiting=False,
     require_unwritten=False,
     single_attempt=False,
+    review=True,
 ):
+    """review=False：改了定调（简介）以后不在这里做连带检查，调用方改完再查（别算进改这一处的限时里）。"""
     if body.mode == "instruction" and not body.instruction.strip():
         raise HTTPException(422, "先写一句你想怎么改")
     book_id = book.id
@@ -217,7 +219,7 @@ async def rewrite_target(
         "revert_version_id": revert_version_id,
         "suggestions": [SuggestionOut.model_validate(row) for row in suggestions],
     }
-    if isinstance(target, Book) and body.path.split("@", 1)[0] == "story":
+    if review and isinstance(target, Book) and body.path.split("@", 1)[0] == "story":
         await review_concept_change(
             session, redis, book_id, before.get("story", ""), **({"single_attempt": True} if single_attempt else {})
         )

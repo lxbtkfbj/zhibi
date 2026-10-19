@@ -37,7 +37,12 @@ export function outcomeCopy(outcome: ChatOutcome, requirement?: AuthorRequiremen
   if (outcome.kind === 'failed' && outcome.redo_failed) return { text: `再改一版没做成（${outcome.reason}），这一处现在是改之前的样子。`, actions: [] }
   if (outcome.kind === 'failed') return { text: `没判断出来（${outcome.reason}），这句话没有记，也没有改。`, actions: ['其实要记下'] }
   if (outcome.kind === 'plan_apply') return { text: `照方案办：${outcome.label ?? '方案'}`, actions: [] }
-  if (outcome.kind === 'plan_made') return { text: '刚才聊了不少，我先整理成方案，你看看再照办', actions: [] }
+  if (outcome.kind === 'plan_made') return outcome.count
+    ? { text: `${outcome.deleting ? '要删东西' : `一次要动 ${outcome.count} 处`}，先整理成了方案卡：你看过、划掉不要的，点「按这个来」才改`, actions: [] }
+    : { text: '刚才聊了不少，我先整理成方案，你看看再照办', actions: [] }
+  if (outcome.kind === 'deleted') return { text: `删掉了：${outcome.target_label ?? '这一处'}`, actions: [] }
+  if (outcome.kind === 'agent') return { text: '', actions: [] }
+  if (outcome.kind === 'not_found') return { text: `没找到「${outcome.target_name ?? ''}」，没改`, actions: [] }
   if (outcome.kind === 'suggestion') return { text: '放进了待处理的建议', actions: ['去看看'] }
   if (outcome.kind === 'feedback') return { text: outcome.label ?? '', actions: [] }
   if (outcome.kind === 'chat') return { text: '只是聊天，没有记', actions: ['其实要记下'] }

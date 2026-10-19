@@ -60,6 +60,9 @@ function toChat(messages: MeetingMessage[]): ChatMessage[] {
         // 照作者的话答的才能重新回答；编辑部干活时说的话、改完设定报的一句不能
         replyTo: asked?.length ? String(asked[0]) : undefined,
         state: m.payload?.state ?? 'done', error: m.payload?.error,
+        // 自己查、自己动手的回答：干活时那一行，答完下面「查了：……」
+        doing: m.payload?.doing,
+        looked: m.payload?.tools?.filter((t) => t.kind === 'query'),
       })
     } else if (m.content) {
       out.push({ id: `line:${id}`, who: '主编', text: m.content, custom: <Line>{m.content}</Line> })

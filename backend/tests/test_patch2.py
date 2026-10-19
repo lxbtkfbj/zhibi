@@ -138,7 +138,8 @@ async def test_open_plan_applies_items_not_feedback_and_all_can_undo(flow, sessi
     async with sessionmaker() as session:
         assert len(list(await session.scalars(select(LlmCall).where(LlmCall.purpose == "开书·三个故事方向")))) == 1
     await flow("POST", f"/versions/{results[0]['revert_version_id']}/revert")
-    await flow("POST", f"/plans/{card['id']}/results/1/undo")
+    # 第五步第三批起方案卡照办的每一条和聊天里改的一样：新建的用「换回原来的」删掉
+    await flow("POST", f"/books/{bid}/notes/{card['id']}/revert", {"step": 1})
     await flow("DELETE", f"/requirements/{results[3]['requirement_id']}")
     assert not (await flow("GET", f"/books/{bid}/library"))["characters"]
     # 没有定调/设定成功落地时，不发补齐邀请。

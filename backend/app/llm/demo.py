@@ -837,10 +837,16 @@ def _outline_write(user: str, chapter: bool) -> s.OutlineNodeWrite | s.ChapterOu
     name = (re.search(r"在看大纲上的(.+?)，想让你", user) or [None, "这一段"])[1]
     if chapter:
         return s.ChapterOutlineWrite(
-            title="演示章名", goal=f"（演示）{name}要做成的事", scenes=["（演示）场景一", "（演示）场景二"],
-            cool_point="（演示）爽点", hook="（演示）钩子", note="（演示）写了章纲。",
+            title="演示章名",
+            goal=f"（演示）{name}要做成的事",
+            scenes=["（演示）场景一", "（演示）场景二"],
+            cool_point="（演示）爽点",
+            hook="（演示）钩子",
+            note="（演示）写了章纲。",
         )
-    return s.OutlineNodeWrite(title="演示名字", text=f"（演示）{name}的剧情：起、压、爆、收。", note="（演示）写了一段。")
+    return s.OutlineNodeWrite(
+        title="演示名字", text=f"（演示）{name}的剧情：起、压、爆、收。", note="（演示）写了一段。"
+    )
 
 
 def _library_draft(user: str) -> s.DraftSet:
@@ -848,7 +854,9 @@ def _library_draft(user: str) -> s.DraftSet:
     category = (re.search(r"「(.+?)」这一类", user) or [None, "设定"])[1]
     fields = _match(r"【这一类的栏目】\n(.*?)\n\n", user)
     count = int(_match(r"【写几条】\n(\d+)", user) or 3)
-    labels = [label for line in fields.splitlines() if "：" in line for label in line.split("：", 1)[1].split("、") if label]
+    labels = [
+        label for line in fields.splitlines() if "：" in line for label in line.split("：", 1)[1].split("、") if label
+    ]
     entries = []
     for i in range(1, count + 1):
         if "一级一级往上排" in fields:
@@ -857,7 +865,8 @@ def _library_draft(user: str) -> s.DraftSet:
             entries.append(s.DraftEntry(name=f"演示{category}{i}", values=values, levels=levels))
             continue
         values = [
-            s.FieldValue(name=label, value="配角" if label == "定位" else f"（演示）第{i}条的{label}") for label in labels
+            s.FieldValue(name=label, value="配角" if label == "定位" else f"（演示）第{i}条的{label}")
+            for label in labels
         ]
         entries.append(s.DraftEntry(name=f"演示{category}{i}", values=values))
     return s.DraftSet(entries=entries, note=f"（演示）写了 {count} 条{category}。")
@@ -943,15 +952,30 @@ def _library_intent(user: str) -> s.LibraryIntent:
     # 开局和结尾：开局是第一篇，结尾是全书结局，算两件
     if any(w in note for w in ("开局", "开头")) and any(w in note for w in ("结尾", "结局")):
         return s.LibraryIntent(
-            kind="写大纲", outline_target="开局", instruction=note, more=["把全书结局写一下"], reply="好，开局和结局我来写。"
+            kind="写大纲",
+            outline_target="开局",
+            instruction=note,
+            more=["把全书结局写一下"],
+            reply="好，开局和结局我来写。",
         )
     # 新建设定：「写一张封不觉的角色卡」「新建一个角色王二」「帮我加一个地点」
     if any(w in note for w in ("角色卡", "新建", "加一个")):
         named = re.search(r"写一张(.+?)的角色卡|新建一个(?:角色)?(.+?)(?:角色|人物|$)", note)
         names = [n for n in (named.groups() if named else ()) if n]
-        category = "角色列表" if any(w in note for w in ("角色", "人物", "反派")) else "地点列表" if "地点" in note else "特殊规则"
+        category = (
+            "角色列表"
+            if any(w in note for w in ("角色", "人物", "反派"))
+            else "地点列表"
+            if "地点" in note
+            else "特殊规则"
+        )
         return s.LibraryIntent(
-            kind="新建设定", category=category, new_names=names[:1], count=1, instruction=note, reply="好，交给设定师写。"
+            kind="新建设定",
+            category=category,
+            new_names=names[:1],
+            count=1,
+            instruction=note,
+            reply="好，交给设定师写。",
         )
     # 写大纲：「帮我写一下这篇」「把第三卷写一下」
     if any(w in note for w in ("写一下", "写写", "帮我写", "细化", "重写")) and any(
@@ -1039,6 +1063,67 @@ def _chat_reply(system, user):
     names = re.findall(r"^.+? · ([^\n]+)$", related, re.M)
     role = next((r for r in ("主编", "设定师", "写手", "审稿") if r in (system.splitlines() or ["主编"])[0]), "主编")
     return s.ChatReply(reply=f"（演示）{role}回答：{note[:20]}。相关资料里有：{'、'.join(names) or '没有'}。")
+
+
+# 演示模型默认不「假装调工具」，聊天照旧走分流；测试要试主编自己查、自己动手时打开
+FAKE_TOOLS = False
+
+
+def _change_of(intent: s.LibraryIntent) -> dict | None:
+    """演示分流的判断换成动手清单里的一条"""
+    if intent.kind == "提问闲聊":
+        return None
+    if intent.kind == "改设定":
+        kind = {"给几个写法": "给几个写法", "照作者的意思改": "改设定", "补齐空着的": "补齐"}[intent.mode]
+        return {"kind": kind, "target": intent.target_name, "part": intent.part, "instruction": intent.instruction}
+    if intent.kind == "新建设定":
+        return {
+            "kind": "新建设定",
+            "category": intent.category,
+            "new_names": intent.new_names,
+            "count": intent.count,
+            "instruction": intent.instruction,
+        }
+    if intent.kind == "写大纲":
+        return {"kind": "写大纲", "target": intent.outline_target, "instruction": intent.instruction}
+    return {"kind": "写作要求", "requirement": intent.requirement, "scope": intent.scope}
+
+
+def _demo_changes(note: str, library: str, names: list[str]) -> list[dict]:
+    """一句话里「……，然后……」拆成几条；每一条照演示分流判断，「简介改成」「删掉某某」另认。"""
+    lines = re.findall(r"^- [^\n]+", library, re.M) + [f"- {n}" for n in names]
+    route = "【设定库目录】\n" + "\n".join(lines) + "\n【最近的对话】\n\n【作者的话】\n{}\n\n要求："
+    changes = []
+    for piece in (p.strip("，, ") for p in note.split("然后")):
+        if "简介改成" in piece:
+            changes.append({"kind": "改简介", "instruction": piece})
+        elif gone := next((n for n in names if f"删掉{n}" in piece or f"把{n}删" in piece), None):
+            changes.append({"kind": "删除", "target": gone})
+        elif change := _change_of(_library_intent(route.format(piece))):
+            changes.append(change)
+    return changes
+
+
+def tool_turn(system: str, user: str, tools: list[str], done: list) -> tuple[list[tuple[str, dict]], str]:
+    """演示模型「假装调工具」：先查话里提到的设定，再照演示分流动手，最后说一段话。
+    返回 (这一来回要调的工具, 这一来回说的字)；tools 是这一来回能调的工具名，空的就是不许再调。"""
+    note = _match(r"【作者这次说的】\n(.*?)(?=\n\n【|\n\n怎么做：|\Z)", user).strip()
+    library = _match(r"【设定库】\n(.*?)(?=\n\n【大纲】|\Z)", user)
+    called = [call.name for call, _ in done]
+    known = [*re.findall(r"^- ([^（：\n]+)", library, re.M), *re.findall(r"^[^\n·：]+ · ([^\n：]+)$", library, re.M)]
+    names = [n for n in dict.fromkeys(k.strip() for k in known) if n]
+    mentioned = [n for n in names if n in note]
+    if "look_up_settings" in tools and mentioned and "look_up_settings" not in called:
+        return [("look_up_settings", {"names": mentioned[:3]})], ""
+    if "make_changes" in tools and "make_changes" not in called and (items := _demo_changes(note, library, names)):
+        return [("make_changes", {"items": items, "title": "演示改动"})], ""
+    if "演示中途出错" in note and "make_changes" in called and "【上次做到一半】" not in user:
+        raise RuntimeError("演示中途出错")
+    role = next((r for r in ("主编", "设定师", "写手", "审稿") if r in (system.splitlines() or ["主编"])[0]), "主编")
+    looked = "、".join(n for call, _ in done if call.name == "look_up_settings" for n in call.args.get("names", []))
+    acted = next((result for call, result in reversed(done) if call.name == "make_changes"), "")
+    text = f"（演示）{role}回答：{note[:20]}。" + (f"查了{looked}。" if looked else "")
+    return [], text + (f"动手的结果：{acted[:80]}" if acted else "")
 
 
 def _chat_plan(user):

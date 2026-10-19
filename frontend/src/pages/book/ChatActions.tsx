@@ -104,13 +104,13 @@ export function ChatOutcome({ message, result, step }: { message: MeetingMessage
   const dialog = editing && <RequirementDialog initial={row?.text ?? message.content} scope={row?.scope === 'chapter' ? 'next_chapter' : row?.scope === 'volume' ? 'this_volume' : 'always'} onClose={() => setEditing(false)} onSave={save} />
   if (shown) {
     const what = isRequirement ? (outcome.kind === 'to_job' ? '交给了编辑部：记成写作要求' : '记成了写作要求') : copy.text
-    const canGo = !isRequirement && !!outcome.target_type && !!outcome.target_id
+    const canGo = !isRequirement && outcome.kind !== 'deleted' && !!outcome.target_type && !!outcome.target_id
     return (
       <div data-testid={`outcome-${message.id}`} className="mt-2 space-y-1.5 text-xs leading-relaxed text-ink-2">
         <p>{gone ? `已换回原来的：${outcome.target_label ?? (isRequirement ? '这条写作要求删掉了' : '这一处')}` : what}</p>
         {!gone && <div className="space-y-1.5">{(outcome.diff ?? []).map((diff, i) => <DiffBlock key={i} diff={diff} />)}</div>}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          {!gone && !isRequirement && <button type="button" disabled={busy || !fresh} onClick={() => void act('再改一版')} className={link} title="照你这句话把这一处重新改一遍">再改一版</button>}
+          {!gone && !isRequirement && !!rawOutcome.redo && <button type="button" disabled={busy || !fresh} onClick={() => void act('再改一版')} className={link} title="照你这句话把这一处重新改一遍">再改一版</button>}
           {!gone && <button type="button" disabled={busy || !fresh} onClick={() => void act('换回原来的')} className={link} title={isRequirement ? '删掉这条要求' : '这一处换回改之前的样子'}>换回原来的</button>}
           {!gone && isRequirement && row && <button type="button" disabled={busy} onClick={() => void act('改一下')} className={link}>改一下</button>}
           {canGo && <button type="button" disabled={busy} onClick={() => void act('去看看')} className={link}>去看看</button>}

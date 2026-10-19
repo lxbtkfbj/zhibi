@@ -877,9 +877,12 @@ export function MeetingFeed({
 /** 一句话里做了好几件事：每件一行结果；最后一件还在做时，下面接着显示正在做什么。 */
 export function StepOutcomes({ message }: { message: MeetingMessage }) {
   const steps = message.payload?.steps
-  if (!steps?.length) return <ChatOutcome message={message} />
   const current = message.payload?.outcome
-  const busy = current && (current.kind === 'working' || current.kind === 'pending')
+  // 接话的人自己动手的那一句：正在做什么显示在回答框里，这里只摆做完的
+  const agent = message.payload?.turn === 'tools'
+  const doing = current && (current.kind === 'working' || current.kind === 'pending' || current.kind === 'agent')
+  if (!steps?.length) return agent && doing ? null : <ChatOutcome message={message} />
+  const busy = doing && current.kind !== 'agent' && !agent
   return (
     <>
       {steps.map((item, index) => <ChatOutcome key={index} message={message} result={item} step={index} />)}

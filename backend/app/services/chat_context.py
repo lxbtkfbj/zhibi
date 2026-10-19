@@ -23,6 +23,12 @@ from app.services.setup_store import load_ledger, load_secrets
 from app.services.writing_context import best_excerpt, character_states, story_so_far
 
 ROLES = {"主编": "chief", "设定师": "lorekeeper", "写手": "writer", "审稿": "reviewer"}
+ROLE_FOCUS = {
+    "chief": "你管剧情、节奏和方向：为什么这样安排、后面怎么走、哪里还能更爽。",
+    "lorekeeper": "你管设定和前后一致：查清楚再答，说明出处（哪一条设定、第几章）。",
+    "writer": "你管怎么写：文风、场面、对话；示范的时候贴着这本书的文风。",
+    "reviewer": "你管挑毛病：站在付费读者的角度，只说真正影响阅读的问题，按严重程度排。",
+}
 THREADS = {"group", *ROLES.values()}
 
 
@@ -84,6 +90,8 @@ def done_text(outcome):
         else f"没做成（{outcome.get('reason') or ''}），什么也没改",
         "plan_apply": "照方案卡办了",
         "saved": f"把书存了一档「{outcome.get('title') or ''}」",
+        "deleted": f"删掉了{label}",
+        "plan_made": "要动的多，整理成了方案卡，等作者点「按这个来」才改" if outcome.get("count") else "",
     }.get(kind, "")
 
 
@@ -354,14 +362,10 @@ async def reply_values(session, book, thread, role, rows, unanswered, summary):
             "作者想让聊出来的想法生效，要先让你「总结一下」出一张方案卡，看过再点「按这个来」。聊到想法差不多成形时，可以提醒他一句；不要说「就这么定了」「咱们直接开始排……」，聊天里说的都还没生效。"
             if thread != "group"
             else "群聊里作者明说要改、要写、要记的，编辑部已经照办了：最近的对话里作者那句话后面写着「（编辑部照这句做了：……）」，那些就是真改了、真写进去了，照实说，别说成没生效。"
-            "只是商量出来的想法还没生效，作者想让它生效，要先让你「总结一下」出一张方案卡，看过再点「按这个来」；没照办的别说成已经办了。"
+            "只是商量出来的想法还没生效：作者想改哪一处，直接说「把……改成……」就会改（一次要动三处以上或者要删东西，会先出方案卡，他点「按这个来」才改）；"
+            "聊了一大堆想一起落实，可以让你「总结一下」出一张方案卡。没照办的别说成已经办了。"
         ),
-        role_focus={
-            "chief": "你管剧情、节奏和方向：为什么这样安排、后面怎么走、哪里还能更爽。",
-            "lorekeeper": "你管设定和前后一致：查清楚再答，说明出处（哪一条设定、第几章）。",
-            "writer": "你管怎么写：文风、场面、对话；示范的时候贴着这本书的文风。",
-            "reviewer": "你管挑毛病：站在付费读者的角度，只说真正影响阅读的问题，按严重程度排。",
-        }[role],
+        role_focus=ROLE_FOCUS[role],
     )
 
 

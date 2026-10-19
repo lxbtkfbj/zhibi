@@ -1,7 +1,7 @@
 /** 编辑部浮窗里的聊天：只有一个聊天，打 @ 点名找谁；回答边写边显示，回答时发送键变「停」；最新一条回答下面能重新回答，没答上来能重试。 */
 
 import clsx from 'clsx'
-import { AlertTriangle, ArrowUp, AtSign, RotateCcw, Square, X } from 'lucide-react'
+import { AlertTriangle, ArrowUp, AtSign, ChevronDown, RotateCcw, Search, Square, X } from 'lucide-react'
 import { type ReactNode, useLayoutEffect, useRef, useState } from 'react'
 import { Spinner, TypingDots } from '../../components/ui'
 import { CHAT_ROLES, type ChatControl, type ChatMessage, type ChatRole, latestReply, mentionAt, takeMention } from './chatModel'
@@ -46,19 +46,44 @@ function AuthorBubble({ message }: { message: ChatMessage }) {
   )
 }
 
+/** 回答下面一行小字「查了：陈默、第 12 章」，点开看查到的原文 */
+function Looked({ items }: { items: { label: string; text: string }[] }) {
+  const [open, setOpen] = useState(false)
+  const labels = [...new Set(items.map((item) => item.label))]
+  return (
+    <div className="mt-1.5 text-xs text-ink-3">
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} title="点开看查到的原文"
+        className="flex max-w-full items-center gap-1 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-line/50 hover:text-ink">
+        <Search className="size-3.5 shrink-0" /><span className="min-w-0 truncate">查了：{labels.join('、')}</span>
+        <ChevronDown className={clsx('size-3.5 shrink-0 transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <div className="mt-1.5 space-y-1.5">
+          {items.map((item, i) => (
+            <div key={i} className="rounded-lg border border-line bg-card px-3 py-2">
+              <p className="text-[11px] text-ink-3">{item.label}</p>
+              <p className="scroll-thin mt-1 max-h-60 overflow-y-auto text-[13px] leading-relaxed break-words whitespace-pre-line text-ink-2">{item.text}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function Reply({ message, latest, answering, onAgain }: { message: ChatMessage; latest: boolean; answering: boolean; onAgain: () => void }) {
   const role = message.who as ChatRole
   const live = message.state === 'thinking' || message.state === 'streaming'
   // 最新一条答完了、停下了：下面能重新回答；别的回答不放按钮
   const canAgain = latest && !answering && !!message.replyTo
   return (
-    <div className="flex gap-2.5">
+    <div data-testid={`reply-${message.id}`} data-state={message.state ?? 'done'} className="flex gap-2.5">
       <Avatar role={role} working={live} />
       <div className="min-w-0 max-w-[calc(100%-46px)]">
         <p className={clsx('mb-1 text-xs font-medium', ROLE_COLOR[role].text)}>{role}</p>
         {message.state === 'thinking' ? (
-          <div className="flex w-fit items-center gap-2 rounded-[4px_16px_16px_16px] bg-card px-4 py-3 text-[13px] text-ink-3 shadow-[0_1px_1px_rgb(60_40_20/0.05)]">
-            <TypingDots />在想
+          <div data-testid={`doing-${message.id}`} className="flex w-fit items-center gap-2 rounded-[4px_16px_16px_16px] bg-card px-4 py-3 text-[13px] text-ink-3 shadow-[0_1px_1px_rgb(60_40_20/0.05)]">
+            <TypingDots />{message.doing ?? '在想'}
           </div>
         ) : message.state === 'failed' ? (
           <div className="flex items-start gap-2 rounded-xl border border-seal/30 bg-seal-soft px-3.5 py-2.5 text-[13px] leading-relaxed text-seal-dark">
@@ -75,6 +100,7 @@ function Reply({ message, latest, answering, onAgain }: { message: ChatMessage; 
             <span className={clsx('break-words whitespace-pre-wrap', message.state === 'streaming' && 'caret')}>{message.text}</span>
           </div>
         ) : null}
+        {!live && !!message.looked?.length && <Looked items={message.looked} />}
         {message.below}
         {message.state === 'stopped' && (
           <p className="mt-1.5 text-xs text-ink-3">{message.text ? '你让它停下了，写出来的留着' : '还没开口就停下了'}</p>

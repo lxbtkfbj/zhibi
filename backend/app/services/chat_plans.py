@@ -1,6 +1,5 @@
 """会话里的方案卡：先看方案，再显式逐条落实，所有结果可追溯。"""
 
-import re
 from copy import deepcopy
 
 from fastapi import HTTPException
@@ -8,18 +7,16 @@ from sqlalchemy import select
 
 from app.agents.schemas import ChatPlan
 from app.api.deps import ensure_idle
-from app.api.library_ai import RewriteIn, rewrite_target
 from app.db import get_sessionmaker
 from app.models import Book, Character, MeetingMessage, SettingSuggestion, WorldEntry
 from app.services import book_saves, jobs
 from app.services.chat import conversation_lock, model
-from app.services.chat_context import dialogue, dialogue_text, references, reply_values, thread_of
-from app.services.group_notes import active_note_job, revert_id, update_message
+from app.services.chat_context import dialogue, dialogue_text, reply_values, thread_of
+from app.services.group_notes import active_note_job, update_message
 from app.services.library import load_target, lock_book
-from app.services.library_context import load_context
 from app.services.meeting import SPEAKER_NAMES, post_message, publish
 from app.services.requirements import SCOPE_INPUTS, add_requirement
-from app.services.versions import record_version, snapshot_of, target_type_of
+from app.services.versions import snapshot_of
 
 
 def item_line(item):
@@ -178,104 +175,51 @@ async def save_requirement(session, book_id, message_id, item):
 
 
 async def apply_item(session, redis, book_id, message_id, title, item):
+    """方案卡上的一条：和聊天里动手是同一套（改一栏、补齐、新建、写大纲、记要求、改简介、删除），
+    每条都有前后对照、能换回原来的、能再改一版。编辑部正在写的时候，除了写作要求都先放进待处理。"""
+    from app.services.chat_tools import plan_change, run_change
+
     await lock_book(session, book_id)
     session.expire_all()
     book = await session.get(Book, book_id)
-    if item["where"] == "写作要求":
-        return await save_requirement(session, book_id, message_id, item)
-    working = await jobs.is_busy(session, book_id)
-    if working and item["where"] in {"设定库", "大纲"}:
+    if item["where"] != "写作要求" and await jobs.is_busy(session, book_id):
         return await suggestion(session, book_id, title, item)
-    # Concept rewrites also cannot race with an active editor.
-    if working:
-        return await suggestion(session, book_id, title, item)
-    ctx = await load_context(session, book)
-    where, name = item["where"], item.get("target", "")
-    if where == "设定库":
-        target = ctx.find_target(name)
-        if target is None:
-            if not name.strip():
-                raise ValueError("请写出要新建的名称")
-            category = next(
-                (c for c in ctx.categories if c["name"] == item.get("category")),
-                next(c for c in ctx.categories if c["key"] == "特殊规则"),
-            )
-            values = dict(
-                book_id=book_id,
-                name=name,
-                status="must",
-                source="ai",
-                one_line=re.split(r"(?<=[。！？!?])|\n", item["change"], maxsplit=1)[0],
-            )
-            target = (
-                Character(**values, background=item["change"])
-                if category["key"] == "角色卡片"
-                else WorldEntry(**values, category=category["key"], style=category["style"], content=item["change"])
-            )
-            session.add(target)
-            await session.flush()
-            kind = target_type_of(target)
-            await record_version(session, book_id, kind, target, "ai", f"方案：{title}")
-            return {
-                "kind": "created",
-                "target_type": kind,
-                "target_id": str(target.id),
-                "target_label": f"{category['name']} · {name}",
-                "snapshot": snapshot_of(target),
-            }
-        path = ctx.route_path(target, item.get("part", ""))
-    elif where == "定调":
-        target, path = book, "story"
-    else:
-        target = None
-        if nums := references(name, "篇", 1):
-            target = next((n for n in ctx._arcs() if ctx.segment_number(n) == nums[0] and n.segment), None)
-            path = "text"
-        elif nums := references(name, "卷", 1):
-            target = next((v for v in ctx.volumes if v.index == nums[0]), None)
-            path = "summary"
-        elif m := re.fullmatch(r"单元[「『](.+)[」』]", name):
-            target = next((u for u in ctx.units if u.title == m[1]), None)
-            path = "summary"
-        if target is None:
-            return await suggestion(session, book_id, title, item)
-    if getattr(target, "locked", False) or getattr(target, "status", "") == "pinned":
-        return await suggestion(session, book_id, title, item)
-    kind, target_id = target_type_of(target), target.id
-    label = ctx.target_label(target, path)
-    if kind in {"segment", "volume", "unit"}:
-        from app.services.library import ensure_unwritten
-
-        try:
-            await ensure_unwritten(session, target)
-        except HTTPException:
-            return await suggestion(session, book_id, title, item)
+    change = await plan_change(session, book, item)
+    await session.commit()
+    message = await session.get(MeetingMessage, message_id)
     try:
-        await rewrite_target(
-            session,
-            redis,
-            book,
-            RewriteIn(target_type=kind, target_id=target_id, path=path, mode="instruction", instruction=item["change"]),
-            require_idle=True,
-            allow_waiting=True,
-            require_unwritten=True,
-            single_attempt=True,
-        )
+        outcome, _ = await run_change(session, redis, message, change)
     except HTTPException as exc:
+        # 锁住的、已经开写的、编辑部刚好开工的：照旧放进待处理的建议，不硬改
+        if exc.status_code != 409 or not any(w in str(exc.detail) for w in ("已锁", "已经开写", "正在工作")):
+            raise
         await session.rollback()
-        if exc.status_code == 409 and (
-            "正在工作" in str(exc.detail) or "已锁" in str(exc.detail) or "已经开写" in str(exc.detail)
-        ):
-            return await suggestion(session, book_id, title, item)
-        raise
-    return {
-        "kind": "edit",
-        "target_type": kind,
-        "target_id": str(target_id),
-        "target_label": label,
-        "mode": "instruction",
-        "revert_version_id": await revert_id(session, kind, target_id),
-    }
+        outcome = await suggestion(session, book_id, title, item)
+    # 结果放在方案卡的 results 里，卡上不留 outcome
+    message = await session.get(MeetingMessage, message_id)
+    await session.refresh(message)
+    message.payload = {k: v for k, v in (message.payload or {}).items() if k != "outcome"}
+    await session.commit()
+    return outcome
+
+
+def results_line(results) -> str:
+    """方案卡照办完说一句：改了几处、新建几条、记了几条要求、删了几处、几条没做成。"""
+
+    def count(*kinds, options=None):
+        return sum(r["kind"] in kinds and (options is None or (r.get("mode") == "options") == options) for r in results)
+
+    created = sum(len(r.get("items") or [None]) for r in results if r["kind"] == "created")
+    parts = [
+        (count("edit", "fill", "outline", options=False), "改了 {} 处"),
+        (count("edit", options=True), "{} 处出了三种写法等你挑"),
+        (created, "新建 {} 条"),
+        (count("requirement", "to_job"), "记了 {} 条要求"),
+        (count("deleted"), "删了 {} 处"),
+        (count("suggestion", "later"), "{} 条放进了待处理的建议"),
+        (count("failed", "not_found", "too_late"), "{} 条没做成"),
+    ]
+    return "，".join(text.format(n) for n, text in parts if n)
 
 
 async def append_result(session, redis, message_id, result):
@@ -333,7 +277,7 @@ async def apply_background(message_id, redis):
             except Exception as exc:
                 await session.rollback()
                 result = {"kind": "failed", "reason": str(getattr(exc, "detail", exc))}
-            if item["where"] in {"定调", "设定库"} and result["kind"] in {"edit", "created"}:
+            if item["where"] in {"定调", "设定库"} and result["kind"] in {"edit", "fill", "created"}:
                 setup_applied = True
             await append_result(session, redis, message_id, result)
         row = await session.get(MeetingMessage, message_id)
@@ -343,19 +287,7 @@ async def apply_background(message_id, redis):
         if feedback:
             content = f"方案「{plan['title']}」交给编辑部了：{feedback['label']}。"
         else:
-            fragments = [
-                f"{label} {sum(r['kind'] == kind for r in results)} {unit}"
-                for kind, label, unit in (
-                    ("edit", "改了", "处"),
-                    ("created", "新建", "条"),
-                    ("requirement", "记了", "条要求"),
-                    ("suggestion", "", "条放进了待处理的建议"),
-                )
-                if any(r["kind"] == kind for r in results)
-            ]
-            content = (
-                f"方案「{plan['title']}」照办了：" + ("，".join(s.strip() for s in fragments) or "没有改动") + "。"
-            )
+            content = f"方案「{plan['title']}」照办了：" + (results_line(results) or "没有改动") + "。"
         await post_message(
             session,
             redis,
@@ -393,6 +325,8 @@ async def undo_created(session, redis, message_id, index):
     if index < 0 or index >= len(results) or results[index]["kind"] != "created":
         raise HTTPException(422, "这条结果不能撤销新建")
     result = results[index]
+    if "snapshot" not in result:
+        raise HTTPException(422, "这一条在下面点「换回原来的」")
     await ensure_idle(session, book_id)
     if not result.get("undone"):
         target = await load_target(session, book_id, result["target_type"], result["target_id"], for_update=True)

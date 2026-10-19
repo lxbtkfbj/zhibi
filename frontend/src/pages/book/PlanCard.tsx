@@ -11,6 +11,8 @@ import { useBookContext } from './context'
 /** 每条前面的类别小标签：落在哪里、改谁。 */
 function planItemTag(item: PlanItem) {
   if (item.where === '写作要求') return `写作要求 · ${item.scope}`
+  // 定调那一段话，新书页上叫「简介」
+  if (item.where === '定调') return '简介'
   if (item.category) return `新建 · ${item.category}`
   return item.where
 }
@@ -58,11 +60,14 @@ export function PlanCard({ message }: { message: MeetingMessage }) {
     </header>
     <ul className="border-t border-line">{visible.map((item, index) => <li key={index} className="group relative flex items-start gap-3 border-b border-line/70 px-4 py-2.5 last:border-b-0">
       <div className="min-w-0 flex-1">
-        <p className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs"><span className="rounded bg-subtle px-1.5 leading-5 text-ink-2 ring-1 ring-line">{planItemTag(item)}</span>{planItemTarget(item) && <span className="text-ink-3">{planItemTarget(item)}</span>}</p>
-        {open && editing === index
+        <p className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs"><span className={clsx('rounded px-1.5 leading-5 ring-1', item.where === '删除' ? 'bg-seal-soft text-seal-dark ring-seal/30' : 'bg-subtle text-ink-2 ring-line')}>{planItemTag(item)}</span>{planItemTarget(item) && <span className="text-ink-3">{planItemTarget(item)}</span>}</p>
+        {item.where === '删除'
+          ? <p className="text-[13px] leading-relaxed break-words whitespace-pre-wrap text-ink">{item.change}</p>
+          : open && editing === index
           ? <textarea autoFocus aria-label={`修改方案第 ${index + 1} 条`} rows={4} className={clsx(inputClass, 'text-[13px] leading-relaxed')} value={item.change} onChange={event => setItems(previous => previous.map((value, i) => i === index ? { ...value, change: event.target.value } : value))} onBlur={() => setEditing(null)} />
           : open ? <button className="w-full rounded text-left text-[13px] leading-relaxed break-words whitespace-pre-wrap text-ink hover:text-chief" title="点一下就能改" aria-label={`编辑方案第 ${index + 1} 条`} onClick={() => setEditing(index)}>{item.change}</button>
             : <p className="text-[13px] leading-relaxed break-words whitespace-pre-wrap text-ink">{item.change}</p>}
+        {item.where === '删除' && open && <p className="mt-1 text-xs text-seal-dark">点「按这个来」才删；删了也能在下面「换回原来的」，或者去存档</p>}
       </div>
       {open && <button aria-label={`删除方案第 ${index + 1} 条`} title="这一条不要" disabled={busy} onClick={() => setItems(previous => previous.filter((_, i) => i !== index))} className="mt-0.5 shrink-0 rounded p-0.5 text-ink-3 opacity-60 transition-opacity group-hover:opacity-100 hover:bg-seal-soft hover:text-seal focus-visible:opacity-100"><X className="size-3.5" /></button>}
     </li>)}</ul>
@@ -79,7 +84,8 @@ export function PlanCard({ message }: { message: MeetingMessage }) {
       </> : <p role="status" className="text-xs text-ink-2">{status === 'superseded' ? '已有新的方案' : status === 'applying' ? '正在照方案办…' : '已照办'}</p>}
     </footer>
     {(!!results.length || !!error) && <div className="space-y-2 border-t border-line px-4 py-2.5">
-      {results.map((result, index) => result.kind === 'created' ? <CreatedResult key={index} message={message} result={result} index={index} /> : <ChatOutcome key={index} message={message} result={result} />)}
+      {/* 这一批以前照办的新建没有前后对照，照旧用撤销；现在每一条都和聊天里改的一样，能换回、能再改一版 */}
+      {results.map((result, index) => result.kind === 'created' && result.snapshot ? <CreatedResult key={index} message={message} result={result} index={index} /> : <ChatOutcome key={index} message={message} result={result} step={index} />)}
       <ErrorText error={error} />
     </div>}
   </section>

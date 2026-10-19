@@ -328,28 +328,33 @@ async def test_apply_each_kind_and_undo_created_guards(client, sessionmaker, red
     response = await client.post(f"/api/plans/{card['id']}/apply")
     assert response.status_code == 202, response.text
     results = (await final_message(client, bid, card["id"]))["payload"]["results"]
+    # 第五步第三批起和聊天里动手同一套：大纲走「写大纲」（结局也能写），新建由设定师照这一类的栏目写，
+    # 类别对不上的放进特殊规则；每一条都有前后对照，能换回原来的
     assert [r["kind"] for r in results] == [
         "edit",
         "edit",
         "created",
         "created",
-        "edit",
-        "edit",
-        "edit",
-        "suggestion",
+        "outline",
+        "outline",
+        "outline",
+        "outline",
         "requirement",
     ], results
-    for r in results:
-        if r["kind"] == "edit":
-            assert (await client.post(f"/api/versions/{r['revert_version_id']}/revert")).status_code == 200
-    assert (await client.delete(f"/api/requirements/{results[-1]['requirement_id']}")).status_code == 204
-    assert (await client.post(f"/api/plans/{card['id']}/results/2/undo")).status_code == 200
+    assert all(r["diff"] and r["change"] for r in results)
+    # 从后往前换回：结局和简介都在书那一行里，先换回后改的
+    for step in (8, 7, 6, 5, 4, 2, 1, 0):
+        response = await client.post(f"/api/books/{bid}/notes/{card['id']}/revert", json={"step": step})
+        assert response.status_code == 200, (step, response.text)
+    async with sessionmaker() as session:
+        assert await session.scalar(select(Character).where(Character.name == "老怪")) is None
+        assert (await session.get(Volume, volume.id)).summary == "旧卷"
     created = results[3]
     assert (
         await client.patch(f"/api/world-entries/{created['target_id']}", json={"content": "作者改过"})
     ).status_code == 200
-    response = await client.post(f"/api/plans/{card['id']}/results/3/undo")
-    assert response.status_code == 409 and response.json()["detail"] == "已经改过，去设定库处理"
+    response = await client.post(f"/api/books/{bid}/notes/{card['id']}/revert", json={"step": 3})
+    assert response.status_code == 409 and "后来又改过" in response.json()["detail"]
 
 
 @pytest.mark.parametrize("protection", ["busy", "locked", "written"])
@@ -372,10 +377,11 @@ async def test_plan_protections_create_suggestions(client, sessionmaker, redis, 
     card = await plan_for(sessionmaker, redis, bid, items)
     await client.post(f"/api/plans/{card['id']}/apply")
     results = (await final_message(client, bid, card["id"]))["payload"]["results"]
+    # 编辑部正在写时，写作要求交给正在干活的编辑部（第五步第三批起和聊天里说的一样）
     assert [r["kind"] for r in results] == (
         ["edit", "suggestion", "requirement"]
         if protection == "written"
-        else ["suggestion", "suggestion", "requirement"]
+        else ["suggestion", "suggestion", "to_job" if protection == "busy" else "requirement"]
     )
 
 
@@ -410,7 +416,7 @@ async def test_apply_keeps_going_after_failure_and_rechecks_working(client, sess
     assert (await client.post(f"/api/plans/{card['id']}/apply")).status_code == 202
     result = (await final_message(client, bid, card["id"]))["payload"]
     assert result["status"] == "applied"
-    assert [r["kind"] for r in result["results"]] == ["failed", "requirement", "suggestion", "requirement"]
+    assert [r["kind"] for r in result["results"]] == ["failed", "requirement", "suggestion", "to_job"]
     assert len(seen) == 4  # No retry, later items still run.
 
 
@@ -458,8 +464,9 @@ async def test_plan_edit_stays_undoable_when_followup_review_fails(client, sessi
     )
     assert (await client.post(f"/api/plans/{card['id']}/apply")).status_code == 202
     results = (await final_message(client, bid, card["id"]))["payload"]["results"]
-    assert [r["kind"] for r in results] == ["edit", "requirement"]
-    assert attempts == [True]
+    assert [r["kind"] for r in results] == ["edit", "requirement"], results
+    # 第五步第三批起方案卡和聊天里改简介是同一条路，连带检查照常重试几次
+    assert attempts == [None]
     async with sessionmaker() as session:
         assert "已按要求修改" in (await session.get(Book, bid)).concept["story"]
         warning = await session.scalar(select(SettingSuggestion).where(SettingSuggestion.kind == "concept"))

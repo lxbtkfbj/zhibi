@@ -144,33 +144,48 @@ async def finish_reply(session, redis, reply_id, text, state, error=""):
     await redis.delete(stop_key(reply_id))
 
 
-async def answer(session, redis, book_id, thread, role, reply_id, rows, unanswered, summary, old):
-    """写一条回答：要合摘要先合，再一边写一边推。出错、超时都落在这条消息上，给「重试」。"""
+async def merge_summary(session, book_id, thread, summary, old):
+    """最近 20 条以前、还没折进摘要的有 10 条以上了：先折进摘要。失败了照旧用旧摘要。"""
+    if len(old) < 10:
+        return summary
+    try:
+        merged = await model(
+            book_id,
+            "lorekeeper",
+            schemas.ChatSummary,
+            "chat_summary",
+            who=SPEAKER_NAMES.get(thread, "编辑部"),
+            summary=summary or "（没有）",
+            messages=dialogue_text(old, limited=False),
+        )
+        row = await thread_of(session, book_id, thread)
+        row.summary, row.summarized_until = merged.summary, old[-1].id
+        await session.commit()
+        return merged.summary
+    except Exception:
+        await session.rollback()
+        log.exception("对话摘要失败，继续用旧摘要回答")
+        return summary
+
+
+def tools_text(tools):
+    """这一轮查到的、做了的：重新回答时交给模型照着说，不再给工具。"""
+    return "\n\n".join(f"【{t.get('label', '')}】\n{t.get('text', '')}" for t in tools or []) or "（没有）"
+
+
+async def answer(session, redis, book_id, thread, role, reply_id, rows, unanswered, summary, old, related=None):
+    """写一条回答：要合摘要先合，再一边写一边推。出错、超时都落在这条消息上，给「重试」。
+    related：自己查过、做过的那一轮重新回答时，资料换成那一轮查到的、做了的。"""
     await publish(redis, book_id, "chat_typing", {"thread": thread, "speaker": role, "on": True})
     text, state, error = "", "failed", ""
     try:
-        if len(old) >= 10:
-            try:
-                merged = await model(
-                    book_id,
-                    "lorekeeper",
-                    schemas.ChatSummary,
-                    "chat_summary",
-                    who=SPEAKER_NAMES.get(thread, "编辑部"),
-                    summary=summary or "（没有）",
-                    messages=dialogue_text(old, limited=False),
-                )
-                row = await thread_of(session, book_id, thread)
-                row.summary, row.summarized_until = merged.summary, old[-1].id
-                await session.commit()
-                summary = merged.summary
-            except Exception:
-                await session.rollback()
-                log.exception("对话摘要失败，继续用旧摘要回答")
+        summary = await merge_summary(session, book_id, thread, summary, old)
         book = await session.get(Book, book_id)
         if book is None:
             return
         values = await reply_values(session, book, thread, role, rows, unanswered, summary)
+        if related is not None:
+            values["related"] = related
         await session.rollback()
         text, state = await stream_reply(redis, book_id, role, reply_id, values)
         text = text.strip()
@@ -236,10 +251,22 @@ async def again_background(book_id, thread, reply_id, redis):
         )
         role, summary, until = reply.speaker, state.summary, state.summarized_until
         old = [m for m in rows[:-20] if m.id > until]
+        payload = dict(reply.payload or {})
         session.expunge_all()
         await session.rollback()
         if not unanswered:
             await finish_reply(session, redis, reply_id, "", "failed", "原来那句话找不到了")
+            return
+        if payload.get("tools_mode"):
+            if payload.get("again") == "retry":
+                # 自己查、自己动手那一轮中途断了：重试接着做没做完的
+                from app.services.chat_agent import answer_note
+
+                await answer_note(redis, book_id, unanswered[0].id, reply_id=reply_id, retry=True)
+                return
+            # 重新回答：只重写那段话，不给工具，照这一轮查到的、做了的说；改动不动、也不重做
+            related = tools_text(payload.get("tools"))
+            await answer(session, redis, book_id, thread, role, reply_id, rows, unanswered, summary, old, related)
             return
         await answer(session, redis, book_id, thread, role, reply_id, rows, unanswered, summary, old)
 

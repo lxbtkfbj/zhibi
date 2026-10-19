@@ -1,17 +1,18 @@
 """模型调用层：按编辑部角色选择模型配置，统一处理结构化输出、重试与用量记录。"""
 
+import asyncio
 import json
 import logging
 import time
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 from urllib.parse import urlparse
 
 import httpx
 import openai
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 from sqlalchemy import or_, select, update
@@ -30,6 +31,21 @@ FULL_CONTENT_LIMIT = 2000
 
 class LLMError(RuntimeError):
     pass
+
+
+class ToolsUnsupported(LLMError):
+    """接口不认工具调用：记在模型配置上，以后走老路。"""
+
+
+@dataclass
+class ToolCall:
+    id: str
+    name: str
+    args: dict
+
+
+# 多来回调工具：每个来回 429／5xx／断线最多重来几次（这一来回已经吐过字就不重来）
+TOOL_ROUND_ATTEMPTS = 3
 
 
 @dataclass(frozen=True)
@@ -498,6 +514,140 @@ class LLMRouter:
                 response="".join(parts),
             )
 
+    async def tool_rounds(
+        self,
+        role: str,
+        system: str,
+        user: str,
+        tools: list[dict],
+        run_tool: Callable[[ToolCall], Awaitable[str]],
+        *,
+        purpose: str,
+        max_rounds: int = 6,
+    ) -> AsyncIterator[tuple[str, str]]:
+        """多来回调工具（聊天里接话的人自己查、自己动手）：模型调了工具就执行，把结果交回去再问；
+        哪一来回不调工具了，那一来回的字就是回答，边写边吐 ("text", 字)。调工具的那一来回要是先说了几句，
+        吐 ("reset", "") 让调用方清掉。最后一来回不许再调工具，逼它把话说完。
+        只看有没有调工具，不看结束原因（中转拼出来的结束原因不可靠）。每个来回记一条调用记录。"""
+        profile = await self.resolve(role)
+        names = [tool["function"]["name"] for tool in tools]
+        history: list = [SystemMessage(system), HumanMessage(user)]
+        transcript = user
+        done: list[tuple[ToolCall, str]] = []
+        for round_no in range(1, max_rounds + 1):
+            last = round_no == max_rounds
+            request = {
+                "system": system,
+                "user": transcript,
+                "schema_name": "工具：" + "、".join(names) + ("（这一来回不许再调工具）" if last else ""),
+                "schema": tools,
+                "method": "tools",
+                "round": round_no,
+                "prompt_names": prompt_names_for(system, user),
+            }
+            text, calls = "", []
+            async for kind, value in self._tool_round(role, profile, history, tools, done, last, request, purpose):
+                if kind == "text":
+                    yield kind, value
+                else:
+                    text, calls = value
+            if not calls:
+                return
+            if text.strip():
+                yield "reset", ""
+            history.append(
+                AIMessage(
+                    content=text,
+                    tool_calls=[{"name": c.name, "args": c.args or {}, "id": c.id, "type": "tool_call"} for c in calls],
+                )
+            )
+            lines = []
+            for call in calls:
+                result = (
+                    await run_tool(call)
+                    if call.args is not None
+                    else "参数没法解析（不是合法的 JSON），照工具说明重新调一次。"
+                )
+                done.append((call, result))
+                history.append(ToolMessage(content=result, tool_call_id=call.id))
+                lines.append(f"调了 {call.name}：{json.dumps(call.args, ensure_ascii=False)}\n工具回：{result}")
+            transcript += f"\n\n—— 第 {round_no} 来回调的工具 ——\n" + "\n\n".join(lines)
+
+    async def _tool_round(self, role, profile, history, tools, done, last, request, purpose):
+        """一个来回：边写边吐字，最后吐 ("done", (这一来回的字, 调的工具))。"""
+        if profile.provider == "demo":
+            started = time.monotonic()
+            names = [] if last else [tool["function"]["name"] for tool in tools]
+            planned, text = demo.tool_turn(history[0].content, history[1].content, names, done)
+            calls = [ToolCall(f"demo_{len(done)}_{i}", name, args) for i, (name, args) in enumerate(planned)]
+            await self._record(
+                role, profile, purpose, started, 0, 0, ok=True, request=request, response=_round_response(text, calls)
+            )
+            if not calls:
+                for i in range(0, len(text), 8):
+                    await asyncio.sleep(demo.DELAY_S / 40)
+                    yield "text", text[i : i + 8]
+            yield "done", (text, calls)
+            return
+        llm = self._chat_model(profile, streaming=True)
+        bound = llm.bind_tools(tools, tool_choice="none") if last else llm.bind_tools(tools)
+        for attempt in range(1, TOOL_ROUND_ATTEMPTS + 1):
+            started = time.monotonic()
+            message = None
+            parts: list[str] = []
+            calls: list[ToolCall] = []
+            ok, error, failure = False, "", None
+            try:
+                async for chunk in bound.astream(history):
+                    message = chunk if message is None else message + chunk
+                    piece = _content_text(chunk.content)
+                    if piece:
+                        parts.append(piece)
+                        yield "text", piece
+                calls = _tool_calls(message, len(done))
+                if _truncated(message):
+                    error = "模型输出被截断"
+                else:
+                    ok = True
+            except BaseException as exc:
+                error, failure = str(exc) or type(exc).__name__, exc
+            finally:
+                await self._record(
+                    role,
+                    profile,
+                    purpose,
+                    started,
+                    *(_usage(message) if message is not None else (None, None)),
+                    ok=ok,
+                    error=error,
+                    request=request,
+                    response=_round_response("".join(parts), calls)
+                    or (_error_response(failure) if isinstance(failure, Exception) else None),
+                )
+            if failure is None and not ok:
+                raise LLMError(
+                    "模型输出被截断：上下文窗口或最大输出长度不够，请调大最大输出 token 或换用上下文更长的模型。"
+                )
+            if failure is None:
+                yield "done", ("".join(parts), calls)
+                return
+            if isinstance(failure, openai.BadRequestError):
+                if not parts and _unsupported_structured_method(failure, "function_calling"):
+                    log.warning("模型配置 %s 不支持工具调用，以后聊天走老路", profile.name)
+                    if profile.structured_method != "json_mode":
+                        await self._remember_structured_method(profile, "json_mode")
+                    raise ToolsUnsupported(f"这个模型不支持工具调用：{failure}") from failure
+                raise LLMError(f"模型接口拒绝了请求：{failure}") from failure
+            if isinstance(failure, (openai.APIError, TimeoutError)):
+                retryable = isinstance(failure, (TimeoutError, openai.APIConnectionError)) or (
+                    isinstance(failure, openai.APIStatusError)
+                    and (failure.status_code == 429 or failure.status_code >= 500)
+                )
+                if retryable and attempt < TOOL_ROUND_ATTEMPTS and not parts:
+                    continue
+                raise LLMError(f"调用模型失败（{profile.name}）：{failure}") from failure
+            raise failure
+
     async def _record(
         self,
         role: str,
@@ -592,8 +742,35 @@ def _error_response(exc: Exception) -> str | None:
 
 
 def _truncated(message) -> bool:
+    # 中转会把好几段结束原因拼在一起（「tool_callstool_calls」「lengthlength」），看有没有 length
     meta = getattr(message, "response_metadata", None) or {}
-    return meta.get("finish_reason") == "length"
+    return "length" in str(meta.get("finish_reason") or "")
+
+
+def _content_text(content) -> str:
+    if isinstance(content, str):
+        return content
+    return "".join(
+        part.get("text", "") if isinstance(part, dict) else str(part)
+        for part in content or []
+        if not isinstance(part, dict) or part.get("type", "text") == "text"
+    )
+
+
+def _tool_calls(message, offset: int) -> list[ToolCall]:
+    """这一来回调了哪些工具：参数不是合法 JSON 的 args 记成 None，回给模型让它重调。没有 id 的补一个。"""
+    if message is None:
+        return []
+    calls = [(c.get("id"), c.get("name") or "", c.get("args") or {}) for c in message.tool_calls or []]
+    calls += [(c.get("id"), c.get("name") or "", None) for c in getattr(message, "invalid_tool_calls", None) or []]
+    return [ToolCall(id or f"call_{offset}_{i}", name, args) for i, (id, name, args) in enumerate(calls)]
+
+
+def _round_response(text: str, calls: list[ToolCall]) -> str:
+    if not calls:
+        return text
+    lines = "\n".join(f"{c.name}：{json.dumps(c.args, ensure_ascii=False)}" for c in calls)
+    return (text + "\n\n" if text else "") + "【调了工具】\n" + lines
 
 
 def _usage(message) -> tuple[int | None, int | None]:

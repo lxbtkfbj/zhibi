@@ -85,8 +85,10 @@ async def again_reply(
         for x in later
     ):
         raise HTTPException(409, "后面又聊了，只有最新的一条回答能重新回答")
-    payload = {k: v for k, v in (m.payload or {}).items() if k not in ("state", "error")}
-    m.content, m.payload = "", {**payload, "state": "thinking"}
+    # 没答上来的点的是「重试」：自己动手的那一轮接着做没做完的；答完、停下的点的是「重新回答」：只重写那段话
+    again = "retry" if reply_state(m) == "failed" else "again"
+    payload = {k: v for k, v in (m.payload or {}).items() if k not in ("state", "error", "doing")}
+    m.content, m.payload = "", {**payload, "state": "thinking", "again": again}
     await session.commit()
     data = message_dict(m)
     await redis.delete(stop_key(m.id))
@@ -207,7 +209,9 @@ async def run_chat_suggestion(
         session.expire_all()
         message = await session.get(MeetingMessage, data.id)
         outcome = (message.payload or {}).get("outcome", {})
-        if outcome.get("kind") not in {"edit", "requirement", "to_job", "plan_apply"}:
+        # 编辑部自己动手的那一轮：结果在 steps 里，做成了一处就算
+        done = {o.get("kind") for o in (message.payload or {}).get("steps") or [outcome]}
+        if not done & {"edit", "fill", "created", "outline", "requirement", "to_job", "plan_apply", "plan_made"}:
             raise HTTPException(409, outcome.get("reason") or "这一条还没有落实，建议已保留，请看看群聊里的处理结果")
         row = await session.get(SettingSuggestion, suggestion_id)
         row.status, row.resolved_at = "accepted", datetime.now(UTC)

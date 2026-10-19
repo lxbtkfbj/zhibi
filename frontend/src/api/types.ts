@@ -520,7 +520,11 @@ export interface MeetingMessage {
     /** 聊天回答：thinking 还没出字、streaming 在写、stopped 作者叫停了、failed 没答上来（error 是原因）；写完了没有这一项 */
     state?: 'thinking' | 'streaming' | 'stopped' | 'failed'; error?: string
     /** 新书页群聊里打 @ 点的名 */
-    ask?: TeamRole } | null
+    ask?: TeamRole
+    /** 群聊里接话的人自己查、自己动手的那一句（tools）；ask_only 是只查只答 */
+    turn?: 'tools'; ask_only?: boolean
+    /** 自己查、自己动手的回答：正在做什么（「在查陈默……」），查了什么、做了什么 */
+    tools_mode?: boolean; doing?: string; tools?: ChatToolUse[] } | null
   created_at: string | null
 }
 
@@ -588,8 +592,13 @@ export interface ChatViewing {
 }
 
 export interface ChatOutcome {
-  kind: 'requirement' | 'to_job' | 'edit' | 'fill' | 'outline' | 'working' | 'not_found' | 'later' | 'chat' | 'pending' | 'too_late' | 'failed' | 'plan_apply' | 'plan_made' | 'plan_pending' | 'created' | 'suggestion' | 'feedback' | 'saved'
+  kind: 'requirement' | 'to_job' | 'edit' | 'fill' | 'outline' | 'working' | 'not_found' | 'later' | 'chat' | 'pending' | 'too_late' | 'failed' | 'plan_apply' | 'plan_made' | 'plan_pending' | 'created' | 'suggestion' | 'feedback' | 'saved' | 'agent' | 'deleted'
   reason?: string
+  /** 再改一版要照着重做的那个判断：有它才能「再改一版」（删掉的没有） */
+  redo?: Record<string, unknown>
+  /** plan_made：接话的人要动的多（count 处），或者要删东西，整理成了方案卡 */
+  count?: number
+  deleting?: boolean
   /** 改完当场的前后对照：每一栏「原来」「改成」（太长截到 2000 字） */
   diff?: ChangeDiff[]
   /** 这一处改了哪几行、改之前改之后的 hash：「换回原来的」「再改一版」用 */
@@ -619,6 +628,8 @@ export interface ChatOutcome {
   target_type?: string
   target_id?: string
   target_label?: string
+  /** not_found：没认出来的那个名字 */
+  target_name?: string
   mode?: string
   revert_version_id?: string
   candidate_id?: string
@@ -650,12 +661,17 @@ export interface SaveCompare {
   groups: { name: string; items: { table: string; id: string; op: 'add' | 'del' | 'mod'; name: string; parts: { label: string; then: string; now: string; then_words: number; now_words: number; long: boolean }[] }[] }[]
 }
 
+/** 回答下面「查了：……」点开看的：查到的资料、做了什么 */
+export interface ChatToolUse { kind: 'query' | 'act'; label: string; text: string }
+
 export interface PlanItem {
-  where: '定调' | '设定库' | '大纲' | '写作要求'
+  where: '定调' | '设定库' | '大纲' | '写作要求' | '删除'
   target: string
   part: string
   category: string
   change: string
   scope: '一直有效' | '只管下一章' | '只管这一卷' | '只管下一卷'
+  /** 编辑部在聊天里自己动手时出的卡：原来那一条清单；linked 是删了会连带什么 */
+  tool?: { kind?: string; shown?: string; linked?: string } & Record<string, unknown>
 }
 export interface ChatPlan { title: string; summary: string; items: PlanItem[]; open_questions: string[] }

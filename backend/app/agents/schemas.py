@@ -6,6 +6,7 @@ import re
 from typing import Any, Literal, get_origin
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic.json_schema import SkipJsonSchema
 
 
 class Lenient(BaseModel):
@@ -928,12 +929,12 @@ class ChatSummary(Lenient):
 
 
 class PlanItem(Lenient):
-    where: Literal["定调", "设定库", "大纲", "写作要求"] = Field(
-        description="这一条落在哪：定调的一段话；设定库里的一条；大纲里的篇、卷、单元或结局；以后规划和写作都要照做的写作要求"
+    where: Literal["定调", "设定库", "大纲", "写作要求", "删除"] = Field(
+        description="这一条落在哪：定调的一段话；设定库里的一条；大纲里的篇、卷、单元或结局；以后规划和写作都要照做的写作要求；要删掉的一张设定卡或大纲上还没开写的一段"
     )
     target: str = Field(
         default="",
-        description="设定库写条目或角色卡片的名称（照设定库目录，新建的写新名字）；大纲写「第 N 篇」「第 N 卷」「单元「名称」」或「结局」；定调、写作要求留空",
+        description="设定库写条目或角色卡片的名称（照设定库目录，新建的写新名字）；大纲写「第 N 篇」「第 N 卷」「单元「名称」」或「结局」；删除写要删的那一条或那一段，写法同上；定调、写作要求留空",
     )
     part: str = Field(
         default="",
@@ -949,6 +950,8 @@ class PlanItem(Lenient):
     scope: Literal["一直有效", "只管下一章", "只管这一卷", "只管下一卷"] = Field(
         default="一直有效", description="写作要求才看：作者说了只管下一章、这一卷、下一卷的照选，没说的选一直有效"
     )
+    # 编辑部在聊天里自己动手时出的方案卡：原来那一条清单，「按这个来」照它做；不给模型看
+    tool: SkipJsonSchema[dict | None] = None
 
 
 class ChatPlan(Lenient):

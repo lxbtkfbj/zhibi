@@ -3,13 +3,14 @@
 import asyncio
 import re
 import uuid
+from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from app.agents.schemas import LibraryIntent
-from app.api.library_ai import RewriteIn, call_model, rewrite_target, say
+from app.api.library_ai import RewriteIn, call_model, review_concept_change, rewrite_target, say
 from app.db import get_sessionmaker
 from app.models import Book, Job, MeetingMessage, SettingSuggestion, SettingVersion
 from app.schemas import ArcCreate, DraftRequest, MeetingMessageOut
@@ -160,34 +161,53 @@ async def receive_note(body, background_tasks, book, session, redis):
         plan = await latest_plan(session, book_id, thread)
         payload["outcome"] = {"kind": "plan_apply", "plan_id": plan.id} if plan else {"kind": "chat"}
         task = "apply"
-    elif body.to or (role := obvious_question(text)):
-        payload.update(
-            outcome={"kind": "chat", **({"shortcut": True} if not body.to else {})},
-            chat_role=body.to or body.ask or role,
-        )
+    elif body.to:
+        payload.update(outcome={"kind": "chat"}, chat_role=body.to)
         task = "reply"
     else:
-        job = await active_note_job(session, book_id)
-        if jobs.open_wait(job) and wants_new_pitches(text):
-            raise HTTPException(409, {"code": "use_feedback", "message": "等你拍板时请直接提意见"})
-        if waiting_feedback(job):
-            try:
-                intent = await classify(session, book_id, text, payload.get("viewing"))
-            except Exception as exc:
-                raise HTTPException(502, f"模型出错了：{exc}") from exc
-            session.expire_all()
+        from app.services.chat_agent import pick_role, supports_tools
+
+        asked = obvious_question(text)
+        # 模型能自己调工具：接话的人（点了名的，或者按话挑的）自己查、自己动手；不能的照旧先分流
+        agent_role = body.ask or pick_role(text)
+        tools = await supports_tools(agent_role)
+        agent = {"outcome": {"kind": "agent"}, "turn": "tools", "chat_role": agent_role}
+        if asked and tools:
+            # 明显是在问：只给查资料的工具，只查只答
+            payload.update(agent, ask_only=True)
+            task = "agent"
+        elif asked:
+            payload.update(outcome={"kind": "chat", "shortcut": True}, chat_role=body.ask or asked)
+            task = "reply"
+        else:
             job = await active_note_job(session, book_id)
-            if intent.kind != "提问闲聊" and waiting_feedback(job):
-                if not await chatted_since_wait(session, book_id, job):
-                    raise HTTPException(409, {"code": "use_feedback", "message": "等你拍板时请直接提意见"})
-                payload["outcome"] = {"kind": "plan_made"}
-                task = "plan"
+            if jobs.open_wait(job) and wants_new_pitches(text):
+                raise HTTPException(409, {"code": "use_feedback", "message": "等你拍板时请直接提意见"})
+            if waiting_feedback(job):
+                try:
+                    intent = await classify(session, book_id, text, payload.get("viewing"))
+                except Exception as exc:
+                    raise HTTPException(502, f"模型出错了：{exc}") from exc
+                session.expire_all()
+                job = await active_note_job(session, book_id)
+                if intent.kind != "提问闲聊" and waiting_feedback(job):
+                    if not await chatted_since_wait(session, book_id, job):
+                        raise HTTPException(409, {"code": "use_feedback", "message": "等你拍板时请直接提意见"})
+                    payload["outcome"] = {"kind": "plan_made"}
+                    task = "plan"
+                elif tools:
+                    # 等拍板时只是在问：照旧只查只答，要改的在拍板的地方提
+                    payload.update(agent, ask_only=True)
+                    task = "agent"
+                else:
+                    payload["outcome"] = {"kind": "pending"}
+                    task = intent
+            elif tools:
+                payload.update(agent)
+                task = "agent"
             else:
                 payload["outcome"] = {"kind": "pending"}
-                task = intent
-        else:
-            payload["outcome"] = {"kind": "pending"}
-            task = "route"
+                task = "route"
     # Commit author messages in id order, without waiting for slow classification.
     async with conversation_lock(redis, book_id, "note_append"):
         data = await post_message(
@@ -212,6 +232,10 @@ async def receive_note(body, background_tasks, book, session, redis):
             )
     elif task == "reply":
         background_tasks.add_task(reply_background, book_id, thread, redis)
+    elif task == "agent":
+        from app.services.chat_agent import agent_background
+
+        background_tasks.add_task(agent_background, book_id, redis)
     elif task == "route":
         background_tasks.add_task(route_background, book_id, redis)
     else:
@@ -229,6 +253,63 @@ SAVE_WORDS = re.compile(
 NAME_PARTS = {"名称", "名字", "姓名", "名"}
 # 判断完以后真正去改、去补：最多等这么久，到了就停手，不改
 ACTION_TIMEOUT = 150
+# 新书页的「简介」：存在定调的 story 里
+CONCEPT_NAMES = {"简介", "定调", "书的简介", "这本书的简介"}
+
+# 接话的人自己动手时（工具调用）：做完的那句话不在群里另说，收起来交回给他，由他统一回答
+SAID: ContextVar[list[str] | None] = ContextVar("group_notes_said", default=None)
+
+
+async def tell(session, redis, book_id, speaker, content):
+    said = SAID.get()
+    if said is not None:
+        said.append(content)
+        return None
+    return await say(session, redis, book_id, speaker, content)
+
+
+async def edit_concept(session, redis, book, message, intent):
+    """改简介那段话（新书页的「简介」）：和改设定的一栏一样，消息下面给前后对照。"""
+    mid, book_id = message.id, book.id
+    body = RewriteIn(
+        target_type="concept",
+        target_id=book.id,
+        path="story",
+        mode="options" if intent.mode == "给几个写法" else "instruction",
+        instruction=intent.instruction or message.content,
+        quiet=True,
+    )
+    outcome = {
+        "kind": "edit",
+        "target_type": "concept",
+        "target_id": str(book.id),
+        "target_label": "简介",
+        "mode": body.mode,
+    }
+    doing = "出三种写法" if body.mode == "options" else "改"
+    await update_message(session, redis, message, outcome={"kind": "working", "text": f"主编在{doing}简介"})
+    old_story = ((await session.get(Book, book_id)).concept or {}).get("story", "")
+    try:
+        # 限时只管改这一段；改完以后的连带检查（再调一次模型）放到后面，不然写进去了却报「没改」
+        result = await asyncio.wait_for(
+            rewrite_target(session, redis, book, body, require_idle=True, review=False), timeout=ACTION_TIMEOUT
+        )
+    except TimeoutError as exc:
+        raise HTTPException(504, "这次编辑部太慢了，两分半还没写完，没改。再试一次") from exc
+    message = await session.get(MeetingMessage, mid)
+    if body.mode == "options":
+        outcome["candidate_id"] = str(result["candidate"].id)
+    else:
+        outcome["revert_version_id"] = result.get("revert_version_id")
+    await update_message(session, redis, message, outcome=outcome)
+    if body.mode != "options":
+        await review_concept_change(session, redis, book_id, old_story)
+        message = await session.get(MeetingMessage, mid)
+    reply = intent.reply or (
+        "三种写法在这条消息下面，挑一个换上。" if body.mode == "options" else "简介改好了，去看看。"
+    )
+    await tell(session, redis, book_id, (message.payload or {}).get("ask") or "chief", reply)
+    return False
 
 
 async def apply_intent(session, redis, message, intent):
@@ -274,6 +355,8 @@ async def apply_intent(session, redis, message, intent):
     else:
         ctx = await load_context(session, book)
         target = ctx.find_target(intent.target_name)
+        if target is None and intent.target_name.strip() in CONCEPT_NAMES:
+            return await edit_concept(session, redis, book, message, intent)
         if target is None:
             outcome = {"kind": "not_found", "target_name": intent.target_name}
             reply = (
@@ -357,7 +440,7 @@ async def apply_intent(session, redis, message, intent):
                 )
     await update_message(session, redis, message, outcome=outcome)
     if reply:
-        await say(session, redis, book_id, (message.payload or {}).get("ask") or "chief", reply)
+        await tell(session, redis, book_id, (message.payload or {}).get("ask") or "chief", reply)
     return False
 
 
@@ -401,17 +484,26 @@ async def apply_with_change(session, redis, message, intent):
 def chat_actor(message) -> str:
     """这句话是谁照办的：点了名就是他；改设定是设定师，写大纲、记要求是主编。"""
     payload = message.payload or {}
+    if message.kind == "plan":
+        return message.speaker
     if payload.get("ask"):
         return payload["ask"]
     kinds = {o.get("kind") for o in payload.get("steps") or [payload.get("outcome") or {}]}
     return "lorekeeper" if kinds & {"edit", "fill", "created"} else "chief"
 
 
+def step_list(message) -> str:
+    """一句话拆成的几件事记在 steps；方案卡「按这个来」办的每一条记在 results。"""
+    return "results" if message.kind == "plan" else "steps"
+
+
 def note_outcome(message, step):
     payload = message.payload or {}
     if step is None:
+        if message.kind == "plan":
+            raise HTTPException(422, "没说是方案卡的哪一条")
         return dict(payload.get("outcome") or {})
-    steps = payload.get("steps") or []
+    steps = payload.get(step_list(message)) or []
     if not 0 <= step < len(steps):
         raise HTTPException(422, "没有这一件")
     return dict(steps[step])
@@ -420,14 +512,15 @@ def note_outcome(message, step):
 async def set_note_outcome(session, redis, message, step, outcome, **extra):
     if step is None:
         return await update_message(session, redis, message, outcome=outcome, **extra)
-    steps = list((message.payload or {}).get("steps") or [])
+    steps = list((message.payload or {}).get(step_list(message)) or [])
     steps[step] = outcome
-    return await update_message(session, redis, message, steps=steps, **extra)
+    return await update_message(session, redis, message, **{step_list(message): steps}, **extra)
 
 
 async def author_note(session, book_id, message_id):
+    """作者的一句话，或者编辑部出的方案卡：这两种下面会有改动，能换回、再改一版。"""
     message = await session.get(MeetingMessage, message_id)
-    if message is None or message.book_id != book_id or message.speaker != "author":
+    if message is None or message.book_id != book_id or (message.speaker != "author" and message.kind != "plan"):
         raise HTTPException(404, "消息不存在")
     return message
 
@@ -500,10 +593,14 @@ async def redo_background(book_id, message_id, step, intent, redis):
         if step is None:
             await update_message(session, redis, message, outcome=fresh)
         else:
-            steps = list(keep.get("steps") or [])
+            steps = list(keep.get(step_list(message)) or [])
             steps[step] = fresh
-            await update_message(session, redis, message, outcome=keep.get("outcome"), steps=steps)
-        actor = (message.payload or {}).get("ask") or ("chief" if fresh.get("kind") == "outline" else "lorekeeper")
+            await update_message(session, redis, message, outcome=keep.get("outcome"), **{step_list(message): steps})
+        actor = (
+            message.speaker
+            if message.kind == "plan"
+            else (message.payload or {}).get("ask") or ("chief" if fresh.get("kind") == "outline" else "lorekeeper")
+        )
         await book_saves.safe_checkpoint(session, book_id, actor, lead=f"{SPEAKER_NAMES[actor]}照你的话再改了一版：")
     for event in ("library", "saves"):
         await publish(redis, book_id, event, {"id": str(book_id)})
@@ -514,7 +611,10 @@ async def note_changes(session, book_id) -> dict[str, bool]:
     rows = list(
         await session.scalars(
             select(MeetingMessage)
-            .where(MeetingMessage.book_id == book_id, MeetingMessage.speaker == "author")
+            .where(
+                MeetingMessage.book_id == book_id,
+                or_(MeetingMessage.speaker == "author", MeetingMessage.kind == "plan"),
+            )
             .order_by(MeetingMessage.id.desc())
             .limit(300)
         )
@@ -522,8 +622,8 @@ async def note_changes(session, book_id) -> dict[str, bool]:
     wanted = []
     for m in rows:
         payload = m.payload or {}
-        if payload.get("steps"):
-            wanted += [(f"{m.id}:{i}", o) for i, o in enumerate(payload["steps"]) if o.get("change")]
+        if payload.get(step_list(m)):
+            wanted += [(f"{m.id}:{i}", o) for i, o in enumerate(payload[step_list(m)]) if o.get("change")]
         elif (payload.get("outcome") or {}).get("change"):
             wanted.append((str(m.id), payload["outcome"]))
     if not wanted:
@@ -552,7 +652,7 @@ async def write_outline_from_chat(session, redis, book, message, intent):
         said = intent.outline_target if intent.outline_target and intent.outline_target != "正在看的" else ""
         await update_message(session, redis, message, outcome={"kind": "not_found", "target_name": said or "这一段"})
         head = f"没认出要写大纲上的「{said}」。" if said else "没认出要写大纲上的哪一段。"
-        await say(
+        await tell(
             session,
             redis,
             book_id,
@@ -584,7 +684,7 @@ async def write_outline_from_chat(session, redis, book, message, intent):
     }
     await update_message(session, redis, message, outcome=outcome)
     note = result.get("note", "").strip().removeprefix("思路：").removeprefix("这次的思路：")
-    await say(
+    await tell(
         session,
         redis,
         book_id,
@@ -610,7 +710,7 @@ async def create_from_chat(session, redis, book, message, intent):
         await update_message(
             session, redis, message, outcome={"kind": "not_found", "target_name": intent.category or "这一类"}
         )
-        await say(
+        await tell(
             session,
             redis,
             book_id,
@@ -626,7 +726,7 @@ async def create_from_chat(session, redis, book, message, intent):
     if asked and not names:
         have = "、".join(f"「{name}」" for name in asked)
         await update_message(session, redis, message, outcome={"kind": "not_found", "target_name": asked[0]})
-        await say(
+        await tell(
             session,
             redis,
             book_id,
@@ -660,7 +760,7 @@ async def create_from_chat(session, redis, book, message, intent):
     await update_message(session, redis, message, outcome=outcome)
     note = (result.get("note") or "").strip()
     made = "、".join(f"「{item['name']}」" for item in items)
-    await say(
+    await tell(
         session,
         redis,
         book_id,

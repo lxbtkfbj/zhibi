@@ -25,6 +25,10 @@ export interface ChatMessage {
   state?: ReplyState
   /** 没答上来的原因，说人话 */
   error?: string
+  /** 还没开口时在做什么：「在查陈默……」「在改陈默的性格……」 */
+  doing?: string
+  /** 回答下面「查了：陈默、第 12 章」：点开看查到的原文 */
+  looked?: { label: string; text: string }[]
   /** 消息下面再放点东西：改了什么、去看看、撤销…… */
   below?: ReactNode
   /** 不是一问一答的（编辑部干活的进度、方案卡）：整条换成这个 */
