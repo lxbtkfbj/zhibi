@@ -35,8 +35,9 @@ from app.crypto import decrypt  # noqa: E402
 
 
 class Person(BaseModel):
-    name: str = Field(description="原文这一章里的叫法")
-    known_as: str = Field("", description="就是【已经认得的人】里的谁就写那个名字，新人留空")
+    name: str = Field(description="认得的人写名单上的名字；新人写原文最正式的叫法")
+    also_called: list[str] = Field(default_factory=list, description="这一章原文里的别的叫法：外号、昵称、尊称、职务称呼")
+    was: str = Field("", description="以前在名单里用别的名字记过、这一章才认出是同一个，写那个旧名字；没有留空")
     shown: str = Field(description="这一章写出了这个人什么，一两句")
     change: str = Field("", description="这一章里变了什么：实力与地位、在哪、处境、死了；没变留空")
 
