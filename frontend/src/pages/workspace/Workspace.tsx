@@ -122,7 +122,7 @@ function TopBar({ book, tab, onTab, right, manuscriptHref, manuscript, leftOffse
 
 /* ---------------- 左边目录 ---------------- */
 
-function EntryButton({ entry, selected, depth = 0, onSelect }: { entry: VEntry; selected: string; depth?: number; onSelect: (id: string) => void }) {
+function EntryButton({ entry, selected, depth = 0, pinned, onSelect }: { entry: VEntry; selected: string; depth?: number; pinned?: boolean; onSelect: (id: string) => void }) {
   const ref = useRef<HTMLButtonElement>(null)
   // 右边滚动换了选中的那条，左边目录跟着滚到看得见
   useEffect(() => {
@@ -131,11 +131,12 @@ function EntryButton({ entry, selected, depth = 0, onSelect }: { entry: VEntry; 
   return (
     <button ref={ref} type="button" onClick={() => onSelect(entry.id)} title={entry.name}
       style={{ paddingLeft: 10 + depth * 14 }}
-      className={clsx('flex w-full items-center gap-2 rounded-md py-[7px] pr-2.5 text-left font-serif text-[15px] transition-colors 2xl:text-base',
+      className={clsx('flex w-full items-center gap-2 rounded-md py-1.5 pr-2.5 text-left font-serif text-[14px] transition-colors 2xl:text-[15px]',
         selected === entry.id ? `${rowSelected} font-bold text-ink` : 'text-ink-2 hover:bg-line/40 hover:text-ink')}>
       {depth > 0 && <span className="text-ink-3/60">└</span>}
       <span className={clsx('truncate', !entry.name && 'text-ink-3')}>{entry.name || '未命名'}</span>
       {entry.locked && <Lock className="size-3 shrink-0 text-ink-3" />}
+      {pinned && <Pin className="ml-auto size-3 shrink-0 text-ink-3" aria-hidden />}
     </button>
   )
 }
@@ -191,27 +192,17 @@ function EntryList({ entries, selected, onSelect }: { entries: VEntry[]; selecte
   )
 }
 
-/** 角色目录：置顶的在最上面（后置顶的在上），其他人照原来的顺序一列。置顶的人多了提醒一句。 */
+/** 角色目录：置顶的在最上面（后置顶的在上，名字后面一个图钉），一条细线下面是其他人。不另起小标题，免得目录多一层。
+ *  置顶的人多了提醒一句。 */
 function CharacterGroups({ entries, selected, onSelect }: { entries: VEntry[]; selected: string; onSelect: (id: string) => void }) {
   const pinned = pinnedFirst(entries)
   const rest = entries.filter((e) => !e.pinnedAt)
   return (
     <>
-      {pinned.length > 0 && (
-        <div className="mb-1">
-          <p className="flex items-center gap-1.5 px-2.5 pt-2 pb-1 text-xs text-ink-3">
-            <Pin className="size-3" />置顶<span className="tabular-nums">{pinned.length}</span>
-          </p>
-          {pinned.map((entry) => <EntryButton key={entry.id} entry={entry} selected={selected} onSelect={onSelect} />)}
-          {pinned.length > PIN_LIMIT && <p className="px-2.5 pt-1 text-[11px] leading-relaxed text-seal-dark">置顶的人每写一章都带上，人多了资料会变多、冲淡这一章的重点</p>}
-        </div>
-      )}
-      {rest.length > 0 && (
-        <div className="mb-1">
-          {pinned.length > 0 && <p className="px-2.5 pt-2 pb-1 text-xs text-ink-3">其他人 <span className="tabular-nums">{rest.length}</span></p>}
-          {rest.map((entry) => <EntryButton key={entry.id} entry={entry} selected={selected} onSelect={onSelect} />)}
-        </div>
-      )}
+      {pinned.map((entry) => <EntryButton key={entry.id} entry={entry} pinned selected={selected} onSelect={onSelect} />)}
+      {pinned.length > PIN_LIMIT && <p className="px-2.5 pt-1 pb-1 text-[11px] leading-relaxed text-seal-dark">置顶的人每写一章都带上，人多了资料会变多、冲淡这一章的重点</p>}
+      {pinned.length > 0 && rest.length > 0 && <div className="mx-2.5 my-1 border-t border-dashed border-line-2" />}
+      {rest.length > 0 && <EntryList entries={rest} selected={selected} onSelect={onSelect} />}
     </>
   )
 }
@@ -302,7 +293,7 @@ function SettingsDirectory({ book, selected, onSelect, onCreateCategory, onNewEn
         <>
           {selected === 'overview' && <div className={clsx('mb-1 rounded-md px-3 py-1.5 text-sm font-medium text-ink', rowSelected)}>设定总览</div>}
           <button type="button" onClick={() => onSelect('world')}
-            className={clsx('mb-1 flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors', selected === 'world' ? `${rowSelected} font-medium text-ink` : 'text-ink-2 hover:bg-line/50')}>
+            className={clsx('mb-1 flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[15px] font-semibold transition-colors', selected === 'world' ? `${rowSelected} text-ink` : book.world ? 'text-ink hover:bg-line/50' : 'text-ink-3 hover:bg-line/50')}>
             <Globe className="size-3.5 text-ink-3" />
             世界概况
             {!book.world && <span className="ml-auto pr-0.5 text-xs text-ink-3">空</span>}
@@ -312,16 +303,19 @@ function SettingsDirectory({ book, selected, onSelect, onCreateCategory, onNewEn
             const catId = `cat:${cat.name}`
             return (
               <div key={cat.key} className="mt-1.5">
+                {/* 往下翻时类别名停在顶上，内容再多也知道在哪一类；底色和侧栏一样，盖住滚上去的条目 */}
+                <div className="sticky top-0 z-[1] bg-paper-2">
                 <div className={clsx('group flex items-center rounded-md transition-colors', selected === catId ? rowSelected : 'hover:bg-line/50')}>
                   <button type="button" onClick={() => setClosed(open ? [...closed, cat.name] : closed.filter((n) => n !== cat.name))}
                     className={clsx('flex size-7 items-center justify-center text-ink-3', !cat.entries.length && 'invisible')} aria-label={open ? '收起' : '展开'}>
                     {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
                   </button>
-                  <button type="button" onClick={() => onSelect(catId)} className={clsx('flex-1 py-1.5 text-left text-sm', selected === catId ? 'font-medium text-ink' : cat.entries.length ? 'text-ink-2' : 'text-ink-3')}>
+                  <button type="button" onClick={() => onSelect(catId)} className={clsx('flex-1 py-1.5 text-left text-[15px] font-semibold', selected === catId || cat.entries.length ? 'text-ink' : 'text-ink-3')}>
                     {cat.name}
                     {cat.custom && <span className="ml-1.5 text-[11px] text-ink-3">自建</span>}
                   </button>
                   <span className="pr-3 text-xs text-ink-3 tabular-nums">{cat.entries.length || '空'}</span>
+                </div>
                 </div>
                 {open && cat.entries.length > 0 && (
                   <div className="mt-0.5 mb-1 ml-[17px] border-l border-line pl-1.5">
