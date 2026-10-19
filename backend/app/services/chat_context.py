@@ -48,6 +48,8 @@ async def dialogue(session, book_id, thread, reset_after=0):
             ((m.payload or {}).get("thread") or "group") == thread
             and (
                 (m.speaker == "author" and m.kind in {"note", "decision"})
+                # 作者把书换回了某一档：编辑部回答时要知道这之后的改动都退了
+                or (m.speaker == "system" and "restore" in (m.payload or {}))
                 or (
                     m.kind in {"speech", "plan"}
                     and m.speaker in ROLES.values()
@@ -77,8 +79,11 @@ def done_text(outcome):
         "later": "编辑部当时在写，没改，放进了待处理的建议",
         "not_found": f"设定库里没找到「{outcome.get('target_name') or ''}」，什么也没改",
         "too_late": "当时在等作者拍板，没记也没改",
-        "failed": f"没做成（{outcome.get('reason') or ''}），什么也没改",
+        "failed": f"再改一版没做成（{outcome.get('reason') or ''}），这一处换回了改之前的样子"
+        if outcome.get("redo_failed")
+        else f"没做成（{outcome.get('reason') or ''}），什么也没改",
         "plan_apply": "照方案卡办了",
+        "saved": f"把书存了一档「{outcome.get('title') or ''}」",
     }.get(kind, "")
 
 
@@ -88,7 +93,7 @@ def done_note(message):
     if message.speaker != "author":
         return ""
     parts = [
-        t + ("（作者后来撤销了）" if o.get("undone") else "")
+        t + ("（作者后来换回了原来的）" if o.get("undone") else "")
         for o in payload.get("steps") or [payload.get("outcome") or {}]
         if (t := done_text(o))
     ]

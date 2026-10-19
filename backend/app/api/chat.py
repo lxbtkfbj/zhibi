@@ -95,41 +95,46 @@ async def again_reply(
     return data
 
 
-class UndoneIn(BaseModel):
-    # 一句话拆成好几件事时，撤销的是第几件；没拆的不给
+class NoteStepIn(BaseModel):
+    # 一句话拆成好几件事时，是第几件；没拆的不给
     step: int | None = None
 
 
-@router.post("/books/{book_id}/notes/{message_id}/undone")
-async def mark_undone(
+@router.post("/books/{book_id}/notes/{message_id}/revert")
+async def revert_note(
     message_id: int,
-    body: UndoneIn | None = None,
+    body: NoteStepIn | None = None,
     book: Book = Depends(get_book),
     session=SessionDep,
     redis: Redis = Depends(get_redis),
 ):
-    """作者在消息下面点了「撤销」：记在这条消息上。刷新后还显示已撤销，不会再撤一次；
-    给模型看的对话里也写明作者后来撤销了。"""
-    m = await session.get(MeetingMessage, message_id)
-    if m is None or m.book_id != book.id or m.speaker != "author":
-        raise HTTPException(404, "消息不存在")
-    payload = dict(m.payload or {})
-    step = body.step if body else None
-    if step is None:
-        if not payload.get("outcome"):
-            raise HTTPException(422, "这句话没让编辑部改过东西")
-        payload["outcome"] = {**payload["outcome"], "undone": True}
-    else:
-        steps = list(payload.get("steps") or [])
-        if not 0 <= step < len(steps):
-            raise HTTPException(422, "没有这一件")
-        steps[step] = {**steps[step], "undone": True}
-        payload["steps"] = steps
-    m.payload = payload
-    await session.commit()
-    data = message_dict(m)
-    await publish(redis, book.id, "message_update", data)
-    return data
+    """消息下面的「换回原来的」：这一处换回改之前的样子；后来又被动过就 409。"""
+    from app.services.group_notes import revert_note as revert
+
+    return await revert(session, redis, book.id, message_id, body.step if body else None)
+
+
+@router.post("/books/{book_id}/notes/{message_id}/redo", status_code=202)
+async def redo_note(
+    message_id: int,
+    background_tasks: BackgroundTasks,
+    body: NoteStepIn | None = None,
+    book: Book = Depends(get_book),
+    session=SessionDep,
+    redis: Redis = Depends(get_redis),
+):
+    """消息下面的「再改一版」：先换回，再照同一句话重改这一处。"""
+    from app.services.group_notes import redo_note as redo
+
+    return await redo(session, redis, book.id, message_id, body.step if body else None, background_tasks)
+
+
+@router.get("/books/{book_id}/note-changes")
+async def note_changes(book: Book = Depends(get_book), session=SessionDep):
+    """聊天里每一处改动现在还能不能换回、再改：这一处后来又改过就不能了。"""
+    from app.services.group_notes import note_changes as changes
+
+    return await changes(session, book.id)
 
 
 class ReceiptIn(BaseModel):

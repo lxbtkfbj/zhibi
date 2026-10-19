@@ -12,6 +12,26 @@ import { findEntry, findNode, type VBook, type VEntry } from './model'
 
 export const workspaceKey = (bookId: string) => ['workspace', bookId] as const
 
+/** 作者自己改了书：停手 3 分钟自动存一档；关页面、切走时也存（后台比一下，跟上一档一样就不存） */
+const AUTO_SAVE_MS = 180_000
+const autoSaves = new Map<string, ReturnType<typeof setTimeout>>()
+export function scheduleAutoSave(bookId: string) {
+  clearTimeout(autoSaves.get(bookId))
+  autoSaves.set(bookId, setTimeout(() => {
+    autoSaves.delete(bookId)
+    void post(`/books/${bookId}/saves`, { auto: true }).catch(() => undefined)
+  }, AUTO_SAVE_MS))
+}
+/** 还有没存的手改：马上存。leaving：关页面时用 sendBeacon，页面关了也送得出去 */
+export function flushAutoSave(bookId: string, leaving = false) {
+  if (!autoSaves.has(bookId)) return
+  clearTimeout(autoSaves.get(bookId))
+  autoSaves.delete(bookId)
+  const url = `/books/${bookId}/saves`
+  if (leaving && navigator.sendBeacon) navigator.sendBeacon(`/api${url}`, new Blob([JSON.stringify({ auto: true })], { type: 'application/json' }))
+  else void post(url, { auto: true }).catch(() => undefined)
+}
+
 async function loadParts(bookId: string): Promise<ApiParts> {
   const [book, library, outline, bible, chapters] = await Promise.all([
     get<ApiParts['book']>(`/books/${bookId}`),
@@ -93,6 +113,7 @@ export function useLiveBook(bookId: string) {
     // 改完刷新整本书；其他页面（旧版书页、书架）下次打开再读
     const done = async <T,>(task: Promise<T>): Promise<T> => {
       const result = await task
+      scheduleAutoSave(bookId)
       await refresh()
       void qc.invalidateQueries({ queryKey: ['book', bookId] })
       void qc.invalidateQueries({ queryKey: ['books'] })

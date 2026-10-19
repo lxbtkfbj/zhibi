@@ -4,6 +4,7 @@
 """
 
 import asyncio
+import re
 import uuid
 
 from fastapi import HTTPException
@@ -337,5 +338,10 @@ async def column_in(session: AsyncSession, book: Book, target: Character | World
             continue
         for key, label in columns:
             if key != "定位" and (text == label or len(label) >= 2 and label in text):
+                return key
+        # 只说了栏目名的一半：「性格改成……」认「性格与说话方式」
+        for key, label in columns:
+            pieces = [p for p in re.split(r"[与和、及]", label) if len(p) >= 2]
+            if key != "定位" and len(pieces) > 1 and any(p in text for p in pieces):
                 return key
     return None

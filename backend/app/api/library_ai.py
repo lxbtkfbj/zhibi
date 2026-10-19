@@ -21,6 +21,7 @@ from app.library_schemas import CandidateOut, SuggestionOut
 from app.llm.router import LLMRouter
 from app.models import Book, Character, Job, SettingCandidate, SettingSuggestion, WorldEntry
 from app.prompts import render
+from app.services import book_saves
 from app.services.library import ensure_unlocked, load_target, lock_book
 from app.services.library_cascade import generate_cascade_suggestions, iter_text_paths
 from app.services.library_context import load_context, rewrite_mode
@@ -223,8 +224,7 @@ async def rewrite_target(
     return response
 
 
-@router.post("/books/{book_id}/library/rewrite")
-async def rewrite(
+async def _rewrite(
     body: RewriteIn,
     book: Book = Depends(get_book),
     session: AsyncSession = SessionDep,
@@ -233,8 +233,7 @@ async def rewrite(
     return await rewrite_target(session, redis, book, body)
 
 
-@router.post("/books/{book_id}/library/fill-gaps")
-async def fill_gaps(
+async def _fill_gaps(
     book: Book = Depends(get_book),
     session: AsyncSession = SessionDep,
     redis: Redis = Depends(get_redis),
@@ -418,3 +417,27 @@ async def review_concept_change(session, redis, book_id, old_story: str, *, sing
             )
         )
         await say(session, redis, book_id, "reviewer", warning)
+
+
+# 编辑部动书：做事前先存作者自己改了还没存的，做完存一档（设计说明 9.13「第二批：存档」）
+@router.post("/books/{book_id}/library/rewrite")
+async def rewrite(
+    body: RewriteIn,
+    book: Book = Depends(get_book),
+    session: AsyncSession = SessionDep,
+    redis: Redis = Depends(get_redis),
+):
+    return await book_saves.editorial(
+        session, book.id, "lorekeeper", "编辑部帮写：", lambda: _rewrite(body, book, session, redis)
+    )
+
+
+@router.post("/books/{book_id}/library/fill-gaps")
+async def fill_gaps(
+    book: Book = Depends(get_book),
+    session: AsyncSession = SessionDep,
+    redis: Redis = Depends(get_redis),
+):
+    return await book_saves.editorial(
+        session, book.id, "lorekeeper", "编辑部补空缺：", lambda: _fill_gaps(book, session, redis)
+    )

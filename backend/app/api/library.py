@@ -50,6 +50,7 @@ from app.schemas import (
     WorldEntryBase,
     WorldEntryOut,
 )
+from app.services import book_saves
 from app.services.library import ensure_unlocked, load_target, lock_book, parse_uuid, validate_entry
 from app.services.library_cascade import generate_cascade_suggestions
 from app.services.library_context import load_context
@@ -365,8 +366,7 @@ def _splice_error(exc: ValueError) -> HTTPException:
     return HTTPException(409 if "原文已经改过" in str(exc) else 422, str(exc))
 
 
-@router.post("/candidates/{row_id}/choose")
-async def choose_candidate(
+async def _choose_candidate(
     row_id: uuid.UUID,
     body: CandidateChoose,
     session: AsyncSession = SessionDep,
@@ -611,8 +611,7 @@ async def _apply_suggestion(session: AsyncSession, suggestion: SettingSuggestion
     return target
 
 
-@router.post("/suggestions/{row_id}/accept", response_model=SuggestionOut)
-async def accept_suggestion(row_id: uuid.UUID, session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)):
+async def _accept_suggestion(row_id: uuid.UUID, session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)):
     suggestion = await _editable_row(session, SettingSuggestion, row_id, allow_busy=True)
     book_id = suggestion.book_id
     book = await session.get(Book, book_id)
@@ -640,8 +639,7 @@ async def ignore_suggestion(row_id: uuid.UUID, session: AsyncSession = SessionDe
     return suggestion
 
 
-@router.post("/books/{book_id}/suggestions/accept-all")
-async def accept_all_suggestions(
+async def _accept_all_suggestions(
     book: Book = Depends(get_book), session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)
 ):
     await lock_book(session, book.id)
@@ -674,4 +672,43 @@ async def accept_all_suggestions(
     await _review_changed_concept(session, redis, book_id, old_story)
     return jsonable_encoder(
         {"accepted": accepted, "skipped": skipped, "accepted_count": len(accepted), "skipped_count": len(skipped)}
+    )
+
+
+# 编辑部的东西放进书里：做事前先存作者自己改了还没存的，做完存一档（设计说明 9.13「第二批：存档」）
+@router.post("/candidates/{row_id}/choose")
+async def choose_candidate(
+    row_id: uuid.UUID,
+    body: CandidateChoose,
+    session: AsyncSession = SessionDep,
+    redis: Redis = Depends(get_redis),
+):
+    row = await session.get(SettingCandidate, row_id)
+    if row is None:
+        raise HTTPException(404, "记录不存在")
+    return await book_saves.editorial(
+        session,
+        row.book_id,
+        "lorekeeper",
+        "换上了挑中的写法：",
+        lambda: _choose_candidate(row_id, body, session, redis),
+    )
+
+
+@router.post("/suggestions/{row_id}/accept", response_model=SuggestionOut)
+async def accept_suggestion(row_id: uuid.UUID, session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)):
+    row = await session.get(SettingSuggestion, row_id)
+    if row is None:
+        raise HTTPException(404, "记录不存在")
+    return await book_saves.editorial(
+        session, row.book_id, "lorekeeper", "收下了建议：", lambda: _accept_suggestion(row_id, session, redis)
+    )
+
+
+@router.post("/books/{book_id}/suggestions/accept-all")
+async def accept_all_suggestions(
+    book: Book = Depends(get_book), session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)
+):
+    return await book_saves.editorial(
+        session, book.id, "lorekeeper", "收下了全部建议：", lambda: _accept_all_suggestions(book, session, redis)
     )

@@ -1,8 +1,9 @@
-/** 新书页：接真书。编辑部浮窗里只有一个聊天（第五步：@ 点名、边写边显示、停、重新回答）；开写、正文、拍板在新书页上，待处理、历史版本还在旧版。 */
+/** 新书页：接真书。编辑部浮窗里只有一个聊天（第五步：@ 点名、边写边显示、停、重新回答）；开写、正文、拍板在新书页上；
+ *  顶栏「存档」是整本书的存档（第五步第二批）。待处理还在旧版。 */
 
 import { useIsMutating } from '@tanstack/react-query'
 import { Settings } from 'lucide-react'
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useBook, useJobActions, useOutline } from '../../api/hooks'
 import type { BookDetail, ChatViewing, Conversation, LiveDraft, MeetingMessage } from '../../api/types'
@@ -14,7 +15,8 @@ import { currentTarget, type NodeFeedback, nodeFeedback } from '../../lib/worksp
 import { segmentReviewKey } from '../../lib/outlineWriting'
 import { BookContext, type BookContextValue, type PitchChoice } from '../book/context'
 import { LiveChat } from './LiveChat'
-import { useLiveBook } from './liveActions'
+import { flushAutoSave, useLiveBook } from './liveActions'
+import { SavesButton, SavesPanel } from './Saves'
 import { useLiveWriting } from './liveWriting'
 import { InboxButton, Workspace } from './Workspace'
 
@@ -100,15 +102,32 @@ function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
   const writing = useLiveWriting({ bookId, detail, parts: raw, messages, draft })
   const openRef = useRef<((type: string, id: string) => void) | null>(null)
   const viewingRef = useRef<(() => ChatViewing | null) | null>(null)
+  // 存档那一栏：开没开、点开的是哪一档
+  const [saves, setSaves] = useState<{ open: boolean; id: number | null }>({ open: false, id: null })
+  const closeSaves = useCallback(() => setSaves({ open: false, id: null }), [])
   const context = useMemo(() => ({
     ...ctx,
     openTarget: (type: string, id: string) => openRef.current?.(type, id),
     viewing: () => viewingRef.current?.() ?? null,
+    openSaves: (id?: number) => setSaves({ open: true, id: id ?? null }),
   }), [ctx])
+  // 关页面、切到别的页面时：手改了还没存的，存一档
+  useEffect(() => {
+    const leave = () => flushAutoSave(bookId, true)
+    const hidden = () => { if (document.visibilityState === 'hidden') flushAutoSave(bookId, true) }
+    window.addEventListener('pagehide', leave)
+    document.addEventListener('visibilitychange', hidden)
+    return () => {
+      window.removeEventListener('pagehide', leave)
+      document.removeEventListener('visibilitychange', hidden)
+      flushAutoSave(bookId)
+    }
+  }, [bookId])
   if (loading) return <div className="flex h-dvh items-center justify-center bg-paper text-[15px] text-ink-3">正在读这本书…</div>
   if (error || !book) return <EmptyState title="这本书没读出来"><Link to="/" className="text-seal underline">回到书房</Link></EmptyState>
   const right = (
     <>
+      <SavesButton open={saves.open} onClick={() => setSaves(saves.open ? { open: false, id: null } : { open: true, id: null })} />
       <InboxButton count={book.pending}>
         <div className="px-3 py-2.5">
           <p className="text-[13px] leading-relaxed text-ink">编辑部挂着 {book.pending} 条建议。新书页还没做处理建议的地方，先去旧版的设定库里看。</p>
@@ -126,6 +145,7 @@ function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
       <Workspace book={book} actions={actions} right={right} notice={<JobNotice book={detail} />} openRef={openRef} viewingRef={viewingRef}
         chat={<LiveChat />}
         chatBadge={unread} openChat={openChat} writing={writing} />
+      <SavesPanel open={saves.open} saveId={saves.id} onClose={closeSaves} onOpenSave={(id) => setSaves({ open: true, id })} />
     </BookContext.Provider>
   )
 }

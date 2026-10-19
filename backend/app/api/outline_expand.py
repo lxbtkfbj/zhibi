@@ -20,7 +20,7 @@ from app.graphs.write_book import prepare_unit_chapters
 from app.llm.router import LLMRouter
 from app.models import Book, Chapter, Job, MeetingMessage, PlotUnit, Volume
 from app.schemas import UnitOut, VolumeOut
-from app.services import setup_store, writing_store
+from app.services import book_saves, setup_store, writing_store
 from app.services.library import lock_book
 from app.services.meeting import Emitter, job_dict, message_dict, publish
 from app.services.versions import record_version, snapshot_of
@@ -110,8 +110,7 @@ async def mark(session, redis, job, status, error=""):
     await broadcast(redis, job.book_id, "job", job_dict(row))
 
 
-@router.post("/volumes/{volume_id}/expand", response_model=VolumeOut)
-async def expand_volume(volume_id: uuid.UUID, session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)):
+async def _expand_volume(volume_id: uuid.UUID, session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)):
     volume, job, before = await reserve(session, Volume, volume_id)
     d = dependencies(redis, job)
     try:
@@ -166,8 +165,7 @@ async def expand_volume(volume_id: uuid.UUID, session: AsyncSession = SessionDep
         await d.llm.aclose()
 
 
-@router.post("/units/{unit_id}/expand", response_model=UnitOut)
-async def expand_unit(unit_id: uuid.UUID, session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)):
+async def _expand_unit(unit_id: uuid.UUID, session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)):
     unit, job, before = await reserve(session, PlotUnit, unit_id)
     d = dependencies(redis, job)
     try:
@@ -188,3 +186,24 @@ async def expand_unit(unit_id: uuid.UUID, session: AsyncSession = SessionDep, re
         raise HTTPException(502, f"模型出错了：{exc}") from exc
     finally:
         await d.llm.aclose()
+
+
+# 编辑部动书：做事前先存作者自己改了还没存的，做完存一档（设计说明 9.13「第二批：存档」）
+@router.post("/volumes/{volume_id}/expand", response_model=VolumeOut)
+async def expand_volume(volume_id: uuid.UUID, session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)):
+    row = await session.get(Volume, volume_id)
+    if row is None:
+        raise HTTPException(404, "记录不存在")
+    return await book_saves.editorial(
+        session, row.book_id, "chief", "主编提前拆好了：", lambda: _expand_volume(volume_id, session, redis)
+    )
+
+
+@router.post("/units/{unit_id}/expand", response_model=UnitOut)
+async def expand_unit(unit_id: uuid.UUID, session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)):
+    row = await session.get(PlotUnit, unit_id)
+    if row is None:
+        raise HTTPException(404, "记录不存在")
+    return await book_saves.editorial(
+        session, row.book_id, "chief", "主编提前出了章纲：", lambda: _expand_unit(unit_id, session, redis)
+    )

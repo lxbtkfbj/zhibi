@@ -516,7 +516,7 @@ export interface MeetingMessage {
   /** note：作者在编辑部工作时插的话 */
   kind: 'plan' | 'speech' | 'artifact' | 'status' | 'decision' | 'error' | 'note'
   content: string
-  payload: { type?: string; data?: unknown; thread?: Speaker | 'group'; reply_to?: number[]; quote?: { text: string; where: string }; viewing?: ChatViewing; outcome?: ChatOutcome; steps?: ChatOutcome[]; plan?: ChatPlan; status?: 'open' | 'superseded' | 'applying' | 'applied'; results?: ChatOutcome[]
+  payload: { type?: string; data?: unknown; thread?: Speaker | 'group'; reply_to?: number[]; quote?: { text: string; where: string }; viewing?: ChatViewing; outcome?: ChatOutcome; steps?: ChatOutcome[]; redo_since?: string; plan?: ChatPlan; status?: 'open' | 'superseded' | 'applying' | 'applied'; results?: ChatOutcome[]
     /** 聊天回答：thinking 还没出字、streaming 在写、stopped 作者叫停了、failed 没答上来（error 是原因）；写完了没有这一项 */
     state?: 'thinking' | 'streaming' | 'stopped' | 'failed'; error?: string
     /** 新书页群聊里打 @ 点的名 */
@@ -588,8 +588,19 @@ export interface ChatViewing {
 }
 
 export interface ChatOutcome {
-  kind: 'requirement' | 'to_job' | 'edit' | 'fill' | 'outline' | 'working' | 'not_found' | 'later' | 'chat' | 'pending' | 'too_late' | 'failed' | 'plan_apply' | 'plan_made' | 'plan_pending' | 'created' | 'suggestion' | 'feedback'
+  kind: 'requirement' | 'to_job' | 'edit' | 'fill' | 'outline' | 'working' | 'not_found' | 'later' | 'chat' | 'pending' | 'too_late' | 'failed' | 'plan_apply' | 'plan_made' | 'plan_pending' | 'created' | 'suggestion' | 'feedback' | 'saved'
   reason?: string
+  /** 改完当场的前后对照：每一栏「原来」「改成」（太长截到 2000 字） */
+  diff?: ChangeDiff[]
+  /** 这一处改了哪几行、改之前改之后的 hash：「换回原来的」「再改一版」用 */
+  change?: { table: string; id: string; before: string | null; after: string | null }[]
+  /** working：从什么时候开始做的（再改一版时用；没有就按消息的时间算） */
+  since?: string
+  /** failed：是「再改一版」没做成（这一处已经换回改之前了） */
+  redo_failed?: boolean
+  /** saved：聊天里说「存个档」存下的那一档 */
+  save_id?: number
+  title?: string
   /** working：编辑部判断完、正在做的那件事 */
   text?: string
   /** fill：补上的几栏 */
@@ -614,6 +625,30 @@ export interface ChatOutcome {
   suggestion_id?: string
 }
 
+
+export interface ChangeDiff { label: string; before: string; after: string; truncated?: boolean }
+
+/** 整本书的一档存档 */
+export interface BookSave {
+  id: number
+  created_at: string
+  kind: 'auto' | 'manual' | 'restore'
+  actor: 'author' | 'chief' | 'lorekeeper' | 'writer' | 'reviewer' | 'system'
+  actor_name: string
+  title: string
+  summary: { items?: { table: string; id: string; op: 'add' | 'del' | 'mod'; group: string; name: string; fields: string[] }[]; more?: number; finished?: { index: number; title: string }[]; first?: boolean }
+  count: number
+  chapters_final: number
+  restored_from: number | null
+}
+
+/** 这一档和现在比：add 是现在有、那时没有（回去会删掉）；del 是那时有、现在没有（回去会加回来） */
+export interface SaveCompare {
+  save: BookSave
+  now_final: number
+  same: boolean
+  groups: { name: string; items: { table: string; id: string; op: 'add' | 'del' | 'mod'; name: string; parts: { label: string; then: string; now: string; then_words: number; now_words: number; long: boolean }[] }[] }[]
+}
 
 export interface PlanItem {
   where: '定调' | '设定库' | '大纲' | '写作要求'

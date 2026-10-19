@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import uuid
 
 import httpx
 import pytest
@@ -14,7 +15,7 @@ from app.api import jobs as jobs_api
 from app.config import get_settings
 from app.llm import demo
 from app.main import create_app
-from app.models import Book, MeetingMessage
+from app.models import AuthorRequirement, Book, MeetingMessage
 from app.schemas import NoteIn
 from app.services import chat, group_notes
 from app.services.chat_context import dialogue
@@ -249,7 +250,7 @@ def test_done_note_lists_each_step():
     assert done_note(SimpleNamespace(speaker="chief", payload={"outcome": {"kind": "edit"}})) == ""
 
 
-async def test_undo_is_recorded_on_the_message(client, sessionmaker, monkeypatch):
+async def test_revert_is_recorded_on_the_message(client, sessionmaker, monkeypatch):
     bid = await seed(sessionmaker)
     seen = []
 
@@ -259,15 +260,19 @@ async def test_undo_is_recorded_on_the_message(client, sessionmaker, monkeypatch
 
     monkeypatch.setattr(chat, "stream_model", capture)
     note = (await client.post(f"/api/books/{bid}/notes", json={"content": "以后每章都要有一场打斗"})).json()
-    requirement = (await final_message(client, bid, note["id"]))["payload"]["outcome"]["requirement_id"]
-    # 消息下面点「撤销」：先删了这条要求，再记到消息上
-    assert (await client.delete(f"/api/requirements/{requirement}")).status_code in (200, 204)
-    marked = await client.post(f"/api/books/{bid}/notes/{note['id']}/undone", json={})
+    outcome = (await final_message(client, bid, note["id"]))["payload"]["outcome"]
+    # 改完当场的前后对照：写作要求原来没有，改成这一句
+    assert outcome["diff"][0]["after"].startswith("原话：以后每章都要有一场打斗")
+    # 消息下面点「换回原来的」：删了这条要求，记到消息上
+    marked = await client.post(f"/api/books/{bid}/notes/{note['id']}/revert", json={})
     assert marked.status_code == 200 and marked.json()["payload"]["outcome"]["undone"] is True
+    async with sessionmaker() as session:
+        assert await session.get(AuthorRequirement, uuid.UUID(outcome["requirement_id"])) is None
+    assert (await client.post(f"/api/books/{bid}/notes/{note['id']}/revert", json={})).status_code == 409
     await client.post(f"/api/books/{bid}/notes", json={"content": "刚才那条还算数吗？"})
-    assert "（编辑部照这句做了：记成了写作要求（作者后来撤销了））" in seen[-1]
+    assert "（编辑部照这句做了：记成了写作要求（作者后来换回了原来的））" in seen[-1]
 
-    # 拆成好几件事的：撤销记在那一件上
+    # 拆成好几件事的：换回记在那一件上；没改过书的不能换
     async with sessionmaker() as session:
         row = MeetingMessage(
             book_id=bid,
@@ -284,9 +289,8 @@ async def test_undo_is_recorded_on_the_message(client, sessionmaker, monkeypatch
         session.add(row)
         await session.commit()
         sid = row.id
-    res = await client.post(f"/api/books/{bid}/notes/{sid}/undone", json={"step": 1})
-    assert [s.get("undone") for s in res.json()["payload"]["steps"]] == [None, True]
-    assert (await client.post(f"/api/books/{bid}/notes/{sid}/undone", json={"step": 5})).status_code == 422
+    assert (await client.post(f"/api/books/{bid}/notes/{sid}/revert", json={"step": 1})).status_code == 422
+    assert (await client.post(f"/api/books/{bid}/notes/{sid}/revert", json={"step": 5})).status_code == 422
     # 编辑部的话、别的书的消息不认
     reply = next(m for m in await meeting(client, bid) if m["speaker"] != "author")
-    assert (await client.post(f"/api/books/{bid}/notes/{reply['id']}/undone", json={})).status_code == 404
+    assert (await client.post(f"/api/books/{bid}/notes/{reply['id']}/revert", json={})).status_code == 404

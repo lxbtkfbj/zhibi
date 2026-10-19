@@ -22,6 +22,7 @@ from app.graphs import book_setup, write_book
 from app.graphs.deps import GraphDeps, JobCancelled, cancel_key
 from app.llm.router import LLMError, LLMRouter
 from app.models import Book, Job
+from app.services import book_saves
 from app.services.jobs import LEGACY_SETUP_MESSAGE
 from app.services.meeting import Emitter, job_dict, publish
 
@@ -61,6 +62,41 @@ BOOK_STATUS_WHILE_WAITING = {
     "trial_read": "writing",
     "chapter_stuck": "writing",
 }
+# 存档：这几步做完动了书，各存一档（谁、开头怎么说；开头是空的就只说改了什么，比如「写完第 12 章」）
+WRITE_SAVES = {
+    "plan_segment": ("chief", "主编定下了下一篇："),
+    "split_segment": ("chief", "主编给这一篇分了卷："),
+    "fill_segment": ("chief", "主编补齐了这一篇："),
+    "fill_volume": ("chief", "主编补齐了这一卷："),
+    "save_volume": ("chief", "主编拆好了这一卷的单元："),
+    "volume_gate": ("chief", "卷纲定了："),
+    "plan_chapters": ("chief", "主编出了章纲："),
+    "revise_chapters": ("chief", "主编改了章纲："),
+    "finalize": ("writer", ""),
+    "reopen": ("lorekeeper", "重写之前，设定师撤掉了这一章记进设定的变化："),
+    "recap_unit": ("lorekeeper", "设定师写了单元回顾："),
+    "recap_volume": ("lorekeeper", "设定师写了卷回顾："),
+}
+SAVES_AFTER = {
+    "write_book": WRITE_SAVES,
+    "rewrite_chapter": WRITE_SAVES,
+    "book_setup": {
+        "concept": ("chief", "开书 · 定调："),
+        "settings_focus": ("lorekeeper", "开书 · 重点设定："),
+        "settings_rest": ("lorekeeper", "开书 · 其余设定："),
+        "outline": ("chief", "开书 · 大纲："),
+        "outline_chapters": ("chief", "开书 · 章纲："),
+        "piece_persist": ("chief", "开书："),
+        "finalize": ("chief", "开书定好了："),
+    },
+}
+
+
+async def save_book(sm: async_sessionmaker[AsyncSession], book_id: uuid.UUID, actor: str, lead: str | None) -> None:
+    async with sm() as session:
+        await book_saves.safe_checkpoint(session, book_id, actor, lead=lead)
+
+
 # 写书循环一章要走好几步，整本书远超 LangGraph 默认的 25 步上限
 RECURSION_LIMIT = 200_000
 
@@ -164,6 +200,10 @@ async def _run(
         job_id=job_id,
     )
     await _update_job(sm, redis, job_id, BOOK_STATUS_WHILE_RUNNING.get(kind), status="running", pending=None, error="")
+    # 编辑部动书之前：作者自己改过还没存的，先存一档
+    async with sm() as session:
+        await book_saves.before_ai(session, book_id)
+    saves_after = SAVES_AFTER.get(kind, {})
 
     try:
         async with AsyncPostgresSaver.from_conn_string(dsn) as saver:
@@ -192,11 +232,14 @@ async def _run(
                     graph_input = book_setup.restart_state(params, old_values, concept)
                 else:
                     graph_input = make_initial(params)
-            async for _ in graph.astream(graph_input, config, context=deps, stream_mode="updates"):
-                pass
+            async for update in graph.astream(graph_input, config, context=deps, stream_mode="updates"):
+                for node in update if isinstance(update, dict) else ():
+                    if node in saves_after:
+                        await save_book(sm, book_id, *saves_after[node])
             snapshot = await graph.aget_state(config)
     except JobCancelled:
         await redis.delete(cancel_key(job_id))
+        await save_book(sm, book_id, "system", "编辑部停下时：")
         await emitter.status("system", "任务已停止。")
         await _update_job(sm, redis, job_id, status="cancelled", finished_at=datetime.now(UTC))
         return
@@ -204,9 +247,12 @@ async def _run(
         log.exception("任务 %s 失败", job_id)
         message = str(exc) if isinstance(exc, LLMError) else f"{type(exc).__name__}: {exc}"
         await emitter.say("system", f"出错了：{message}", kind="error")
+        await save_book(sm, book_id, "system", "编辑部出错停下时：")
         await _update_job(sm, redis, job_id, status="failed", error=message[:4000])
         return
 
+    # 兜底：上面几步以外动过的书，停下来时存一档
+    await save_book(sm, book_id, "system", "等你拍板时：" if snapshot.interrupts else "编辑部做完这一轮：")
     if snapshot.interrupts:
         pending = snapshot.interrupts[0].value
         await _update_job(

@@ -31,7 +31,7 @@ from app.schemas import (
     SplitIn,
     SplitUndoIn,
 )
-from app.services import outline_structure
+from app.services import book_saves, outline_structure
 from app.services.desk import (
     CHARACTER_COLUMNS,
     ENTRY_CATEGORIES,
@@ -52,6 +52,7 @@ from app.services.versions import record_version, snapshot_of
 
 router = APIRouter(tags=["workspace"])
 
+
 async def entry_rows(session: AsyncSession, book_id, category: str) -> list[WorldEntry]:
     rows = list(await session.scalars(select(WorldEntry).where(WorldEntry.book_id == book_id)))
     if category == GOLDFINGER:
@@ -62,9 +63,7 @@ async def entry_rows(session: AsyncSession, book_id, category: str) -> list[Worl
     return [
         r
         for r in rows
-        if r.category == key
-        and not is_goldfinger(r)
-        and not (key == "世界与地图" and r.name.strip() == WORLD_OVERVIEW)
+        if r.category == key and not is_goldfinger(r) and not (key == "世界与地图" and r.name.strip() == WORLD_OVERVIEW)
     ]
 
 
@@ -300,9 +299,7 @@ async def create_chapter(unit_id: uuid.UUID, body: ChapterCreate, session: Async
     if unit.chapter_count > 0 and len(own) + 1 > unit.chapter_count:
         unit.chapter_count = len(own) + 1
         volume.chapter_count = sum(row.chapter_count for row in state.own_units(volume.id))
-    await outline_structure.finish_structure(
-        session, unit.book_id, state, "新增一章", affected={unit.id, volume.id}
-    )
+    await outline_structure.finish_structure(session, unit.book_id, state, "新增一章", affected={unit.id, volume.id})
     await session.commit()
     return {"index": chapter.index}
 
@@ -373,7 +370,11 @@ async def draft_entries(body: DraftRequest, book: Book = Depends(get_book), sess
     if people:
         same, name, hint = ctx.characters, "角色", CHARACTER_CATEGORY["hint"]
     elif custom is not None:
-        same, name, hint = await entry_rows(session, book.id, body.category), custom.name, custom.hint or "（作者没写说明）"
+        same, name, hint = (
+            await entry_rows(session, book.id, body.category),
+            custom.name,
+            custom.hint or "（作者没写说明）",
+        )
     elif ladder:
         same = [row for row in ctx.entries if row.category == LADDER]
         name, hint = LADDER, next(c["hint"] for c in BUILTIN_CATEGORIES if c["key"] == LADDER)
@@ -440,14 +441,16 @@ async def draft_entries(body: DraftRequest, book: Book = Depends(get_book), sess
     return {"entries": entries, "note": result.note}
 
 
-@router.post("/books/{book_id}/fill-entry")
-async def fill_one_entry(body: FillRequest, book: Book = Depends(get_book), session: AsyncSession = SessionDep) -> dict:
+async def _fill_one_entry(
+    body: FillRequest, book: Book = Depends(get_book), session: AsyncSession = SessionDep
+) -> dict:
     """让编辑部把这一条空着的栏目补上（卡片右上角「⋯」里点的）。"""
     return await fill_entry(session, book, body.target_type, body.target_id, body.request)
 
 
-@router.post("/books/{book_id}/outline/write")
-async def write_outline(body: OutlineWriteIn, book: Book = Depends(get_book), session: AsyncSession = SessionDep) -> dict:
+async def _write_outline(
+    body: OutlineWriteIn, book: Book = Depends(get_book), session: AsyncSession = SessionDep
+) -> dict:
     """大纲上每一页的「编辑部帮写这一段」：直接写进去，返回改之前的样子好撤销。"""
     return await write_outline_node(session, book, body.target_type, body.target_id, body.request)
 
@@ -467,8 +470,7 @@ async def split_outline(body: SplitIn, book: Book = Depends(get_book), session: 
     return await draft_split(session, book, body.target_type, body.target_id, body.request, body.current)
 
 
-@router.post("/books/{book_id}/outline/split/accept")
-async def accept_outline_split(
+async def _accept_outline_split(
     body: SplitAcceptIn, book: Book = Depends(get_book), session: AsyncSession = SessionDep
 ) -> dict:
     """收下帮拆的这一版：放进大纲，带回撤销用的记录。"""
@@ -568,3 +570,29 @@ async def move_outline(body: OutlineMove, book: Book = Depends(get_book), sessio
     await outline_structure.finish_structure(session, book.id, state, "挪动章的顺序", affected={unit.id})
     await session.commit()
     return {"id": str(chapter.index)}
+
+
+# 编辑部动书：做事前先存作者自己改了还没存的，做完存一档（设计说明 9.13「第二批：存档」）
+@router.post("/books/{book_id}/fill-entry")
+async def fill_one_entry(body: FillRequest, book: Book = Depends(get_book), session: AsyncSession = SessionDep) -> dict:
+    return await book_saves.editorial(
+        session, book.id, "lorekeeper", "设定师补齐：", lambda: _fill_one_entry(body, book, session)
+    )
+
+
+@router.post("/books/{book_id}/outline/write")
+async def write_outline(
+    body: OutlineWriteIn, book: Book = Depends(get_book), session: AsyncSession = SessionDep
+) -> dict:
+    return await book_saves.editorial(
+        session, book.id, "chief", "主编帮写：", lambda: _write_outline(body, book, session)
+    )
+
+
+@router.post("/books/{book_id}/outline/split/accept")
+async def accept_outline_split(
+    body: SplitAcceptIn, book: Book = Depends(get_book), session: AsyncSession = SessionDep
+) -> dict:
+    return await book_saves.editorial(
+        session, book.id, "chief", "收下了帮拆的一版：", lambda: _accept_outline_split(body, book, session)
+    )

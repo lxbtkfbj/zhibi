@@ -11,7 +11,7 @@ from app.api.deps import ensure_idle
 from app.api.library_ai import RewriteIn, rewrite_target
 from app.db import get_sessionmaker
 from app.models import Book, Character, MeetingMessage, SettingSuggestion, WorldEntry
-from app.services import jobs
+from app.services import book_saves, jobs
 from app.services.chat import conversation_lock, model
 from app.services.chat_context import dialogue, dialogue_text, references, reply_values, thread_of
 from app.services.group_notes import active_note_job, revert_id, update_message
@@ -294,6 +294,8 @@ async def apply_background(message_id, redis):
             row.payload.get("thread", "group"),
             deepcopy(row.payload["plan"]),
         )
+        # 编辑部动书之前：作者自己改过还没存的，先存一档
+        await book_saves.before_ai(session, book_id)
         await lock_book(session, book_id)
         job = await active_note_job(session, book_id)
         opened = jobs.open_wait(job)
@@ -363,6 +365,10 @@ async def apply_background(message_id, redis):
             kind="speech",
             content=content,
             payload={"reply_to": [message_id], **({"thread": thread} if thread != "group" else {})},
+        )
+        # 方案卡照办完：一档
+        await book_saves.safe_checkpoint(
+            session, book_id, role, lead=f"{SPEAKER_NAMES.get(role, '主编')}照方案「{plan['title']}」办了："
         )
         if opened and setup_applied and jobs.open_wait(await active_note_job(session, book_id)):
             await post_message(

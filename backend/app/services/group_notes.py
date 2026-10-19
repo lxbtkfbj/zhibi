@@ -13,7 +13,7 @@ from app.api.library_ai import RewriteIn, call_model, rewrite_target, say
 from app.db import get_sessionmaker
 from app.models import Book, Job, MeetingMessage, SettingSuggestion, SettingVersion
 from app.schemas import ArcCreate, DraftRequest, MeetingMessageOut
-from app.services import jobs
+from app.services import book_saves, jobs
 from app.services.chat import conversation_lock, reply_background
 from app.services.chat_context import (
     ROLES,
@@ -37,7 +37,7 @@ from app.services.desk import (
 )
 from app.services.library import lock_book
 from app.services.library_context import load_context
-from app.services.meeting import message_dict, post_message, publish
+from app.services.meeting import SPEAKER_NAMES, message_dict, post_message, publish
 from app.services.outline_write import new_arc_number, resolve_outline_target, write_outline_node
 from app.services.requirements import SCOPE_INPUTS, add_requirement
 from app.services.versions import target_type_of
@@ -134,6 +134,25 @@ async def receive_note(body, background_tasks, book, session, redis):
         **({"ask": body.ask} if body.ask and not body.to else {}),
     }
     plan = None
+    if not body.to and (said := SAVE_WORDS.fullmatch(text)):
+        # 「存个档」「存个档，叫开局定稿」：程序直接认，不调模型
+        from app.api.saves import manual_save
+
+        save = await manual_save(session, book_id, said["name"] or "")
+        payload["outcome"] = {"kind": "saved", "save_id": save.id, "title": save.title}
+        async with conversation_lock(redis, book_id, "note_append"):
+            data = await post_message(
+                session,
+                redis,
+                book_id=book_id,
+                job_id=None,
+                speaker="author",
+                kind="note",
+                content=text,
+                payload=payload,
+            )
+        await publish(redis, book_id, "saves", {"id": save.id})
+        return MeetingMessageOut(**data)
     if wants_plan(text):
         payload["outcome"] = {"kind": "plan_pending"}
         task = "plan"
@@ -198,6 +217,12 @@ async def receive_note(body, background_tasks, book, session, redis):
     else:
         background_tasks.add_task(route_background, book_id, redis, data["id"], task)
     return MeetingMessageOut(**data)
+
+
+SAVE_WORDS = re.compile(
+    r"\s*(?:帮我|给我)?存(?:一|个|一个)?档(?:吧)?[，,。\s]*"
+    r"(?:(?:名字)?(?:叫做?|就叫)\s*[「“\"']?(?P<name>[^」”\"']{1,60}?)[」”\"']?)?\s*[。！!]?\s*"
+)
 
 
 # 作者明说要改名时，part 才会是这几种说法
@@ -334,6 +359,180 @@ async def apply_intent(session, redis, message, intent):
     if reply:
         await say(session, redis, book_id, (message.payload or {}).get("ask") or "chief", reply)
     return False
+
+
+# 改完当场给作者看前后对照：这几种改了书
+SHOWN = {"edit", "fill", "created", "outline", "requirement", "to_job"}
+
+
+def expected_ids(book_id, outcome) -> set[str]:
+    """这一处改的是哪几行：只认这几行，别把同时手改的别处也算进来。"""
+    ids = {outcome.get(k) for k in ("target_id", "created_id", "requirement_id")}
+    ids |= {item.get("target_id") for item in outcome.get("items") or []}
+    if outcome.get("target_type") in ("concept", "book"):
+        ids.add(str(book_id))
+    return {str(i) for i in ids if i}
+
+
+async def apply_with_change(session, redis, message, intent):
+    """照判断去做，并把这一处改之前、改之后记在结果上：消息下面给前后对照，「换回原来的」「再改一版」都用它。"""
+    book_id, mid = message.book_id, message.id
+    before = await book_saves.read_state(session, book_id)
+    await session.commit()
+    needs = await apply_intent(session, redis, await session.get(MeetingMessage, mid), intent)
+    message = await session.get(MeetingMessage, mid)
+    await session.refresh(message)
+    outcome = dict((message.payload or {}).get("outcome") or {})
+    if outcome.get("kind") in SHOWN and not (outcome.get("kind") == "edit" and outcome.get("mode") == "options"):
+        after = await book_saves.read_state(session, book_id)
+        rows = book_saves.row_changes(before, after)
+        wanted = expected_ids(book_id, outcome)
+        rows = [row for row in rows if row["id"] in wanted] or rows
+        if rows:
+            await book_saves.keep_change(session, book_id, before, after, rows)
+            outcome.update(
+                change=rows, diff=book_saves.readable_diff(before, after, rows), redo=intent.model_dump(mode="json")
+            )
+            await update_message(session, redis, message, outcome=outcome)
+    await session.commit()
+    return needs
+
+
+def chat_actor(message) -> str:
+    """这句话是谁照办的：点了名就是他；改设定是设定师，写大纲、记要求是主编。"""
+    payload = message.payload or {}
+    if payload.get("ask"):
+        return payload["ask"]
+    kinds = {o.get("kind") for o in payload.get("steps") or [payload.get("outcome") or {}]}
+    return "lorekeeper" if kinds & {"edit", "fill", "created"} else "chief"
+
+
+def note_outcome(message, step):
+    payload = message.payload or {}
+    if step is None:
+        return dict(payload.get("outcome") or {})
+    steps = payload.get("steps") or []
+    if not 0 <= step < len(steps):
+        raise HTTPException(422, "没有这一件")
+    return dict(steps[step])
+
+
+async def set_note_outcome(session, redis, message, step, outcome, **extra):
+    if step is None:
+        return await update_message(session, redis, message, outcome=outcome, **extra)
+    steps = list((message.payload or {}).get("steps") or [])
+    steps[step] = outcome
+    return await update_message(session, redis, message, steps=steps, **extra)
+
+
+async def author_note(session, book_id, message_id):
+    message = await session.get(MeetingMessage, message_id)
+    if message is None or message.book_id != book_id or message.speaker != "author":
+        raise HTTPException(404, "消息不存在")
+    return message
+
+
+async def take_back(session, book_id, outcome):
+    """把这一处换回改之前的样子：这几行后来又被动过（作者手改、写章、聊天里又改、回到过存档）就不换。"""
+    from app.api.deps import ensure_idle
+
+    rows = outcome.get("change")
+    if not rows:
+        raise HTTPException(422, "这句话没让编辑部改过书")
+    if outcome.get("undone"):
+        raise HTTPException(409, "已经换回原来的了")
+    await ensure_idle(session, book_id)
+    await book_saves.before_ai(session, book_id)
+    await lock_book(session, book_id)
+    if not await book_saves.rows_fresh(session, rows):
+        raise HTTPException(409, "这一处后来又改过；要退就去存档")
+    await book_saves.put_back(session, book_id, rows)
+    await session.commit()
+
+
+async def revert_note(session, redis, book_id, message_id, step):
+    """消息下面的「换回原来的」：只换这一处，不是整本；换完存一档「你换回了：……」。"""
+    message = await author_note(session, book_id, message_id)
+    outcome = note_outcome(message, step)
+    await take_back(session, book_id, outcome)
+    message = await author_note(session, book_id, message_id)
+    data = await set_note_outcome(session, redis, message, step, {**outcome, "undone": True})
+    label = outcome.get("target_label") or "这一处"
+    await book_saves.safe_checkpoint(session, book_id, "author", f"你换回了：{label}")
+    for event in ("library", "saves"):
+        await publish(redis, book_id, event, {"id": str(book_id)})
+    return data
+
+
+async def redo_note(session, redis, book_id, message_id, step, background_tasks):
+    """消息下面的「再改一版」：先换回改之前，再照同一句话把这一处重新改一遍，前后对照换成新的。"""
+    message = await author_note(session, book_id, message_id)
+    outcome = note_outcome(message, step)
+    if outcome.get("kind") in ("requirement", "to_job"):
+        raise HTTPException(422, "写作要求是你自己的话，没有再改一版；要改就点「改一下」")
+    if not outcome.get("redo"):
+        raise HTTPException(422, "这一处不能再改一版")
+    intent = LibraryIntent.model_validate(outcome["redo"])
+    await take_back(session, book_id, outcome)
+    message = await author_note(session, book_id, message_id)
+    label = outcome.get("target_label") or "这一处"
+    since = datetime.now(UTC).isoformat()
+    working = {"kind": "working", "text": f"在重新改「{label}」", "since": since}
+    # 重做时编辑部报的「设定师在改……」按这个时间算秒数，不按这句话发出来的时间
+    data = await set_note_outcome(session, redis, message, step, working, redo_since=since)
+    background_tasks.add_task(redo_background, book_id, message_id, step, intent, redis)
+    return data
+
+
+async def redo_background(book_id, message_id, step, intent, redis):
+    async with conversation_lock(redis, book_id, "routing"), get_sessionmaker()() as session:
+        message = await session.get(MeetingMessage, message_id)
+        keep = dict(message.payload or {})
+        try:
+            await apply_with_change(session, redis, message, intent)
+            message = await session.get(MeetingMessage, message_id)
+            await session.refresh(message)
+            fresh = dict((message.payload or {}).get("outcome") or {})
+        except Exception as exc:
+            await session.rollback()
+            message = await session.get(MeetingMessage, message_id)
+            fresh = {"kind": "failed", "reason": failure_reason(exc), "redo_failed": True}
+        if step is None:
+            await update_message(session, redis, message, outcome=fresh)
+        else:
+            steps = list(keep.get("steps") or [])
+            steps[step] = fresh
+            await update_message(session, redis, message, outcome=keep.get("outcome"), steps=steps)
+        actor = (message.payload or {}).get("ask") or ("chief" if fresh.get("kind") == "outline" else "lorekeeper")
+        await book_saves.safe_checkpoint(session, book_id, actor, lead=f"{SPEAKER_NAMES[actor]}照你的话再改了一版：")
+    for event in ("library", "saves"):
+        await publish(redis, book_id, event, {"id": str(book_id)})
+
+
+async def note_changes(session, book_id) -> dict[str, bool]:
+    """聊天里每一处改动现在还能不能「换回原来的」「再改一版」：{"消息号" 或 "消息号:第几件": 能不能}。"""
+    rows = list(
+        await session.scalars(
+            select(MeetingMessage)
+            .where(MeetingMessage.book_id == book_id, MeetingMessage.speaker == "author")
+            .order_by(MeetingMessage.id.desc())
+            .limit(300)
+        )
+    )
+    wanted = []
+    for m in rows:
+        payload = m.payload or {}
+        if payload.get("steps"):
+            wanted += [(f"{m.id}:{i}", o) for i, o in enumerate(payload["steps"]) if o.get("change")]
+        elif (payload.get("outcome") or {}).get("change"):
+            wanted.append((str(m.id), payload["outcome"]))
+    if not wanted:
+        return {}
+    now = await book_saves.read_state(session, book_id)
+    return {
+        key: not o.get("undone") and all(now.rows.get(r["table"], {}).get(r["id"]) == r["after"] for r in o["change"])
+        for key, o in wanted
+    }
 
 
 async def write_outline_from_chat(session, redis, book, message, intent):
@@ -510,7 +709,7 @@ async def apply_steps(session, redis, message, first, more, viewing):
                 intent.requirement = intent.requirement or said
             intent.more = []
             message = await session.get(MeetingMessage, mid)
-            needs_reply |= await apply_intent(session, redis, message, intent)
+            needs_reply |= await apply_with_change(session, redis, message, intent)
             message = await session.get(MeetingMessage, mid)
             await session.refresh(message)
             steps.append(dict((message.payload or {}).get("outcome") or {}))
@@ -540,19 +739,26 @@ async def route_background(book_id, redis, known_id=None, known_intent=None):
             if message is None:
                 break
             mid, text, viewing = message.id, message.content, (message.payload or {}).get("viewing")
+            # 编辑部动书之前：作者自己改过还没存的，先存一档
+            await book_saves.before_ai(session, book_id)
             try:
                 intent = known_intent if mid == known_id else await classify(session, book_id, text, viewing)
                 more = [step.strip() for step in intent.more or [] if step.strip()][:3]
                 if more:
                     needs_reply |= await apply_steps(session, redis, message, intent, more, viewing)
                 else:
-                    needs_reply |= await apply_intent(session, redis, message, intent)
+                    needs_reply |= await apply_with_change(session, redis, message, intent)
             except Exception as exc:
                 await session.rollback()
                 message = await session.get(MeetingMessage, mid)
                 reason = failure_reason(exc)
                 if message:
                     await update_message(session, redis, message, outcome={"kind": "failed", "reason": reason})
+            # 动完存一档：一句话一档
+            message = await session.get(MeetingMessage, mid)
+            if message is not None:
+                actor = chat_actor(message)
+                await book_saves.safe_checkpoint(session, book_id, actor, lead=f"{SPEAKER_NAMES[actor]}照你的话")
     if needs_reply:
         await reply_background(book_id, "group", redis)
 

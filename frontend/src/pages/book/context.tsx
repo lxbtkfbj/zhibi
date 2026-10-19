@@ -32,6 +32,8 @@ export interface BookContextValue {
   openTarget?: (type: string, id: string) => void
   /** 新书页上有：作者这会儿正在看哪一页，群聊发话时带上 */
   viewing?: () => ChatViewing | null
+  /** 新书页上有：打开存档那一栏（带上一档的号就直接点开那一档） */
+  openSaves?: (saveId?: number) => void
   focusComposer: number
   focusChat: () => void
   requestFeedback: () => void

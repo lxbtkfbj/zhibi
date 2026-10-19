@@ -44,10 +44,12 @@ export function useMeeting(bookId: string) {
     })
     source.addEventListener('error', () => setConnected(false))
     source.addEventListener('book', () => {
-      for (const key of [keys.book(bookId), keys.books, keys.nodes(bookId), keys.bible(bookId), keys.outline(bookId), keys.threads(bookId), keys.secrets(bookId), libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), libraryKeys.candidates(bookId), libraryKeys.versions(bookId), ['outline-tree', bookId], ['workspace', bookId]]) {
+      for (const key of [keys.book(bookId), keys.books, keys.nodes(bookId), keys.bible(bookId), keys.outline(bookId), keys.threads(bookId), keys.secrets(bookId), keys.chapters(bookId), libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), libraryKeys.candidates(bookId), libraryKeys.versions(bookId), ['outline-tree', bookId], ['workspace', bookId], ['saves', bookId], settingsKeys.book(bookId), settingsKeys.requirements(bookId)]) {
         void qc.invalidateQueries({ queryKey: key })
       }
     })
+    // 存了一档、回到了某一档：存档那一栏重新读
+    source.addEventListener('saves', () => { void qc.invalidateQueries({ queryKey: ['saves', bookId] }) })
     source.addEventListener('library', () => {
       for (const key of [libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), libraryKeys.candidates(bookId), libraryKeys.versions(bookId), ['outline-tree', bookId], ['workspace', bookId], keys.bible(bookId)]) void qc.invalidateQueries({ queryKey: key })
     })
@@ -58,7 +60,7 @@ export function useMeeting(bookId: string) {
         if (base.length && base[base.length - 1].id >= message.id) return prev
         return { bookId, messages: [...base, message] }
       })
-      refresh([settingsKeys.requirements(bookId), keys.book(bookId), keys.outline(bookId), libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), ['outline-tree', bookId], ['workspace', bookId]])
+      refresh([settingsKeys.requirements(bookId), keys.book(bookId), keys.outline(bookId), libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), ['outline-tree', bookId], ['workspace', bookId], ['saves', bookId]])
       if (message.kind === 'artifact' && REFRESH_ON.has(message.payload?.type ?? '')) {
         refresh([libraryKeys.candidates(bookId), libraryKeys.versions(bookId), keys.chapters(bookId)])
         if (['spine', 'segment', 'segment_volumes'].includes(message.payload?.type ?? '')) refresh([keys.nodes(bookId)])
@@ -71,7 +73,8 @@ export function useMeeting(bookId: string) {
     source.addEventListener('message_update', event => {
       const message = JSON.parse((event as MessageEvent).data) as MeetingMessage
       setState(prev => prev.bookId === bookId ? { bookId, messages: prev.messages.map(m => m.id === message.id ? message : m) } : prev)
-      refresh([settingsKeys.requirements(bookId)])
+      // 聊天里改完、换回、再改一版：整本书和存档跟着刷新
+      refresh([settingsKeys.requirements(bookId), ['workspace', bookId], ['saves', bookId]])
     })
     // 聊天回答边写边推：每次带着到目前为止的全文
     source.addEventListener('chat_delta', event => {

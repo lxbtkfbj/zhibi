@@ -20,6 +20,7 @@ from app.api import (
     outline_expand,
     outline_tree,
     prompt_tools,
+    saves,
     story_map,
     workspace,
 )
@@ -83,6 +84,7 @@ def create_app() -> FastAPI:
         outline_expand,
         new_book,
         workspace,
+        saves,
     ):
         application.include_router(module.router, prefix="/api")
     return application
