@@ -61,9 +61,40 @@ async def dialogue(session, book_id, thread, reset_after=0):
     ]
 
 
+def done_text(outcome):
+    """编辑部照作者这句话实际做了什么，一小句；只是聊天、还在判断的不算"""
+    kind, label = outcome.get("kind"), outcome.get("target_label") or ""
+    if kind == "edit":
+        return f"给「{label}」出了三种写法，等作者挑" if outcome.get("mode") == "options" else f"改了「{label}」"
+    if kind == "fill":
+        filled = outcome.get("filled") or []
+        return f"补了「{label}」空着的{'、'.join(filled)}" if filled else f"「{label}」每一栏都写了，没补"
+    return {
+        "created": f"新建了{label}，放进了设定库",
+        "outline": f"写好了大纲里的{label}，已经换上去",
+        "requirement": "记成了写作要求",
+        "to_job": "交给了正在干活的编辑部，做完手头这一步照办",
+        "later": "编辑部当时在写，没改，放进了待处理的建议",
+        "not_found": f"设定库里没找到「{outcome.get('target_name') or ''}」，什么也没改",
+        "too_late": "当时在等作者拍板，没记也没改",
+        "failed": f"没做成（{outcome.get('reason') or ''}），什么也没改",
+        "plan_apply": "照方案卡办了",
+    }.get(kind, "")
+
+
+def done_note(message):
+    """写进对话里：作者这句话后面带上编辑部照办了什么，回答的人才知道已经改了、写了"""
+    payload = getattr(message, "payload", None) or {}
+    if message.speaker != "author":
+        return ""
+    parts = [t for o in payload.get("steps") or [payload.get("outcome") or {}] if (t := done_text(o))]
+    return f"（编辑部照这句做了：{'；'.join(parts)}）" if parts else ""
+
+
 def dialogue_text(rows, *, limited=True, limit=6000):
     lines = [
         f"{SPEAKER_NAMES.get(m.speaker, m.speaker)}：{m.content[:800] + ('……' if len(m.content) > 800 else '')}"
+        f"{done_note(m)}"
         for m in rows
     ]
     if limited:
@@ -310,7 +341,12 @@ async def reply_values(session, book, thread, role, rows, unanswered, summary):
         recent=dialogue_text(rows[-20:]),
         quote=quote,
         note=note,
-        how_to_apply="作者想让聊出来的想法生效，要先让你「总结一下」出一张方案卡，看过再点「按这个来」。聊到想法差不多成形时，可以提醒他一句；不要说「就这么定了」「咱们直接开始排……」，聊天里说的都还没生效。",
+        how_to_apply=(
+            "作者想让聊出来的想法生效，要先让你「总结一下」出一张方案卡，看过再点「按这个来」。聊到想法差不多成形时，可以提醒他一句；不要说「就这么定了」「咱们直接开始排……」，聊天里说的都还没生效。"
+            if thread != "group"
+            else "群聊里作者明说要改、要写、要记的，编辑部已经照办了：最近的对话里作者那句话后面写着「（编辑部照这句做了：……）」，那些就是真改了、真写进去了，照实说，别说成没生效。"
+            "只是商量出来的想法还没生效，作者想让它生效，要先让你「总结一下」出一张方案卡，看过再点「按这个来」；没照办的别说成已经办了。"
+        ),
         role_focus={
             "chief": "你管剧情、节奏和方向：为什么这样安排、后面怎么走、哪里还能更爽。",
             "lorekeeper": "你管设定和前后一致：查清楚再答，说明出处（哪一条设定、第几章）。",

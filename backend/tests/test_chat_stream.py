@@ -204,3 +204,46 @@ async def test_restart_marks_half_written_replies(sessionmaker, redis):
     async with sessionmaker() as session:
         row = await session.scalar(select(MeetingMessage).where(MeetingMessage.id == rid))
         assert row.payload["state"] == "failed" and "重启" in row.payload["error"]
+
+
+async def test_answer_knows_what_the_editors_did(client, sessionmaker, monkeypatch):
+    bid = await seed(sessionmaker)
+    seen = []
+
+    async def capture(book_id, role, template, **values):
+        seen.append(values)
+        yield "好。"
+
+    monkeypatch.setattr(chat, "stream_model", capture)
+    # 演示分流：这句记成写作要求
+    await client.post(f"/api/books/{bid}/notes", json={"content": "以后每章都要有一场打斗"})
+    await client.post(f"/api/books/{bid}/notes", json={"content": "刚才那条记上了吗？"})
+    recent, hint = seen[-1]["recent"], seen[-1]["how_to_apply"]
+    assert "以后每章都要有一场打斗（编辑部照这句做了：记成了写作要求）" in recent
+    assert "已经照办了" in hint and "别说成没生效" in hint
+    # 私聊照旧：聊的都还没生效
+    await client.post(f"/api/books/{bid}/notes", json={"content": "为什么？", "to": "chief"})
+    assert "聊天里说的都还没生效" in seen[-1]["how_to_apply"]
+
+
+def test_done_note_lists_each_step():
+    from types import SimpleNamespace
+
+    from app.services.chat_context import done_note
+
+    message = SimpleNamespace(
+        speaker="author",
+        payload={
+            "steps": [
+                {"kind": "outline", "target_label": "第 1 篇"},
+                {"kind": "outline", "target_label": "全书结局"},
+                {"kind": "chat"},
+            ]
+        },
+    )
+    assert (
+        done_note(message)
+        == "（编辑部照这句做了：写好了大纲里的第 1 篇，已经换上去；写好了大纲里的全书结局，已经换上去）"
+    )
+    assert done_note(SimpleNamespace(speaker="author", payload={"outcome": {"kind": "chat"}})) == ""
+    assert done_note(SimpleNamespace(speaker="chief", payload={"outcome": {"kind": "edit"}})) == ""
