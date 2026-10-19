@@ -1,5 +1,6 @@
 /** 新书页：接真书。编辑部浮窗里只有一个聊天（第五步：@ 点名、边写边显示、停、重新回答、新对话、从这里重来）；开写、正文、拍板在新书页上；
- *  顶栏「存档」是整本书的存档（第五步第二批），「待处理」是编辑部等你定的建议（第四步第二批），都在右边一栏。 */
+ *  左边一栏最下面固定两行：「存档」是整本书的存档（第五步第二批，点开在右边一栏），「本书设置」是居中的弹窗；右上角齿轮是系统设置。
+ *  「待处理」是编辑部等你定的建议（第四步第二批）：在编辑部窗口里，顶上点了整个窗口换成待处理；收成小球时小球旁边说一声。 */
 
 import { useIsMutating } from '@tanstack/react-query'
 import { Settings } from 'lucide-react'
@@ -19,9 +20,10 @@ import { BookSettingsDialog } from './BookSettings'
 import { ChatConvs } from './ChatConvs'
 import { LiveChat } from './LiveChat'
 import { flushAutoSave, useLiveBook } from './liveActions'
-import { SavesButton, SavesPanel } from './Saves'
+import { SavesPanel, SavesRow } from './Saves'
 import { useLiveWriting } from './liveWriting'
-import { PendingButton, PendingPanel } from './Inbox'
+import { useSettingsModal } from '../../lib/settingsModal'
+import { PendingBallTag, PendingButton, PendingList } from './Inbox'
 import { PendingContext, pendingTarget } from './pending'
 import { Workspace } from './Workspace'
 
@@ -118,38 +120,33 @@ function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
   const openRef = useRef<((type: string, id: string) => void) | null>(null)
   const viewingRef = useRef<(() => ChatViewing | null) | null>(null)
   // 存档那一栏：开没开、点开的是哪一档
-  const [saves, setSavesState] = useState<{ open: boolean; id: number | null }>({ open: false, id: null })
-  // 待处理那一栏：开没开、要找到挂在哪一条上的建议；和存档那一栏同一个位置，开一个就关另一个
-  const [pending, setPendingState] = useState<{ open: boolean; focus: string | null }>({ open: false, focus: null })
-  // 本书设置：居中的弹窗，背景糊掉；存档、待处理那一栏开着也不动，关上弹窗还是刚才的样子
+  const [saves, setSaves] = useState<{ open: boolean; id: number | null }>({ open: false, id: null })
+  // 编辑部窗口是不是换成了待处理那一页、要找到挂在哪一条上的建议
+  const [inbox, setInbox] = useState<{ open: boolean; focus: string | null }>({ open: false, focus: null })
+  // 本书设置：居中的弹窗，背景糊掉；存档那一栏开着也不动，关上弹窗还是刚才的样子
   const [settings, setSettings] = useState(false)
-  const setSaves = useCallback((next: { open: boolean; id: number | null }) => {
-    setSavesState(next)
-    if (next.open) setPendingState({ open: false, focus: null })
-  }, [])
-  const setPending = useCallback((next: { open: boolean; focus: string | null }) => {
-    setPendingState(next)
-    if (next.open) setSavesState({ open: false, id: null })
-  }, [])
   const closeSettings = useCallback(() => setSettings(false), [])
-  const closeSaves = useCallback(() => setSaves({ open: false, id: null }), [setSaves])
-  const closePending = useCallback(() => setPending({ open: false, focus: null }), [setPending])
+  const closeSaves = useCallback(() => setSaves({ open: false, id: null }), [])
+  const closeInbox = useCallback(() => setInbox({ open: false, focus: null }), [])
+  // 打开待处理：编辑部收着就先打开窗口
+  const openInbox = useCallback((focus: string | null) => { setInbox({ open: true, focus }); onOpen() }, [onOpen])
   const suggestions = useLibrarySuggestions(bookId)
+  const { openSettings: openSystemSettings } = useSettingsModal()
   const notes = useMemo(() => {
     const counts = new Map<string, number>()
     for (const s of suggestions.data ?? []) {
       const at = pendingTarget(s)?.id
       if (at) counts.set(at, (counts.get(at) ?? 0) + 1)
     }
-    return { count: (id: string) => counts.get(id) ?? 0, open: (id?: string) => setPending({ open: true, focus: id ?? null }) }
-  }, [suggestions.data, setPending])
+    return { count: (id: string) => counts.get(id) ?? 0, open: (id?: string) => openInbox(id ?? null) }
+  }, [suggestions.data, openInbox])
   const context = useMemo(() => ({
     ...ctx,
     openTarget: (type: string, id: string) => openRef.current?.(type, id),
     viewing: () => viewingRef.current?.() ?? null,
     openSaves: (id?: number) => setSaves({ open: true, id: id ?? null }),
-    openPending: () => setPending({ open: true, focus: null }),
-  }), [ctx, setSaves, setPending])
+    openPending: () => openInbox(null),
+  }), [ctx, openInbox])
   // 关页面、切到别的页面时：手改了还没存的，存一档
   useEffect(() => {
     const leave = () => flushAutoSave(bookId, true)
@@ -165,23 +162,41 @@ function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
   if (loading) return <div className="flex h-dvh items-center justify-center bg-paper text-[15px] text-ink-3">正在读这本书…</div>
   if (error || !book) return <EmptyState title="这本书没读出来"><Link to="/" className="text-seal underline">回到书房</Link></EmptyState>
   const right = (
+    <button type="button" onClick={openSystemSettings} className="rounded-lg p-2 text-ink-3 transition-colors hover:bg-line/50 hover:text-ink" aria-label="系统设置" title="系统设置">
+      <Settings className="size-4" />
+    </button>
+  )
+  const pendingCount = suggestions.data?.length ?? book.pending
+  const chatTools = (
     <>
-      <SavesButton open={saves.open} onClick={() => setSaves(saves.open ? { open: false, id: null } : { open: true, id: null })} />
-      <PendingButton count={suggestions.data?.length ?? book.pending} open={pending.open} onClick={() => setPending(pending.open ? { open: false, focus: null } : { open: true, focus: null })} />
-      <button type="button" onClick={() => setSettings(true)}
-        aria-pressed={settings} className={`rounded-lg p-2 transition-colors hover:bg-line/50 hover:text-ink ${settings ? 'bg-line/50 text-ink' : 'text-ink-3'}`} aria-label="本书设置" title="本书设置">
-        <Settings className="size-4" />
+      <PendingButton count={pendingCount} open={inbox.open} onClick={() => (inbox.open ? closeInbox() : setInbox({ open: true, focus: null }))} />
+      {!inbox.open && <ChatConvs />}
+    </>
+  )
+  // 换成待处理时聊天不卸掉：回到聊天还是原来翻到的地方
+  const chat = (
+    <>
+      {inbox.open && <PendingList key={inbox.focus ?? ''} focus={inbox.focus} onBack={closeInbox} />}
+      <div className={inbox.open ? 'hidden' : 'contents'}><LiveChat writing={writing} /></div>
+    </>
+  )
+  const row = 'flex h-9 w-full items-center gap-2 rounded-md px-2.5 text-sm text-ink-2 transition-colors hover:bg-line/50 hover:text-ink'
+  const sideFooter = (
+    <>
+      <SavesRow className={row} open={saves.open} onClick={() => setSaves(saves.open ? { open: false, id: null } : { open: true, id: null })} />
+      <button type="button" onClick={() => setSettings(true)} aria-pressed={settings} title="这本书怎么写：人称、每章字数、写作要求……"
+        className={`${row} ${settings ? 'bg-line/50 text-ink' : ''}`}>
+        <Settings className="size-4 shrink-0" />本书设置
       </button>
     </>
   )
   return (
     <BookContext.Provider value={context}>
       <PendingContext.Provider value={notes}>
-      <Workspace book={book} actions={actions} right={right} notice={<JobNotice book={detail} />} openRef={openRef} viewingRef={viewingRef}
-        chat={<LiveChat writing={writing} />} chatTools={<ChatConvs />}
+      <Workspace book={book} actions={actions} right={right} sideFooter={sideFooter} notice={<JobNotice book={detail} />} openRef={openRef} viewingRef={viewingRef}
+        chat={chat} chatTools={chatTools} chatBallNote={<PendingBallTag count={pendingCount} onClick={() => openInbox(null)} />}
         chatBadge={unread} openChat={openChat} writing={writing} />
       <SavesPanel open={saves.open} saveId={saves.id} onClose={closeSaves} onOpenSave={(id) => setSaves({ open: true, id })} />
-      <PendingPanel open={pending.open} focus={pending.focus} onClose={closePending} />
       <BookSettingsDialog open={settings} onClose={closeSettings} />
       </PendingContext.Provider>
     </BookContext.Provider>

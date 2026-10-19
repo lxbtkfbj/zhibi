@@ -3,7 +3,7 @@
  *  编辑部干活的进度压成一行：正在做的只在最底下留一行跟着变；做完的一行小字带「去看」；等拍板的一行「……等你看 · 去看」；
  *  大块产出只放在页面上。 */
 
-import { AlertTriangle, ListChecks } from 'lucide-react'
+import { AlertTriangle } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { post } from '../../api/client'
 import type { ChatOutcome, Job, MeetingMessage, Outline, TeamRole } from '../../api/types'
@@ -277,13 +277,6 @@ export function LiveChat({ writing }: { writing?: WritingControl }) {
     },
     stop: () => { if (current) void run(() => post(`/books/${bookId}/chat/replies/${current.id}/stop`)) },
     again: (id) => { void run(() => post(`/books/${bookId}/chat/replies/${id}/again`)) },
-    tools: (
-      <button type="button" disabled={sending} title="把这一段聊的整理成一张方案卡，看过再决定要不要照办"
-        onClick={() => void run(() => post(`/books/${bookId}/notes`, { content: '总结一下前面聊的', ...(conv ? { conv } : {}) }))}
-        className="flex h-8 items-center gap-1 rounded-lg px-2 text-[13px] text-ink-3 transition-colors hover:bg-line/50 hover:text-ink disabled:opacity-50">
-        <ListChecks className="size-4" />总结一下
-      </button>
-    ),
     notice: waiting ? (
       <p className="mb-2 rounded-lg bg-seal-soft px-3 py-2 text-[13px] leading-relaxed text-seal-dark">
         编辑部在等你拍板{target ? `「${target.label}」` : ''} · 现在说要改，会当成修改意见
@@ -291,7 +284,7 @@ export function LiveChat({ writing }: { writing?: WritingControl }) {
     ) : undefined,
     banner: old ? (
       <div className="flex shrink-0 items-center gap-2 border-b border-line bg-subtle px-4 py-1.5 text-xs text-ink-3">
-        <span className="min-w-0 flex-1 truncate">以前的对话「{old.title || '新对话'}」· {dayLabel(old.last_at)} · 接着说就在这一段里聊</span>
+        <span className="min-w-0 flex-1 truncate">以前的对话「{old.title || '新对话'}」· {dayLabel(old.last_at)} · {old.archived ? '归档了，接着说就取消归档' : '接着说就在这一段里聊'}</span>
         <button type="button" onClick={() => setChatConv?.(null)} className="shrink-0 text-chief hover:underline">回到最近的</button>
       </div>
     ) : undefined,

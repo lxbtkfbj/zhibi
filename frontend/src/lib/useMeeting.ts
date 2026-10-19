@@ -76,6 +76,12 @@ export function useMeeting(bookId: string) {
       // 聊天里改完、换回、再改一版：整本书和存档跟着刷新
       refresh([settingsKeys.requirements(bookId), ['workspace', bookId], ['saves', bookId], ['chat-convs', bookId]])
     })
+    // 群聊的一段对话归档、删除了：删掉的那一段，聊天记录从列表里去掉
+    source.addEventListener('conversations', event => {
+      const { conv, action } = JSON.parse((event as MessageEvent).data) as { conv: string; action: string }
+      if (action === 'delete') setState(prev => prev.bookId === bookId ? { bookId, messages: prev.messages.filter(m => m.payload?.conv !== conv) } : prev)
+      refresh([['chat-convs', bookId]])
+    })
     // 聊天回答边写边推：每次带着到目前为止的全文
     source.addEventListener('chat_delta', event => {
       const { id, text } = JSON.parse((event as MessageEvent).data) as { id: number; text: string }

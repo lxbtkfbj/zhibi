@@ -3,7 +3,7 @@
 import clsx from 'clsx'
 import { ChevronDown, Lock, LockOpen, MoreHorizontal, Pin, Search, Sparkles, Trash2, X } from 'lucide-react'
 import { type ReactNode, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { COLUMN_KEY, COLUMN_MAX, COLUMN_MIN, ColumnWidthContext, zoomOf } from './column'
+import { COLUMN_KEY, COLUMN_MAX, COLUMN_MIN, ColumnWidthContext, SideFooterContext, zoomOf } from './column'
 import type { VField } from './model'
 import { menuItem, paperCard, readText } from './styles'
 
@@ -221,9 +221,10 @@ export function CardMenu({ locked, onLock, onDelete, deleteLabel = '删掉这一
 
 /* ---------------- 左边目录 ---------------- */
 
-/** 左边一栏的壳：每一页（简介、设定、大纲、正文）同一个宽度，右边缘能拖。 */
+/** 左边一栏的壳：每一页（简介、设定、大纲、正文）同一个宽度，右边缘能拖；最下面固定一块存档、本书设置。 */
 export function SideColumn({ children }: { children: ReactNode }) {
   const { width, setWidth } = useContext(ColumnWidthContext)
+  const footer = useContext(SideFooterContext)
   const ref = useRef<HTMLElement>(null)
   const [dragging, setDragging] = useState(false)
   useEffect(() => {
@@ -252,6 +253,7 @@ export function SideColumn({ children }: { children: ReactNode }) {
   return (
     <aside ref={ref} className="relative flex shrink-0 flex-col border-r border-line bg-paper-2" style={{ width }}>
       {children}
+      {footer && <div className="relative z-[1] shrink-0 border-t border-line bg-paper-2 px-2 py-1.5 shadow-[0_-12px_18px_-16px_rgb(40_25_10/0.4)]">{footer}</div>}
       <div onPointerDown={(e) => { e.preventDefault(); setDragging(true) }} title="拖动调宽窄"
         className={clsx('absolute inset-y-0 -right-1.5 z-10 w-3 cursor-col-resize after:absolute after:inset-y-0 after:left-1.5 after:w-0.5 after:transition-colors', dragging ? 'after:bg-chief/60' : 'hover:after:bg-chief/40')} />
       {dragging && <div className="fixed inset-0 z-50 cursor-col-resize" />}

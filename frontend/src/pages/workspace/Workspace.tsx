@@ -23,7 +23,7 @@ import { useSplit } from './useSplit'
 import {
   AskButton, CardMenu, Crumb, DirectoryShell, Editable, LinkChip, Prose, Section, Sheet, SideColumn,
 } from './widgets'
-import { ColumnWidthContext, useColumnWidth, zoomOf } from './column'
+import { ColumnWidthContext, SideFooterContext, useColumnWidth, zoomOf } from './column'
 import { paperCard, readText, rowSelected, smallButton, titleClass } from './styles'
 
 export type Tab = '简介' | '设定' | '大纲' | '正文'
@@ -1700,14 +1700,18 @@ const errorText = (error: unknown) => (error instanceof Error ? error.message : 
 export interface WorkspaceProps {
   book: VBook
   actions: WorkspaceActions
-  /** 顶栏右边：原型放换书的按钮，真书放回旧版、设置 */
+  /** 顶栏右边：原型放换书的按钮，真书放系统设置 */
   right: ReactNode
+  /** 左边一栏最下面固定的一块：真书放存档、本书设置 */
+  sideFooter?: ReactNode
   /** 编辑部窗口里放什么 */
   chat: ReactNode
   /** 编辑部窗口顶上再放的按钮（真书：新对话、以前的对话） */
   chatTools?: ReactNode
   /** 收起成小球时右上角的数字；不给就只是一个红点 */
   chatBadge?: number
+  /** 收起成小球时小球左边再说一声（真书：有待处理时「N 条待处理」） */
+  chatBallNote?: ReactNode
   /** 外面要打开编辑部（比如点了某条消息）：每次加一 */
   openChat?: number
   /** 顶栏下面的一行提醒 */
@@ -1724,7 +1728,7 @@ export interface WorkspaceProps {
   start?: { tab?: Tab; node?: string; chapter?: string }
 }
 
-export function Workspace({ book: base, actions, right, chat, chatTools, chatBadge, openChat, notice, manuscriptHref, openRef, viewingRef, writing, start }: WorkspaceProps) {
+export function Workspace({ book: base, actions, right, sideFooter, chat, chatTools, chatBadge, chatBallNote, openChat, notice, manuscriptHref, openRef, viewingRef, writing, start }: WorkspaceProps) {
   // 新增了还没起名字的条目：只在这一页，起了名字才存
   const [drafts, setDrafts] = useState<VEntry[]>([])
   const draftsRef = useRef(drafts)
@@ -1971,6 +1975,7 @@ export function Workspace({ book: base, actions, right, chat, chatTools, chatBad
   return (
     <ActionsContext.Provider value={tools}>
       <ColumnWidthContext.Provider value={column}>
+      <SideFooterContext.Provider value={sideFooter ?? null}>
       <div className="desk-zoom flex flex-col bg-paper text-ink">
         <TopBar book={book} tab={tab} onTab={setTab} right={right} manuscriptHref={manuscriptHref} manuscript={!!writing}
           leftOffset={columnWidth} rightOffset={dock === 'side' ? sideWidth : 0} />
@@ -2016,6 +2021,7 @@ export function Workspace({ book: base, actions, right, chat, chatTools, chatBad
         </div>
 
         {dock === 'float' && <FloatingEditorial setDock={setDock} size={chatSize} tools={chatTools}>{chat}</FloatingEditorial>}
+        {dock === 'ball' && chatBallNote && <div className="fixed right-24 bottom-[36px] z-40">{chatBallNote}</div>}
         {dock === 'ball' && (
           <button type="button" onClick={() => setDock('float')} title="编辑部"
             className="press fixed right-6 bottom-6 z-40 flex size-14 items-center justify-center rounded-full bg-chief font-serif text-xl text-on-role shadow-[0_14px_30px_-10px_rgb(40_50_90/0.6)] transition-transform hover:-translate-y-0.5">
@@ -2045,6 +2051,7 @@ export function Workspace({ book: base, actions, right, chat, chatTools, chatBad
           </div>
         )}
       </div>
+      </SideFooterContext.Provider>
       </ColumnWidthContext.Provider>
     </ActionsContext.Provider>
   )

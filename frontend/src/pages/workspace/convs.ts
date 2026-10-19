@@ -1,4 +1,4 @@
-/** 群聊分成一段段对话：读对话列表、认消息属于哪一段、正在看哪一段、这一段还有几句没落实。 */
+/** 群聊分成一段段对话：读对话列表、认消息属于哪一段、正在看哪一段。 */
 
 import { useQuery } from '@tanstack/react-query'
 import { get } from '../../api/client'
@@ -20,16 +20,9 @@ export function convOf(m: MeetingMessage, latest: string | undefined): string | 
 export function useCurrentConv(): { conv: string | undefined; latest: string | undefined; convs: ChatConv[] | undefined } {
   const { bookId, chatConv, messages } = useBookContext()
   const { data: convs } = useChatConvs(bookId)
-  const latest = convs?.[0]?.id ?? messages.findLast((m) => !m.payload?.thread && m.payload?.conv)?.payload?.conv
+  // 最近聊的那一段：后台标了 current 的（归档的不算）
+  const latest = convs?.find((c) => c.current)?.id ?? messages.findLast((m) => !m.payload?.thread && m.payload?.conv)?.payload?.conv
   return { conv: chatConv ?? latest, latest, convs }
-}
-
-/** 这一段里只是商量、没改书的话（问句不算）：上一张方案卡以后的 */
-export function unsettled(messages: MeetingMessage[], conv: string | undefined, latest: string | undefined): number {
-  const mine = messages.filter((m) => !m.payload?.thread && !m.payload?.dropped && convOf(m, latest) === conv)
-  const since = mine.findLastIndex((m) => m.kind === 'plan')
-  return mine.slice(since + 1).filter((m) => m.speaker === 'author' && m.kind === 'note'
-    && m.payload?.outcome?.kind === 'chat' && !m.payload.ask_only && !m.payload.outcome.shortcut && !m.payload.steps?.length).length
 }
 
 /** 「今天 21:03」「昨天」「10-17」 */

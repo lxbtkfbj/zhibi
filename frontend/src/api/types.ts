@@ -533,7 +533,7 @@ export interface MeetingMessage {
 }
 
 /** 群聊里的一段对话：按作者的第一句话起名；current 是最近聊的那一段 */
-export interface ChatConv { id: string; title: string; created_at: string; last_at: string; notes: number; current: boolean }
+export interface ChatConv { id: string; title: string; created_at: string; last_at: string; notes: number; current: boolean; archived?: boolean }
 
 /** 写手正在写的正文（实时推送，不进数据库）。text 是这一章到目前为止的全文。 */
 export interface LiveDraft {

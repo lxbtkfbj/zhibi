@@ -1,10 +1,10 @@
-/** 新书页顶栏的「存档」：右边一栏，像 git 那样整本书一档一档往后存（设计说明 9.13「第二批：存档」）。
+/** 新书页的「存档」（左边一栏最下面那一行点开）：右边一栏，像 git 那样整本书一档一档往后存（设计说明 9.13「第二批：存档」）。
  *  最上面「存一档」；下面时间倒排、按天分组，手动存的带书签最显眼，自动存的连着几条折成一行；
  *  点开一档看和现在比改了哪些，能「回到这一档」（整本，连正文）。 */
 
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
-import { Bookmark, ChevronDown, ChevronLeft, ChevronRight, History, RotateCcw, X } from 'lucide-react'
+import { Bookmark, ChevronDown, ChevronLeft, ChevronRight, RotateCcw, Save, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { get, post } from '../../api/client'
 import type { BookSave, SaveCompare } from '../../api/types'
@@ -288,7 +288,7 @@ function SaveDetail({ saveId, onBack }: { saveId: number; onBack: () => void }) 
   )
 }
 
-/** 顶栏右边的「存档」按钮和右边那一栏 */
+/** 存档：右边那一栏 */
 export function SavesPanel({ open, saveId, onClose, onOpenSave }: { open: boolean; saveId: number | null; onClose: () => void; onOpenSave: (id: number | null) => void }) {
   useEffect(() => {
     if (!open) return
@@ -300,7 +300,7 @@ export function SavesPanel({ open, saveId, onClose, onOpenSave }: { open: boolea
   return (
     <aside aria-label="存档" className="fixed top-14 right-0 bottom-0 z-40 flex w-[min(420px,100vw)] flex-col border-l border-line bg-paper shadow-[var(--shadow-lift)] 2xl:top-16">
       <div className="flex shrink-0 items-center gap-2 border-b border-line px-4 py-2.5">
-        <History className="size-4 text-ink-3" />
+        <Save className="size-4 text-ink-3" />
         <h2 className="flex-1 text-[15px] font-medium text-ink">存档</h2>
         <button type="button" onClick={onClose} aria-label="关上存档" className="rounded-md p-1 text-ink-3 hover:bg-line/50 hover:text-ink"><X className="size-4" /></button>
       </div>
@@ -309,11 +309,30 @@ export function SavesPanel({ open, saveId, onClose, onOpenSave }: { open: boolea
   )
 }
 
-export function SavesButton({ open, onClick }: { open: boolean; onClick: () => void }) {
+/** 最近一档是多久以前存的：一分钟以内「刚存过」，一小时以内按分钟，一天以内按小时，再早写日子 */
+function savedAgo(iso: string, now: number) {
+  const minutes = Math.floor((now - new Date(iso).getTime()) / 60_000)
+  if (minutes < 1) return '刚存过'
+  if (minutes < 60) return `${minutes} 分钟前存过`
+  if (minutes < 24 * 60) return `${Math.floor(minutes / 60)} 小时前存过`
+  return `${day(iso)}存过`
+}
+
+/** 左边一栏最下面那一行「存档 · 几分钟前存过」：点了打开右边那一栏 */
+export function SavesRow({ open, onClick, className }: { open: boolean; onClick: () => void; className: string }) {
+  const { bookId } = useBookContext()
+  const latest = useQuery({ queryKey: [...savesKey(bookId), 'latest'], queryFn: () => get<{ items: BookSave[] }>(`/books/${bookId}/saves?limit=1`) })
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000)
+    return () => window.clearInterval(timer)
+  }, [])
+  const last = latest.data?.items[0]
   return (
-    <button type="button" onClick={onClick} aria-pressed={open}
-      className={clsx('flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm transition-colors hover:bg-line/50 hover:text-ink', open ? 'bg-line/50 text-ink' : 'text-ink-2')}>
-      <History className="size-4" />存档
+    <button type="button" onClick={onClick} aria-pressed={open} title="整本书的存档：看改了什么、回到以前的哪一档"
+      className={clsx(className, open && 'bg-line/50 text-ink')}>
+      <Save className="size-4 shrink-0" />存档
+      <span className="ml-auto truncate text-xs text-ink-3">{last ? savedAgo(last.created_at, now) : latest.isPending ? '' : '还没存过'}</span>
     </button>
   )
 }
