@@ -22,10 +22,10 @@ const resultOf = (s: LibrarySuggestion) => (s.payload.result ?? null) as Suggest
 /** 编辑部窗口顶上的「待处理」：点了窗口换成待处理那一页，再点回到聊天 */
 export function PendingButton({ count, open, onClick }: { count: number; open: boolean; onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} aria-pressed={open} title={open ? '回到聊天' : '编辑部觉得该改、等你定的建议'}
-      className={clsx('flex h-8 items-center gap-1 rounded-md px-1.5 text-[13px] transition-colors hover:bg-line/60 hover:text-ink', open ? 'bg-line/60 text-ink' : 'text-ink-3')}>
-      <Inbox className="size-4" />待处理
-      {count > 0 && <span className="flex min-w-5 items-center justify-center rounded-full bg-seal px-1.5 text-[11px] leading-5 text-on-role">{count}</span>}
+    <button type="button" onClick={onClick} aria-pressed={open} aria-label={count > 0 ? `待处理（${count} 条）` : '待处理'} title={open ? '回到聊天' : '待处理：编辑部觉得该改、等你定的建议'}
+      className={clsx('flex h-8 shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-1.5 text-[13px] transition-colors hover:bg-line/60 hover:text-ink', open ? 'bg-line/60 text-ink' : 'text-ink-3')}>
+      <Inbox className="size-4 shrink-0" /><span className="hidden @min-[500px]/editorial-header:inline">待处理</span>
+      {count > 0 && <span aria-hidden="true" className="flex min-w-5 shrink-0 items-center justify-center rounded-full bg-seal px-1.5 text-[11px] leading-5 text-on-role">{count > 99 ? '99+' : count}</span>}
     </button>
   )
 }

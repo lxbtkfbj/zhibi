@@ -152,8 +152,8 @@ function EmptyChat({ onPick }: { onPick: (role: ChatRole) => void }) {
           <button key={role} type="button" onClick={() => onPick(role)}
             className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-colors hover:bg-card">
             <Avatar role={role} small />
-            <span className="text-[14px] text-ink">{role}</span>
-            <span className="ml-auto text-xs text-ink-3">{duty}</span>
+            <span className="shrink-0 whitespace-nowrap text-[14px] text-ink">{role}</span>
+            <span className="ml-auto min-w-0 text-xs text-ink-3">{duty}</span>
           </button>
         ))}
       </div>

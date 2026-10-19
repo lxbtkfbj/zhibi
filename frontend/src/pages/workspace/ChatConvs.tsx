@@ -12,7 +12,7 @@ import { ErrorText } from '../../components/ui'
 import { useBookContext } from '../book/context'
 import { convsKey, dayLabel, useCurrentConv } from './convs'
 
-const headerButton = 'flex h-8 items-center gap-1 rounded-md px-1.5 text-[13px] text-ink-3 transition-colors hover:bg-line/60 hover:text-ink'
+const headerButton = 'flex h-8 shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-1.5 text-[13px] text-ink-3 transition-colors hover:bg-line/60 hover:text-ink'
 
 /** 一段对话后面的「⋯」：点了这一行右边换成「归档」「删除」（删除点两次）；列表会滚动，不另弹小菜单免得被切掉 */
 function ConvActions({ c, onArchive, onDelete, busy, open, setOpen }: {
@@ -100,17 +100,17 @@ export function ChatConvs() {
     </div>
   )
   return (
-    <div ref={box} className="relative flex items-center gap-0.5">
+    <div ref={box} className="flex shrink-0 items-center gap-0.5">
       <button type="button" disabled={busy} onClick={() => void start()}
-        title="开一段新对话：前面的对话不再带给编辑部，书里的设定、大纲、要求照样都在" className={headerButton}>
-        <MessageSquarePlus className="size-4" />新对话
+        aria-label="新对话" title="新对话：前面的对话不再带给编辑部，书里的设定、大纲、要求照样都在" className={headerButton}>
+        <MessageSquarePlus className="size-4 shrink-0" /><span className="hidden @min-[500px]/editorial-header:inline">新对话</span>
       </button>
       <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}
         title="以前的对话：点一段接着聊" aria-label="以前的对话" className={clsx(headerButton, open && 'bg-line/60 text-ink')}>
         <History className="size-4" />
       </button>
       {open && (
-        <div role="listbox" aria-label="以前的对话" className="absolute top-[calc(100%+6px)] right-0 z-20 w-80 rounded-xl border border-line bg-card p-1.5 shadow-[var(--shadow-lift)]">
+        <div role="listbox" aria-label="以前的对话" className="absolute top-[calc(100%+6px)] right-3 z-20 w-[calc(100%-1.5rem)] max-w-80 rounded-xl border border-line bg-card p-1.5 shadow-[var(--shadow-lift)]">
           <p className="px-2.5 pt-1 pb-1.5 text-xs text-ink-3">以前的对话 · 点一段接着聊</p>
           <div className="scroll-thin max-h-80 overflow-y-auto">
             {active.map(row)}

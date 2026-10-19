@@ -1,5 +1,5 @@
 /** 新书页：接真书。编辑部浮窗里只有一个聊天（第五步：@ 点名、边写边显示、停、重新回答、新对话、从这里重来）；开写、正文、拍板在新书页上；
- *  左边一栏最下面固定两行：「存档」是整本书的存档（第五步第二批，点开在右边一栏），「本书设置」是居中的弹窗；右上角齿轮是系统设置。
+ *  左边一栏最下面固定两行：「存档」和「本书设置」都是居中弹窗；右上角齿轮是系统设置。
  *  「待处理」是编辑部等你定的建议（第四步第二批）：在编辑部窗口里，顶上点了整个窗口换成待处理；收成小球时小球旁边说一声。 */
 
 import { useIsMutating } from '@tanstack/react-query'
@@ -119,11 +119,11 @@ function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
   const writing = useLiveWriting({ bookId, detail, parts: raw, messages, draft })
   const openRef = useRef<((type: string, id: string) => void) | null>(null)
   const viewingRef = useRef<(() => ChatViewing | null) | null>(null)
-  // 存档那一栏：开没开、点开的是哪一档
+  // 存档弹窗：开没开、点开的是哪一档
   const [saves, setSaves] = useState<{ open: boolean; id: number | null }>({ open: false, id: null })
   // 编辑部窗口是不是换成了待处理那一页、要找到挂在哪一条上的建议
   const [inbox, setInbox] = useState<{ open: boolean; focus: string | null }>({ open: false, focus: null })
-  // 本书设置：居中的弹窗，背景糊掉；存档那一栏开着也不动，关上弹窗还是刚才的样子
+  // 本书设置：居中的弹窗，背景糊掉
   const [settings, setSettings] = useState(false)
   const closeSettings = useCallback(() => setSettings(false), [])
   const closeSaves = useCallback(() => setSaves({ open: false, id: null }), [])

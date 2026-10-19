@@ -6,6 +6,8 @@ import type { ChatViewing } from '../../api/types'
 import { useBookMeta } from '../../api/newBook'
 import { CategoryPicker, LengthInput, Row, TagPicker } from '../../components/BookFields'
 import { BookCover } from '../../components/BookCover'
+import { readEditorialDock, writeEditorialDock, type EditorialDock as Dock } from '../../lib/editorialDock'
+import { readWorkspaceReadingPosition, writeWorkspaceReadingPosition, type WorkspaceReadingPosition } from '../../lib/workspaceReadingPosition'
 import {
   ActionsContext, type CategoryStyle, type DraftItem, type EntryChange, type RewriteMode, type RewriteOutcome, type WorkspaceActions,
   blankEntry, childKind, draftToEntry, entryIn, useSave, useWorkspace, withFields,
@@ -27,7 +29,6 @@ import { ColumnWidthContext, SideFooterContext, useColumnWidth, zoomOf } from '.
 import { paperCard, readText, rowSelected, smallButton, titleClass } from './styles'
 
 export type Tab = '简介' | '设定' | '大纲' | '正文'
-type Dock = 'ball' | 'float' | 'side'
 /** 点了左边：滚到哪一张；同一类里平滑滚，换类直接跳 */
 interface ScrollReq { id: string; smooth: boolean; n: number }
 
@@ -1367,23 +1368,26 @@ function BookColumn({ book, outline, onTab, manuscript }: { book: VBook; outline
 
 /* ---------------- 编辑部 ---------------- */
 
+/** 按窗口自身宽度收起工具文字，而非整页宽度；拖窄或放大界面时标题与按钮都不折行。 */
 function ChatHeader({ dock, setDock, onDragStart, tools }: { dock: Dock; setDock: (dock: Dock) => void; onDragStart?: (e: ReactPointerEvent) => void; tools?: ReactNode }) {
   return (
-    <div onPointerDown={onDragStart} className={clsx('flex h-14 shrink-0 items-center gap-2.5 border-b border-line px-4', onDragStart && 'cursor-grab active:cursor-grabbing')}>
-      <div className="flex -space-x-1.5">
-        {Object.keys(ROLE_STYLE).map((role) => (
-          <span key={role} className={clsx('flex size-8 items-center justify-center rounded-full font-serif text-[13px] ring-2 ring-paper', ROLE_STYLE[role])} title={role}>{role[0]}</span>
-        ))}
-      </div>
-      <span className="text-[15px] font-medium">编辑部</span>
-      <div className="ml-auto flex items-center gap-0.5">
-        {tools}
-        {dock === 'float' ? (
-          <button type="button" onClick={() => setDock('side')} className="rounded-md p-1.5 text-ink-3 hover:bg-line/60 hover:text-ink" title="贴到右边" aria-label="贴到右边"><PanelRight className="size-4" /></button>
-        ) : (
-          <button type="button" onClick={() => setDock('float')} className="rounded-md p-1.5 text-ink-3 hover:bg-line/60 hover:text-ink" title="浮起来" aria-label="浮起来"><PictureInPicture2 className="size-4" /></button>
-        )}
-        <button type="button" onClick={() => setDock('ball')} className="rounded-md p-1.5 text-ink-3 hover:bg-line/60 hover:text-ink" title="收起" aria-label="收起"><Minus className="size-4" /></button>
+    <div data-testid="editorial-header" className="@container/editorial-header relative shrink-0 border-b border-line">
+      <div onPointerDown={onDragStart} className={clsx('flex h-14 items-center gap-2 px-3 @min-[500px]/editorial-header:gap-2.5 @min-[500px]/editorial-header:px-4', onDragStart && 'cursor-grab active:cursor-grabbing')}>
+        <div aria-hidden="true" className="hidden shrink-0 -space-x-1.5 @min-[400px]/editorial-header:flex">
+          {Object.keys(ROLE_STYLE).map((role) => (
+            <span key={role} className={clsx('flex size-8 items-center justify-center rounded-full font-serif text-[13px] ring-2 ring-paper', ROLE_STYLE[role])} title={role}>{role[0]}</span>
+          ))}
+        </div>
+        <span data-testid="editorial-title" className="shrink-0 whitespace-nowrap text-[15px] font-medium">编辑部</span>
+        <div className="ml-auto flex shrink-0 items-center gap-0.5 whitespace-nowrap">
+          {tools}
+          {dock === 'float' ? (
+            <button type="button" onClick={() => setDock('side')} className="rounded-md p-1.5 text-ink-3 hover:bg-line/60 hover:text-ink" title="贴到右边" aria-label="贴到右边"><PanelRight className="size-4" /></button>
+          ) : (
+            <button type="button" onClick={() => setDock('float')} className="rounded-md p-1.5 text-ink-3 hover:bg-line/60 hover:text-ink" title="浮起来" aria-label="浮起来"><PictureInPicture2 className="size-4" /></button>
+          )}
+          <button type="button" onClick={() => setDock('ball')} className="rounded-md p-1.5 text-ink-3 hover:bg-line/60 hover:text-ink" title="收起" aria-label="收起"><Minus className="size-4" /></button>
+        </div>
       </div>
     </div>
   )
@@ -1432,8 +1436,9 @@ function FloatingEditorial({ setDock, children, size, tools }: { setDock: (dock:
     <>
       {nearEdge && <div className="pointer-events-none fixed top-14 right-0 bottom-0 z-30 w-[380px] border-l-2 border-chief/40 bg-chief-soft/40" />}
       <div ref={ref}
+        data-testid="editorial-floating"
         className="fixed z-40 flex flex-col overflow-hidden rounded-2xl border border-line bg-paper shadow-[0_24px_60px_-20px_rgb(40_25_10/0.45),0_2px_6px_rgb(40_25_10/0.08)]"
-        style={{ ...(pos ? { left: pos.x, top: pos.y } : { right: 24, bottom: 24 }), width: size.width, height: size.height, resize: 'both', minWidth: 320, minHeight: 360, maxWidth: 820, maxHeight: 'calc(85vh / var(--desk-zoom) / var(--desk-scale))' }}>
+        style={{ ...(pos ? { left: pos.x, top: pos.y } : { right: 16, bottom: 24 }), width: size.width, height: size.height, resize: 'both', minWidth: 'min(320px, calc(100vw / var(--desk-zoom) / var(--desk-scale) - 32px))', minHeight: 360, maxWidth: 'min(820px, calc(100vw / var(--desk-zoom) / var(--desk-scale) - 32px))', maxHeight: 'calc(85vh / var(--desk-zoom) / var(--desk-scale))' }}>
         <ChatHeader dock="float" setDock={setDock} onDragStart={start} tools={tools} />
         {children}
       </div>
@@ -1476,7 +1481,7 @@ function DockedEditorial({ setDock, children, width, setWidth, tools }: { setDoc
     } catch { /* 存不了就只管这一次 */ }
   }, [dragging, width])
   return (
-    <aside ref={ref} className="relative flex shrink-0 flex-col border-l border-line bg-paper" style={{ width }}>
+    <aside ref={ref} data-testid="editorial-docked" className="relative flex shrink-0 flex-col border-l border-line bg-paper" style={{ width }}>
       <div onPointerDown={(e) => { e.preventDefault(); setDragging(true) }} title="拖动调宽窄"
         className={clsx('absolute inset-y-0 -left-1.5 z-10 w-3 cursor-col-resize after:absolute after:inset-y-0 after:left-1.5 after:w-0.5 after:transition-colors', dragging ? 'after:bg-chief/60' : 'hover:after:bg-chief/40')} />
       {dragging && <div className="fixed inset-0 z-50 cursor-col-resize" />}
@@ -1722,23 +1727,28 @@ export function Workspace({ book: base, actions, right, sideFooter, chat, chatTo
     })),
   }), [base, drafts])
 
-  const [tab, setTab] = useState<Tab>(start?.tab === '正文' && !writing ? '设定' : start?.tab ?? '设定')
-  const [entry, setEntry] = useState(() => (base.categories.some((c) => c.entries.length) ? firstSelection(base) : 'overview'))
-  const [fresh, setFresh] = useState('')
   const firstChild = base.outline.children?.[0]
   const firstNode = start?.node && findNode(base.outline, start.node) ? start.node : firstChild?.children?.[0]?.id ?? firstChild?.id ?? 'book'
-  const [node, setNode] = useState(firstNode)
+  const defaultPosition = useMemo<WorkspaceReadingPosition>(() => ({
+    tab: start?.tab === '正文' && !writing ? '设定' : start?.tab ?? '设定',
+    entry: firstSelection(base),
+    node: firstNode,
+    chapter: start?.chapter && findNode(base.outline, start.chapter) ? start.chapter : 'home',
+    open: ['book', ...(findNode(base.outline, firstNode) ?? []).map(item => item.id)],
+  }), [base, firstNode, start, writing])
+  const [initialPosition] = useState(() => readWorkspaceReadingPosition(base, defaultPosition, { live: actions.live, manuscript: !!writing, explicitStart: !!start }))
+  const [tab, setTab] = useState<Tab>(initialPosition.tab)
+  const [entry, setEntry] = useState(initialPosition.entry)
+  const [fresh, setFresh] = useState('')
+  const [node, setNode] = useState(initialPosition.node)
   const [freshNode, setFreshNode] = useState('')
   // 章号跟着位置走：插在第 1 章前面的新章还是 c1，要让大纲页重新来一遍
   const [nodeNonce, setNodeNonce] = useState(0)
-  const [open, setOpen] = useState(() => {
-    const path = findNode(base.outline, firstNode) ?? []
-    return ['book', ...path.map((n) => n.id)]
-  })
+  const [open, setOpen] = useState(initialPosition.open)
   const [outlineQuery, setOutlineQuery] = useState('')
   // 正文里看的是哪一章；home 是正文首页（开写）
-  const [chapter, setChapter] = useState(start?.chapter && findNode(base.outline, start.chapter) ? start.chapter : 'home')
-  const [dock, setDock] = useState<Dock>('ball')
+  const [chapter, setChapter] = useState(initialPosition.chapter)
+  const [dock, setDock] = useState<Dock>(() => readEditorialDock(actions.live))
   // 贴边时编辑部多宽：记住上次拖的宽度；顶栏的四个入口要让开它
   const [sideWidth, setSideWidth] = useState(() => savedSideWidth(actions.live ? 520 : 460))
   const [columnWidth, setColumnWidth] = useColumnWidth()
@@ -1747,6 +1757,12 @@ export function Workspace({ book: base, actions, right, sideFooter, chat, chatTo
   // 一打开就滚到选中的那一条
   const [scrollReq, setScrollReq] = useState<ScrollReq | null>(() => ({ id: entry, smooth: false, n: 0 }))
   const pageRef = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    writeWorkspaceReadingPosition(base, { tab, entry, node, chapter, open }, defaultPosition, { live: actions.live, manuscript: !!writing })
+  }, [actions.live, base, chapter, defaultPosition, entry, node, open, tab, writing])
+
+  useEffect(() => { writeEditorialDock(dock, actions.live) }, [dock, actions.live])
 
   useEffect(() => {
     if (!toast) return

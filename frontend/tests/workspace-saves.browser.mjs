@@ -25,7 +25,7 @@ const shot = async (name) => {
   await page.screenshot({ path: path.join(output, `${name}.jpg`), quality: 88 })
   console.log(name)
 }
-const savesPanel = page.getByRole('complementary', { name: '存档' })
+const savesPanel = page.getByRole('dialog', { name: '存档', exact: true })
 
 try {
   await page.goto(`${base}/desk/${bookId}`)
@@ -60,14 +60,14 @@ try {
     await savesPanel.getByPlaceholder(/起个名字/).fill('沈九定稿')
     await savesPanel.getByRole('button', { name: '存一档' }).click()
     await expect(savesPanel.getByText('沈九定稿')).toBeVisible()
-    const fold = savesPanel.locator('button', { hasText: /起 \d+ 档/ }).first()
+    const fold = savesPanel.locator('button', { hasText: /连续 \d+ 档/ }).first()
     if (await fold.count()) await fold.click()
     await shot('5-存档栏-手动存的和自动存的')
 
     // 点开一档：和现在比改了哪些，展开看「那时」「现在」
-    for (const fold of await savesPanel.locator('button', { hasText: /起 \d+ 档/ }).all()) await fold.click()
+    for (const fold of await savesPanel.locator('button[aria-expanded="false"]', { hasText: /连续 \d+ 档/ }).all()) await fold.click()
     await savesPanel.getByRole('button', { name: /沈九/ }).filter({ hasText: /设定师照你的话/ }).last().click()
-    await expect(savesPanel.getByText(/这一档和现在比|一模一样/)).toBeVisible({ timeout: 20_000 })
+    await expect(savesPanel.getByText(/与现在相比|一模一样/)).toBeVisible({ timeout: 20_000 })
     const item = savesPanel.locator('section button').first()
     if (await item.count()) await item.click()
     await shot('6-点开一档-和现在比')
@@ -78,7 +78,7 @@ try {
     // 写过章的书：存档栏里写完第几章、回到某一档的那几条
     await page.getByRole('button', { name: '存档', exact: true }).click()
     await expect(savesPanel.locator('section').first()).toBeVisible()
-    for (const fold of await savesPanel.locator('button', { hasText: /起 \d+ 档/ }).all()) await fold.click()
+    for (const fold of await savesPanel.locator('button[aria-expanded="false"]', { hasText: /连续 \d+ 档/ }).all()) await fold.click()
     await shot('5b-存档栏-写过章的书')
   }
 
@@ -88,11 +88,11 @@ try {
     await expect(savesPanel.getByText('正在读存档…')).toHaveCount(0)
     await expect(savesPanel.locator('section').first()).toBeVisible()
     // 自动存的折在一行里：先展开
-    for (const fold of await savesPanel.locator('button', { hasText: /起 \d+ 档/ }).all()) await fold.click()
+    for (const fold of await savesPanel.locator('button[aria-expanded="false"]', { hasText: /连续 \d+ 档/ }).all()) await fold.click()
     await savesPanel.getByRole('button', { name: new RegExp(restoreTo) }).last().click()
     await savesPanel.getByRole('button', { name: '回到这一档' }).click()
     await shot('7-回到一档-确认框')
-    await savesPanel.getByRole('button', { name: '回到这一档' }).last().click()
+    await page.getByRole('alertdialog').getByRole('button', { name: '回到这一档', exact: true }).click()
     await expect(savesPanel.getByText('书已经换回这一档了')).toBeVisible({ timeout: 30_000 })
     await shot('8-回到一档以后')
     await page.keyboard.press('Escape')
