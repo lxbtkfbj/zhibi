@@ -77,10 +77,10 @@ async def test_chat_fill_created_and_outline_can_be_taken_back(client, sessionma
     bid = await seed(sessionmaker)
     real_classify = group_notes.classify
 
-    async def fill_intent(session, book_id, text, viewing=None):
+    async def fill_intent(session, book_id, text, viewing=None, conv=None):
         if text.startswith("把楚风补齐"):
             return s.LibraryIntent(kind="改设定", target_name="楚风", mode="补齐空着的", instruction=text)
-        return await real_classify(session, book_id, text, viewing)
+        return await real_classify(session, book_id, text, viewing, conv)
 
     monkeypatch.setattr(group_notes, "classify", fill_intent)
     # 补齐：每一栏补了什么都摆出来

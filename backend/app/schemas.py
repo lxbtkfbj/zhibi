@@ -1051,6 +1051,10 @@ class NoteIn(BaseModel):
     ask: Literal["chief", "lorekeeper", "writer", "reviewer"] | None = None
     quote: ChatQuote | None = None
     viewing: ChatViewing | None = None
+    # 新书页群聊：发在哪一段对话（不给就是最近聊的那一段）
+    conv: str | None = None
+    # 从这里重来：这句话（作者的某一句）和后面的聊天收起来，再发这一句
+    rewind_from: int | None = None
 
 
 class MeetingMessageOut(BaseModel):

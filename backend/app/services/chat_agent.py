@@ -24,6 +24,7 @@ from app.services import book_saves, chat_tools, jobs
 from app.services.chat import PUSH_EVERY, answer, answered_ids, conversation_lock, finish_reply, merge_summary, stop_key
 from app.services.chat_context import (
     ROLE_FOCUS,
+    conversation_state,
     dialogue,
     dialogue_text,
     done_text,
@@ -386,6 +387,7 @@ ACT_RULE = (
     "作者明说要改、要写、要记的，自己动手（make_changes）：改一栏、补齐空着的栏目、出三种写法、新建设定卡、"
     "写大纲上的一段（还没有的下一篇也能写）、改简介、记写作要求、删掉一张卡或还没开写的一段。"
     "作者只是问、商量、出主意的，只查只答，不要动手；拿不准是要改还是在问，就当成在问，最后问一句要不要改。"
+    "作者说了「先别改」「先别动」「我再想想」的，哪怕说的是以后怎么写，也一处都不动（写作要求也不记），只聊。"
 )
 ASK_RULE = "作者这句话是在问。只查只答，不要动手改书；你觉得该改，最多在回答里问一句要不要改。"
 
@@ -465,11 +467,12 @@ async def answer_note(redis, book_id, message_id, *, reply_id=None, retry=False)
             reply_id = reply["id"]
         # 编辑部动书之前：作者自己改过还没存的，先存一档
         await book_saves.before_ai(session, book_id)
-        state = await thread_of(session, book_id, "group")
+        # 只带这句话所在的那一段对话和它的摘要
+        state = await conversation_state(session, book_id, "group", payload.get("conv"))
         await session.commit()
-        rows = [m for m in await dialogue(session, book_id, "group", state.reset_after) if m.id < message_id]
+        rows = [m for m in await dialogue(session, book_id, "group", conv=state.id) if m.id < message_id]
         old = [m for m in rows[:-20] if m.id > state.summarized_until]
-        summary = await merge_summary(session, book_id, "group", state.summary, old)
+        summary = await merge_summary(session, book_id, "group", state.summary, old, state.id)
         book = await session.get(Book, book_id)
         message = await session.get(MeetingMessage, message_id)
         values = await agent_values(session, book, role, message, rows, summary, bool(payload.get("ask_only")), retry)
@@ -547,17 +550,20 @@ async def fall_back(redis, book_id, message_id, reply_id, role) -> bool:
         async with sm() as session:
             message = await session.get(MeetingMessage, message_id)
             text, viewing = message.content, (message.payload or {}).get("viewing")
-            intent = await group_notes.classify(session, book_id, text, viewing)
+            conv = (message.payload or {}).get("conv")
+            intent = await group_notes.classify(session, book_id, text, viewing, conv)
             if intent.kind == "提问闲聊" and not intent.more:
-                state = await thread_of(session, book_id, "group")
+                state = await conversation_state(session, book_id, "group", conv)
                 await session.commit()
-                rows = [m for m in await dialogue(session, book_id, "group", state.reset_after) if m.id < reply_id]
+                conv = state.id
+                rows = [m for m in await dialogue(session, book_id, "group", conv=conv) if m.id < reply_id]
                 old = [m for m in rows[:-20] if m.id > state.summarized_until]
+                summary = state.summary
                 message = await session.get(MeetingMessage, message_id)
                 await group_notes.update_message(session, redis, message, outcome={"kind": "chat", "handled": True})
                 session.expunge_all()
                 await session.rollback()
-                await answer(session, redis, book_id, "group", role, reply_id, rows, [message], state.summary, old)
+                await answer(session, redis, book_id, "group", role, reply_id, rows, [message], summary, old, conv=conv)
                 return True
             more = [step.strip() for step in intent.more or [] if step.strip()][:3]
             if more:
@@ -588,6 +594,8 @@ async def agent_background(book_id, redis) -> None:
                         MeetingMessage.id > state.reset_after,
                         MeetingMessage.speaker == "author",
                         MeetingMessage.payload["turn"].astext == "tools",
+                        # 「从这里重来」收起来的不答
+                        MeetingMessage.payload["dropped"].astext.is_(None),
                         MeetingMessage.id.not_in(list(answered) or [0]),
                     )
                     .order_by(MeetingMessage.id)

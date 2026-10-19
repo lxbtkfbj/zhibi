@@ -31,6 +31,8 @@ export interface ChatMessage {
   looked?: { label: string; text: string }[]
   /** 消息下面再放点东西：改了什么、去看看、撤销…… */
   below?: ReactNode
+  /** 作者的话能「从这里重来」；warn：这句和后面的话改过书，书不跟着退，先提醒一声 */
+  rewind?: { warn?: string }
   /** 不是一问一答的（编辑部干活的进度、方案卡）：整条换成这个 */
   custom?: ReactNode
 }
@@ -39,8 +41,8 @@ export interface ChatControl {
   messages: ChatMessage[]
   /** 正在回答：发送键变成「停」 */
   answering: boolean
-  /** 返回 false：没发出去，输入框里的话留着 */
-  send: (text: string, to?: ChatRole) => void | Promise<boolean>
+  /** 返回 false：没发出去，输入框里的话留着。rewindFrom：从作者的这一句重来（这句和后面的聊天收起来） */
+  send: (text: string, to?: ChatRole, rewindFrom?: string) => void | Promise<boolean>
   /** 停下正在写的回答，写出来的字留着 */
   stop: () => void
   /** 把这一条回答重新来一遍；没答上来的就是重试 */
@@ -58,6 +60,10 @@ export interface ChatControl {
   sendError?: ReactNode
   /** 外面要把光标放进输入框：每次加一 */
   focusKey?: number
+  /** 聊天最上面一行（在看以前的对话……） */
+  banner?: ReactNode
+  /** 聊天最底下、所有消息后面（编辑部正在干活的那一行、等你看的那一行） */
+  footer?: ReactNode
 }
 
 const ROLE_NAMES = CHAT_ROLES.map((r) => r.role)

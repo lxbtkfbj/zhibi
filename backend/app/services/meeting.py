@@ -74,6 +74,10 @@ async def post_message(
     content: str,
     payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    from app.services.chat_convs import stamp
+
+    # 群聊里的每一条都记上属于哪一段对话
+    payload = await stamp(session, book_id, payload)
     message = MeetingMessage(
         book_id=book_id, job_id=job_id, speaker=speaker, kind=kind, content=content, payload=payload
     )

@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from app.agents.schemas import PlanItem
 from app.api.deps import SessionDep, get_book, get_redis
 from app.models import Book, MeetingMessage, SettingSuggestion
+from app.services import chat_convs
 from app.services.chat import LIVE, again_background, conversation_lock, reply_state, stop_key
 from app.services.chat_context import THREADS, thread_of
 from app.services.meeting import SPEAKER_NAMES, message_dict, post_message, publish
@@ -27,10 +28,14 @@ async def reset(thread: str, book: Book = Depends(get_book), session=SessionDep,
     valid_thread(thread)
     book_id = book.id
     async with conversation_lock(redis, book_id, thread):
-        state = await thread_of(session, book_id, thread)
         latest = await session.scalar(select(func.max(MeetingMessage.id)).where(MeetingMessage.book_id == book_id)) or 0
-        state.reset_after = state.summarized_until = latest
-        state.summary = ""
+        if thread == "group":
+            # 群聊换个话题（旧版书页）就是开一段新对话
+            await chat_convs.start(session, book_id)
+        else:
+            state = await thread_of(session, book_id, thread)
+            state.reset_after = state.summarized_until = latest
+            state.summary = ""
         who = SPEAKER_NAMES.get(thread, "编辑部")
         await post_message(
             session,
@@ -43,6 +48,21 @@ async def reset(thread: str, book: Book = Depends(get_book), session=SessionDep,
             payload={"thread": thread},
         )
     return {"reset_after": latest}
+
+
+@router.get("/books/{book_id}/chat/conversations")
+async def conversations(book: Book = Depends(get_book), session=SessionDep):
+    """群聊的一段段对话：最近聊的在前，按作者的第一句话起名"""
+    rows = await chat_convs.listing(session, book.id)
+    await session.commit()
+    return rows
+
+
+@router.post("/books/{book_id}/chat/conversations", status_code=201)
+async def new_conversation(book: Book = Depends(get_book), session=SessionDep):
+    """新对话：最近那一段还没说过话就接着用它"""
+    row = await chat_convs.start(session, book.id)
+    return {"id": str(row.id), "title": row.title, "created_at": row.created_at.isoformat()}
 
 
 async def reply_of(session, book, message_id):

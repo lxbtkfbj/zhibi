@@ -60,7 +60,7 @@ export function useMeeting(bookId: string) {
         if (base.length && base[base.length - 1].id >= message.id) return prev
         return { bookId, messages: [...base, message] }
       })
-      refresh([settingsKeys.requirements(bookId), keys.book(bookId), keys.outline(bookId), libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), ['outline-tree', bookId], ['workspace', bookId], ['saves', bookId]])
+      refresh([settingsKeys.requirements(bookId), keys.book(bookId), keys.outline(bookId), libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), ['outline-tree', bookId], ['workspace', bookId], ['saves', bookId], ['chat-convs', bookId]])
       if (message.kind === 'artifact' && REFRESH_ON.has(message.payload?.type ?? '')) {
         refresh([libraryKeys.candidates(bookId), libraryKeys.versions(bookId), keys.chapters(bookId)])
         if (['spine', 'segment', 'segment_volumes'].includes(message.payload?.type ?? '')) refresh([keys.nodes(bookId)])
@@ -74,7 +74,7 @@ export function useMeeting(bookId: string) {
       const message = JSON.parse((event as MessageEvent).data) as MeetingMessage
       setState(prev => prev.bookId === bookId ? { bookId, messages: prev.messages.map(m => m.id === message.id ? message : m) } : prev)
       // 聊天里改完、换回、再改一版：整本书和存档跟着刷新
-      refresh([settingsKeys.requirements(bookId), ['workspace', bookId], ['saves', bookId]])
+      refresh([settingsKeys.requirements(bookId), ['workspace', bookId], ['saves', bookId], ['chat-convs', bookId]])
     })
     // 聊天回答边写边推：每次带着到目前为止的全文
     source.addEventListener('chat_delta', event => {

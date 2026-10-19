@@ -353,21 +353,24 @@ async def _review(d: GraphDeps, scope: str, kind: str = "review") -> None:
 
 async def _library_feedback(d: GraphDeps, feedback: str) -> None:
     from app.api.library_ai import RewriteIn, rewrite_target
-    from app.services.chat_context import dialogue, dialogue_text, thread_of
+    from app.services.chat_context import conversation_state, dialogue, dialogue_text
     from app.services.group_notes import viewing_text
 
     async with d.sessionmaker() as session:
         ctx = await load_context(session, await session.get(Book, d.book_id))
         library, outline = ctx.library, ctx.outline
-        thread = await thread_of(session, d.book_id, "group")
-        recent = dialogue_text((await dialogue(session, d.book_id, "group", thread.reset_after))[-6:])
+        # 最近聊的那一段对话
+        conv = await conversation_state(session, d.book_id, "group")
+        recent = dialogue_text((await dialogue(session, d.book_id, "group", conv=conv.id))[-6:])
         await session.commit()
     result = await d.llm.structured(
         "router",
         schemas.LibraryIntent,
         editorial.persona("chief"),
         # 开书流程里提的意见：没有「正在看的那一页」
-        render("library_route", library=library, outline=outline, recent=recent, viewing=viewing_text(None), note=feedback),
+        render(
+            "library_route", library=library, outline=outline, recent=recent, viewing=viewing_text(None), note=feedback
+        ),
         purpose="群聊分流",
     )
     if result.kind == "改设定":

@@ -14,6 +14,7 @@ import { useConversationReads } from '../../lib/useWorkspacePanels'
 import { currentTarget, type NodeFeedback, nodeFeedback } from '../../lib/workspace'
 import { segmentReviewKey } from '../../lib/outlineWriting'
 import { BookContext, type BookContextValue, type PitchChoice } from '../book/context'
+import { ChatConvs } from './ChatConvs'
 import { LiveChat } from './LiveChat'
 import { flushAutoSave, useLiveBook } from './liveActions'
 import { SavesButton, SavesPanel } from './Saves'
@@ -27,6 +28,8 @@ function useEditorial(bookId: string, book: BookDetail, onOpen: () => void): { c
   const { data: outline } = useOutline(bookId)
   const { segment, segmentPending } = useJobActions(bookId)
   const [conversation, setConversationState] = useState<Conversation>('group')
+  // 群聊正在看哪一段对话：打开时是最近聊的那一段
+  const [chatConv, setChatConv] = useState<string | null>(null)
   const [focusComposer, setFocusComposer] = useState(0)
   const [composerNode, setComposerNode] = useState<NodeFeedback | null>(null)
   const [chatQuotes, setChatQuotes] = useState<Record<string, ChatQuote | null>>({})
@@ -44,7 +47,7 @@ function useEditorial(bookId: string, book: BookDetail, onOpen: () => void): { c
   const unread = useConversationReads(bookId, messages, conversation, true)
   const setConversation = useCallback((next: Conversation) => { setConversationState(next); onOpen() }, [onOpen])
   const ctx: BookContextValue = {
-    bookId, book, job, messages, connected, chatTyping, chatQuotes, setChatQuotes, draft, working, waiting, asking, outline, conversation, setConversation, unread,
+    bookId, book, job, messages, connected, chatTyping, chatQuotes, setChatQuotes, draft, working, waiting, asking, outline, conversation, setConversation, unread, chatConv, setChatConv,
     askChief: (quote) => { setChatQuotes((previous) => ({ ...previous, chief: quote })); setConversation('chief'); setFocusComposer((n) => n + 1) },
     following: false, followTarget, resumeFollow: () => undefined,
     // 聊天里点到书稿的地方：新书页还没有的，先去旧版
@@ -143,7 +146,7 @@ function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
   return (
     <BookContext.Provider value={context}>
       <Workspace book={book} actions={actions} right={right} notice={<JobNotice book={detail} />} openRef={openRef} viewingRef={viewingRef}
-        chat={<LiveChat />}
+        chat={<LiveChat writing={writing} />} chatTools={<ChatConvs />}
         chatBadge={unread} openChat={openChat} writing={writing} />
       <SavesPanel open={saves.open} saveId={saves.id} onClose={closeSaves} onOpenSave={(id) => setSaves({ open: true, id })} />
     </BookContext.Provider>

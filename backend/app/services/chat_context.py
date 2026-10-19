@@ -41,16 +41,42 @@ async def thread_of(session, book_id, thread):
     return await session.scalar(select(ChatThread).where(ChatThread.book_id == book_id, ChatThread.thread == thread))
 
 
-async def dialogue(session, book_id, thread, reset_after=0):
-    rows = await session.scalars(
-        select(MeetingMessage)
-        .where(MeetingMessage.book_id == book_id, MeetingMessage.id > reset_after)
-        .order_by(MeetingMessage.id)
+async def conversation_state(session, book_id, thread, conv=None):
+    """摘要存在哪：群聊是那一段对话（不给就是最近聊的那一段），私聊是 chat_threads 那一行"""
+    if thread != "group":
+        return await thread_of(session, book_id, thread)
+    from app.services import chat_convs
+
+    return (await chat_convs.find(session, book_id, conv) if conv else None) or await chat_convs.current(
+        session, book_id
     )
+
+
+async def dialogue(session, book_id, thread, reset_after=0, conv=None):
+    """一个对话里说过的话。群聊给了 conv 就只要那一段（作者把书换回存档的那一行，这一段开始以后的都带上）；
+    「从这里重来」收起来的不算。"""
+    rows = list(
+        await session.scalars(
+            select(MeetingMessage)
+            .where(MeetingMessage.book_id == book_id, MeetingMessage.id > reset_after)
+            .order_by(MeetingMessage.id)
+        )
+    )
+    if thread == "group" and conv:
+        conv = str(getattr(conv, "id", conv))
+        mine = [m for m in rows if (m.payload or {}).get("conv") == conv]
+        start = mine[0].id if mine else None
+        rows = [
+            m
+            for m in rows
+            if (m.payload or {}).get("conv") == conv
+            or (start is not None and m.id > start and m.speaker == "system" and "restore" in (m.payload or {}))
+        ]
     return [
         m
         for m in rows
-        if (
+        if not (m.payload or {}).get("dropped")
+        and (
             ((m.payload or {}).get("thread") or "group") == thread
             and (
                 (m.speaker == "author" and m.kind in {"note", "decision"})

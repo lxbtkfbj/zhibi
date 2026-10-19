@@ -1418,7 +1418,7 @@ function BookColumn({ book, outline, onTab, manuscript }: { book: VBook; outline
 
 /* ---------------- 编辑部 ---------------- */
 
-function ChatHeader({ dock, setDock, onDragStart }: { dock: Dock; setDock: (dock: Dock) => void; onDragStart?: (e: ReactPointerEvent) => void }) {
+function ChatHeader({ dock, setDock, onDragStart, tools }: { dock: Dock; setDock: (dock: Dock) => void; onDragStart?: (e: ReactPointerEvent) => void; tools?: ReactNode }) {
   return (
     <div onPointerDown={onDragStart} className={clsx('flex h-14 shrink-0 items-center gap-2.5 border-b border-line px-4', onDragStart && 'cursor-grab active:cursor-grabbing')}>
       <div className="flex -space-x-1.5">
@@ -1428,6 +1428,7 @@ function ChatHeader({ dock, setDock, onDragStart }: { dock: Dock; setDock: (dock
       </div>
       <span className="text-[15px] font-medium">编辑部</span>
       <div className="ml-auto flex items-center gap-0.5">
+        {tools}
         {dock === 'float' ? (
           <button type="button" onClick={() => setDock('side')} className="rounded-md p-1.5 text-ink-3 hover:bg-line/60 hover:text-ink" title="贴到右边" aria-label="贴到右边"><PanelRight className="size-4" /></button>
         ) : (
@@ -1439,7 +1440,7 @@ function ChatHeader({ dock, setDock, onDragStart }: { dock: Dock; setDock: (dock
   )
 }
 
-function FloatingEditorial({ setDock, children, size }: { setDock: (dock: Dock) => void; children: ReactNode; size: { width: number; height: number } }) {
+function FloatingEditorial({ setDock, children, size, tools }: { setDock: (dock: Dock) => void; children: ReactNode; size: { width: number; height: number }; tools?: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null)
   const drag = useRef<{ dx: number; dy: number } | null>(null)
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
@@ -1484,7 +1485,7 @@ function FloatingEditorial({ setDock, children, size }: { setDock: (dock: Dock) 
       <div ref={ref}
         className="fixed z-40 flex flex-col overflow-hidden rounded-2xl border border-line bg-paper shadow-[0_24px_60px_-20px_rgb(40_25_10/0.45),0_2px_6px_rgb(40_25_10/0.08)]"
         style={{ ...(pos ? { left: pos.x, top: pos.y } : { right: 24, bottom: 24 }), width: size.width, height: size.height, resize: 'both', minWidth: 320, minHeight: 360, maxWidth: 820, maxHeight: 'calc(85vh / var(--desk-zoom) / var(--desk-scale))' }}>
-        <ChatHeader dock="float" setDock={setDock} onDragStart={start} />
+        <ChatHeader dock="float" setDock={setDock} onDragStart={start} tools={tools} />
         {children}
       </div>
     </>
@@ -1502,7 +1503,7 @@ function savedSideWidth(fallback: number): number {
 }
 
 /** 贴在右边的编辑部：左边缘可以拖宽拖窄，记住上次的宽度。 */
-function DockedEditorial({ setDock, children, width, setWidth }: { setDock: (dock: Dock) => void; children: ReactNode; width: number; setWidth: (width: number) => void }) {
+function DockedEditorial({ setDock, children, width, setWidth, tools }: { setDock: (dock: Dock) => void; children: ReactNode; width: number; setWidth: (width: number) => void; tools?: ReactNode }) {
   const ref = useRef<HTMLElement>(null)
   const [dragging, setDragging] = useState(false)
   useEffect(() => {
@@ -1530,7 +1531,7 @@ function DockedEditorial({ setDock, children, width, setWidth }: { setDock: (doc
       <div onPointerDown={(e) => { e.preventDefault(); setDragging(true) }} title="拖动调宽窄"
         className={clsx('absolute inset-y-0 -left-1.5 z-10 w-3 cursor-col-resize after:absolute after:inset-y-0 after:left-1.5 after:w-0.5 after:transition-colors', dragging ? 'after:bg-chief/60' : 'hover:after:bg-chief/40')} />
       {dragging && <div className="fixed inset-0 z-50 cursor-col-resize" />}
-      <ChatHeader dock="side" setDock={setDock} />
+      <ChatHeader dock="side" setDock={setDock} tools={tools} />
       {children}
     </aside>
   )
@@ -1731,6 +1732,8 @@ export interface WorkspaceProps {
   right: ReactNode
   /** 编辑部窗口里放什么 */
   chat: ReactNode
+  /** 编辑部窗口顶上再放的按钮（真书：新对话、以前的对话） */
+  chatTools?: ReactNode
   /** 收起成小球时右上角的数字；不给就只是一个红点 */
   chatBadge?: number
   /** 外面要打开编辑部（比如点了某条消息）：每次加一 */
@@ -1749,7 +1752,7 @@ export interface WorkspaceProps {
   start?: { tab?: Tab; node?: string; chapter?: string }
 }
 
-export function Workspace({ book: base, actions, right, chat, chatBadge, openChat, notice, manuscriptHref, openRef, viewingRef, writing, start }: WorkspaceProps) {
+export function Workspace({ book: base, actions, right, chat, chatTools, chatBadge, openChat, notice, manuscriptHref, openRef, viewingRef, writing, start }: WorkspaceProps) {
   // 新增了还没起名字的条目：只在这一页，起了名字才存
   const [drafts, setDrafts] = useState<VEntry[]>([])
   const draftsRef = useRef(drafts)
@@ -2037,10 +2040,10 @@ export function Workspace({ book: base, actions, right, chat, chatBadge, openCha
               ? <ManuscriptHome book={book} writing={writing} nav={nav} />
               : <ChapterPage key={chapter} book={book} id={chapter} writing={writing} nav={nav} />)}
           </main>
-          {dock === 'side' && <DockedEditorial setDock={setDock} width={sideWidth} setWidth={setSideWidth}>{chat}</DockedEditorial>}
+          {dock === 'side' && <DockedEditorial setDock={setDock} width={sideWidth} setWidth={setSideWidth} tools={chatTools}>{chat}</DockedEditorial>}
         </div>
 
-        {dock === 'float' && <FloatingEditorial setDock={setDock} size={chatSize}>{chat}</FloatingEditorial>}
+        {dock === 'float' && <FloatingEditorial setDock={setDock} size={chatSize} tools={chatTools}>{chat}</FloatingEditorial>}
         {dock === 'ball' && (
           <button type="button" onClick={() => setDock('float')} title="编辑部"
             className="press fixed right-6 bottom-6 z-40 flex size-14 items-center justify-center rounded-full bg-chief font-serif text-xl text-on-role shadow-[0_14px_30px_-10px_rgb(40_50_90/0.6)] transition-transform hover:-translate-y-0.5">

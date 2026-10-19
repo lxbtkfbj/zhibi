@@ -524,9 +524,14 @@ export interface MeetingMessage {
     /** 群聊里接话的人自己查、自己动手的那一句（tools）；ask_only 是只查只答 */
     turn?: 'tools'; ask_only?: boolean
     /** 自己查、自己动手的回答：正在做什么（「在查陈默……」），查了什么、做了什么 */
-    tools_mode?: boolean; doing?: string; tools?: ChatToolUse[] } | null
+    tools_mode?: boolean; doing?: string; tools?: ChatToolUse[]
+    /** 群聊里属于哪一段对话；dropped 是「从这里重来」收起来的 */
+    conv?: string; dropped?: boolean } | null
   created_at: string | null
 }
+
+/** 群聊里的一段对话：按作者的第一句话起名；current 是最近聊的那一段 */
+export interface ChatConv { id: string; title: string; created_at: string; last_at: string; notes: number; current: boolean }
 
 /** 写手正在写的正文（实时推送，不进数据库）。text 是这一章到目前为止的全文。 */
 export interface LiveDraft {
@@ -598,6 +603,8 @@ export interface ChatOutcome {
   redo?: Record<string, unknown>
   /** plan_made：接话的人要动的多（count 处），或者要删东西，整理成了方案卡 */
   count?: number
+  /** chat：明显是在问，没分流直接答的 */
+  shortcut?: boolean
   deleting?: boolean
   /** 改完当场的前后对照：每一栏「原来」「改成」（太长截到 2000 字） */
   diff?: ChangeDiff[]

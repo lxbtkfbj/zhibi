@@ -1,7 +1,7 @@
 /** 编辑部浮窗里的聊天：只有一个聊天，打 @ 点名找谁；回答边写边显示，回答时发送键变「停」；最新一条回答下面能重新回答，没答上来能重试。 */
 
 import clsx from 'clsx'
-import { AlertTriangle, ArrowUp, AtSign, ChevronDown, RotateCcw, Search, Square, X } from 'lucide-react'
+import { AlertTriangle, ArrowUp, AtSign, ChevronDown, PencilLine, RotateCcw, Search, Square, X } from 'lucide-react'
 import { type ReactNode, useLayoutEffect, useRef, useState } from 'react'
 import { Spinner, TypingDots } from '../../components/ui'
 import { CHAT_ROLES, type ChatControl, type ChatMessage, type ChatRole, latestReply, mentionAt, takeMention } from './chatModel'
@@ -34,13 +34,39 @@ export function RoleRow({ role, children }: { role: ChatRole; children: ReactNod
   )
 }
 
-function AuthorBubble({ message }: { message: ChatMessage }) {
+/** 作者的话：鼠标移上去左边出「从这里重来」，点了这句放回输入框，改了再发（这句和后面的聊天收起来，书不跟着退） */
+function AuthorBubble({ message, canRewind, onRewind }: { message: ChatMessage; canRewind: boolean; onRewind: () => void }) {
+  const [asking, setAsking] = useState(false)
+  const rewind = () => {
+    if (message.rewind?.warn && !asking) setAsking(true)
+    else {
+      setAsking(false)
+      onRewind()
+    }
+  }
   return (
-    <div className="flex flex-col items-end">
-      <p className="max-w-[85%] rounded-[16px_4px_16px_16px] bg-author-bubble px-4 py-2.5 chat-text leading-[1.75] break-words whitespace-pre-wrap text-ink">
-        {message.to && <span className={clsx('mr-1.5 font-medium', ROLE_COLOR[message.to].text)}>@{message.to}</span>}
-        {message.text}
-      </p>
+    <div data-testid={`note-${message.id}`} className="group flex flex-col items-end">
+      <div className="flex max-w-[85%] items-start gap-1">
+        {canRewind && message.rewind && (
+          <button type="button" onClick={rewind} title="从这里重来：这句话放回输入框，改了再发；这句和后面的聊天收起来，书不跟着退"
+            className="mt-1.5 flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-xs whitespace-nowrap text-ink-3 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-line/50 hover:text-ink focus-visible:opacity-100">
+            <PencilLine className="size-3.5" />从这里重来
+          </button>
+        )}
+        <p className="min-w-0 rounded-[16px_4px_16px_16px] bg-author-bubble px-4 py-2.5 chat-text leading-[1.75] break-words whitespace-pre-wrap text-ink">
+          {message.to && <span className={clsx('mr-1.5 font-medium', ROLE_COLOR[message.to].text)}>@{message.to}</span>}
+          {message.text}
+        </p>
+      </div>
+      {asking && (
+        <div role="alertdialog" className="mt-1.5 max-w-[85%] rounded-lg border border-line bg-card px-3 py-2 text-[13px] leading-relaxed text-ink-2">
+          <p>{message.rewind?.warn}</p>
+          <div className="mt-1.5 flex justify-end gap-2">
+            <button type="button" onClick={() => setAsking(false)} className="rounded-md px-2 py-0.5 text-ink-3 hover:bg-line/50 hover:text-ink">算了</button>
+            <button type="button" onClick={rewind} className="rounded-md px-2 py-0.5 font-medium text-chief hover:bg-chief-soft">接着来</button>
+          </div>
+        </div>
+      )}
       {message.below && <div className="max-w-[85%]">{message.below}</div>}
     </div>
   )
@@ -137,16 +163,25 @@ function EmptyChat({ onPick }: { onPick: (role: ChatRole) => void }) {
 
 interface Mention { start: number; query: string; roles: ChatRole[]; index: number }
 
-function Composer({ chat, to, setTo, focusKey }: { chat: ChatControl; to?: ChatRole; setTo: (role?: ChatRole) => void; focusKey: number }) {
+/** 正在从作者的某一句重来：那句话放进输入框 */
+interface Rewinding { id: string; text: string; to?: ChatRole }
+
+function Composer({ chat, to, setTo, focusKey, rewinding, endRewind }: { chat: ChatControl; to?: ChatRole; setTo: (role?: ChatRole) => void; focusKey: number; rewinding: Rewinding | null; endRewind: () => void }) {
   const [text, setText] = useState('')
+  // 点了「从这里重来」：那句话放回输入框（换了一句就再放一次）
+  const [filled, setFilled] = useState<string | null>(null)
+  if ((rewinding?.id ?? null) !== filled) {
+    setFilled(rewinding?.id ?? null)
+    if (rewinding) setText(rewinding.text)
+  }
   // 正在打「@设…」，或者点了「@ 点名」：输入框上面弹出四个人
   const [mention, setMention] = useState<Mention | null>(null)
   const ref = useRef<HTMLTextAreaElement>(null)
   const caretAt = useRef<number | null>(null)
 
   useLayoutEffect(() => {
-    if (focusKey || chat.focusKey) ref.current?.focus()
-  }, [focusKey, chat.focusKey])
+    if (focusKey || chat.focusKey || rewinding) ref.current?.focus()
+  }, [focusKey, chat.focusKey, rewinding])
   useLayoutEffect(() => {
     if (caretAt.current === null || !ref.current) return
     ref.current.setSelectionRange(caretAt.current, caretAt.current)
@@ -174,9 +209,10 @@ function Composer({ chat, to, setTo, focusKey }: { chat: ChatControl; to?: ChatR
     if (!content) return
     setMention(null)
     // 没发出去（返回 false）就留着原话
-    if ((await chat.send(content, to ?? taken.to)) === false) return
+    if ((await chat.send(content, to ?? taken.to, rewinding?.id)) === false) return
     setText((now) => (now === text ? '' : now))
     setTo(undefined)
+    if (rewinding) endRewind()
   }
   const options = mention?.roles ?? []
 
@@ -197,6 +233,13 @@ function Composer({ chat, to, setTo, focusKey }: { chat: ChatControl; to?: ChatR
         </div>
       )}
       {chat.notice}
+      {rewinding && (
+        <div className="mb-2 flex items-center gap-2 rounded-lg bg-chief-soft/70 px-3 py-2 text-[13px] leading-relaxed text-chief">
+          <PencilLine className="size-4 shrink-0" />
+          <span className="min-w-0 flex-1">从这句重来：改好了再发，这句和后面的聊天会收起来；书里改过的不跟着退</span>
+          <button type="button" onClick={() => { endRewind(); setText('') }} className="shrink-0 font-medium hover:underline">算了</button>
+        </div>
+      )}
       <div className="rounded-[14px] border border-line-2 bg-card transition-[border-color,box-shadow] focus-within:border-ink-3/70 focus-within:shadow-[var(--shadow-paper)]">
         {to && (
           <div className="px-3 pt-2.5">
@@ -280,6 +323,10 @@ function Composer({ chat, to, setTo, focusKey }: { chat: ChatControl; to?: ChatR
 export function EditorialChat({ chat }: { chat: ChatControl }) {
   const [to, setTo] = useState<ChatRole>()
   const [focusKey, setFocusKey] = useState(0)
+  const [rewinding, setRewinding] = useState<Rewinding | null>(null)
+  // 正在重来的那一句（和后面的）淡下去；那句话不在了（被收起来、换了一段对话）就算了
+  const from = rewinding ? chat.messages.findIndex((m) => m.id === rewinding.id) : -1
+  if (rewinding && from < 0) setRewinding(null)
   const box = useRef<HTMLDivElement>(null)
   // 作者往上翻着看的时候，新冒出来的字不把他拽回底下
   const pinned = useRef(true)
@@ -293,15 +340,21 @@ export function EditorialChat({ chat }: { chat: ChatControl }) {
   const latest = latestReply(chat.messages)
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-pane-mid">
+      {chat.banner}
       <div ref={box} className="scroll-thin min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5"
         onScroll={(e) => { const el = e.currentTarget; pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48 }}>
-        {count === 0 && <EmptyChat onPick={(role) => { setTo(role); setFocusKey((n) => n + 1) }} />}
-        {chat.messages.map((m) => (m.custom ? <div key={m.id}>{m.custom}</div>
-          : m.who === '作者'
-            ? <AuthorBubble key={m.id} message={m} />
-            : <Reply key={m.id} message={m} latest={m === latest} answering={chat.answering} onAgain={() => chat.again(m.id)} />))}
+        {count === 0 && !chat.footer && <EmptyChat onPick={(role) => { setTo(role); setFocusKey((n) => n + 1) }} />}
+        {chat.messages.map((m, i) => {
+          const body = m.custom ? m.custom
+            : m.who === '作者'
+              ? <AuthorBubble message={m} canRewind={!chat.answering && !chat.sending}
+                onRewind={() => { setRewinding({ id: m.id, text: m.text, to: m.to }); setTo(m.to) }} />
+              : <Reply message={m} latest={m === latest} answering={chat.answering} onAgain={() => chat.again(m.id)} />
+          return <div key={m.id} className={clsx('transition-opacity', from >= 0 && i >= from && 'opacity-35')}>{body}</div>
+        })}
+        {chat.footer}
       </div>
-      <Composer chat={chat} to={to} setTo={setTo} focusKey={focusKey} />
+      <Composer chat={chat} to={to} setTo={setTo} focusKey={focusKey} rewinding={rewinding} endRewind={() => setRewinding(null)} />
     </div>
   )
 }

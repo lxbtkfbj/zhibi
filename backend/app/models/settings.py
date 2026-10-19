@@ -45,3 +45,18 @@ class ChatThread(UUIDPk, Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class ChatConversation(UUIDPk, Base):
+    """群聊里的一段对话：每段只带自己的记录和摘要。消息的 payload.conv 记着属于哪一段（私聊不分段）。"""
+
+    __tablename__ = "chat_conversations"
+
+    book_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("books.id", ondelete="CASCADE"), index=True)
+    # 按作者在这一段说的第一句话起名；还没说话的是空的
+    title: Mapped[str] = mapped_column(Text, default="", server_default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.clock_timestamp())
+    # 最近一次在这一段说话（或者刚开这一段）：最近的那一段就是「现在聊的」
+    last_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.clock_timestamp())
+    summary: Mapped[str] = mapped_column(Text, default="", server_default="")
+    summarized_until: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")

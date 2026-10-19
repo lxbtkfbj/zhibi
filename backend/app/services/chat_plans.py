@@ -11,7 +11,7 @@ from app.db import get_sessionmaker
 from app.models import Book, Character, MeetingMessage, SettingSuggestion, WorldEntry
 from app.services import book_saves, jobs
 from app.services.chat import conversation_lock, model
-from app.services.chat_context import dialogue, dialogue_text, reply_values, thread_of
+from app.services.chat_context import conversation_state, dialogue, dialogue_text, reply_values
 from app.services.group_notes import active_note_job, update_message
 from app.services.library import load_target, lock_book
 from app.services.meeting import SPEAKER_NAMES, post_message, publish
@@ -68,10 +68,18 @@ async def make_plan_background(book_id, thread, note_id, redis):
         await publish(redis, book_id, "chat_typing", {"thread": thread, "speaker": role, "on": True, "mode": "plan"})
         async with get_sessionmaker()() as session:
             try:
-                state = await thread_of(session, book_id, thread)
-                rows = await dialogue(session, book_id, thread, state.reset_after)
-                book = await session.get(Book, book_id)
                 note = await session.get(MeetingMessage, note_id)
+                # 群聊只总结这句话所在的那一段对话
+                conv = (note.payload or {}).get("conv") if thread == "group" else None
+                state = await conversation_state(session, book_id, thread, conv)
+                rows = await dialogue(
+                    session,
+                    book_id,
+                    thread,
+                    getattr(state, "reset_after", 0),
+                    conv=state.id if thread == "group" else None,
+                )
+                book = await session.get(Book, book_id)
                 values = await reply_values(session, book, thread, role, rows, [note], state.summary)
                 values = {
                     k: values[k] for k in ("concept", "library", "outline", "progress", "pending", "summary", "note")

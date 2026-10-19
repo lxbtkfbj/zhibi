@@ -19,6 +19,7 @@ from app.services.chat import conversation_lock, reply_background
 from app.services.chat_context import (
     ROLES,
     accepts_plan,
+    conversation_state,
     dialogue,
     dialogue_text,
     obvious_question,
@@ -78,11 +79,12 @@ def viewing_text(viewing):
     return viewing.get("label") or "（作者在看某一页，没有名字）"
 
 
-async def classify(session, book_id, text, viewing=None):
+async def classify(session, book_id, text, viewing=None, conv=None):
     book = await session.get(Book, book_id)
     ctx = await load_context(session, book)
-    state = await thread_of(session, book_id, "group")
-    recent = dialogue_text((await dialogue(session, book_id, "group", state.reset_after))[-6:])
+    # 最近几句只看这句话所在的那一段对话（不给就是最近聊的那一段）
+    state = await conversation_state(session, book_id, "group", conv)
+    recent = dialogue_text((await dialogue(session, book_id, "group", conv=state.id))[-6:])
     library, outline = ctx.library, ctx.outline
     await session.commit()
     return await asyncio.wait_for(
@@ -121,14 +123,25 @@ async def chatted_since_wait(session, book_id, job):
 
 
 async def receive_note(body, background_tasks, book, session, redis):
+    from app.services import chat_convs
     from app.services.chat_plans import latest_plan, make_plan_background, request_apply
 
     text, book_id, thread = body.content.strip(), book.id, body.to or "group"
     if not text:
         raise HTTPException(422, "请写下你的话")
+    conv = None
+    if not body.to:
+        # 群聊分段：发在作者正在看的那一段（旧版不给，就是最近聊的那一段）
+        conv = await chat_convs.resolve(session, book_id, body.conv)
+        if body.rewind_from:
+            # 从这里重来：这句话和后面的聊天先收起来，再发改过的这一句。只退聊天，书不动
+            await chat_convs.rewind(session, redis, book_id, conv, body.rewind_from)
+        await chat_convs.spoke(session, conv, text)
+        conv_id = str(conv.id)
+        await session.commit()
     payload = {
         "requirement_saved": True,
-        **({"thread": thread} if body.to else {}),
+        **({"thread": thread} if body.to else {"conv": conv_id}),
         **({"quote": body.quote.model_dump()} if body.quote else {}),
         # 新书页上带：作者正在看哪一页（只在群聊里用来认「这一篇」「这一条」）
         **({"viewing": body.viewing.model_dump()} if body.viewing and not body.to else {}),
@@ -185,7 +198,7 @@ async def receive_note(body, background_tasks, book, session, redis):
                 raise HTTPException(409, {"code": "use_feedback", "message": "等你拍板时请直接提意见"})
             if waiting_feedback(job):
                 try:
-                    intent = await classify(session, book_id, text, payload.get("viewing"))
+                    intent = await classify(session, book_id, text, payload.get("viewing"), conv_id)
                 except Exception as exc:
                     raise HTTPException(502, f"模型出错了：{exc}") from exc
                 session.expire_all()
@@ -800,7 +813,9 @@ async def apply_steps(session, redis, message, first, more, viewing):
             if said is None:
                 intent = first
             else:
-                intent = await classify(session, book_id, said + SPLIT_NOTE, viewing)
+                intent = await classify(
+                    session, book_id, said + SPLIT_NOTE, viewing, (message.payload or {}).get("conv")
+                )
                 # 拆出来的这一句里说清了写大纲上哪一段（结局、第几篇），就照这一句找，不再听模型另认
                 if intent.kind == "写大纲" and OUTLINE_WORDS.search(said):
                     intent.outline_target = said
@@ -839,10 +854,11 @@ async def route_background(book_id, redis, known_id=None, known_intent=None):
             if message is None:
                 break
             mid, text, viewing = message.id, message.content, (message.payload or {}).get("viewing")
+            conv = (message.payload or {}).get("conv")
             # 编辑部动书之前：作者自己改过还没存的，先存一档
             await book_saves.before_ai(session, book_id)
             try:
-                intent = known_intent if mid == known_id else await classify(session, book_id, text, viewing)
+                intent = known_intent if mid == known_id else await classify(session, book_id, text, viewing, conv)
                 more = [step.strip() for step in intent.more or [] if step.strip()][:3]
                 if more:
                     needs_reply |= await apply_steps(session, redis, message, intent, more, viewing)

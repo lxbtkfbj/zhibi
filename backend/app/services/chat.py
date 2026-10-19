@@ -13,7 +13,7 @@ from app.db import get_sessionmaker
 from app.llm.router import LLMRouter
 from app.models import Book, MeetingMessage
 from app.prompts import render
-from app.services.chat_context import dialogue, dialogue_text, reply_values, thread_of
+from app.services.chat_context import conversation_state, dialogue, dialogue_text, reply_values, thread_of
 from app.services.meeting import SPEAKER_NAMES, message_dict, post_message, publish
 
 log = logging.getLogger(__name__)
@@ -144,8 +144,9 @@ async def finish_reply(session, redis, reply_id, text, state, error=""):
     await redis.delete(stop_key(reply_id))
 
 
-async def merge_summary(session, book_id, thread, summary, old):
-    """最近 20 条以前、还没折进摘要的有 10 条以上了：先折进摘要。失败了照旧用旧摘要。"""
+async def merge_summary(session, book_id, thread, summary, old, conv=None):
+    """最近 20 条以前、还没折进摘要的有 10 条以上了：先折进摘要。失败了照旧用旧摘要。
+    群聊的摘要存在那一段对话上（conv）。"""
     if len(old) < 10:
         return summary
     try:
@@ -158,7 +159,7 @@ async def merge_summary(session, book_id, thread, summary, old):
             summary=summary or "（没有）",
             messages=dialogue_text(old, limited=False),
         )
-        row = await thread_of(session, book_id, thread)
+        row = await conversation_state(session, book_id, thread, conv)
         row.summary, row.summarized_until = merged.summary, old[-1].id
         await session.commit()
         return merged.summary
@@ -173,13 +174,15 @@ def tools_text(tools):
     return "\n\n".join(f"【{t.get('label', '')}】\n{t.get('text', '')}" for t in tools or []) or "（没有）"
 
 
-async def answer(session, redis, book_id, thread, role, reply_id, rows, unanswered, summary, old, related=None):
+async def answer(
+    session, redis, book_id, thread, role, reply_id, rows, unanswered, summary, old, related=None, conv=None
+):
     """写一条回答：要合摘要先合，再一边写一边推。出错、超时都落在这条消息上，给「重试」。
     related：自己查过、做过的那一轮重新回答时，资料换成那一轮查到的、做了的。"""
     await publish(redis, book_id, "chat_typing", {"thread": thread, "speaker": role, "on": True})
     text, state, error = "", "failed", ""
     try:
-        summary = await merge_summary(session, book_id, thread, summary, old)
+        summary = await merge_summary(session, book_id, thread, summary, old, conv)
         book = await session.get(Book, book_id)
         if book is None:
             return
@@ -212,6 +215,15 @@ async def reply_background(book_id, thread, redis):
             unanswered = [m for m in rows if m.speaker == "author" and i_chat(m) and m.id not in answered]
             if not unanswered:
                 return
+            conv = None
+            if thread == "group":
+                # 群聊分段：一次只答同一段里的话，资料和摘要也只用这一段的
+                conv = (unanswered[-1].payload or {}).get("conv")
+                unanswered = [m for m in unanswered if (m.payload or {}).get("conv") == conv]
+                state = await conversation_state(session, book_id, thread, conv)
+                await session.commit()
+                rows = await dialogue(session, book_id, thread, conv=state.id)
+                conv = state.id
             role = thread if thread != "group" else (unanswered[-1].payload or {}).get("chat_role", "chief")
             summary, until = state.summary, state.summarized_until
             old = [m for m in rows[:-20] if m.id > until]
@@ -231,19 +243,25 @@ async def reply_background(book_id, thread, redis):
             )
             session.expunge_all()
             await session.rollback()
-            await answer(session, redis, book_id, thread, role, reply["id"], rows, unanswered, summary, old)
+            await answer(session, redis, book_id, thread, role, reply["id"], rows, unanswered, summary, old, conv=conv)
 
 
 async def again_background(book_id, thread, reply_id, redis):
     """重新回答、重试：同一条消息，照原来那几句话再答一遍。"""
     async with conversation_lock(redis, book_id, thread), get_sessionmaker()() as session:
-        state = await thread_of(session, book_id, thread)
-        await session.commit()
         reply = await session.get(MeetingMessage, reply_id)
         if reply is None or reply_state(reply) != "thinking":
             return
+        conv = reply.payload.get("conv") if thread == "group" else None
+        state = await conversation_state(session, book_id, thread, conv)
+        await session.commit()
+        conv = state.id if thread == "group" else None
         asked = list(reply.payload.get("reply_to") or [])
-        rows = [m for m in await dialogue(session, book_id, thread, state.reset_after) if m.id < reply_id]
+        rows = [
+            m
+            for m in await dialogue(session, book_id, thread, getattr(state, "reset_after", 0), conv=conv)
+            if m.id < reply_id
+        ]
         unanswered = list(
             await session.scalars(
                 select(MeetingMessage).where(MeetingMessage.id.in_(asked)).order_by(MeetingMessage.id)
@@ -266,9 +284,9 @@ async def again_background(book_id, thread, reply_id, redis):
                 return
             # 重新回答：只重写那段话，不给工具，照这一轮查到的、做了的说；改动不动、也不重做
             related = tools_text(payload.get("tools"))
-            await answer(session, redis, book_id, thread, role, reply_id, rows, unanswered, summary, old, related)
+            await answer(session, redis, book_id, thread, role, reply_id, rows, unanswered, summary, old, related, conv)
             return
-        await answer(session, redis, book_id, thread, role, reply_id, rows, unanswered, summary, old)
+        await answer(session, redis, book_id, thread, role, reply_id, rows, unanswered, summary, old, conv=conv)
 
 
 async def clean_live_replies(redis):

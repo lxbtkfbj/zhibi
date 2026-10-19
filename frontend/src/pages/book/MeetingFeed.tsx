@@ -759,6 +759,8 @@ interface FeedEntry {
 function visibleEntries(messages: MeetingMessage[], conversation: Conversation, showGroup: boolean): FeedEntry[] {
   const entries: FeedEntry[] = []
   for (const message of messages) {
+    // 新书页上「从这里重来」收起来的话：旧版也不显示
+    if (message.payload?.dropped) continue
     const thread = threadOf(message)
     if (conversation !== 'group' && thread !== conversation && !(showGroup && !thread && message.speaker === conversation)) continue
     if (conversation === 'group' && thread) {

@@ -92,7 +92,16 @@ async def broadcast(redis, book_id, event, data):
 async def finish(session, redis, job, content):
     row = await session.get(Job, job.id)
     row.status = "succeeded"
-    message = MeetingMessage(book_id=job.book_id, job_id=job.id, speaker="chief", kind="speech", content=content)
+    from app.services.chat_convs import stamp
+
+    message = MeetingMessage(
+        book_id=job.book_id,
+        job_id=job.id,
+        speaker="chief",
+        kind="speech",
+        content=content,
+        payload=await stamp(session, job.book_id, None),
+    )
     session.add(message)
     await session.commit()
     await session.refresh(row)
