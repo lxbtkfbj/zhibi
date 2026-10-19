@@ -1,4 +1,4 @@
-/** 原型里的编辑部聊天：照几段写好的话一个字一个字吐出来，能停、能重新回答；话里带「出错」先演示一次没答上来。不连后台。 */
+/** 原型里的编辑部聊天：照几段写好的话一个字一个字吐出来，能停、能重新回答；打招呼、问是谁按身份答；话里带「出错」先演示一次没答上来。不连后台，不是模型写的。 */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChatControl, ChatMessage, ChatRole } from './chatModel'
@@ -6,11 +6,34 @@ import type { VBook } from './model'
 
 /** 没点名：原型照话里的字挑人；真书上是编辑部自己挑 */
 function pickRole(text: string): ChatRole {
-  if (/毛病|漏洞|节奏|拖|审/.test(text)) return '审稿'
-  if (/文笔|描写|场面|怎么写|句子|对话|文风|示范/.test(text)) return '写手'
-  if (/设定|人物|角色|主角|境界|实力|世界|地点|势力|金手指|对得上/.test(text)) return '设定师'
+  if (/毛病|漏洞|节奏|節奏|拖|审|審/.test(text)) return '审稿'
+  if (/文笔|文筆|描写|描寫|场面|場面|怎么写|怎麼寫|句子|对话|對話|文风|文風|示范|示範/.test(text)) return '写手'
+  if (/设定|設定|人物|角色|主角|境界|实力|實力|世界|地点|地點|势力|勢力|金手指|对得上|對得上/.test(text)) return '设定师'
   return '主编'
 }
+
+/** 打招呼、问是谁：按身份答。每人两句，重新回答换另一句 */
+const INTRO: Record<ChatRole, string[]> = {
+  主编: [
+    '我是主编，编辑部里拿主意的那个：这本书往哪走、大纲怎么排、下一篇写什么，都可以问我。要改大纲、记写作要求，也跟我说。',
+    '主编。方向和大纲归我管——想先定开头还是结尾、哪一篇要细化，直接跟我说就行。',
+  ],
+  设定师: [
+    '我是设定师，管这本书的人物、地点、功法这些设定，还有前后对不对得上。想新建一个人物、补齐一张卡，跟我说。',
+    '设定师。书里谁是谁、什么境界、人在哪儿，都记在我这儿；哪里前后矛盾了，我第一个发现。',
+  ],
+  写手: [
+    '我是写手，正文是我写的。某个场面怎么写更爽、文风想往哪改，问我；有喜欢的写法也告诉我，我记下来照着写。',
+    '写手。一章章的正文归我，想看哪种场面怎么写，我可以先示范一段。',
+  ],
+  审稿: [
+    '我是审稿，专门挑毛病：哪里写得拖、哪里有漏洞、人物前后对不上，问我。',
+    '审稿。写完的每一章我都过一遍，节奏、漏洞、爽点够不够，有话直说。',
+  ],
+}
+
+const GREETING = /^(你好|您好|嗨|哈喽|hello|hi|在吗|在嗎|在不在|早上好|晚上好)$/i
+const WHO = /你(叫|是)(什么|什麼|谁|誰)|名字|你是干什么|你是幹什麼|你管什么|你管什麼|你负责|你負責|介绍一下|介紹一下/
 
 /** 每个人两段话：重新回答换另一段，看得出是新答的 */
 const REPLIES: Record<ChatRole, string[]> = {
@@ -30,6 +53,14 @@ const REPLIES: Record<ChatRole, string[]> = {
     '我挑三处，你看着办：\n\n一是开头铺垫有点长，第三段还没看到{主角}的本事，读者容易走；二是几个配角说话的口气太像，换个名字几乎分不出谁是谁；三是对手出场太晚，前面缺一个压着主角的人。\n\n第一条最要紧，建议把本事提到第一章前一半。',
     '节奏上我觉得有点拖：连着三章都在铺垫，中间没有一次小的回报。网文一般三五章就要给读者一点甜头，打脸、得宝、破境、揭开一个小秘密都行。\n\n可以在第二章末尾先放一个小胜，让{主角}躲过一劫，后面再接大的。',
   ],
+}
+
+/** 原型挑哪段话：打招呼、问是谁按身份答；别的话从这个人写好的两段里挑，所以常会答非所问 */
+function replyFor(role: ChatRole, text: string, n: number): string {
+  const intro = INTRO[role][n % INTRO[role].length]
+  if (GREETING.test(text.replace(/[\s，,。.!！?？~～]/g, ''))) return `你好。${intro}`
+  if (WHO.test(text)) return intro
+  return REPLIES[role][n % REPLIES[role].length]
 }
 
 function protagonist(book: VBook): string {
@@ -66,9 +97,8 @@ export function useChatSim(book: VBook): ChatControl {
     tries.current.set(question.id, n + 1)
     const role = question.to ?? pickRole(question.text)
     update(replyId, { who: role, text: '', state: 'thinking', error: undefined })
-    const fail = question.text.includes('出错') && !failed.current.has(question.id)
-    const pool = REPLIES[role]
-    const full = pool[n % pool.length].replace(/\{(书名|主角)\}/g, (_, key: '书名' | '主角') => names[key])
+    const fail = /出错|出錯/.test(question.text) && !failed.current.has(question.id)
+    const full = replyFor(role, question.text, n).replace(/\{(书名|主角)\}/g, (_, key: '书名' | '主角') => names[key])
     timer.current = setTimeout(() => {
       if (fail) {
         failed.current.add(question.id)
@@ -109,5 +139,5 @@ export function useChatSim(book: VBook): ChatControl {
     if (reply && question && !answering) answer(reply.id, question)
   }, [answer, answering, messages])
 
-  return { messages, answering, send, stop, again, hint: '原型 · 回答是写好的几段话；话里带「出错」会先演示一次没答上来' }
+  return { messages, answering, send, stop, again, hint: '原型 · 回答不是模型写的，是几段写好的示范，所以常会答非所问；话里带「出错」会演示一次没答上来' }
 }
