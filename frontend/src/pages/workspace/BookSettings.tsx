@@ -70,7 +70,7 @@ function Dialog({ onClose }: { onClose: () => void }) {
         initial={{ opacity: 0, y: 16, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 12, scale: 0.98 }}
         transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
         className="flex w-[720px] flex-col overflow-hidden rounded-2xl border border-line bg-paper shadow-[var(--shadow-lift)] outline-none"
-        // 和书页一样按屏幕宽度、外观里的「书页大小」放大；宽高上限先除回去
+        // 和书页一样按屏幕宽度、外观里的「界面大小」放大；宽高上限先除回去
         style={{
           zoom: 'calc(var(--desk-zoom) * var(--desk-scale))',
           maxWidth: 'calc((100vw - 32px) / var(--desk-zoom) / var(--desk-scale))',

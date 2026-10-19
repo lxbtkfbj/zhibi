@@ -1,4 +1,4 @@
-import { ArrowLeft, CheckCircle2, Eye, EyeOff, X, XCircle } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, ChevronDown, Eye, EyeOff, X, XCircle } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
@@ -21,6 +21,16 @@ const PRESETS = [
   { name: 'Kimi', base_url: 'https://api.moonshot.cn/v1', model: 'kimi-latest' },
   { name: '本地 Ollama', base_url: 'http://127.0.0.1:11434/v1', model: 'qwen3.5:4b' },
 ]
+/** 编辑部分工：每个角色干什么、挑什么样的模型 */
+const ROLE_HINTS: Partial<Record<RoleKey, string>> = {
+  default: '没单独选的角色都用它',
+  chief: '排大纲、章纲，群聊里接话、动手改书：挑聪明、能调工具的',
+  lorekeeper: '建设定、每章写完记下变化：便宜快的也够用',
+  writer: '写正文：挑文笔好的',
+  reviewer: '每章写完挑毛病：便宜快的也够用',
+  router: '以前用来判断群聊里的话要做什么，现在编辑部自己判断，用不上了；选回「跟随默认」这一行就不再显示',
+}
+
 const EMPTY: LlmProfileInput = { name: '', provider: 'openai_compatible', base_url: '', api_key: '', model: '', temperature: 0.8, max_tokens: null, structured_method: 'function_calling', timeout_s: 300, reasoning_effort: '' }
 
 /** A page within the settings window, never another dialog. */
@@ -28,6 +38,8 @@ function ProfileForm({ profile, onBack }: { profile: LlmProfile | null; onBack: 
   const { create, update } = useProfileMutations()
   const apiKeyId = useId()
   const [showKey, setShowKey] = useState(false)
+  // 温度、超时这些一般不用动：收起来，要改再展开
+  const [advanced, setAdvanced] = useState(false)
   const [form, setForm] = useState<LlmProfileInput>(profile ? { ...EMPTY, ...profile, api_key: '', reasoning_effort: profile.reasoning_effort ?? '' } : EMPTY)
   const set = <K extends keyof LlmProfileInput>(key: K, value: LlmProfileInput[K]) => setForm(previous => ({ ...previous, [key]: value }))
   const mutation = profile ? update : create
@@ -49,7 +61,8 @@ function ProfileForm({ profile, onBack }: { profile: LlmProfile | null; onBack: 
         <div className="settings-row"><ModelSelector compact value={form.model} onChange={model => set('model', model)} baseUrl={form.base_url} apiKey={form.api_key} profileId={profile?.id} /></div>
       </>}
     </SettingsGroup>
-    {form.provider !== 'demo' && <SettingsGroup title="高级参数">
+    {form.provider !== 'demo' && <button type="button" onClick={() => setAdvanced(!advanced)} aria-expanded={advanced} className="settings-fold"><ChevronDown className={`size-3.5 transition-transform ${advanced ? 'rotate-180' : ''}`} />高级：温度、最大输出、结构化输出方式、推理强度、超时（一般不用动）</button>}
+    {form.provider !== 'demo' && advanced && <SettingsGroup title="高级参数">
       <SettingsRow label="温度" hint="越高越有创意"><input aria-label="温度" type="number" step={0.1} min={0} max={2} value={form.temperature} onChange={event => set('temperature', Number(event.target.value))} className="settings-input" /></SettingsRow>
       <SettingsRow label="最大输出 token" hint="留空使用模型默认值"><input aria-label="最大输出 token" type="number" min={1} value={form.max_tokens ?? ''} onChange={event => set('max_tokens', event.target.value ? Number(event.target.value) : null)} className="settings-input" /></SettingsRow>
       <SettingsRow label="结构化输出方式" hint="不支持时会自动降级"><select aria-label="结构化输出方式" value={form.structured_method} onChange={event => set('structured_method', event.target.value as LlmProfileInput['structured_method'])} className="settings-select"><option value="function_calling">工具调用（推荐）</option><option value="json_mode">JSON 模式</option><option value="json_schema">JSON Schema</option></select></SettingsRow>
@@ -64,8 +77,9 @@ function ProfileForm({ profile, onBack }: { profile: LlmProfile | null; onBack: 
 function ProfileRow({ profile, onEdit }: { profile: LlmProfile; onEdit: () => void }) {
   const { remove, test } = useProfileMutations()
   return <SettingsRow label={profile.name} hint={profile.provider === 'demo' ? '演示模式 · 内置示例内容，不联网' : `${profile.model} · ${profile.has_key ? '已保存密钥' : '未填 Key'}`} extra={<>
-    {profile.structured_method_auto && <p className="text-xs text-ink-3">已自动改用 {profile.structured_method}</p>}
-    {test.data && <p className={`flex items-center gap-1 text-xs ${test.data.ok ? 'text-lore' : 'text-seal'}`}>{test.data.ok ? <CheckCircle2 className="size-3.5" /> : <XCircle className="size-3.5" />}{test.data.message}</p>}
+    {profile.structured_method_auto && <p className="settings-note">这个接口不认工具调用，已自动改用 JSON 模式：群聊里编辑部不会自己查资料、动手，先判断要做什么，再一件件做。</p>}
+    {test.data && <p className={`flex items-center gap-1 text-[13px] ${test.data.ok ? 'text-lore' : 'text-seal'}`}>{test.data.ok ? <CheckCircle2 className="size-3.5 shrink-0" /> : <XCircle className="size-3.5 shrink-0" />}{test.data.ok ? `连上了：${test.data.message}` : test.data.message}</p>}
+    {test.data?.ok && test.data.tools_message && <p className={`settings-note ${test.data.tools ? '!text-lore' : ''}`}>{test.data.tools_message}</p>}
     <ErrorText error={remove.error || test.error} />
   </>}><SettingsButton disabled={test.isPending} onClick={() => test.mutate(profile.id)}>{test.isPending ? '测试中…' : '测试'}</SettingsButton><SettingsButton onClick={onEdit}>修改</SettingsButton><SettingsButton danger disabled={remove.isPending} onClick={() => { if (confirm(`删除「${profile.name}」？`)) remove.mutate(profile.id) }}>删除</SettingsButton></SettingsRow>
 }
@@ -75,6 +89,8 @@ function ModelsPanel() {
   const roles = useRoles()
   const { setRoles } = useProfileMutations()
   const [editing, setEditing] = useState<LlmProfile | 'new' | null>(null)
+  // 「跟随默认」后面写上默认是哪个模型
+  const defaultName = (profiles.data?.find(profile => profile.id === roles.data?.default) ?? profiles.data?.[0])?.name
   if (editing) return <ProfileForm key={editing === 'new' ? 'new' : editing.id} profile={editing === 'new' ? null : editing} onBack={() => setEditing(null)} />
   return <>
     <SettingsGroup title="模型列表" action={<SettingsButton onClick={() => setEditing('new')}>＋ 添加</SettingsButton>}>
@@ -85,7 +101,8 @@ function ModelsPanel() {
     </SettingsGroup>
     <SettingsGroup title="编辑部分工">
       {roles.error && <SettingsRow label={<ErrorText error={roles.error} />} />}
-      {ROLE_KEYS.map(role => <SettingsRow key={role} label={role === 'default' ? '默认' : ROLE_KEY_LABEL[role]} hint={role === 'default' ? '未单独指定的角色都用它' : role === 'router' ? '判断你在群聊里说的话是要改设定、记成要求还是提问。选一个快的模型就行，不用最强的。没选时用「默认」的模型。' : undefined}><select aria-label={`${role === 'default' ? '默认' : ROLE_KEY_LABEL[role]}使用的模型`} value={roles.data?.[role] ?? ''} disabled={!roles.data || setRoles.isPending} onChange={event => setRoles.mutate({ [role]: event.target.value || null } as Partial<Record<RoleKey, string | null>>)} className="settings-select max-w-60"><option value="">{role === 'default' ? '未设置，使用第一个配置' : '跟随默认'}</option>{profiles.data?.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></SettingsRow>)}
+      {/* 群聊分流用不上了：没选过的不显示，选过的留着好改回「跟随默认」 */}
+      {ROLE_KEYS.filter(role => role !== 'router' || roles.data?.router).map(role => <SettingsRow key={role} label={role === 'default' ? '默认' : ROLE_KEY_LABEL[role]} hint={ROLE_HINTS[role]}><select aria-label={`${role === 'default' ? '默认' : ROLE_KEY_LABEL[role]}使用的模型`} value={roles.data?.[role] ?? ''} disabled={!roles.data || setRoles.isPending} onChange={event => setRoles.mutate({ [role]: event.target.value || null } as Partial<Record<RoleKey, string | null>>)} className="settings-select max-w-60"><option value="">{role === 'default' ? `未设置，用第一个${profiles.data?.[0] ? `（${profiles.data[0].name}）` : ''}` : `跟随默认${defaultName ? `（${defaultName}）` : ''}`}</option>{profiles.data?.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></SettingsRow>)}
     </SettingsGroup>
     <ErrorText error={setRoles.error} />
   </>
@@ -101,8 +118,7 @@ function AppearancePanel() {
       <SettingsRow label="行距"><Segmented label="行距" value={appearance.readingLeading} options={[{ value: 'compact', label: '紧凑' }, { value: 'standard', label: '标准' }, { value: 'relaxed', label: '宽松' }]} onChange={readingLeading => setAppearance({ readingLeading })} /></SettingsRow>
     </SettingsGroup>
     <SettingsGroup title="界面">
-      <SettingsRow label="书页大小" hint="书里的简介、设定、大纲、正文整体放大缩小；大屏上会先按屏幕宽度放大，这里在那个基础上再调"><Segmented label="书页大小" value={String(appearance.deskScale)} options={DESK_SCALES.map(v => ({ value: String(v), label: `${v}%` }))} onChange={v => setAppearance({ deskScale: Number(v) })} /></SettingsRow>
-      <SettingsRow label="界面文字"><Segmented label="界面文字" value={appearance.uiScale} options={[{ value: 'standard', label: '标准' }, { value: 'large', label: '大一号' }]} onChange={uiScale => setAppearance({ uiScale })} /></SettingsRow>
+      <SettingsRow label="界面大小" hint="书页、书房、设置整体放大缩小；大屏上会先按屏幕宽度放大，这里在那个基础上再调"><Segmented label="界面大小" value={String(appearance.deskScale)} options={DESK_SCALES.map(v => ({ value: String(v), label: `${v}%` }))} onChange={v => setAppearance({ deskScale: Number(v), uiScale: Number(v) > 100 ? 'large' : 'standard' })} /></SettingsRow>
       <SettingsRow label="减少动效" hint="关掉打字机、滑入这些动画"><Toggle label="减少动效" checked={appearance.reducedMotion} onChange={reducedMotion => setAppearance({ reducedMotion })} /></SettingsRow>
     </SettingsGroup>
   </>
@@ -110,7 +126,7 @@ function AppearancePanel() {
 
 function DefaultsEditor({ initial }: { initial: SettingsResponse }) {
   const editor = useSettingsEditor(initial, '/settings/new-book-defaults', 'PUT')
-  return <><p className="mb-5 text-xs leading-5 text-ink-3">自动保存。只管之后新开的书；已经有的书，在书页右上角齿轮「本书设置」里改。</p>{!!editor.error && <div className="mb-4"><ErrorText error={editor.error} /><SettingsButton onClick={editor.retry}>重试保存</SettingsButton></div>}
+  return <><p className="settings-intro">自动保存。只管之后新开的书；已经有的书，在书页左下角「本书设置」里改。</p>{!!editor.error && <div className="mb-4"><ErrorText error={editor.error} /><SettingsButton onClick={editor.retry}>重试保存</SettingsButton></div>}
     <WritingSettings value={editor.value} onChange={editor.update} statuses={editor.statuses} /></>
 }
 function DefaultsPanel() {
@@ -121,15 +137,48 @@ function DefaultsPanel() {
 }
 
 interface UsageTotals { calls: number; prompt_tokens: number | null; completion_tokens: number | null }
-interface UsageSummary { items: (UsageTotals & { book_id: string | null; book_title: string; role: string })[]; total: UsageTotals }
+interface UsageSummary {
+  items: (UsageTotals & { book_id: string | null; book_title: string; role: string })[]
+  total: UsageTotals
+  by_model?: (UsageTotals & { profile_name: string | null; model: string | null })[]
+}
+interface BookUsage { title: string; calls: number; prompt_tokens: number | null; completion_tokens: number | null; roles: string[] }
+/** 数字过万写「万」；有一部分没记用量的，加起来也算不知道 */
+const amount = (value: number | null | undefined) => value == null ? '—' : value >= 10000 ? `${(value / 10000).toFixed(value >= 1000000 ? 0 : 1)} 万` : value.toLocaleString('zh-CN')
+const plus = (a: number | null, b: number | null) => (a == null || b == null ? null : a + b)
 function UsagePanel() {
   const query = useQuery({ queryKey: ['global-usage'], queryFn: () => get<UsageSummary>('/usage') })
-  const number = (value: number | null | undefined) => value == null ? '—' : value.toLocaleString('zh-CN')
-  return <SettingsGroup title="用量">
-    {query.isLoading && <SettingsRow label={<Spinner />} />}
-    {query.error && <SettingsRow label={<ErrorText error={query.error} />} />}
-    {query.data && <div className="overflow-x-auto"><table className="settings-table"><thead><tr><th>书名</th><th>角色</th><th className="numeric">调用</th><th className="numeric">输入 token</th><th className="numeric">输出 token</th></tr></thead><tbody>{query.data.items.map(item => <tr key={`${item.book_id ?? 'global'}:${item.role}`}><td>{item.book_title || '未归属书籍'}</td><td>{ROLE_KEY_LABEL[item.role as RoleKey] ?? item.role}</td><td className="numeric">{number(item.calls)}</td><td className="numeric">{number(item.prompt_tokens)}</td><td className="numeric">{number(item.completion_tokens)}</td></tr>)}{!query.data.items.length && <tr><td colSpan={5}>还没有调用记录</td></tr>}</tbody><tfoot><tr><td colSpan={2}>合计</td><td className="numeric">{number(query.data.total.calls)}</td><td className="numeric">{number(query.data.total.prompt_tokens)}</td><td className="numeric">{number(query.data.total.completion_tokens)}</td></tr></tfoot></table></div>}
-  </SettingsGroup>
+  // 按书合起来；每本书底下一行小字写各角色调了几次
+  const byBook = new Map<string, BookUsage>()
+  for (const item of query.data?.items ?? []) {
+    const key = item.book_id ?? ''
+    const row = byBook.get(key) ?? { title: item.book_title || '没归到哪本书', calls: 0, prompt_tokens: 0, completion_tokens: 0, roles: [] }
+    row.calls += item.calls
+    row.prompt_tokens = plus(row.prompt_tokens, item.prompt_tokens)
+    row.completion_tokens = plus(row.completion_tokens, item.completion_tokens)
+    row.roles.push(`${ROLE_KEY_LABEL[item.role as RoleKey] ?? item.role} ${item.calls} 次`)
+    byBook.set(key, row)
+  }
+  const books = [...byBook.entries()].sort((a, b) => b[1].calls - a[1].calls)
+  const head = <thead><tr><th /><th className="numeric">调用</th><th className="numeric">输入 token</th><th className="numeric">输出 token</th></tr></thead>
+  return <>
+    <p className="settings-intro">token 是模型算钱的单位，大约一个汉字一个多 token；花多少钱看输入、输出各多少，再乘上服务商的单价。</p>
+    {query.isLoading && <Spinner />}
+    <ErrorText error={query.error} />
+    {query.data && <>
+      <SettingsGroup title="按书">
+        <div className="overflow-x-auto"><table className="settings-table">{head}<tbody>
+          {books.map(([key, book]) => <tr key={key}><td><div>{book.title}</div><div className="settings-table-sub">{book.roles.join(' · ')}</div></td><td className="numeric">{amount(book.calls)}</td><td className="numeric">{amount(book.prompt_tokens)}</td><td className="numeric">{amount(book.completion_tokens)}</td></tr>)}
+          {!books.length && <tr><td colSpan={4}>还没有调用记录</td></tr>}
+        </tbody><tfoot><tr><td>合计</td><td className="numeric">{amount(query.data.total.calls)}</td><td className="numeric">{amount(query.data.total.prompt_tokens)}</td><td className="numeric">{amount(query.data.total.completion_tokens)}</td></tr></tfoot></table></div>
+      </SettingsGroup>
+      {!!query.data.by_model?.length && <SettingsGroup title="按模型">
+        <div className="overflow-x-auto"><table className="settings-table">{head}<tbody>
+          {query.data.by_model.map(row => <tr key={`${row.profile_name}:${row.model}`}><td><div>{row.profile_name || '没记名字'}</div>{row.model && <div className="settings-table-sub">{row.model}</div>}</td><td className="numeric">{amount(row.calls)}</td><td className="numeric">{amount(row.prompt_tokens)}</td><td className="numeric">{amount(row.completion_tokens)}</td></tr>)}
+        </tbody></table></div>
+      </SettingsGroup>}
+    </>}
+  </>
 }
 
 const TABS = [{ key: 'models', label: '模型' }, { key: 'appearance', label: '外观' }, { key: 'defaults', label: '新书默认' }, { key: 'usage', label: '用量' }] as const
@@ -157,7 +206,7 @@ function SettingsWindow({ onClose }: { onClose: () => void }) {
     return () => { document.removeEventListener('keydown', keydown); document.body.style.overflow = previousOverflow; previousFocus?.focus() }
   }, [])
   return <div className="settings-modal-overlay" onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}><div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="settings-title" className="settings-modal">
-    <header className="settings-modal-heading"><h2 id="settings-title">设置</h2><SettingsButton aria-label="关闭设置" onClick={onClose}><X className="size-4" /></SettingsButton></header>
+    <header className="settings-modal-heading"><div><h2 id="settings-title">系统设置</h2><p>所有书共用：用哪些模型、界面样子、新开的书默认怎么写、用了多少。改了就存。</p></div><button type="button" className="settings-close" aria-label="关闭设置" title="关上（Esc）" onClick={onClose}><X className="size-5" /></button></header>
     <div className="settings-modal-body"><nav className="settings-modal-nav" aria-label="设置分页"><div role="tablist" aria-orientation="vertical" className="flex flex-col gap-1">{TABS.map(item => <button key={item.key} id={`settings-tab-${item.key}`} role="tab" aria-selected={tab === item.key} aria-controls="settings-panel" onClick={() => setTab(item.key)}>{item.label}</button>)}</div><Link to="/prompts" onClick={onClose}>提示词与调用记录 →</Link></nav>
       <div id="settings-panel" role="tabpanel" aria-labelledby={`settings-tab-${tab}`} className="settings-modal-content scroll-thin">{tab === 'models' && <ModelsPanel />}{tab === 'appearance' && <AppearancePanel />}{tab === 'defaults' && <DefaultsPanel />}{tab === 'usage' && <UsagePanel />}</div>
     </div>

@@ -36,17 +36,50 @@
 .settings-button:disabled { opacity: .5; cursor: not-allowed; }
 .settings-save-status { margin-left: 8px; font-size: 11px; color: var(--color-lore); white-space: nowrap; }
 .settings-modal-overlay { position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center; background: var(--color-overlay); padding: 18px; backdrop-filter: blur(6px); }
-.settings-modal { width: 1040px; max-width: 100%; height: 760px; max-height: calc(100dvh - 36px); display: flex; flex-direction: column; overflow: hidden; background: var(--color-paper-2); border: 1px solid var(--color-divider); border-radius: 12px; box-shadow: var(--shadow-lift); }
-.settings-modal-heading { display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; padding: 14px 20px; border-bottom: 1px solid var(--color-divider); }
-.settings-modal-heading h2 { font-size: 17px; font-weight: 600; }
+/* 系统设置弹窗：和本书设置一个样子（宣纸底、宋体大标题、15px 字、一项一行细线隔开、选项是分开的小按钮）；
+   跟书页一样按屏幕宽度、外观里的「界面大小」放大，宽高上限先除回去 */
+.settings-modal { width: 940px; height: 780px; zoom: calc(var(--desk-zoom) * var(--desk-scale)); max-width: calc((100vw - 36px) / var(--desk-zoom) / var(--desk-scale)); max-height: calc(88dvh / var(--desk-zoom) / var(--desk-scale)); display: flex; flex-direction: column; overflow: hidden; background: var(--color-paper); border: 1px solid var(--color-line); border-radius: 16px; box-shadow: var(--shadow-lift); outline: none; }
+.settings-modal-heading { display: flex; align-items: flex-start; gap: 16px; flex-shrink: 0; padding: 28px 36px 20px; border-bottom: 1px solid var(--color-line); }
+.settings-modal-heading > div { flex: 1; min-width: 0; }
+.settings-modal-heading h2 { font-family: var(--font-serif); font-size: 26px; line-height: 1.25; font-weight: 700; }
+.settings-modal-heading p { margin-top: 8px; color: var(--color-ink-3); font-size: 13px; line-height: 1.7; }
+.settings-close { margin: -4px -12px 0 0; padding: 8px; border-radius: 8px; color: var(--color-ink-3); cursor: pointer; }
+.settings-close:hover { background: color-mix(in srgb, var(--color-line) 50%, transparent); color: var(--color-ink); }
 .settings-modal-body { display: flex; flex: 1; min-height: 0; }
-.settings-modal-nav { width: 142px; flex-shrink: 0; padding: 14px 10px; background: var(--color-pane-left, var(--color-sidebar)); border-right: 1px solid var(--color-divider); display: flex; flex-direction: column; gap: 4px; }
-.settings-modal-nav button { text-align: left; padding: 8px 12px; font-size: 13px; border-radius: 7px; color: var(--color-ink-2); cursor: pointer; }
-.settings-modal-nav button[aria-selected=true] { background: var(--color-card); color: var(--color-ink); }
-.settings-modal-nav a { margin-top: auto; padding: 8px 4px; color: var(--color-ink-2); font-size: 12px; line-height: 1.8; }
+.settings-modal-nav { width: 168px; flex-shrink: 0; padding: 20px 12px; background: var(--color-paper-2); border-right: 1px solid var(--color-line); display: flex; flex-direction: column; gap: 4px; }
+.settings-modal-nav button { text-align: left; padding: 9px 14px; font-size: 15px; border-radius: 8px; color: var(--color-ink-2); cursor: pointer; transition: background-color 150ms, color 150ms; }
+.settings-modal-nav button:hover { color: var(--color-ink); }
+.settings-modal-nav button[aria-selected=true] { background: var(--color-card); color: var(--color-ink); box-shadow: 0 1px 2px rgb(40 25 10 / 0.06); }
+.settings-modal-nav a { margin-top: auto; padding: 8px 6px; color: var(--color-ink-3); font-size: 13px; line-height: 1.8; }
 .settings-modal-nav a:hover { color: var(--color-seal); }
-.settings-modal-content { flex: 1; min-width: 0; overflow: auto; padding: 20px; }
-.settings-modal-content .settings-row { padding-left: 12px; padding-right: 12px; }
+.settings-modal-content { flex: 1; min-width: 0; overflow: auto; padding: 0 36px 36px; }
+.settings-modal .settings-group, .settings-modal .settings-group + .settings-group { margin-top: 32px; }
+.settings-modal .settings-group-heading { min-height: 32px; margin-bottom: 0; padding-bottom: 8px; border-bottom: 1px solid var(--color-line); color: var(--color-ink-3); font-size: 13px; letter-spacing: .15em; }
+.settings-modal .settings-list { overflow: visible; background: none; border: 0; border-radius: 0; }
+.settings-modal .settings-row { min-height: 0; padding: 16px 0; border-bottom: 1px solid var(--color-line); }
+.settings-modal .settings-row-main { gap: 10px 24px; }
+.settings-modal .settings-row-label { font-size: 15px; }
+.settings-modal .settings-row-hint { margin-top: 4px; font-size: 13px; line-height: 1.7; }
+.settings-modal .settings-segmented { gap: 6px; overflow: visible; background: none; border: 0; border-radius: 0; }
+.settings-modal .settings-segmented button, .settings-modal .settings-segmented button:first-child { height: 32px; min-height: 0; padding: 0 14px; border: 1px solid var(--color-line-2); border-radius: 8px; background: var(--color-card); color: var(--color-ink-2); font-size: 13px; transition: border-color 150ms, color 150ms; }
+.settings-modal .settings-segmented button:hover { background: var(--color-card); border-color: color-mix(in srgb, var(--color-ink-3) 50%, transparent); color: var(--color-ink); }
+.settings-modal .settings-segmented button.is-selected { background: var(--color-ink); border-color: var(--color-ink); color: var(--color-paper-2); }
+.settings-modal .settings-input, .settings-modal .settings-select { height: 32px; padding: 4px 10px; border-color: var(--color-line-2); border-radius: 8px; font-size: 14px; }
+.settings-modal .settings-button { height: 32px; padding: 0 12px; border-color: var(--color-line-2); border-radius: 8px; font-size: 13px; }
+.settings-modal .settings-button:hover { background: var(--color-card); border-color: color-mix(in srgb, var(--color-ink-3) 50%, transparent); color: var(--color-ink); }
+.settings-modal .settings-button.is-primary:hover { background: var(--color-ink-2); color: var(--color-paper-2); }
+.settings-modal .settings-stepper { height: 32px; border-color: var(--color-line-2); border-radius: 8px; font-size: 14px; }
+.settings-modal .settings-stepper button { width: 32px; }
+.settings-modal .settings-save-status { font-size: 12px; }
+.settings-modal .settings-table { font-size: 13px; }
+.settings-modal .settings-table th { padding: 10px 8px; background: none; border-bottom: 1px solid var(--color-line); }
+.settings-modal .settings-table td { padding: 10px 8px; border-top: 0; border-bottom: 1px solid var(--color-line); }
+.settings-table-sub { margin-top: 2px; color: var(--color-ink-3); font-size: 12px; }
+.settings-note { color: var(--color-ink-3); font-size: 13px; line-height: 1.7; }
+.settings-intro { margin-top: 24px; color: var(--color-ink-3); font-size: 13px; line-height: 1.7; }
+.settings-fold { display: flex; align-items: center; gap: 6px; margin-top: 24px; color: var(--color-ink-3); font-size: 13px; cursor: pointer; }
+.settings-fold:hover { color: var(--color-ink); }
+.settings-profile-form { padding-top: 24px; }
 .settings-profile-form .settings-input, .settings-profile-form .settings-select { width: 100%; }
 .settings-table { width: 100%; font-size: 12px; border-collapse: collapse; }
 .settings-table th { padding: 9px 10px; font-weight: 400; color: var(--color-ink-3); text-align: left; background: var(--color-paper-2); }
@@ -55,10 +88,11 @@
 .settings-table tfoot td { font-weight: 600; }
 @media (max-width: 600px) {
   .settings-modal-overlay { padding: 10px; }
-  .settings-modal { height: 640px; max-height: calc(100dvh - 20px); }
+  .settings-modal { height: 640px; }
+  .settings-modal-heading { padding: 20px 16px 14px; }
   .settings-modal-nav { width: 96px; padding: 10px 6px; }
-  .settings-modal-nav button { padding: 8px; }
-  .settings-modal-content { padding: 14px 10px; }
+  .settings-modal-nav button { padding: 8px; font-size: 14px; }
+  .settings-modal-content { padding: 0 14px 20px; }
   .settings-row-control { flex-wrap: wrap; }
   .settings-segmented button { padding-inline: 6px; }
 }
