@@ -59,6 +59,8 @@ export function useSettingsEditor(initial: SettingsResponse, path: string, metho
         const bookId = path.match(/^\/books\/([^/]+)\/settings$/)?.[1]
         qc.setQueryData(bookId ? settingsKeys.book(bookId) : settingsKeys.defaults, response)
         if (bookId) void qc.invalidateQueries({ queryKey: ['book', bookId] })
+        // 每章字数变了：书页简介里「约 N 章」跟着重算
+        if (bookId && 'chapter_words' in submitted) void qc.invalidateQueries({ queryKey: ['workspace', bookId] })
         if (!active.current) return
         if (version === revision.current) {
           setDraft(null)

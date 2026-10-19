@@ -4,7 +4,6 @@ import { decisionCopy } from '../src/lib/decision.ts'
 import { nextSegmentFields } from '../src/lib/setupPresentation.ts'
 import { isWritingComplete, storyMapNodeChapters, storyMapWritingIndex, writingPosition, writingPositionText } from '../src/lib/storyMap.ts'
 import { artifactTarget, composerRoute, currentTarget, pendingTarget, progressText } from '../src/lib/workspace.ts'
-import { requirementSource } from '../src/lib/writingSettings.ts'
 
 const pending = { kind: 'segment_review', flow: 3, number: 3, round: 1, warnings: ['上一篇的期待仍然开着。', '人物还没写什么时候登场。'], flags: {}, decisions: [], plan: {}, split: { volumes: [] } }
 const job = { id: 'job', kind: 'write_book', status: 'waiting_author', pending }
@@ -30,7 +29,6 @@ test('下一篇提意见走专用接口路由，文案、提醒和来源准确',
   assert.equal(copy.approve, '确认这一篇')
   assert.equal(copy.placeholder, '说说下一篇想怎么改…')
   assert.deepEqual(copy.issues, pending.warnings)
-  assert.equal(requirementSource('segment:3'), '第 3 篇规划意见')
   assert.equal(progressText({ active_job: job, chapters_final: 0 }, [], null, pendingTarget(pending, 'book')), '等你确认：第 3 篇')
 })
 

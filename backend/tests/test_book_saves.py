@@ -197,6 +197,28 @@ async def test_round_trip_restores_every_table(client, sessionmaker):
         assert await rows_of(session, b) == changed
 
 
+async def test_restoring_an_old_save_moves_other_rules_into_requirements(client, sessionmaker):
+    # 2026-10-19 以前的存档，本书设置里还带着「其他规矩」：回去以后挪成写作要求（已经有的不重复），设置里清空
+    b = await full_book(sessionmaker)
+    async with sessionmaker() as session:
+        book = await session.get(Book, b)
+        book.settings = {**book.settings, "other_rules": "别写套话\n每章都要有打斗"}
+        await session.commit()
+        old = await book_saves.checkpoint(session, b, "author", "旧的一档", kind="manual", force=True)
+    async with sessionmaker() as session:
+        book = await session.get(Book, b)
+        book.settings = {**book.settings, "other_rules": ""}
+        await session.commit()
+    res = await client.post(f"/api/books/{b}/saves/{old.id}/restore")
+    assert res.status_code == 200, res.text
+    async with sessionmaker() as session:
+        assert (await session.get(Book, b)).settings["other_rules"] == ""
+        texts = await session.scalars(
+            select(AuthorRequirement.text).where(AuthorRequirement.book_id == b).order_by(AuthorRequirement.created_at)
+        )
+        assert list(texts) == ["每章都要有打斗", "别写套话"]
+
+
 async def test_same_state_is_not_saved_and_one_edit_adds_one_row(sessionmaker):
     b = await full_book(sessionmaker)
     async with sessionmaker() as session:

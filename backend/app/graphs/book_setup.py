@@ -123,7 +123,8 @@ def initial_state(
 
 
 def requirements(state: SetupState) -> str:
-    return format_requirements(state.get("live_requirements") or [], [], state.get("settings"))
+    # 以前的开书流程要起书名：书名规矩照带
+    return format_requirements(state.get("live_requirements") or [], [], state.get("settings"), title=True)
 
 
 def _saved_state(saved: dict) -> dict:

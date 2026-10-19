@@ -734,10 +734,12 @@ def format_pitches(pitches: list[dict[str, Any]]) -> str:
     )
 
 
-def format_requirements(brief: list[str], notes: list[str], settings: dict | None = None) -> str:
+def format_requirements(
+    brief: list[str], notes: list[str], settings: dict | None = None, *, title: bool = False
+) -> str:
     """Every active requirement is included; deleting a ledger row removes it next step."""
     lines = list(dict.fromkeys(x for x in [*brief, *notes] if x.strip()))
-    blocks = [compile_rules(settings)]
+    blocks = [compile_rules(settings, title=title)]
     if lines:
         body = "\n".join(f"- {line}" for line in lines)
         blocks.append(f"【作者的要求（必须落实；后面的要求与前面冲突时以后面的为准）】\n{body}")

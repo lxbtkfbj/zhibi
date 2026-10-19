@@ -22,8 +22,11 @@ def problems(issues):
 
 def test_pick_by_genre_and_tags():
     assert pb.pick(HAREM).key == "harem_xuanhuan"
-    assert pb.pick({"genre": "仙侠", "tags": ["爽文"]}).key == "harem_xuanhuan"
-    assert pb.pick({"genre": "玄幻·修仙", "tags": ["凡人流", "慢热成长"]}).key == "general"  # 不是爽文、后宫
+    assert pb.pick({"genre": "仙侠", "tags": ["多女主"]}).key == "harem_xuanhuan"
+    assert pb.pick({"genre": "玄幻·修仙", "tags": ["凡人流", "慢热成长"]}).key == "general"  # 不是后宫
+    # 爽文、无敌、打脸不带后宫的玄幻书很多（《万古邪帝》：扮猪吃虎、重生、爽文、智斗、杀伐果断），不能套女主登场、修罗场
+    assert pb.pick({"genre": "玄幻", "tags": ["扮猪吃虎", "重生", "爽文", "智斗", "杀伐果断"]}).key == "general"
+    assert pb.pick({"genre": "高武", "tags": ["无敌", "打脸"]}).key == "general"
     assert pb.pick({"genre": "都市·重生", "tags": ["后宫"]}).key == "general"  # 不是玄幻
     assert pb.pick(None).key == "general"
 

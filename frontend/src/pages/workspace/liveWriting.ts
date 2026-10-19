@@ -9,7 +9,7 @@ import type { BookDetail, Chapter, Job, LiveDraft, MeetingMessage, Pending } fro
 import type { ApiParts } from './fromApi'
 import { workspaceKey } from './liveActions'
 import { cn, type VGate, type VNode, type VWriting, type WritePlan, type WritingGates } from './model'
-import type { ChapterDetail, WritingControl } from './writing'
+import { type ChapterDetail, type WritingControl, timesOf } from './writing'
 
 const WHO: Record<string, VWriting['who']> = { chief: '主编', lorekeeper: '设定师', writer: '写手', reviewer: '审稿' }
 const WRITE_KINDS = new Set(['write_book', 'rewrite_chapter'])
@@ -22,7 +22,7 @@ function writeBody(plan: WritePlan): { until: 'count' | 'unit' | 'volume' | 'boo
 }
 
 /** 等作者拍板的那件事放在哪一页、怎么说 */
-function gateOf(pending: Pending, parts: ApiParts | undefined): VGate | undefined {
+function gateOf(pending: Pending, parts: ApiParts | undefined, rewrites: number): VGate | undefined {
   switch (pending.kind) {
     case 'trial_read':
       return {
@@ -31,7 +31,7 @@ function gateOf(pending: Pending, parts: ApiParts | undefined): VGate | undefine
       }
     case 'chapter_stuck':
       return {
-        kind: 'stuck', node: `c${pending.chapter}`, title: `第${pending.chapter}章重写了两次，审稿还不满意`,
+        kind: 'stuck', node: `c${pending.chapter}`, title: rewrites > 0 ? `第${pending.chapter}章重写了${timesOf(rewrites)}次，审稿还不满意` : `第${pending.chapter}章审稿不满意`,
         hint: '先读一读：觉得能用，就直接用这一版；想让写手再改，就告诉他怎么改。', issues: pending.issues,
       }
     case 'volume_review': {
@@ -71,6 +71,8 @@ export function useLiveWriting({ bookId, detail, parts, messages, draft }: {
 }): WritingControl {
   const qc = useQueryClient()
   const settings = useBookSettings(bookId)
+  // 一章不过审稿最多重写几次：本书设置「编辑部写得多仔细」那一档定的
+  const rewrites = settings.data?.settings.max_rewrites ?? 2
   const job = detail.active_job
   const writingJob = job && WRITE_KINDS.has(job.kind) ? job : null
   // 点了停下：等手上这一章写完（记的是哪一轮，换了一轮就不算）
@@ -101,7 +103,7 @@ export function useLiveWriting({ bookId, detail, parts, messages, draft }: {
       }
     }
     if (state === 'waiting_author' && writingJob.pending) {
-      const gate = gateOf(writingJob.pending, parts)
+      const gate = gateOf(writingJob.pending, parts, rewrites)
       return gate ? { state: 'waiting', gate } : { state: 'idle' }
     }
     if (state === 'failed') return { state: 'failed', error: writingJob.error || '模型出错了', note: '写好的都留着，点「接着写」从中断的地方接着做。' }
@@ -111,7 +113,7 @@ export function useLiveWriting({ bookId, detail, parts, messages, draft }: {
       return { state: 'finished', note: note || '这一轮写完了。' }
     }
     return { state: 'idle' }
-  }, [writingJob, draft, messages, parts, stopping, finished])
+  }, [writingJob, draft, messages, parts, stopping, finished, rewrites])
 
   const gates: WritingGates = {
     segment: settings.data?.settings.segment_approval ?? true,
@@ -145,7 +147,7 @@ export function useLiveWriting({ bookId, detail, parts, messages, draft }: {
   }, [progress, qc, bookId])
 
   return {
-    status, gates, trialDone: detail.trial_read_done,
+    status, gates, trialDone: detail.trial_read_done, rewrites,
     setGate: async (key, on) => {
       const field = { segment: 'segment_approval', volume: 'volume_approval', chapters: 'chapters_approval', trial: 'trial_read' }[key]
       await patch(`/books/${bookId}/settings`, { [field]: on })

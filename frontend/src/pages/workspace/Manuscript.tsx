@@ -7,7 +7,7 @@ import { useSave, useWorkspace } from './actions'
 import { chapterNodes, cn, countWords, findEntry, findNode, splitTitle, type VBook, type VGate, type VNode, type WritePlan, type WritingGates } from './model'
 import { CardMenu, DirectoryShell, Editable, LinkChip, Sheet } from './widgets'
 import { rowSelected, smallButton, titleClass } from './styles'
-import { type ChapterDetail, GATE_LABELS, type WritingControl, chapterLabel, gateTarget, placeOf, readyToWrite, upcomingSteps, writePlans } from './writing'
+import { type ChapterDetail, GATE_LABELS, type WritingControl, chapterLabel, gateTarget, placeOf, readyToWrite, stuckRule, upcomingSteps, writePlans } from './writing'
 
 /** 正文这几页要跳去的地方 */
 export interface ManuscriptNav {
@@ -279,7 +279,7 @@ function GateToggles({ writing, nav }: { writing: WritingControl; nav: Manuscrip
           </label>
         ))}
       </div>
-      <p className="mt-2.5 text-[13px] text-ink-3">一章重写两次还过不了审稿，总会停下来请你定。</p>
+      <p className="mt-2.5 text-[13px] text-ink-3">{stuckRule(writing.rewrites)}</p>
     </section>
   )
 }
@@ -344,7 +344,7 @@ export function ManuscriptHome({ book, writing, nav }: { book: VBook; writing: W
               : <button type="button" className={clsx(primaryButton, 'mt-5 h-10 px-7')} onClick={() => say(nav, writing.start(plan))}>{done.length ? '接着写' : '开写'}</button>}
             <h3 className="mt-9 mb-2.5 text-[13px] tracking-[0.15em] text-ink-3">开写以后会这样走</h3>
             <ol className="list-decimal space-y-1.5 pl-5 text-[15px] leading-relaxed text-ink-2 marker:text-ink-3">
-              {upcomingSteps(book.outline, writing.gates, writing.trialDone).map((step) => <li key={step}>{step}</li>)}
+              {upcomingSteps(book.outline, writing.gates, writing.trialDone, writing.rewrites).map((step) => <li key={step}>{step}</li>)}
             </ol>
           </div>
         )}

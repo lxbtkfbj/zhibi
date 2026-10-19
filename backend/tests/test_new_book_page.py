@@ -91,6 +91,25 @@ async def test_blank_book_uses_chapter_words_from_settings(client, queued):
     assert res.json()["book"]["concept"]["chapter_words"] == 3200
 
 
+async def test_blank_book_moves_default_rules_into_writing_requirements(client, queued):
+    # 2026-10-19：「其他规矩」并进写作要求，新书默认里带着的，建书时挪成这本书一直有效的写作要求
+    defaults = await client.put("/api/settings/new-book-defaults", json={"other_rules": "别写套话\n\n 主角说话要贫 "})
+    assert defaults.status_code == 200
+    book = (await client.post("/api/books", json={"start_setup": False})).json()["book"]
+    rows = (await client.get(f"/api/books/{book['id']}/requirements")).json()
+    assert [(row["text"], row["label"]) for row in rows] == [("别写套话", "一直有效"), ("主角说话要贫", "一直有效")]
+    settings = (await client.get(f"/api/books/{book['id']}/settings")).json()
+    assert settings["settings"]["other_rules"] == "" and "别写套话" not in settings["rules_text"]
+
+
+async def test_book_detail_tells_actual_chapter_words(client, queued):
+    # 本书设置没填每章字数：按新建时记进定调的写；填了以后按设置写，书的详情跟着变（简介页「约 N 章」用它算）
+    book = (await client.post("/api/books", json={"start_setup": False})).json()["book"]
+    assert book["chapter_words"] == DEFAULT_CHAPTER_WORDS
+    assert (await client.patch(f"/api/books/{book['id']}/settings", json={"chapter_words": 3000})).status_code == 200
+    assert (await client.get(f"/api/books/{book['id']}")).json()["chapter_words"] == 3000
+
+
 @pytest.mark.parametrize(
     "extra",
     [

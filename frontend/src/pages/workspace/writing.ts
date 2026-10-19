@@ -13,6 +13,8 @@ export interface WritingControl {
   setGate(key: keyof WritingGates, on: boolean): Promise<string | void>
   /** 前 3 章试读过了没有 */
   trialDone: boolean
+  /** 一章不过审稿最多重写几次（本书设置「编辑部写得多仔细」那一档定的） */
+  rewrites: number
   /** 开不了写时说为什么 */
   blocked?: string
   start(plan: WritePlan): Promise<string | void>
@@ -42,6 +44,20 @@ export const GATE_LABELS: { key: keyof WritingGates; label: string; note?: strin
   { key: 'trial', label: '新书写完前 3 章，请我试读', note: '网文讲「黄金三章」：读者看完前三章就决定追不追，前三章最值得你亲自读。' },
 ]
 
+const TIMES = ['', '一', '两', '三', '四', '五']
+/** 3 → 三（「重写三次」） */
+export const timesOf = (n: number) => TIMES[n] ?? String(n)
+
+/** 一章过不了审稿会怎样：重写几次跟着「编辑部写得多仔细」那一档走 */
+export function rewriteRule(rewrites: number): string {
+  return rewrites > 0 ? `不过关退回重写，${timesOf(rewrites)}次还不行就停下来请你定` : '不过关就停下来请你定'
+}
+
+/** 开写页「停在哪由你定」底下那一句：这一处总会停 */
+export function stuckRule(rewrites: number): string {
+  return rewrites > 0 ? `一章重写${timesOf(rewrites)}次还过不了审稿，总会停下来请你定。` : '一章过不了审稿，总会停下来请你定。'
+}
+
 /** 「第3章「少半截的小指」」 */
 export function chapterLabel(node: VNode): string {
   const [prefix, name] = splitTitle(node.title)
@@ -70,7 +86,7 @@ export function writePlans(root: VNode): { key: WritePlan; label: string; hint: 
 }
 
 /** 开写以后会怎么走：按大纲现在的样子和这几处要不要停，用白话列出来。 */
-export function upcomingSteps(root: VNode, gates: WritingGates, trialDone: boolean): string[] {
+export function upcomingSteps(root: VNode, gates: WritingGates, trialDone: boolean, rewrites = 2): string[] {
   const chapters = chapterNodes(root)
   const done = chapters.filter((c) => c.body?.status === 'done').length
   const next = chapters.find((c) => c.body?.status !== 'done')
@@ -91,7 +107,7 @@ export function upcomingSteps(root: VNode, gates: WritingGates, trialDone: boole
   } else {
     steps.push(`写手从${chapterLabel(next)}${done ? '接着' : '开始'}写，一章一章往下写`)
   }
-  steps.push('每章写完，审稿过一遍（不过关退回重写，两次还不行就停下来请你定），设定师记下人物、设定的变化')
+  steps.push(`每章写完，审稿过一遍（${rewriteRule(rewrites)}），设定师记下人物、设定的变化`)
   if (gates.trial && !trialDone && done < 3) steps.push('写完前 3 章，停下来请你试读')
   if (next && hasUnitWithoutChapters(root)) steps.push(`写到还没有章纲的单元，主编先出章纲${stop(gates.chapters)}`)
   if (next && hasLater(root, '卷')) steps.push(`写到新的一卷，主编先拆单元、写卷纲${stop(gates.volume)}`)

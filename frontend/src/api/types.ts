@@ -301,6 +301,8 @@ export interface BookDetail extends BookSummary {
   active_job: Job | null
   chapters_final: number
   words_final: number
+  /** 实际按每章多少字写：本书设置填了用它，没填用新建时记下的（2500） */
+  chapter_words?: number
   /** 新工作台：这本书每一类设定有哪几栏 */
   card_layouts?: Record<string, { facts: { key: string; label: string }[]; sections: { key: string; label: string }[] }>
 }

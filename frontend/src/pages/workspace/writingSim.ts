@@ -223,7 +223,7 @@ export function useWritingSim(book: VBook, setBook: Dispatch<SetStateAction<VBoo
       }
     }
     return {
-      status, gates, trialDone, blocked,
+      status, gates, trialDone, blocked, rewrites: 2,
       setGate: async (key, on) => {
         setGates((g) => ({ ...g, [key]: on }))
         return on ? '好，写到那里会停下来请你看' : '好，写到那里编辑部自己定，不停下来'

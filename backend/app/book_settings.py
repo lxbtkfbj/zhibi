@@ -56,17 +56,19 @@ def merge_settings(current: dict | None, changes: dict) -> dict:
     return BookSettings.model_validate(merged).model_dump()
 
 
-def compile_rules(settings: dict | BookSettings | None) -> str:
-    """Compile only present values; do not inject defaults into an empty input."""
+def compile_rules(settings: dict | BookSettings | None, *, title: bool = False) -> str:
+    """Compile only present values; do not inject defaults into an empty input.
+
+    书名规矩只在要起书名时带（新建页起草、以前的开书流程）：书有了名字以后写正文、审稿、排大纲都用不上。"""
     s = settings.model_dump() if isinstance(settings, BookSettings) else settings or {}
     lines = []
-    title = {
+    title_rule = {
         "short": "2-6 个字的经典短书名，像《逆天邪神》《斗破苍穹》，不要用「主标题：副标题」的长书名。",
         "tomato": "番茄式长书名，「主题：一句话卖点」的格式，例如《苟道邪尊：平时低调发育，战时越境秒杀》。",
         "custom": s.get("title_custom", "").strip(),
     }.get(s.get("title_style"), "")
-    if title:
-        lines.append(f"书名：{title}")
+    if title and title_rule:
+        lines.append(f"书名：{title_rule}")
     person = {
         "first": "全书用第一人称（「我」）叙述。",
         "second": "全书用第二人称（「你」）叙述。",

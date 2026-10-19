@@ -60,7 +60,7 @@ async def draft(body: BookDraftIn, session: AsyncSession = SessionDep) -> BookDr
     blocks = {
         "idea": body.idea.strip() or "（作者没写点子，按下面现在的样子来）",
         "catalog": catalog_text(),
-        "requirements": compile_rules(defaults),
+        "requirements": compile_rules(defaults, title=True),
         "revision": (
             f"【新建页上现在的样子】\n{format_current(body.current)}\n\n【作者的意见】\n{body.feedback.strip()}"
             if revising

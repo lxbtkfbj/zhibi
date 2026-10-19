@@ -14,9 +14,7 @@
 .settings-segmented button { min-height: 26px; padding: 3px 9px; color: var(--color-ink-2); font-size: 12px; line-height: 20px; border-left: 1px solid var(--color-divider); white-space: nowrap; cursor: pointer; }
 .settings-segmented button:first-child { border-left: 0; }
 .settings-segmented button:hover { background: var(--color-paper-2); }
-.settings-segmented button.is-custom { color: var(--color-seal); }
 .settings-segmented button.is-selected { background: var(--color-ink); color: var(--color-paper-2); }
-.settings-segmented button.is-selected.is-custom { background: var(--color-seal); color: var(--color-on-seal); }
 .settings-toggle { flex-shrink: 0; position: relative; width: 34px; height: 20px; border-radius: 12px; background: var(--color-line-2); cursor: pointer; }
 .settings-toggle span { position: absolute; width: 16px; height: 16px; top: 2px; left: 2px; border-radius: 50%; background: var(--color-card); transition: transform 150ms; }
 .settings-toggle.is-on { background: var(--color-ink); }
@@ -37,13 +35,7 @@
 .settings-button.is-danger { color: var(--color-seal); }
 .settings-button:disabled { opacity: .5; cursor: not-allowed; }
 .settings-save-status { margin-left: 8px; font-size: 11px; color: var(--color-lore); white-space: nowrap; }
-.settings-subrows { margin-top: 12px; border-left: 2px solid var(--color-divider); padding-left: 8px; }
-.settings-subrows .settings-row { padding: 8px 0 8px 8px; }
-.settings-preview { margin-top: 24px; border: 1px dashed var(--color-line-2); border-radius: 10px; padding: 16px; }
-.settings-preview h3 { color: var(--color-ink-2); font-size: 13px; }
-.settings-preview p { color: var(--color-ink-3); font-size: 12px; margin-top: 5px; }
-.settings-preview pre { margin-top: 12px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--color-ink); font: inherit; font-size: 13px; line-height: 1.8; }
-.settings-modal-overlay { position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center; background: var(--color-overlay); padding: 18px; }
+.settings-modal-overlay { position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center; background: var(--color-overlay); padding: 18px; backdrop-filter: blur(6px); }
 .settings-modal { width: 1040px; max-width: 100%; height: 760px; max-height: calc(100dvh - 36px); display: flex; flex-direction: column; overflow: hidden; background: var(--color-paper-2); border: 1px solid var(--color-divider); border-radius: 12px; box-shadow: var(--shadow-lift); }
 .settings-modal-heading { display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; padding: 14px 20px; border-bottom: 1px solid var(--color-divider); }
 .settings-modal-heading h2 { font-size: 17px; font-weight: 600; }

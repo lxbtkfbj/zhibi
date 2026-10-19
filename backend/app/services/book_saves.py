@@ -42,6 +42,7 @@ from app.models import (
     Volume,
     WorldEntry,
 )
+from app.services.requirements import absorb_other_rules
 
 log = logging.getLogger(__name__)
 
@@ -864,6 +865,8 @@ async def restore(session: AsyncSession, book_id: uuid.UUID, save_id: int) -> tu
         await session.execute(
             update(Book.__table__).where(Book.__table__.c.id == book_id).values(**values, updated_at=func.now())
         )
+        # 2026-10-19 以前的存档，本书设置里还带着「其他规矩」：挪进写作要求，和新的一样
+        await absorb_other_rules(session, await session.get(Book, book_id, populate_existing=True))
     # 停在半路能「接着做」的活作废：不然接着做会照着旧进度往下写
     await session.execute(
         update(Job)

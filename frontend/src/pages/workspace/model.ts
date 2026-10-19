@@ -161,7 +161,7 @@ export interface VWriting {
   stopping?: boolean
 }
 
-/** 写作中停下来请作者看的地方（本书设置里的四个开关） */
+/** 写作中停下来请作者看的地方：开写页「停在哪由你定」的四个开关（存在本书设置里，只在开写页改） */
 export interface WritingGates { segment: boolean; volume: boolean; chapters: boolean; trial: boolean }
 
 export type WritePlan = '1' | '3' | 'unit' | 'volume' | 'book'

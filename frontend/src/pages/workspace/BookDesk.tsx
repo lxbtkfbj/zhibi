@@ -2,20 +2,20 @@
  *  顶栏「存档」是整本书的存档（第五步第二批），「待处理」是编辑部等你定的建议（第四步第二批），都在右边一栏。 */
 
 import { useIsMutating } from '@tanstack/react-query'
-import { Settings, X } from 'lucide-react'
+import { Settings } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useBook, useJobActions, useOutline } from '../../api/hooks'
 import { useLibrarySuggestions } from '../../api/library'
 import type { BookDetail, ChatViewing, Conversation, LiveDraft, MeetingMessage } from '../../api/types'
 import { EmptyState } from '../../components/ui'
-import { BookSettingsPage } from '../BookSettingsPage'
 import type { ChatQuote } from '../../lib/chat'
 import { useMeeting } from '../../lib/useMeeting'
 import { useConversationReads } from '../../lib/useWorkspacePanels'
 import { currentTarget, type NodeFeedback, nodeFeedback } from '../../lib/workspace'
 import { segmentReviewKey } from '../../lib/outlineWriting'
 import { BookContext, type BookContextValue, type PitchChoice } from '../book/context'
+import { BookSettingsDialog } from './BookSettings'
 import { ChatConvs } from './ChatConvs'
 import { LiveChat } from './LiveChat'
 import { flushAutoSave, useLiveBook } from './liveActions'
@@ -109,22 +109,6 @@ function JobNotice({ book }: { book: BookDetail }) {
   )
 }
 
-/** 本书设置：盖在书上的一整页，关上就回到刚才那一页。 */
-function SettingsSheet({ onClose }: { onClose: () => void }) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-  return (
-    <div role="dialog" aria-label="本书设置" className="scroll-thin fixed inset-x-0 top-14 bottom-0 z-40 overflow-y-auto bg-paper 2xl:top-16">
-      <button type="button" onClick={onClose} aria-label="关上本书设置" title="关上（Esc）"
-        className="fixed top-[4.5rem] right-6 z-10 rounded-lg p-2 text-ink-3 transition-colors hover:bg-line/50 hover:text-ink 2xl:top-20"><X className="size-5" /></button>
-      <BookSettingsPage />
-    </div>
-  )
-}
-
 function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
   const { book, actions, loading, error, raw } = useLiveBook(bookId)
   const [openChat, setOpenChat] = useState(0)
@@ -137,21 +121,15 @@ function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
   const [saves, setSavesState] = useState<{ open: boolean; id: number | null }>({ open: false, id: null })
   // 待处理那一栏：开没开、要找到挂在哪一条上的建议；和存档那一栏同一个位置，开一个就关另一个
   const [pending, setPendingState] = useState<{ open: boolean; focus: string | null }>({ open: false, focus: null })
-  // 本书设置：盖在书上的一整页
+  // 本书设置：居中的弹窗，背景糊掉；存档、待处理那一栏开着也不动，关上弹窗还是刚才的样子
   const [settings, setSettings] = useState(false)
   const setSaves = useCallback((next: { open: boolean; id: number | null }) => {
     setSavesState(next)
-    if (next.open) {
-      setPendingState({ open: false, focus: null })
-      setSettings(false)
-    }
+    if (next.open) setPendingState({ open: false, focus: null })
   }, [])
   const setPending = useCallback((next: { open: boolean; focus: string | null }) => {
     setPendingState(next)
-    if (next.open) {
-      setSavesState({ open: false, id: null })
-      setSettings(false)
-    }
+    if (next.open) setSavesState({ open: false, id: null })
   }, [])
   const closeSettings = useCallback(() => setSettings(false), [])
   const closeSaves = useCallback(() => setSaves({ open: false, id: null }), [setSaves])
@@ -190,7 +168,7 @@ function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
     <>
       <SavesButton open={saves.open} onClick={() => setSaves(saves.open ? { open: false, id: null } : { open: true, id: null })} />
       <PendingButton count={suggestions.data?.length ?? book.pending} open={pending.open} onClick={() => setPending(pending.open ? { open: false, focus: null } : { open: true, focus: null })} />
-      <button type="button" onClick={() => { setSettings(!settings); setSavesState({ open: false, id: null }); setPendingState({ open: false, focus: null }) }}
+      <button type="button" onClick={() => setSettings(true)}
         aria-pressed={settings} className={`rounded-lg p-2 transition-colors hover:bg-line/50 hover:text-ink ${settings ? 'bg-line/50 text-ink' : 'text-ink-3'}`} aria-label="本书设置" title="本书设置">
         <Settings className="size-4" />
       </button>
@@ -204,7 +182,7 @@ function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
         chatBadge={unread} openChat={openChat} writing={writing} />
       <SavesPanel open={saves.open} saveId={saves.id} onClose={closeSaves} onOpenSave={(id) => setSaves({ open: true, id })} />
       <PendingPanel open={pending.open} focus={pending.focus} onClose={closePending} />
-      {settings && <SettingsSheet onClose={closeSettings} />}
+      <BookSettingsDialog open={settings} onClose={closeSettings} />
       </PendingContext.Provider>
     </BookContext.Provider>
   )

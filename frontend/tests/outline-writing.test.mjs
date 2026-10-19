@@ -83,12 +83,12 @@ test('会议卡新篇显示标题正文终点，旧消息继续显示旧事实',
   assert.deepEqual(nextSegmentFields({ title: '尚待补齐的新篇', text: '', end: {} }), [{ label: '篇名', value: '尚待补齐的新篇' }])
 })
 
-test('展开任务有中文进度，单元章纲开关共用本书和新书默认组件', () => {
+test('展开任务有中文进度，单元章纲开关只在开写页（2026-10-19 起不在本书设置里重复）', () => {
   assert.equal(progressText({ active_job: { kind: 'outline_expand', status: 'running', id: 'j' }, chapters_final: 0 }, [], null, null), '展开大纲 · 主编正在展开这一个')
+  const live = readFileSync(new URL('../src/pages/workspace/liveWriting.ts', import.meta.url), 'utf8')
+  assert.match(live, /chapters: settings.data\?.settings.chapters_approval \?\? false/)
   const shared = readFileSync(new URL('../src/components/settings/WritingSettings.tsx', import.meta.url), 'utf8')
-  assert.ok(shared.indexOf('每卷卷纲都要我拍板') < shared.indexOf('每个单元的章纲都给我看'))
-  assert.ok(shared.indexOf('每个单元的章纲都给我看') < shared.indexOf('每一篇开写前先给我确认'))
-  assert.match(shared, /checked=\{value.chapters_approval \?\? false\}/)
+  assert.ok(!shared.includes('chapters_approval'))
 })
 
 test('旧版书页已退役（2026-10-19）：旧页面、专用问卷组件和只给旧页面用的写作组件都拿掉了', () => {

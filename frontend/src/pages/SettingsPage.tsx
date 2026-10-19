@@ -10,7 +10,7 @@ import type { LlmProfile, LlmProfileInput, RoleKey } from '../api/types'
 import { ErrorText, Spinner } from '../components/ui'
 import { ModelSelector } from '../components/ModelSelector'
 import { Segmented, SettingsButton, SettingsGroup, SettingsRow, Stepper, Toggle } from '../components/settings/SettingsList'
-import { RulesPreview, WritingSettings } from '../components/settings/WritingSettings'
+import { WritingSettings } from '../components/settings/WritingSettings'
 import { ROLE_KEY_LABEL, ROLE_KEYS } from '../lib/roles'
 import { DESK_SCALES, useAppearance } from '../lib/appearance'
 
@@ -110,9 +110,8 @@ function AppearancePanel() {
 
 function DefaultsEditor({ initial }: { initial: SettingsResponse }) {
   const editor = useSettingsEditor(initial, '/settings/new-book-defaults', 'PUT')
-  return <><p className="mb-5 text-xs leading-5 text-ink-3">自动保存。只影响之后新开的书；已有书保留自己的设置。</p>{!!editor.error && <div className="mb-4"><ErrorText error={editor.error} /><SettingsButton onClick={editor.retry}>重试保存</SettingsButton></div>}
-    <SettingsGroup title="开书"><SettingsRow label="开书方式" hint="一步一步看：每做完一步等你确认；一口气做完再给我看：定调和设定库做完不停，停在大纲给你看" status={editor.statuses.setup_mode}><Segmented label="默认开书方式" value={editor.value.setup_mode} options={[{ value: 'puzzle', label: '一步一步看' }, { value: 'oneshot', label: '一口气做完再给我看' }]} onChange={setup_mode => editor.update({ setup_mode })} /></SettingsRow></SettingsGroup>
-    <WritingSettings value={editor.value} onChange={editor.update} statuses={editor.statuses} /><RulesPreview text={editor.rulesText} /></>
+  return <><p className="mb-5 text-xs leading-5 text-ink-3">自动保存。只管之后新开的书；已经有的书，在书页右上角齿轮「本书设置」里改。</p>{!!editor.error && <div className="mb-4"><ErrorText error={editor.error} /><SettingsButton onClick={editor.retry}>重试保存</SettingsButton></div>}
+    <WritingSettings value={editor.value} onChange={editor.update} statuses={editor.statuses} /></>
 }
 function DefaultsPanel() {
   const query = useNewBookDefaults()

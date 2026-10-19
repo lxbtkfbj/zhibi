@@ -230,6 +230,8 @@ class BookDetail(BookSummary):
     # 写作进度：已定稿章数、总字数
     chapters_final: int = 0
     words_final: int = 0
+    # 实际按每章多少字写：本书设置填了用它，没填用新建时记进定调的，都没有按 3000
+    chapter_words: int = 0
 
 
 class BookCreated(BaseModel):

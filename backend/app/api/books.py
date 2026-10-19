@@ -40,7 +40,9 @@ from app.schemas import (
 from app.services import jobs, outline_structure, writing_store
 from app.services.library import lock_book
 from app.services.meeting import post_message
+from app.services.requirements import absorb_other_rules
 from app.services.versions import record_version, snapshot_of
+from app.services.writing_context import chapter_words
 
 router = APIRouter(tags=["books"])
 
@@ -66,6 +68,7 @@ async def detail(session: AsyncSession, book: Book) -> BookDetail:
         )
     ).one()
     out.chapters_final, out.words_final = int(count), int(words)
+    out.chapter_words = chapter_words(book)
     return out
 
 
@@ -93,6 +96,7 @@ async def create_book(
     book.settings = {**book.settings, "setup_mode": mode}
     session.add(book)
     await session.flush()
+    await absorb_other_rules(session, book)
     job = jobs.new_setup_job(book, ask=body.ask, mode=mode, prefill=body.prefill)
     session.add(job)
     await session.commit()
@@ -134,6 +138,9 @@ async def create_blank_book(body: BookCreate, session: AsyncSession) -> BookCrea
     book.concept["chapter_words"] = settings.get("chapter_words") or DEFAULT_CHAPTER_WORDS
     book.settings = settings
     session.add(book)
+    await session.flush()
+    # 新书默认里的其他规矩挪进这本书的写作要求
+    await absorb_other_rules(session, book)
     await session.commit()
     await session.refresh(book)
     return BookCreated(book=await detail(session, book), job=None)
@@ -153,7 +160,9 @@ async def update_book(
 ) -> BookDetail:
     await lock_book(session, book.id)
     await session.refresh(book, with_for_update=True)
-    await ensure_idle(session, book.id)
+    # 文风参考只给写手看、编辑部不会去改它：只改它时编辑部干活也能改，从下一章起照新的写
+    if body.model_fields_set - {"style_reference"}:
+        await ensure_idle(session, book.id)
     before = snapshot_of(book)
     if body.title is not None:
         book.title = body.title

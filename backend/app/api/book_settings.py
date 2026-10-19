@@ -65,8 +65,9 @@ class RequirementOut(BaseModel):
     updated_at: datetime
 
 
-def result(settings: dict) -> SettingsOut:
-    return SettingsOut(settings=BookSettings.model_validate(settings), rules_text=compile_rules(settings))
+def result(settings: dict, *, title: bool = False) -> SettingsOut:
+    # 书名规矩只在起书名时带：新书默认里有，已经建好的书没有
+    return SettingsOut(settings=BookSettings.model_validate(settings), rules_text=compile_rules(settings, title=title))
 
 
 def validated(current: dict, body: dict) -> dict:
@@ -83,7 +84,7 @@ async def new_book_defaults(session: AsyncSession) -> dict:
 
 @router.get("/settings/new-book-defaults", response_model=SettingsOut)
 async def get_defaults(session: AsyncSession = SessionDep):
-    return result(await new_book_defaults(session))
+    return result(await new_book_defaults(session), title=True)
 
 
 @router.put("/settings/new-book-defaults", response_model=SettingsOut)
@@ -95,7 +96,7 @@ async def put_defaults(body: dict, session: AsyncSession = SessionDep):
     else:
         row.value = values
     await session.commit()
-    return result(values)
+    return result(values, title=True)
 
 
 @router.get("/books/{book_id}/settings", response_model=SettingsOut)

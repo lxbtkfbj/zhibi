@@ -52,6 +52,16 @@ async def add_requirement(
     return row
 
 
+async def absorb_other_rules(session: AsyncSession, book: Book) -> None:
+    """本书设置的「其他规矩」并进了写作要求：每一行挪成一条一直有效的写作要求，设置里清空。
+    已有的书迁移 0021 挪过；新建的书（新书默认里带着的）、回到旧存档时在这里挪。书要先 flush 过、有 id。"""
+    rules = (book.settings or {}).get("other_rules") or ""
+    for line in dict.fromkeys(line.strip() for line in rules.splitlines() if line.strip()):
+        await add_requirement(session, book.id, line)
+    if rules:
+        book.settings = {**book.settings, "other_rules": ""}
+
+
 async def suppress_legacy_text(session: AsyncSession, book_id: uuid.UUID, text: str) -> None:
     """Remember an explicit edit/delete so an old checkpoint cannot resurrect its text."""
     await session.execute(select(Book.id).where(Book.id == book_id).with_for_update())

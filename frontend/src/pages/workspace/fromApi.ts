@@ -9,7 +9,7 @@ import {
 } from './model'
 
 export interface ApiParts {
-  book: { id: string; title: string; genre: string; concept: Record<string, unknown>; card_layouts?: Record<string, CardTemplate> }
+  book: { id: string; title: string; genre: string; concept: Record<string, unknown>; card_layouts?: Record<string, CardTemplate>; chapter_words?: number }
   library: LibrarySnapshot
   outline: OutlineTree
   relationships: Relationship[]
@@ -218,7 +218,8 @@ export function bookFromApi(parts: ApiParts): VBook {
     genre: text(concept.genre) || parts.book.genre || '',
     tags: Array.isArray(concept.tags) ? (concept.tags as string[]) : [],
     length,
-    chapterWords: typeof concept.chapter_words === 'number' && concept.chapter_words > 0 ? concept.chapter_words : 2500,
+    // 本书设置里改了每章字数，简介页「约 N 章」跟着变：后台给的是实际按多少字写
+    chapterWords: parts.book.chapter_words || (typeof concept.chapter_words === 'number' && concept.chapter_words > 0 ? concept.chapter_words : 2500),
     blurb: text(concept.story) || text(concept.logline),
     world,
     categories,

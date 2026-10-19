@@ -1,6 +1,7 @@
 """Settings, exact compiled prose, live flow controls and the unique requirement ledger."""
 
 import importlib.util
+import json
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -54,7 +55,14 @@ from app.services.writing_context import chapter_words, requirements_of
     ],
 )
 def test_compile_exact_options(settings, line):
-    assert compile_rules(settings) == "【这本书的写作规矩】\n- " + line
+    assert compile_rules(settings, title=True) == "【这本书的写作规矩】\n- " + line
+
+
+def test_title_rule_only_when_naming_a_book():
+    # 书有了名字以后，写正文、审稿、排大纲都不再带书名规矩；只有起书名（新建页起草、以前的开书流程）才带
+    settings = {"title_style": "short", "person": "third"}
+    assert compile_rules(settings) == "【这本书的写作规矩】\n- 人称：全书用第三人称叙述。"
+    assert compile_rules(settings, title=True).count("书名：") == 1
 
 
 @pytest.mark.parametrize(
@@ -151,7 +159,9 @@ async def test_defaults_are_copied_and_validated(client):
     await client.put("/api/settings/new-book-defaults", json={"title_style": "short"})
     values = (await client.get(f"/api/books/{book_id}/settings")).json()
     assert values["settings"]["title_style"] == "tomato"
-    assert "番茄式长书名" in values["rules_text"]
+    # 书名规矩只在起书名时带：新书默认的预览里有，已经建好的书没有
+    assert "番茄式长书名" not in values["rules_text"]
+    assert "经典短书名" in (await client.get("/api/settings/new-book-defaults")).json()["rules_text"]
     for body in ({"pitches": 5}, {"max_rewrites": -1}, {"person": "custom"}, {"volume_audit": None}, {"unknown": 1}):
         assert (await client.patch(f"/api/books/{book_id}/settings", json=body)).status_code == 422
 
@@ -188,6 +198,15 @@ async def test_setting_change_creates_note_and_is_consumed(client, sessionmaker)
     assert "番茄长书名" in out["notes"][0]
     # Settings notifications are transient instructions, not irrevocable ledger requirements.
     assert (await client.get(f"/api/books/{book_id}/requirements")).json() == []
+
+
+async def test_style_reference_can_change_while_editorial_works(client, sessionmaker):
+    # 文风参考只给写手看、编辑部不会去改：编辑部干活时也能改，从下一章起照新的写；别的照样等编辑部停下
+    book_id, _ = await fixture_book(sessionmaker, kind="write_book")
+    response = await client.patch(f"/api/books/{book_id}", json={"style_reference": "短句，多对话。"})
+    assert response.status_code == 200, response.text
+    assert response.json()["style_reference"] == "短句，多对话。"
+    assert (await client.patch(f"/api/books/{book_id}", json={"title": "新名字"})).status_code == 409
 
 
 async def test_writing_settings_change_is_group_system_message(client, sessionmaker):
@@ -420,6 +439,53 @@ async def test_legacy_migration_preserves_text_time_and_drops_column(sessionmake
             )
             module.downgrade()
             assert set(sync_connection.scalar(sa.text("SELECT requirements FROM books"))) == {"旧要求", "另一条"}
+
+        await connection.run_sync(migrate)
+        await session.rollback()
+
+
+async def test_other_rules_migration_moves_each_line_into_requirements(sessionmaker):
+    # 0021：「其他规矩」并进写作要求，每一行挪成一条一直有效的写作要求，已经有的不重复，设置里清空
+    spec = importlib.util.spec_from_file_location(
+        "rules_migration", Path("alembic/versions/0021_other_rules_to_requirements.py")
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    async with sessionmaker() as session:
+        connection = await session.connection()
+
+        def migrate(sync_connection):
+            sync_connection.execute(sa.text("CREATE SCHEMA rules_migration_test"))
+            sync_connection.execute(sa.text("SET LOCAL search_path TO rules_migration_test"))
+            sync_connection.execute(sa.text("CREATE TABLE books (id uuid PRIMARY KEY, settings jsonb)"))
+            sync_connection.execute(
+                sa.text(
+                    "CREATE TABLE author_requirements (id uuid PRIMARY KEY, book_id uuid, text text, "
+                    "source varchar(100), scope varchar(10) DEFAULT 'always', "
+                    "created_at timestamptz DEFAULT clock_timestamp())"
+                )
+            )
+            with_rules, without = uuid.uuid4(), uuid.uuid4()
+            for book_id, rules in ((with_rules, "规矩一\n\n 规矩二 \n规矩一\n已经有的"), (without, "")):
+                sync_connection.execute(
+                    sa.text("INSERT INTO books VALUES (:id, CAST(:settings AS jsonb))"),
+                    {"id": book_id, "settings": json.dumps({"person": "first", "other_rules": rules})},
+                )
+            sync_connection.execute(
+                sa.text(
+                    "INSERT INTO author_requirements (id, book_id, text, source) VALUES (:id, :book, '已经有的', 'note')"
+                ),
+                {"id": uuid.uuid4(), "book": with_rules},
+            )
+            module.op = Operations(MigrationContext.configure(sync_connection))
+            module.upgrade()
+            rows = sync_connection.execute(
+                sa.text("SELECT text, source, scope FROM author_requirements ORDER BY created_at")
+            ).all()
+            assert [row.text for row in rows] == ["已经有的", "规矩一", "规矩二"]
+            assert {(row.source, row.scope) for row in rows[1:]} == {("manual", "always")}
+            settings = dict(sync_connection.execute(sa.text("SELECT id, settings FROM books")).all())
+            assert settings[with_rules] == settings[without] == {"person": "first", "other_rules": ""}
 
         await connection.run_sync(migrate)
         await session.rollback()
