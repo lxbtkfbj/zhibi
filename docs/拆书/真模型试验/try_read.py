@@ -82,18 +82,28 @@ class ReadBatch(BaseModel):
 def profile_row(name: str) -> dict:
     with psycopg.connect("postgresql://zhibi:zhibi@127.0.0.1:5433/zhibi") as conn:
         cur = conn.execute(
-            "select base_url, model, api_key_encrypted, temperature, timeout_s, reasoning_effort from llm_profiles where name = %s",
+            "select base_url, model, api_key_encrypted, temperature, timeout_s, reasoning_effort, structured_method from llm_profiles where name = %s",
             (name,),
         )
-        base_url, model, key, temperature, timeout_s, effort = cur.fetchone()
-    return {"base_url": base_url, "model": model, "api_key": decrypt(key), "temperature": temperature, "timeout_s": timeout_s, "effort": effort}
+        row = cur.fetchone()
+        if row is None:
+            raise SystemExit(f"作者库里没有叫「{name}」的模型配置")
+        base_url, model, key, temperature, timeout_s, effort, method = row
+    return {
+        "name": name, "base_url": base_url, "model": model, "api_key": decrypt(key), "temperature": temperature,
+        "timeout_s": timeout_s, "effort": effort, "method": method,
+    }
+
+
+# 「A 3.8f」后来改名了；试别的模型时设环境变量 TEARDOWN_PROFILE（模型配置的名字）
+PROFILE = os.environ.get("TEARDOWN_PROFILE", "A fireworks/deepseek-v4.1-flash-1017")
 
 
 async def main() -> None:
     source, label = sys.argv[1], sys.argv[2]
     effort = sys.argv[3] if len(sys.argv) > 3 else None
     chapters = json.loads(Path(source).read_text(encoding="utf-8"))
-    p = profile_row("A 3.8f")
+    p = profile_row(PROFILE)
     template = (PROMPTS / "teardown_read.md").read_text(encoding="utf-8")
     body = "\n\n".join(f"「第 {c['index']} 章 {c['title']}」\n{c['text']}" for c in chapters)
     user = (

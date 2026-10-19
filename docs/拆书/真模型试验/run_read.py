@@ -9,21 +9,26 @@
 
 import asyncio
 import json
+import os
 import sys
 import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from try_read import PROMPTS, ReadBatch, profile_row  # noqa: E402  try_read 里已经读好 .env、接上 backend
+from try_read import PROFILE, PROMPTS, ReadBatch, profile_row  # noqa: E402  try_read 里已经读好 .env、接上 backend
 
 import httpx  # noqa: E402
 from langchain_core.messages import HumanMessage, SystemMessage  # noqa: E402
 from langchain_openai import ChatOpenAI  # noqa: E402
 
+from app.llm.router import parse_json_output, schema_instruction  # noqa: E402  和执笔里 JSON 模式同一套
+
 MAX_CHARS = 12000
 PER_BATCH = 4
 PARALLEL = 4
+# 思考调低；设 TEARDOWN_EFFORT= （空）就不发这个参数
+EFFORT = os.environ.get("TEARDOWN_EFFORT", "low")
 SYSTEM = "你是「执笔」编辑部的设定师，这次在拆别人写好的书：只照原文记，不评价、不改、不补。一律使用简体中文。"
 
 
@@ -94,11 +99,25 @@ class Roster:
 
 
 class Reader:
-    def __init__(self, book: str, out: Path, llm: ChatOpenAI) -> None:
-        self.book, self.out, self.llm = book, out, llm
+    def __init__(self, book: str, out: Path, llm: ChatOpenAI, method: str = "function_calling") -> None:
+        self.book, self.out, self.llm, self.method = book, out, llm, method
         self.template = (PROMPTS / "teardown_read.md").read_text(encoding="utf-8")
-        self.runnable = llm.with_structured_output(ReadBatch, method="function_calling", include_raw=True)
+        if method == "json_mode":
+            # 不认工具调用的模型：照执笔的 JSON 模式，把格式要求接在系统提示后面
+            self.runnable = llm.bind(response_format={"type": "json_object"})
+        else:
+            self.runnable = llm.with_structured_output(ReadBatch, method="function_calling", include_raw=True)
         self.calls: list[dict] = []
+
+    async def invoke(self, user: str) -> dict:
+        """调一次模型，返回和 with_structured_output(include_raw=True) 一样的 {raw, parsed, parsing_error}。"""
+        if self.method != "json_mode":
+            return await self.runnable.ainvoke([SystemMessage(SYSTEM), HumanMessage(user)])
+        raw = await self.runnable.ainvoke([SystemMessage(SYSTEM + schema_instruction(ReadBatch)), HumanMessage(user)])
+        try:
+            return {"raw": raw, "parsed": parse_json_output(ReadBatch, str(raw.content)), "parsing_error": None}
+        except ValueError as exc:
+            return {"raw": raw, "parsed": None, "parsing_error": exc}
 
     async def call(self, chapters: list[dict], roster: str, tag: str) -> list[dict]:
         """读一批，返回拿到的章；被限流等几秒再试，别的错直接当失败。"""
@@ -114,7 +133,7 @@ class Reader:
             started = time.monotonic()
             record = {"tag": tag, "chapters": [c["index"] for c in chapters], "chars": len(body), "roster_people": roster.count("\n- ") + (roster.startswith("- "))}
             try:
-                out = await self.runnable.ainvoke([SystemMessage(SYSTEM), HumanMessage(user)])
+                out = await self.invoke(user)
             except Exception as exc:  # noqa: BLE001
                 record.update(seconds=round(time.monotonic() - started, 1), error=f"{type(exc).__name__}: {str(exc)[:300]}")
                 self.calls.append(record)
@@ -170,15 +189,16 @@ async def main() -> None:
     data = json.loads(source.read_text(encoding="utf-8"))
     batches = make_batches(data["chapters"])
     print(f"{len(data['chapters'])} 章分成 {len(batches)} 批")
-    p = profile_row("A 3.8f")
+    p = profile_row(PROFILE)
+    print(f"模型：{p['name']}（{p['model']}，{p['method']}，思考 {EFFORT or '不发'}）")
     started = time.monotonic()
     async with httpx.AsyncClient(timeout=p["timeout_s"]) as client:
         llm = ChatOpenAI(
             model=p["model"], base_url=p["base_url"], api_key=p["api_key"], temperature=p["temperature"],
             timeout=p["timeout_s"], max_retries=0, http_async_client=client, http_client=httpx.Client(timeout=p["timeout_s"]),
-            reasoning_effort="low",
+            **({"reasoning_effort": EFFORT} if EFFORT else {}),
         )
-        reader = Reader(data["book"], out, llm)
+        reader = Reader(data["book"], out, llm, p["method"])
         roster = Roster()
         done: dict[int, dict] = {}
         # 第一批单独跑，后面每批开跑时带上已经读完的
@@ -199,6 +219,10 @@ async def main() -> None:
                 roster.add(result["chapters"])
     total = round(time.monotonic() - started, 1)
     summary = {
+        "profile": p["name"],
+        "model": p["model"],
+        "method": p["method"],
+        "effort": EFFORT,
         "seconds": total,
         "batches": len(batches),
         "calls": reader.calls,
