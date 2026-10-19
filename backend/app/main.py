@@ -22,6 +22,7 @@ from app.api import (
     prompt_tools,
     saves,
     story_map,
+    teardown,
     workspace,
 )
 from app.config import get_settings
@@ -85,6 +86,7 @@ def create_app() -> FastAPI:
         new_book,
         workspace,
         saves,
+        teardown,
     ):
         application.include_router(module.router, prefix="/api")
     return application

@@ -151,7 +151,9 @@ async def _update(session: AsyncSession, model: Any, row_id: uuid.UUID, body: Ba
                 before=before,
                 previous_source=previous_source,
             )
-            await author_rename_suggestions(session, row, before)
+            book = await session.get(Book, row.book_id)
+            if book.source != "teardown":
+                await author_rename_suggestions(session, row, before)
         await session.commit()
     except IntegrityError as exc:
         raise HTTPException(409, "名称重复") from exc

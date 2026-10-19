@@ -161,6 +161,9 @@ class BookDraftIn(BaseModel):
 
 class BookPatch(BaseModel):
     title: str | None = Field(None, min_length=1, max_length=200)
+    # 拆书确认页的原作者、原书简介；不改作者自己书的资料。
+    author: str | None = Field(None, max_length=200)
+    intro: str | None = Field(None, max_length=20000)
     style_reference: str | None = Field(None, max_length=20000)
     concept: dict | None = None
     spine: dict | None = None
@@ -209,6 +212,7 @@ class BookSummary(ORM):
     id: uuid.UUID
     title: str
     source: str
+    teardown: dict | None = None
     genre: str
     status: str
     idea: str

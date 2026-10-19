@@ -453,7 +453,8 @@ class CharacterUpdate(Lenient):
         description="本章结束时的实力与地位：修炼的写境界，言情、职场写身份、家世、职位，用等级体系里的叫法；变了才写，没变就留空",
     )
     abilities: str = Field(
-        default="", description="会的本事变了（学会新本事、失去旧本事）才写，写变化后完整的能力说明；境界写在实力与地位；没变就留空"
+        default="",
+        description="会的本事变了（学会新本事、失去旧本事）才写，写变化后完整的能力说明；境界写在实力与地位；没变就留空",
     )
     is_alive: bool = Field(default=True, description="本章结束时是否还活着")
 
@@ -648,7 +649,9 @@ class LibraryIntent(Lenient):
     new_names: list[str] = Field(
         default_factory=list, description="新建设定时才写：作者点了名的几条的名字；没点名的留空，由设定师起名"
     )
-    count: int = Field(default=1, ge=1, le=5, description="新建设定时才写：写几条；作者点了名的就是点名的条数，没说就是 1")
+    count: int = Field(
+        default=1, ge=1, le=5, description="新建设定时才写：写几条；作者点了名的就是点名的条数，没说就是 1"
+    )
     part: str = Field(
         default="", description="改设定时才写：改这一条的哪一处：卡片的字段名、等级的级名、「名称」「一句话」「一段话」"
     )
@@ -661,7 +664,9 @@ class LibraryIntent(Lenient):
         default="给几个写法",
         description="改设定时才写：作者只说了不满意、没说怎么改的，选给几个写法；说清了怎么改的，选照作者的意思改；要把这一条补齐、写全、补完整的，选补齐空着的",
     )
-    instruction: str = Field(default="", description="改设定、新建设定、写大纲时才写：作者想怎么改、想写成什么样，用作者的话概括一句")
+    instruction: str = Field(
+        default="", description="改设定、新建设定、写大纲时才写：作者想怎么改、想写成什么样，用作者的话概括一句"
+    )
     requirement: str = Field(
         default="",
         description="写作要求时才写：写成一句清楚的要求，说清做什么、不写理由，「这样」「那个」换成具体内容，60 字以内",
@@ -674,7 +679,9 @@ class LibraryIntent(Lenient):
         default="主编",
         description="提问闲聊时才写：谁来回答最合适：问设定、前后对不对、谁知道什么找设定师；问怎么写、文风找写手；要挑毛病找审稿；其余找主编",
     )
-    reply: str = Field(default="", description="改设定、新建设定、写大纲、写作要求时，主编在群聊里回作者的一句话；提问闲聊留空")
+    reply: str = Field(
+        default="", description="改设定、新建设定、写大纲、写作要求时，主编在群聊里回作者的一句话；提问闲聊留空"
+    )
     more: list[str] = Field(
         default_factory=list,
         description="作者这句话里还要编辑部做的别的事：上面只填第一件，其余每件改写成一句能单独交给编辑部的话，照作者说的先后排，最多 3 件；只有一件事留空",
@@ -686,7 +693,9 @@ class BookDraft(Lenient):
     blurb: str = Field(description="简介：写给读者看的那段话，100-250 字；开头一句就抓人，不剧透结局")
     channel: Literal["男频", "女频"] = Field(description="男频还是女频")
     genre: str = Field(description="类别：从给出的类别里挑一个，原样照写")
-    tags: list[str] = Field(default_factory=list, description="3-5 个标签，优先用给出的常见标签，没有合适的才自己写，每个不超过 6 个字")
+    tags: list[str] = Field(
+        default_factory=list, description="3-5 个标签，优先用给出的常见标签，没有合适的才自己写，每个不超过 6 个字"
+    )
     target_length: int = Field(ge=1, le=5000, description="篇幅，单位万字，一般 100-300")
     reply: str = Field(default="", description="一句话告诉作者你这版的思路，或者这次改了哪里")
 

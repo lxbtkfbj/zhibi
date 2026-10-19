@@ -45,12 +45,18 @@ async def test_arcs_insert_anywhere_and_move(client):
     last = (await client.post(f"/api/books/{book}/arcs", json={"title": "大结局"})).json()
     # 先写了第一篇和最后一篇，中间想到哪插到哪
     await client.post(f"/api/books/{book}/arcs", json={"title": "中段", "before_node_id": last["id"]})
-    middle2 = (await client.post(f"/api/books/{book}/arcs", json={"title": "中段二", "after_node_id": first["id"]})).json()
+    middle2 = (
+        await client.post(f"/api/books/{book}/arcs", json={"title": "中段二", "after_node_id": first["id"]})
+    ).json()
     assert await titles(client, book) == ["开局", "中段二", "中段", "大结局"]
-    res = await client.post(f"/api/books/{book}/outline/move", json={"kind": "arc", "id": middle2["id"], "direction": "down"})
+    res = await client.post(
+        f"/api/books/{book}/outline/move", json={"kind": "arc", "id": middle2["id"], "direction": "down"}
+    )
     assert res.status_code == 200, res.text
     assert await titles(client, book) == ["开局", "中段", "中段二", "大结局"]
-    res = await client.post(f"/api/books/{book}/outline/move", json={"kind": "arc", "id": first["id"], "direction": "up"})
+    res = await client.post(
+        f"/api/books/{book}/outline/move", json={"kind": "arc", "id": first["id"], "direction": "up"}
+    )
     assert res.status_code == 422
 
 
@@ -59,16 +65,30 @@ async def test_volumes_follow_their_arc_when_arcs_move(client):
     a = (await client.post(f"/api/books/{book}/arcs", json={"title": "甲"})).json()
     b = (await client.post(f"/api/books/{book}/arcs", json={"title": "乙"})).json()
     va = (await client.post(f"/api/books/{book}/volumes", json={"target_node_id": a["id"], "title": "甲卷"})).json()
-    vb = (await client.post(f"/api/books/{book}/volumes", json={"target_node_id": b["id"], "title": "乙卷", "after_volume_id": va["id"]})).json()
+    vb = (
+        await client.post(
+            f"/api/books/{book}/volumes", json={"target_node_id": b["id"], "title": "乙卷", "after_volume_id": va["id"]}
+        )
+    ).json()
     # 新建的卷章数先不定
     assert va["chapter_count"] == 0
     await client.post(f"/api/books/{book}/outline/move", json={"kind": "arc", "id": b["id"], "direction": "up"})
     tree = (await client.get(f"/api/books/{book}/outline-tree")).json()
-    assert [(arc["title"], [v["title"] for v in arc["volumes"]]) for arc in tree["arcs"]] == [("乙", ["乙卷"]), ("甲", ["甲卷"])]
+    assert [(arc["title"], [v["title"] for v in arc["volumes"]]) for arc in tree["arcs"]] == [
+        ("乙", ["乙卷"]),
+        ("甲", ["甲卷"]),
+    ]
     assert [v["index"] for arc in tree["arcs"] for v in arc["volumes"]] == [1, 2]
     # 同一篇里的卷能挪
-    vb2 = (await client.post(f"/api/books/{book}/volumes", json={"target_node_id": b["id"], "title": "乙卷二", "after_volume_id": vb["id"]})).json()
-    res = await client.post(f"/api/books/{book}/outline/move", json={"kind": "volume", "id": vb2["id"], "direction": "up"})
+    vb2 = (
+        await client.post(
+            f"/api/books/{book}/volumes",
+            json={"target_node_id": b["id"], "title": "乙卷二", "after_volume_id": vb["id"]},
+        )
+    ).json()
+    res = await client.post(
+        f"/api/books/{book}/outline/move", json={"kind": "volume", "id": vb2["id"], "direction": "up"}
+    )
     assert res.status_code == 200, res.text
     tree = (await client.get(f"/api/books/{book}/outline-tree")).json()
     assert [v["title"] for v in tree["arcs"][0]["volumes"]] == ["乙卷二", "乙卷"]
@@ -78,11 +98,15 @@ async def test_inserting_after_a_later_arc_plans_the_ones_before(client, session
     book = await blank_book(client)
     book_id = uuid.UUID(book)
     async with sessionmaker() as session:
-        session.add_all([
-            StoryNode(book_id=book_id, position=1, kind="milestone", title="已定", segment={"title": "已定", "text": "x"}),
-            StoryNode(book_id=book_id, position=2, kind="milestone", title="远景", event="以后的事"),
-            StoryNode(book_id=book_id, position=3, kind="ending", title="结局", event="大结局"),
-        ])
+        session.add_all(
+            [
+                StoryNode(
+                    book_id=book_id, position=1, kind="milestone", title="已定", segment={"title": "已定", "text": "x"}
+                ),
+                StoryNode(book_id=book_id, position=2, kind="milestone", title="远景", event="以后的事"),
+                StoryNode(book_id=book_id, position=3, kind="ending", title="结局", event="大结局"),
+            ]
+        )
         await session.commit()
     nodes = (await client.get(f"/api/books/{book}/nodes")).json()
     far = next(n for n in nodes if n["title"] == "远景")
@@ -90,7 +114,12 @@ async def test_inserting_after_a_later_arc_plans_the_ones_before(client, session
     assert res.status_code == 201, res.text
     tree = (await client.get(f"/api/books/{book}/outline-tree")).json()
     # 「远景」夹在两篇定下来的篇中间会被写作跳过：跟着定下来
-    assert [(arc["title"], arc["planned"]) for arc in tree["arcs"]] == [("已定", True), ("远景", True), ("新的", True), ("结局", False)]
+    assert [(arc["title"], arc["planned"]) for arc in tree["arcs"]] == [
+        ("已定", True),
+        ("远景", True),
+        ("新的", True),
+        ("结局", False),
+    ]
     ending = next(n for n in nodes if n["kind"] == "ending")
     res = await client.post(f"/api/books/{book}/arcs", json={"title": "结局后", "after_node_id": ending["id"]})
     assert res.status_code == 422
@@ -142,7 +171,9 @@ async def test_undecided_unit_lets_the_editor_decide_how_many_chapters(client, s
         volume = Volume(book_id=book_id, index=1, title="第一卷", chapter_count=0, status="approved")
         session.add(volume)
         await session.flush()
-        unit = PlotUnit(book_id=book_id, volume_id=volume.id, index=1, title="入城", chapter_count=0, key_events=["进城"])
+        unit = PlotUnit(
+            book_id=book_id, volume_id=volume.id, index=1, title="入城", chapter_count=0, key_events=["进城"]
+        )
         session.add(unit)
         await session.commit()
         unit_id = unit.id

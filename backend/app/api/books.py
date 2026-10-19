@@ -6,14 +6,14 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from redis.asyncio import Redis
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import defer, selectinload
 
 from app.agents.glossary import clean_techniques
 from app.api.book_settings import new_book_defaults
-from app.api.deps import SessionDep, ensure_idle, get_book, get_redis
+from app.api.deps import SessionDep, ensure_book_not_teardown, ensure_idle, ensure_not_teardown, get_book, get_redis
 from app.api.story_map import validate_node
 from app.book_meta import DEFAULT_CHAPTER_WORDS, channel_of
-from app.models import Book, Chapter, Job, PlotUnit, StoryNode, StoryThread, Volume
+from app.models import Book, Chapter, Job, PlotUnit, StoryNode, StoryThread, TeardownSource, Volume
 from app.schemas import (
     BookCreate,
     BookCreated,
@@ -41,21 +41,28 @@ from app.services import jobs, outline_structure, writing_store
 from app.services.library import lock_book
 from app.services.meeting import post_message
 from app.services.requirements import absorb_other_rules
+from app.services.teardown_info import teardown_summary
+from app.services.text_search import search_original
 from app.services.versions import record_version, snapshot_of
 from app.services.writing_context import chapter_words
 
 router = APIRouter(tags=["books"])
 
 
-def summary(book: Book, job_status: str | None = None) -> BookSummary:
+def summary(book: Book, job_status: str | None = None, preview: dict | None = None) -> BookSummary:
     out = BookSummary.model_validate(book)
     out.logline = (book.concept or {}).get("logline", "")
     out.job_status = job_status
+    out.teardown = teardown_summary(book, preview)
     return out
 
 
 async def detail(session: AsyncSession, book: Book) -> BookDetail:
     out = BookDetail.model_validate(book)
+    preview = None
+    if book.source == "teardown" and (book.teardown or {}).get("stage") == "confirming":
+        preview = await session.scalar(select(TeardownSource.preview).where(TeardownSource.book_id == book.id))
+    out.teardown = teardown_summary(book, preview)
     out.logline = (book.concept or {}).get("logline", "")
     job = await jobs.active_job(session, book.id)
     out.active_job = JobOut.model_validate(job) if job else None
@@ -81,7 +88,19 @@ async def list_books(session: AsyncSession = SessionDep) -> list[BookSummary]:
         )
     ).all()
     status_by_book = {book_id: status for book_id, status in latest}
-    return [summary(b, status_by_book.get(b.id)) for b in rows]
+    confirming = [b.id for b in rows if b.source == "teardown" and (b.teardown or {}).get("stage") == "confirming"]
+    previews = (
+        dict(
+            (
+                await session.execute(
+                    select(TeardownSource.book_id, TeardownSource.preview).where(TeardownSource.book_id.in_(confirming))
+                )
+            ).all()
+        )
+        if confirming
+        else {}
+    )
+    return [summary(b, status_by_book.get(b.id), previews.get(b.id)) for b in rows]
 
 
 @router.post("/books", response_model=BookCreated, status_code=201)
@@ -164,6 +183,18 @@ async def update_book(
     if body.model_fields_set - {"style_reference"}:
         await ensure_idle(session, book.id)
     before = snapshot_of(book)
+    if (body.author is not None or body.intro is not None) and book.source != "teardown":
+        raise HTTPException(422, "原作者和原书简介只用于拆的书")
+    if book.source == "teardown":
+        meta = dict(book.teardown or {})
+        if body.title is not None or (body.concept is not None and "title" in body.concept):
+            meta["title_edited"] = True
+        for name in ("author", "intro"):
+            value = getattr(body, name)
+            if value is not None:
+                meta[name] = value
+                meta[f"{name}_edited"] = True
+        book.teardown = meta
     if body.title is not None:
         book.title = body.title
         book.concept = {**(book.concept or {}), "title": body.title}
@@ -228,6 +259,8 @@ async def update_volume(volume_id: uuid.UUID, body: VolumePatch, session: AsyncS
     volume = await session.get(Volume, volume_id, options=[selectinload(Volume.units)])
     if volume is None:
         raise HTTPException(404, "卷不存在")
+    if body.model_fields_set & {"locked", "chapter_count", "target_node_id", "reaches_node"}:
+        await ensure_book_not_teardown(session, volume.book_id, "改大纲结构")
     await lock_book(session, volume.book_id)
     await ensure_idle(session, volume.book_id)
     volume = await session.scalar(
@@ -263,6 +296,8 @@ async def update_unit(unit_id: uuid.UUID, body: UnitPatch, session: AsyncSession
     unit = await session.get(PlotUnit, unit_id)
     if unit is None:
         raise HTTPException(404, "剧情单元不存在")
+    if body.model_fields_set & {"locked", "chapter_count"}:
+        await ensure_book_not_teardown(session, unit.book_id, "改大纲结构")
     await lock_book(session, unit.book_id)
     await ensure_idle(session, unit.book_id)
     unit = await session.scalar(
@@ -294,6 +329,7 @@ async def _structure_target(session: AsyncSession, model, row_id: uuid.UUID):
     row = await session.get(model, row_id)
     if row is None:
         raise HTTPException(404, "卷不存在" if model is Volume else "剧情单元不存在")
+    await ensure_book_not_teardown(session, row.book_id, "改大纲结构")
     await lock_book(session, row.book_id)
     await ensure_idle(session, row.book_id)
     state = await outline_structure.load_structure(session, row.book_id)
@@ -389,6 +425,7 @@ async def order_units(volume_id: uuid.UUID, body: UnitOrder, session: AsyncSessi
 async def create_volume(
     body: VolumeCreate, book: Book = Depends(get_book), session: AsyncSession = SessionDep
 ) -> VolumeOut:
+    ensure_not_teardown(book, "改大纲结构")
     await lock_book(session, book.id)
     await ensure_idle(session, book.id)
     await validate_node(session, book.id, body.target_node_id)
@@ -465,6 +502,14 @@ async def update_thread(thread_id: uuid.UUID, body: ThreadPatch, session: AsyncS
 # ---------- 章节 ----------
 
 
+@router.get("/books/{book_id}/search")
+async def search_book(q: str = "", book: Book = Depends(get_book), session: AsyncSession = SessionDep):
+    word = q.strip()
+    if not 1 <= len(word) <= 30:
+        raise HTTPException(422, "要搜的词 1 到 30 个字")
+    return await search_original(session, book.id, word)
+
+
 @router.get("/books/{book_id}/chapters", response_model=list[ChapterBrief])
 async def list_chapters(
     book: Book = Depends(get_book),
@@ -473,7 +518,12 @@ async def list_chapters(
     session: AsyncSession = SessionDep,
 ) -> list[ChapterBrief]:
     """全书章节目录；指定 volume 时只列这一卷，并带上章纲；with_outline 时全书都带章纲（新书页用）。"""
-    stmt = select(Chapter).where(Chapter.book_id == book.id).order_by(Chapter.index)
+    stmt = (
+        select(Chapter)
+        .options(defer(Chapter.content, raiseload=True))
+        .where(Chapter.book_id == book.id)
+        .order_by(Chapter.index)
+    )
     if volume is not None:
         stmt = stmt.join(Volume, Chapter.volume_id == Volume.id).where(Volume.index == volume)
     rows = (await session.execute(stmt)).scalars().all()
@@ -503,15 +553,20 @@ async def get_chapter(index: int, book: Book = Depends(get_book), session: Async
 async def update_chapter(
     index: int, body: ChapterPatch, book: Book = Depends(get_book), session: AsyncSession = SessionDep
 ) -> ChapterOut:
+    if "content" in body.model_fields_set:
+        ensure_not_teardown(book, "改原文")
     await ensure_idle(session, book.id)
     chapter = await _chapter(session, book.id, index)
     if body.outline is not None:
-        if outline_structure.started(chapter):
+        if book.source != "teardown" and outline_structure.started(chapter):
             raise HTTPException(409, "这一章已经开写了，章纲不能改")
         changes = body.outline.model_dump(exclude_unset=True)
         if "scenes" in changes:
             changes["scenes"] = [scene.strip() for scene in changes["scenes"] or [] if scene.strip()]
-        chapter.outline = {**(chapter.outline or {}), **{key: value for key, value in changes.items() if value is not None}}
+        chapter.outline = {
+            **(chapter.outline or {}),
+            **{key: value for key, value in changes.items() if value is not None},
+        }
     if body.title is not None:
         chapter.title = body.title
     if body.content is not None:
@@ -534,6 +589,7 @@ async def rewrite_chapter(
 
     后面还有已定稿的章节时，后面的章节不会跟着改，需要作者确认（confirm）。
     """
+    ensure_not_teardown(book, "重写")
     book = await session.scalar(
         select(Book).where(Book.id == book.id).with_for_update().execution_options(populate_existing=True)
     )
@@ -631,9 +687,7 @@ async def _has_outline(session: AsyncSession, book_id) -> bool:
     """大纲上有没有东西可写：有卷，或者有作者写了一段话的篇。"""
     if await session.scalar(select(Volume.id).where(Volume.book_id == book_id).limit(1)):
         return True
-    nodes = await session.scalars(
-        select(StoryNode).where(StoryNode.book_id == book_id, StoryNode.segment.is_not(None))
-    )
+    nodes = await session.scalars(select(StoryNode).where(StoryNode.book_id == book_id, StoryNode.segment.is_not(None)))
     return any(str((node.segment or {}).get("text") or "").strip() for node in nodes)
 
 
@@ -646,6 +700,7 @@ async def plan_segment(
     session: AsyncSession = SessionDep,
     redis: Redis = Depends(get_redis),
 ) -> JobOut:
+    ensure_not_teardown(book, "定下一篇")
     # 与同入口的重复请求串行；保留等待作者的任务，不能从旁再开规划任务。
     book = await session.scalar(
         select(Book).where(Book.id == book.id).with_for_update().execution_options(populate_existing=True)
@@ -687,6 +742,7 @@ async def start_writing(
     redis: Redis = Depends(get_redis),
 ) -> JobOut:
     """开写：编辑部按卷纲和章纲逐章写作，写够这一轮就停。"""
+    ensure_not_teardown(book, "开写")
     book = await session.scalar(
         select(Book).where(Book.id == book.id).with_for_update().execution_options(populate_existing=True)
     )

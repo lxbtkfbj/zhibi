@@ -58,7 +58,9 @@ async def test_status_follows_how_much_is_written(client):
     res = await client.patch(f"/api/characters/{person['id']}", json={"locked": True})
     assert res.json()["status"] == "later"
 
-    entry = (await client.post(f"/api/books/{book}/world-entries", json={"category": "特殊规则", "name": "夺舍"})).json()
+    entry = (
+        await client.post(f"/api/books/{book}/world-entries", json={"category": "特殊规则", "name": "夺舍"})
+    ).json()
     assert entry["status"] == "later"
     res = await client.patch(f"/api/world-entries/{entry['id']}", json={"content": "只能夺舍神识比自己弱的人。"})
     assert res.json()["status"] == "one"
@@ -67,11 +69,17 @@ async def test_status_follows_how_much_is_written(client):
         json={"content": "1. 只能夺舍神识比自己弱的人\n2. 一辈子只能夺舍一次"},
     )
     assert res.json()["status"] == "must"
-    res = await client.patch(f"/api/world-entries/{entry['id']}", json={"content": "", "field_values": {"代价": "折寿十年"}})
+    res = await client.patch(
+        f"/api/world-entries/{entry['id']}", json={"content": "", "field_values": {"代价": "折寿十年"}}
+    )
     assert res.json()["status"] == "one"
     ladder = await client.post(
         f"/api/books/{book}/world-entries",
-        json={"category": "等级体系", "name": "境界", "levels": [{"name": "炼气", "text": ""}, {"name": "筑基", "text": ""}]},
+        json={
+            "category": "等级体系",
+            "name": "境界",
+            "levels": [{"name": "炼气", "text": ""}, {"name": "筑基", "text": ""}],
+        },
     )
     assert ladder.json()["status"] == "must"
 
@@ -92,7 +100,12 @@ async def test_goldfinger_is_its_own_category(client, sessionmaker):
     old = (
         await client.post(
             f"/api/books/{book}/world-entries",
-            json={"category": "特殊规则", "name": "系统", "tags": ["金手指"], "fields": [{"name": "来源", "value": "天外"}]},
+            json={
+                "category": "特殊规则",
+                "name": "系统",
+                "tags": ["金手指"],
+                "fields": [{"name": "来源", "value": "天外"}],
+            },
         )
     ).json()
     rule = (await client.post(f"/api/books/{book}/world-entries", json={"category": "特殊规则", "name": "货币"})).json()
@@ -180,7 +193,8 @@ def test_goldfinger_migration_moves_tagged_paragraphs():
 async def test_concept_ending_reaches_the_model_until_there_is_an_ending_node(client, sessionmaker):
     book = await blank_book(client)
     res = await client.patch(
-        f"/api/books/{book}", json={"concept": {"story": "陈默看得见寿命。", "ending": "陈默改写生死簿。"}, "review_changes": False}
+        f"/api/books/{book}",
+        json={"concept": {"story": "陈默看得见寿命。", "ending": "陈默改写生死簿。"}, "review_changes": False},
     )
     assert res.status_code == 200, res.text
     assert "全书结局：陈默改写生死簿。" in format_concept({"story": "x", "ending": "陈默改写生死簿。"})
@@ -266,7 +280,11 @@ async def test_new_arc_goes_after_planned_arcs_and_later_arcs_plan_in_order(clie
             [
                 StoryNode(book_id=book_id, position=1, kind="opening", title="开篇"),
                 StoryNode(
-                    book_id=book_id, position=2, kind="milestone", title="入城", segment={"title": "第一篇", "text": "x"}
+                    book_id=book_id,
+                    position=2,
+                    kind="milestone",
+                    title="入城",
+                    segment={"title": "第一篇", "text": "x"},
                 ),
                 StoryNode(book_id=book_id, position=3, kind="milestone", title="远景一", event="后来的事"),
                 StoryNode(book_id=book_id, position=4, kind="milestone", title="远景二", event="更后来的事"),
@@ -380,9 +398,16 @@ async def test_author_adds_edits_and_deletes_chapters(client):
     units = (await client.get(f"/api/books/{book}/outline")).json()["volumes"][0]["units"]
     assert [u["chapter_count"] for u in units] == [3, 3]
 
-    res = await client.patch(f"/api/books/{book}/chapters/4", json={"outline": {"cool_point": "反杀", "goal": "陈默夜里出城"}})
+    res = await client.patch(
+        f"/api/books/{book}/chapters/4", json={"outline": {"cool_point": "反杀", "goal": "陈默夜里出城"}}
+    )
     assert res.status_code == 200, res.text
-    assert res.json()["outline"] == {"goal": "陈默夜里出城", "scenes": ["城门"], "hook": "身后有人", "cool_point": "反杀"}
+    assert res.json()["outline"] == {
+        "goal": "陈默夜里出城",
+        "scenes": ["城门"],
+        "hook": "身后有人",
+        "cool_point": "反杀",
+    }
 
     res = await client.delete(f"/api/books/{book}/chapters/2")
     assert res.status_code == 204
@@ -395,4 +420,3 @@ async def test_author_adds_edits_and_deletes_chapters(client):
     assert res.status_code == 409
     res = await client.delete(f"/api/books/{book}/chapters/3")
     assert res.status_code == 409
-

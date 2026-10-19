@@ -39,6 +39,7 @@ from app.models import (
     SettingSuggestion,
     StoryNode,
     StoryThread,
+    TeardownSource,
     Volume,
     WorldEntry,
 )
@@ -119,7 +120,7 @@ def row_data(model, mapping) -> dict:
     return {
         key: plain(value)
         for key, value in mapping.items()
-        if key not in skip and not (key == "pinned_at" and value is None)
+        if key not in skip and not (key == "pinned_at" and value is None) and not (key == "teardown" and not value)
     }
 
 
@@ -854,12 +855,20 @@ async def restore(session: AsyncSession, book_id: uuid.UUID, save_id: int) -> tu
     data = await load_objects(session, book_id, [h for table in rows.values() for h in table.values()])
     chapter_hashes = set(rows.get("chapters", {}).values())
     texts = await load_objects(session, book_id, [d.get("content") for h, d in data.items() if h in chapter_hashes])
+    book_data = data.get(next(iter(rows.get("books", {}).values()), ""), None)
+    if (
+        book_data
+        and book_data.get("source") == "teardown"
+        and (book_data.get("teardown") or {}).get("stage") == "confirming"
+        and await session.get(TeardownSource, book_id) is None
+    ):
+        # 原文件不进存档，导入后就删除。先挡住，再删章，避免回档把唯一原文也清掉。
+        raise HTTPException(409, "导入前的存档没有原文件，不能回到这一档；导入后的存档仍可恢复。")
     for model in reversed(TABLES):
         t = model.__table__
         await session.execute(delete(t).where(t.c.book_id == book_id))
     for model in TABLES:
         await _put_rows(session, model, [data[h] for h in rows.get(model.__tablename__, {}).values()], texts)
-    book_data = data.get(next(iter(rows.get("books", {}).values()), ""), None)
     if book_data:
         values = _values(Book, {k: v for k, v in book_data.items() if k not in BOOK_SKIP}, {})
         await session.execute(

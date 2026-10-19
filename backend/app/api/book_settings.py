@@ -8,7 +8,7 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import SessionDep, get_book, get_redis
+from app.api.deps import SessionDep, ensure_book_not_teardown, ensure_not_teardown, get_book, get_redis
 from app.book_settings import BookSettings, compile_rules, default_settings, merge_settings, settings_of
 from app.models import AppSetting, AuthorRequirement, Book, Chapter, Job, MeetingMessage
 from app.services import jobs
@@ -164,6 +164,7 @@ async def patch_settings(
     body: dict, book: Book = Depends(get_book), session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)
 ):
     # Live editing is explicitly allowed while workers are running; lock only this short transaction.
+    ensure_not_teardown(book, "改本书设置")
     await session.refresh(book, attribute_names=["settings"], with_for_update=True)
     before = settings_of(book)
     values = validated(before, body)
@@ -212,6 +213,7 @@ async def post_requirement(
     session: AsyncSession = SessionDep,
     redis: Redis = Depends(get_redis),
 ):
+    ensure_not_teardown(book, "加写作要求")
     message = await session.get(MeetingMessage, body.message_id) if body.message_id else None
     if body.message_id and (
         message is None
@@ -257,6 +259,7 @@ async def requirement(session: AsyncSession, requirement_id: uuid.UUID) -> Autho
 @router.patch("/requirements/{requirement_id}", response_model=RequirementOut)
 async def patch_requirement(requirement_id: uuid.UUID, body: RequirementPatch, session: AsyncSession = SessionDep):
     row = await requirement(session, requirement_id)
+    await ensure_book_not_teardown(session, row.book_id, "加写作要求")
     text = body.text if body.text is not None else row.text
     await session.execute(select(Book.id).where(Book.id == row.book_id).with_for_update())
     duplicate = await session.scalar(
@@ -280,6 +283,7 @@ async def patch_requirement(requirement_id: uuid.UUID, body: RequirementPatch, s
 @router.delete("/requirements/{requirement_id}", status_code=204)
 async def delete_requirement(requirement_id: uuid.UUID, session: AsyncSession = SessionDep):
     row = await requirement(session, requirement_id)
+    await ensure_book_not_teardown(session, row.book_id, "加写作要求")
     await suppress_legacy_text(session, row.book_id, row.text)
     await session.delete(row)
     await session.commit()
@@ -331,6 +335,7 @@ def source_label(source):
 
 @router.post("/books/{book_id}/requirements/tidy")
 async def tidy_requirements(book: Book = Depends(get_book), session: AsyncSession = SessionDep):
+    ensure_not_teardown(book, "加写作要求")
     from app.agents.schemas import RequirementsTidy
     from app.services.chat import model
     from app.services.chat_context import progress_of
@@ -384,6 +389,7 @@ class RequirementsApply(BaseModel):
 async def apply_requirements(
     body: RequirementsApply, book: Book = Depends(get_book), session: AsyncSession = SessionDep
 ):
+    ensure_not_teardown(book, "加写作要求")
     await session.execute(select(Book.id).where(Book.id == book.id).with_for_update())
     ids = {*body.delete, *(r.id for r in body.rewrite)}
     rows = {

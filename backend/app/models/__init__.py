@@ -7,6 +7,7 @@ from app.models.llm import ROLES, LlmCall, LlmProfile, PromptOverride, RoleAssig
 from app.models.saves import BookObject, BookSave
 from app.models.settings import AppSetting, AuthorRequirement, ChatConversation, ChatThread
 from app.models.story_map import NodeAnchor, Secret, StoryNode
+from app.models.teardown import TeardownSource
 
 __all__ = [
     "AppSetting",
@@ -16,6 +17,8 @@ __all__ = [
     "ROLES",
     "Base",
     "Book",
+    "BookObject",
+    "BookSave",
     "Chapter",
     "Character",
     "DraftVersion",
@@ -36,6 +39,7 @@ __all__ = [
     "SettingVersion",
     "StoryNode",
     "StoryThread",
+    "TeardownSource",
     "Volume",
     "WorldEntry",
 ]

@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents import schemas as s
 from app.agents.context import format_requirements
-from app.api.deps import SessionDep, ensure_idle, get_book
+from app.api.deps import SessionDep, ensure_book_not_teardown, ensure_idle, ensure_not_teardown, get_book
 from app.api.library_ai import call_model
 from app.library_config import BUILTIN_CATEGORIES, CHARACTER_CATEGORY, GOLDFINGER, LEGACY_ROLE_TYPES, ROLE_TYPES
 from app.models import Book, Chapter, Character, PlotUnit, SettingCategory, StoryNode, Volume, WorldEntry
@@ -190,6 +190,7 @@ async def plan_earlier_arcs(session: AsyncSession, book_id, nodes: list[StoryNod
 async def create_arc(body: ArcCreate, book: Book = Depends(get_book), session: AsyncSession = SessionDep) -> dict:
     """加一篇：只有名字和一段话，写到它时编辑部照这段话分卷。可以插在任何一篇的前面或后面；
     不说插哪就接在已经定下来的篇后面。开篇前面、结局后面不能插。"""
+    ensure_not_teardown(book, "改大纲结构")
     await lock_book(session, book.id)
     await ensure_idle(session, book.id)
     nodes = await _ordered_nodes(session, book.id)
@@ -239,6 +240,7 @@ async def delete_arc(node_id: uuid.UUID, session: AsyncSession = SessionDep) -> 
     node = await session.get(StoryNode, node_id)
     if node is None:
         raise HTTPException(404, "这一篇不存在")
+    await ensure_book_not_teardown(session, node.book_id, "改大纲结构")
     await lock_book(session, node.book_id)
     await ensure_idle(session, node.book_id)
     if node.kind in {"opening", "ending"}:
@@ -259,6 +261,7 @@ async def create_chapter(unit_id: uuid.UUID, body: ChapterCreate, session: Async
     unit = await session.get(PlotUnit, unit_id)
     if unit is None:
         raise HTTPException(404, "剧情单元不存在")
+    await ensure_book_not_teardown(session, unit.book_id, "改大纲结构")
     await lock_book(session, unit.book_id)
     await ensure_idle(session, unit.book_id)
     state = await outline_structure.load_structure(session, unit.book_id)
@@ -308,6 +311,7 @@ async def create_chapter(unit_id: uuid.UUID, body: ChapterCreate, session: Async
 @router.delete("/books/{book_id}/chapters/{index}", status_code=204)
 async def delete_chapter(index: int, book: Book = Depends(get_book), session: AsyncSession = SessionDep) -> None:
     """删一章还没开写的章纲，单元少算一章。"""
+    ensure_not_teardown(book, "改大纲结构")
     await lock_book(session, book.id)
     await ensure_idle(session, book.id)
     state = await outline_structure.load_structure(session, book.id)
@@ -352,6 +356,7 @@ def same_kind_text(ctx, rows) -> str:
 @router.post("/books/{book_id}/drafts")
 async def draft_entries(body: DraftRequest, book: Book = Depends(get_book), session: AsyncSession = SessionDep) -> dict:
     """编辑部帮写：写几条候选，不存。作者收下哪条，前端就按新增一条存进来（来源记成从候选里收下的）。"""
+    ensure_not_teardown(book, "让编辑部改书")
     people = body.category == "角色列表"
     ladder = body.category == LADDER
     custom = None
@@ -461,6 +466,7 @@ async def restore_outline(
     body: OutlineRestoreIn, book: Book = Depends(get_book), session: AsyncSession = SessionDep
 ) -> dict:
     """群聊里点「撤销」：把编辑部帮写之前的那一段存回去。"""
+    ensure_not_teardown(book, "改大纲结构")
     await restore_outline_node(session, book, body.target_type, body.target_id, body.before)
     return {"ok": True}
 
@@ -468,6 +474,7 @@ async def restore_outline(
 @router.post("/books/{book_id}/outline/split")
 async def split_outline(body: SplitIn, book: Book = Depends(get_book), session: AsyncSession = SessionDep) -> dict:
     """编辑部帮拆：单元出章纲、卷拆成单元。只出一版给作者看，不存。"""
+    ensure_not_teardown(book, "改大纲结构")
     return await draft_split(session, book, body.target_type, body.target_id, body.request, body.current)
 
 
@@ -483,6 +490,7 @@ async def undo_outline_split(
     body: SplitUndoIn, book: Book = Depends(get_book), session: AsyncSession = SessionDep
 ) -> dict:
     """撤销刚收下的那一版：换回原来的样子。"""
+    ensure_not_teardown(book, "改大纲结构")
     await undo_split(session, book, body.target_type, body.target_id, body.undo)
     return {"ok": True}
 
@@ -490,6 +498,7 @@ async def undo_outline_split(
 @router.post("/books/{book_id}/outline/move")
 async def move_outline(body: OutlineMove, book: Book = Depends(get_book), session: AsyncSession = SessionDep) -> dict:
     """篇、卷、单元、章往前或往后挪一格。卷跟着篇走；已经开写的章节不能被挪动。"""
+    ensure_not_teardown(book, "改大纲结构")
     await lock_book(session, book.id)
     await ensure_idle(session, book.id)
     step = -1 if body.direction == "up" else 1
@@ -576,6 +585,7 @@ async def move_outline(body: OutlineMove, book: Book = Depends(get_book), sessio
 # 编辑部动书：做事前先存作者自己改了还没存的，做完存一档（设计说明 9.13「第二批：存档」）
 @router.post("/books/{book_id}/fill-entry")
 async def fill_one_entry(body: FillRequest, book: Book = Depends(get_book), session: AsyncSession = SessionDep) -> dict:
+    ensure_not_teardown(book, "让编辑部改书")
     return await book_saves.editorial(
         session, book.id, "lorekeeper", "设定师补齐：", lambda: _fill_one_entry(body, book, session)
     )
@@ -585,6 +595,7 @@ async def fill_one_entry(body: FillRequest, book: Book = Depends(get_book), sess
 async def write_outline(
     body: OutlineWriteIn, book: Book = Depends(get_book), session: AsyncSession = SessionDep
 ) -> dict:
+    ensure_not_teardown(book, "改大纲结构")
     return await book_saves.editorial(
         session, book.id, "chief", "主编帮写：", lambda: _write_outline(body, book, session)
     )
@@ -594,6 +605,7 @@ async def write_outline(
 async def accept_outline_split(
     body: SplitAcceptIn, book: Book = Depends(get_book), session: AsyncSession = SessionDep
 ) -> dict:
+    ensure_not_teardown(book, "改大纲结构")
     return await book_saves.editorial(
         session, book.id, "chief", "收下了帮拆的一版：", lambda: _accept_outline_split(body, book, session)
     )

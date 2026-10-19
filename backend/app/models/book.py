@@ -17,8 +17,9 @@ class Book(UUIDPk, Timestamps, Base):
     __tablename__ = "books"
 
     title: Mapped[str] = mapped_column(String(200), default="未命名")
-    # new：从点子开新书；imported：导入已有小说
+    # new：从点子开新书；imported：导入自己的小说；teardown：拆别人的书
     source: Mapped[str] = mapped_column(String(20), default="new")
+    teardown: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     idea: Mapped[str] = mapped_column(Text, default="")
     style_reference: Mapped[str] = mapped_column(Text, default="")
     genre: Mapped[str] = mapped_column(String(100), default="")
@@ -185,6 +186,7 @@ class Chapter(UUIDPk, Timestamps, Base):
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     # generated / imported
     source: Mapped[str] = mapped_column(String(20), default="generated")
+    teardown: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     # planned：只有章纲；drafting：写作与审稿中；final：已定稿
     status: Mapped[str] = mapped_column(String(20), default="planned")
 

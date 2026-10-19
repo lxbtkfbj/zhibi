@@ -405,6 +405,10 @@ def retry_note(steps: list[dict]) -> str:
 
 
 async def agent_values(session, book, role, message, rows, summary, read_only, retry) -> dict:
+    if book.source == "teardown":
+        from app.services.teardown_chat import values
+
+        return await values(session, book, role, message, rows, summary, tools=True, retry=retry)
     ctx = await load_context(session, book)
     chapters = list(
         await session.scalars(
@@ -470,8 +474,12 @@ async def answer_note(redis, book_id, message_id, *, reply_id=None, retry=False)
                 payload={"reply_to": [message_id], "state": "thinking", "tools_mode": True},
             )
             reply_id = reply["id"]
-        # 编辑部动书之前：作者自己改过还没存的，先存一档
-        await book_saves.before_ai(session, book_id)
+        book = await session.get(Book, book_id)
+        teardown = book.source == "teardown"
+        read_only = teardown or bool(payload.get("ask_only"))
+        # 拆的书里只回答，不把聊天变成书的存档或其他写入。
+        if not teardown:
+            await book_saves.before_ai(session, book_id)
         # 只带这句话所在的那一段对话和它的摘要
         state = await conversation_state(session, book_id, "group", payload.get("conv"))
         await session.commit()
@@ -480,9 +488,9 @@ async def answer_note(redis, book_id, message_id, *, reply_id=None, retry=False)
         summary = await merge_summary(session, book_id, "group", state.summary, old, state.id)
         book = await session.get(Book, book_id)
         message = await session.get(MeetingMessage, message_id)
-        values = await agent_values(session, book, role, message, rows, summary, bool(payload.get("ask_only")), retry)
+        values = await agent_values(session, book, role, message, rows, summary, read_only, retry)
         await session.rollback()
-    turn = Turn(redis, book_id, message_id, reply_id, role, bool(payload.get("ask_only")), payload.get("viewing"))
+    turn = Turn(redis, book_id, message_id, reply_id, role, read_only, payload.get("viewing"))
     if retry:
         for step in payload.get("steps") or []:
             if step.get("key") and step.get("kind") not in ("failed", "not_found", "too_late"):
@@ -492,7 +500,9 @@ async def answer_note(redis, book_id, message_id, *, reply_id=None, retry=False)
     await publish(redis, book_id, "chat_typing", {"thread": "group", "speaker": role, "on": True})
     text, state_name, error, finished = "", "failed", "", False
     try:
-        task = asyncio.create_task(drive(turn, persona(role), render("chat_agent", **values)))
+        task = asyncio.create_task(
+            drive(turn, persona(role), render("chat_teardown" if teardown else "chat_agent", **values))
+        )
         try:
             result = await watch(turn, task)
         finally:
@@ -556,8 +566,14 @@ async def fall_back(redis, book_id, message_id, reply_id, role) -> bool:
             message = await session.get(MeetingMessage, message_id)
             text, viewing = message.content, (message.payload or {}).get("viewing")
             conv = (message.payload or {}).get("conv")
-            intent = await group_notes.classify(session, book_id, text, viewing, conv, before=message_id)
-            if intent.kind == "提问闲聊" and not intent.more:
+            book = await session.get(Book, book_id)
+            teardown = book.source == "teardown"
+            intent = (
+                None
+                if teardown
+                else await group_notes.classify(session, book_id, text, viewing, conv, before=message_id)
+            )
+            if teardown or (intent.kind == "提问闲聊" and not intent.more):
                 state = await conversation_state(session, book_id, "group", conv)
                 await session.commit()
                 conv = state.id

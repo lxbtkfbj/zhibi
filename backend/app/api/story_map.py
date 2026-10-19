@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.glossary import terms
-from app.api.deps import SessionDep, ensure_idle, get_book
+from app.api.deps import SessionDep, ensure_book_not_teardown, ensure_idle, ensure_not_teardown, get_book
 from app.models import Book, Character, Foreshadowing, NodeAnchor, Secret, StoryNode, Volume
 from app.schemas import (
     AnchorCreate,
@@ -146,6 +146,7 @@ def _allow_empty(book: Book, status: str | None) -> None:
 
 @router.post("/books/{book_id}/nodes", response_model=NodeOut, status_code=201)
 async def create_node(body: NodeCreate, book: Book = Depends(get_book), session: AsyncSession = SessionDep):
+    ensure_not_teardown(book, "改大纲结构")
     await ensure_idle(session, book.id)
     book = await _lock_book(session, book.id)
     _allow_empty(book, body.status)
@@ -172,6 +173,8 @@ async def create_node(body: NodeCreate, book: Book = Depends(get_book), session:
 async def update_node(node_id: uuid.UUID, body: NodePatch, session: AsyncSession = SessionDep):
     node = await _row(session, StoryNode, node_id)
     book = await _lock_book(session, node.book_id)
+    if body.model_fields_set & {"volume", "status"}:
+        ensure_not_teardown(book, "改大纲结构")
     await ensure_idle(session, node.book_id)
     node = await session.scalar(
         select(StoryNode).where(StoryNode.id == node_id).with_for_update().execution_options(populate_existing=True)
@@ -203,6 +206,7 @@ async def update_node(node_id: uuid.UUID, body: NodePatch, session: AsyncSession
 @router.delete("/nodes/{node_id}", status_code=204)
 async def delete_node(node_id: uuid.UUID, session: AsyncSession = SessionDep):
     node = await _row(session, StoryNode, node_id)
+    await ensure_book_not_teardown(session, node.book_id, "改大纲结构")
     await ensure_idle(session, node.book_id)
     book = await _lock_book(session, node.book_id)
     if node.kind in {"opening", "ending"}:
@@ -219,6 +223,7 @@ async def delete_node(node_id: uuid.UUID, session: AsyncSession = SessionDep):
 
 @router.post("/books/{book_id}/nodes/order", response_model=list[NodeOut])
 async def order_nodes(body: NodeOrder, book: Book = Depends(get_book), session: AsyncSession = SessionDep):
+    ensure_not_teardown(book, "改大纲结构")
     await ensure_idle(session, book.id)
     book = await _lock_book(session, book.id)
     nodes = {node.id: node for node in await _nodes(session, book.id)}

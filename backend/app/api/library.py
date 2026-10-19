@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import library_config as config
-from app.api.deps import SessionDep, ensure_idle, get_book, get_redis
+from app.api.deps import SessionDep, ensure_book_not_teardown, ensure_idle, ensure_not_teardown, get_book, get_redis
 from app.api.segment_models import SegmentPatch
 from app.api.story_map import validate_node
 from app.library_schemas import (
@@ -293,6 +293,26 @@ async def revert_version(
 ):
     version = await _editable_row(session, SettingVersion, version_id, allow_busy=True)
     target = await load_target(session, version.book_id, version.target_type, version.target_id, for_update=True)
+    book = await session.get(Book, version.book_id)
+    current = snapshot_of(target)
+    changed = {key for key, value in version.snapshot.items() if current.get(key) != value}
+    if isinstance(target, Chapter) and "content" in changed:
+        ensure_not_teardown(book, "改原文")
+    structure_fields = {"chapter_count", "locked", "target_node_id", "reaches_node"}
+    if isinstance(target, (Volume, PlotUnit)) and changed & structure_fields:
+        ensure_not_teardown(book, "改大纲结构")
+    if isinstance(target, StoryNode) and "status" in changed:
+        ensure_not_teardown(book, "改大纲结构")
+    if isinstance(target, StoryNode) and "segment" in changed and book.source == "teardown":
+        # 篇的文字能回退；程序维护的章数、状态等不能借旧版本回写。
+        old_segment, new_segment = target.segment or {}, version.snapshot.get("segment") or {}
+        structural = (old_segment.keys() | new_segment.keys()) - SegmentPatch.model_fields.keys()
+        if (
+            target.segment is None
+            or version.snapshot.get("segment") is None
+            or any(old_segment.get(key) != new_segment.get(key) for key in structural)
+        ):
+            ensure_not_teardown(book, "改大纲结构")
     if isinstance(target, Chapter) and target.status != "final":
         raise HTTPException(409, "这一章还在写作或重写，定稿后再退回正文版本")
     structure = None
@@ -688,6 +708,7 @@ async def choose_candidate(
     row = await session.get(SettingCandidate, row_id)
     if row is None:
         raise HTTPException(404, "记录不存在")
+    await ensure_book_not_teardown(session, row.book_id, "让编辑部改书")
     return await book_saves.editorial(
         session,
         row.book_id,
@@ -702,6 +723,7 @@ async def accept_suggestion(row_id: uuid.UUID, session: AsyncSession = SessionDe
     row = await session.get(SettingSuggestion, row_id)
     if row is None:
         raise HTTPException(404, "记录不存在")
+    await ensure_book_not_teardown(session, row.book_id, "让编辑部改书")
     return await book_saves.editorial(
         session, row.book_id, "lorekeeper", "收下了建议：", lambda: _accept_suggestion(row_id, session, redis)
     )
@@ -714,6 +736,7 @@ async def accept_all_suggestions(
     session: AsyncSession = SessionDep,
     redis: Redis = Depends(get_redis),
 ):
+    ensure_not_teardown(book, "让编辑部改书")
     return await book_saves.editorial(
         session,
         book.id,
@@ -734,6 +757,9 @@ async def suggestion_changes(book: Book = Depends(get_book), session: AsyncSessi
 @router.post("/suggestions/{row_id}/revert", response_model=SuggestionOut)
 async def revert_suggestion(row_id: uuid.UUID, session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)):
     """同意以后的「换回原来的」：这一处后来又被动过就 409"""
+    row = await session.get(SettingSuggestion, row_id)
+    if row is not None:
+        await ensure_book_not_teardown(session, row.book_id, "让编辑部改书")
     return await suggestions.revert(session, redis, row_id)
 
 
@@ -751,4 +777,7 @@ async def hand_over_suggestion(
     redis: Redis = Depends(get_redis),
 ):
     """让编辑部改：只说了毛病的、群聊里说了当时没改的，当成作者在聊天里说的一句话"""
+    row = await session.get(SettingSuggestion, row_id)
+    if row is not None:
+        await ensure_book_not_teardown(session, row.book_id, "让编辑部改书")
     return await suggestions.hand_over(session, redis, row_id, body.conv if body else None, background_tasks)

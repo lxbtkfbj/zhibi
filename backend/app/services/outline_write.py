@@ -4,7 +4,6 @@
 """
 
 import asyncio
-import uuid
 from typing import Any
 
 from fastapi import HTTPException
@@ -136,7 +135,9 @@ def ensure_writable(target: Target, state) -> None:
             if volume.target_node_id == row.id:
                 state.ensure_unwritten(volume, "这一篇已经开写了，编辑部不改写过的大纲")
     elif target.kind in ("volume", "unit"):
-        state.ensure_unwritten(row, f"这{'一卷' if target.kind == 'volume' else '个单元'}已经开写了，编辑部不改写过的大纲")
+        state.ensure_unwritten(
+            row, f"这{'一卷' if target.kind == 'volume' else '个单元'}已经开写了，编辑部不改写过的大纲"
+        )
     elif target.kind == "chapter" and outline_structure.started(row):
         raise HTTPException(409, "这一章已经开写了，编辑部不改写过的章纲")
 
@@ -192,7 +193,9 @@ def write_rule(target: Target, state) -> str:
     if target.kind in ("volume", "unit"):
         count = row.chapter_count or (len(state.own_chapters(row)) if target.kind == "unit" else 0)
         rule += f"\n这{'一卷' if target.kind == 'volume' else '个单元'}" + (
-            f"定了 {count} 章，写的事要撑得起 {count} 章，也别塞不下。" if row.chapter_count else "章数还没定，按剧情需要写，不用管章数。"
+            f"定了 {count} 章，写的事要撑得起 {count} 章，也别塞不下。"
+            if row.chapter_count
+            else "章数还没定，按剧情需要写，不用管章数。"
         )
     return rule
 
@@ -258,8 +261,13 @@ async def write_outline_node(
     row = target.row
     if target.kind == "chapter":
         scenes = [_text(x) for x in result.scenes if _text(x)]
-        outline = {**(row.outline or {}), "goal": _text(result.goal), "scenes": scenes,
-                   "cool_point": _text(result.cool_point), "hook": _text(result.hook)}
+        outline = {
+            **(row.outline or {}),
+            "goal": _text(result.goal),
+            "scenes": scenes,
+            "cool_point": _text(result.cool_point),
+            "hook": _text(result.hook),
+        }
         if not (outline["goal"] or scenes):
             await session.rollback()
             raise HTTPException(502, "编辑部这次没写出东西，没改。再试一次")
@@ -296,7 +304,22 @@ async def write_outline_node(
 
 
 # 群聊里作者指着正在看的那一页说的
-HERE_WORDS = ("正在看", "这一篇", "这篇", "这一卷", "这卷", "这个单元", "这单元", "这一章", "这章", "这一段", "这段", "这里", "这儿", "这个")
+HERE_WORDS = (
+    "正在看",
+    "这一篇",
+    "这篇",
+    "这一卷",
+    "这卷",
+    "这个单元",
+    "这单元",
+    "这一章",
+    "这章",
+    "这一段",
+    "这段",
+    "这里",
+    "这儿",
+    "这个",
+)
 CN_NUMBERS = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
 OUTLINE_TYPES = ("book", "segment", "volume", "unit", "chapter")
 
@@ -417,8 +440,13 @@ async def restore_outline_node(
         sections = before.get("sections") or {}
         lines = [line.strip() for line in str(sections.get("发生什么", "")).split("\n") if line.strip()]
         row.title = title
-        row.outline = {**(row.outline or {}), "goal": lines[0] if lines else "", "scenes": lines[1:],
-                       "cool_point": _text(sections.get("看点")), "hook": _text(sections.get("结尾钩子"))}
+        row.outline = {
+            **(row.outline or {}),
+            "goal": lines[0] if lines else "",
+            "scenes": lines[1:],
+            "cool_point": _text(sections.get("看点")),
+            "hook": _text(sections.get("结尾钩子")),
+        }
         await session.commit()
         return
     snapshot = snapshot_of(row)

@@ -1057,11 +1057,31 @@ def _library_intent(user: str) -> s.LibraryIntent:
 
 
 def _chat_reply(system, user):
+    if "作者导入的别人已经写好的小说" in user:
+        return s.ChatReply(reply=_teardown_reply(system, user))
     note = _match(r"【作者这次说的】\n(.*?)(?=\n\n要求：|\Z)", user)
     related = _match(r"【和这次的话有关的资料】\n(.*?)(?=\n\n【|\Z)", user)
     names = re.findall(r"^.+? · ([^\n]+)$", related, re.M)
     role = next((r for r in ("主编", "设定师", "写手", "审稿") if r in (system.splitlines() or ["主编"])[0]), "主编")
     return s.ChatReply(reply=f"（演示）{role}回答：{note[:20]}。相关资料里有：{'、'.join(names) or '没有'}。")
+
+
+def _teardown_reply(system, user, found=""):
+    """拆书演示只复述程序提供的出处，不凭演示书内容编原书情节。"""
+    note = _match(r"【作者这次说的】\n(.*?)(?=\n\n怎么做：|\Z)", user).strip()
+    role = next((r for r in ("主编", "设定师", "写手", "审稿") if r in (system.splitlines() or ["主编"])[0]), "主编")
+    prefix = f"（演示）{role}回答："
+    if any(word in note for word in ("改", "补齐", "删", "总结", "按这个来", "写作要求", "存档", "存个档")):
+        return (
+            prefix
+            + "拆的书里编辑部只回答问题，要改直接在页面上改。章纲在大纲那一页，人物和设定在设定那一页；原文和大纲结构照原书来，改不了。"
+        )
+    related = found or _match(r"【和这次的话有关的资料】\n(.*?)(?=\n\n【|\Z)", user)
+    if matched := re.search(r"「[^」]+」在 \d+ 章里出现过，第一次在第 \d+ 章。", related):
+        return prefix + matched[0] + "这是程序检索原文找到的位置，没有修改这本书。"
+    if related and related != "（没找到）":
+        return prefix + "找到了和问题有关的资料：" + related[:200] + "。只按提供的原文和资料回答，没有修改这本书。"
+    return prefix + "原文里没找到可核对的资料。想找某个词在哪几章，可以在正文页目录的搜索框里搜原文。"
 
 
 # 演示模型默认不「假装调工具」，聊天照旧走分流；测试要试主编自己查、自己动手时打开
@@ -1107,6 +1127,16 @@ def tool_turn(system: str, user: str, tools: list[str], done: list) -> tuple[lis
     """演示模型「假装调工具」：先查话里提到的设定，再照演示分流动手，最后说一段话。
     返回 (这一来回要调的工具, 这一来回说的字)；tools 是这一来回能调的工具名，空的就是不许再调。"""
     note = _match(r"【作者这次说的】\n(.*?)(?=\n\n【|\n\n怎么做：|\Z)", user).strip()
+    if "作者导入的别人已经写好的小说" in user:
+        from app.services.teardown_chat import quoted_words
+
+        if "search_text" in tools and not done:
+            words = quoted_words(note)
+            if not words and (match := re.match(r"(.{1,30}?)(?:第一次出场|在哪几章)", note)):
+                words = [match[1].strip()]
+            if words:
+                return [("search_text", {"word": word}) for word in words], ""
+        return [], _teardown_reply(system, user, "\n\n".join(result for _, result in done))
     library = _match(r"【设定库】\n(.*?)(?=\n\n【大纲】|\Z)", user)
     called = [call.name for call, _ in done]
     known = [*re.findall(r"^- ([^（：\n]+)", library, re.M), *re.findall(r"^[^\n·：]+ · ([^\n：]+)$", library, re.M)]

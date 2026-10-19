@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
-from app.api.deps import SessionDep, get_book, get_redis
+from app.api.deps import SessionDep, ensure_book_not_teardown, get_book, get_redis
 from app.db import get_sessionmaker
 from app.graphs.deps import cancel_key
 from app.models import Book, Job, LlmCall, MeetingMessage
@@ -55,6 +55,7 @@ async def _locked_job(session, job_id):
     book_id = await session.scalar(select(Job.book_id).where(Job.id == job_id))
     if book_id is None:
         raise HTTPException(404, "任务不存在")
+    await ensure_book_not_teardown(session, book_id, "让编辑部改书")
     await lock_book(session, book_id)
     return await session.scalar(
         select(Job).where(Job.id == job_id).with_for_update().execution_options(populate_existing=True)
@@ -63,7 +64,9 @@ async def _locked_job(session, job_id):
 
 async def _reject_legacy_setup(job_id: uuid.UUID, session: AsyncSession = SessionDep) -> None:
     # 在请求体校验之前拦住旧客户端的 nodes/cast/fill 等块名，统一给出可操作的重开提示。
-    if jobs.is_legacy_setup(await _job(session, job_id)):
+    job = await _job(session, job_id)
+    await ensure_book_not_teardown(session, job.book_id, "让编辑部改书")
+    if jobs.is_legacy_setup(job):
         raise HTTPException(409, jobs.LEGACY_SETUP_MESSAGE)
 
 
@@ -183,7 +186,8 @@ async def feedback_to_job(session, redis, job, feedback, *, remember=True):
 
 @router.post("/jobs/{job_id}/directions")
 async def retired_directions(job_id: uuid.UUID, session: AsyncSession = SessionDep) -> None:
-    await _job(session, job_id)
+    job = await _job(session, job_id)
+    await ensure_book_not_teardown(session, job.book_id, "让编辑部改书")
     raise HTTPException(409, "这个任务用的是旧流程，请按新流程重开")
 
 
@@ -323,6 +327,7 @@ async def answer(
 ) -> JobOut:
     """回答主编动笔前的提问。没回答的问题交给编辑部决定。"""
     job = await _job(session, job_id)
+    await ensure_book_not_teardown(session, job.book_id, "让编辑部改书")
     if jobs.is_legacy_setup(job):
         raise HTTPException(409, jobs.LEGACY_SETUP_MESSAGE)
     if jobs.pending_kind(job) != "setup_questions":

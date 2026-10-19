@@ -43,7 +43,15 @@ CHARACTER_STATE = ("location", "condition", "want", "abilities", "power", "is_al
 POWER = "实力与地位"
 
 STATE_LABELS = {"location": "在哪", "condition": "处境", "want": "眼下想要", "abilities": "能力", "power": POWER}
-CATEGORY_LABELS = {"世界与地图": "地点", "势力划分": "势力", "物品与功法": "物品", "往事与秘密": "往事", "特殊规则": "规则", "等级体系": "等级", "金手指": "金手指"}
+CATEGORY_LABELS = {
+    "世界与地图": "地点",
+    "势力划分": "势力",
+    "物品与功法": "物品",
+    "往事与秘密": "往事",
+    "特殊规则": "规则",
+    "等级体系": "等级",
+    "金手指": "金手指",
+}
 
 
 def changes_text(log: dict[str, Any] | None) -> list[str]:
@@ -61,7 +69,9 @@ def changes_text(log: dict[str, Any] | None) -> list[str]:
     lines.extend(f"新的人物：{name}" for name in log.get("created") or [])
     for entry in log.get("created_entries") or []:
         snapshot = entry.get("snapshot") or {}
-        lines.append(f"新的一条：{snapshot.get('name', '')}（{CATEGORY_LABELS.get(snapshot.get('category', ''), '设定')}）")
+        lines.append(
+            f"新的一条：{snapshot.get('name', '')}（{CATEGORY_LABELS.get(snapshot.get('category', ''), '设定')}）"
+        )
     return lines
 
 
@@ -77,6 +87,8 @@ def set_char_state(row: Character, key: str, value: Any) -> None:
         row.extra = {**extra, POWER: value} if value else extra
     else:
         setattr(row, key, value)
+
+
 LEDGER_STATE = ("status", "planted_chapter", "hint_chapters", "resolved_chapter")
 
 

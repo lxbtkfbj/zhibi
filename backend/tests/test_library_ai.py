@@ -242,7 +242,10 @@ async def test_chat_target_missing_not_saved_as_requirement(client, sessionmaker
     async with sessionmaker() as session:
         assert list(await session.scalars(select(AuthorRequirement))) == []
         message = await session.scalar(select(MeetingMessage).order_by(MeetingMessage.id.desc()))
-        assert message.content == "设定库里还没有「不在库里」。要新写一条就说「新建不在库里」；要改的是别的哪一条，说一下它的名字。"
+        assert (
+            message.content
+            == "设定库里还没有「不在库里」。要新写一条就说「新建不在库里」；要改的是别的哪一条，说一下它的名字。"
+        )
 
 
 @pytest.mark.parametrize("status", ["queued", "running", "waiting_author"])

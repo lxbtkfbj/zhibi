@@ -33,6 +33,7 @@ CATALOG = [
     ),
     ("library_review", "查一遍", "设定库", "reviewer", "查设定库的矛盾、同根、好看、题材"),
     ("chat_reply", "聊天回答", "聊天", "chief", "作者在群聊提问或私聊时，角色回答；实际用聊天对象的角色"),
+    ("chat_teardown", "拆书群聊回答", "聊天", "chief,lorekeeper,writer,reviewer", "拆的书里群聊回答用"),
     (
         "chat_agent",
         "聊天：自己查、自己动手",
@@ -71,6 +72,8 @@ CATALOG = [
 BY_NAME = {row[0]: row for row in CATALOG}
 
 VARIABLE_LABELS = {
+    "book_info": "原书信息与拆书进度",
+    "lookup": "怎么查资料",
     "progress": "写到哪了",
     "extras": "角色自己的资料",
     "pending": "等你确认的内容",

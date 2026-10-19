@@ -252,30 +252,22 @@ async def chapter_text(session, book: Book, args: ReadChapter) -> str:
 
 
 async def search_text(session, book: Book, word: str) -> str:
+    from app.services.text_search import search_original
+
     word = word.strip()[:30]
     if not word:
         return "没给要搜的词。"
-    at = func.strpos(Chapter.content, word)
-    times = (func.length(Chapter.content) - func.length(func.replace(Chapter.content, word, ""))) / len(word)
-    rows = (
-        await session.execute(
-            select(
-                Chapter.index,
-                Chapter.title,
-                times.label("times"),
-                func.substr(Chapter.content, func.greatest(at - 60, 1), 120 + len(word)).label("near"),
-            )
-            .where(Chapter.book_id == book.id, at > 0)
-            .order_by(Chapter.index)
-        )
-    ).all()
+    result = await search_original(session, book.id, word)
+    rows = result["results"]
     if not rows:
-        return f"写出来的正文里没有「{word}」。"
-    lines = [f"「{word}」在 {len(rows)} 章里出现过，第一次在第 {rows[0].index} 章。"]
+        return f"原文里没有「{word}」。" if book.source == "teardown" else f"写出来的正文里没有「{word}」。"
+    lines = [f"「{word}」在 {result['chapters']} 章里出现过，第一次在第 {rows[0]['index']} 章。"]
     for row in rows[:8]:
-        lines.append(f"第 {row.index} 章《{row.title}》（{int(row.times)} 次），第一次出现前后：……{row.near.strip()}……")
+        lines.append(
+            f"第 {row['index']} 章《{row['title']}》（{row['times']} 次），第一次出现前后：……{row['near'].strip()}……"
+        )
     if len(rows) > 8:
-        lines.append("还有：" + "、".join(f"第 {row.index} 章" for row in rows[8:40]))
+        lines.append("还有：" + "、".join(f"第 {row['index']} 章" for row in rows[8:40]))
     return clip("\n".join(lines))
 
 

@@ -463,9 +463,7 @@ async def fill_arc(session, book, endpoint_id, split, nodes_view, *, matching_co
         if [card.get("index") for card in cards] != list(range(first, first + len(cards))):
             raise ValueError("分卷期间卷号发生了变化，请重试。")
         for data in cards:
-            volume = Volume(
-                book_id=book.id, index=data["index"], title=data.get("title", ""), status="planned"
-            )
+            volume = Volume(book_id=book.id, index=data["index"], title=data.get("title", ""), status="planned")
             volume.target_node_id = endpoint.id
             for key in VOLUME_FIELDS:
                 if data.get(key) is not None:

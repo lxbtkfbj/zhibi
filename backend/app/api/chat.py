@@ -8,7 +8,7 @@ from redis.asyncio import Redis
 from sqlalchemy import func, select
 
 from app.agents.schemas import PlanItem
-from app.api.deps import SessionDep, get_book, get_redis
+from app.api.deps import SessionDep, ensure_book_not_teardown, ensure_not_teardown, get_book, get_redis
 from app.models import Book, MeetingMessage, SettingSuggestion
 from app.services import chat_convs
 from app.services.chat import LIVE, again_background, conversation_lock, reply_state, stop_key
@@ -166,6 +166,7 @@ async def revert_note(
     """消息下面的「换回原来的」：这一处换回改之前的样子；后来又被动过就 409。"""
     from app.services.group_notes import revert_note as revert
 
+    ensure_not_teardown(book, "让编辑部改书")
     return await revert(session, redis, book.id, message_id, body.step if body else None)
 
 
@@ -181,6 +182,7 @@ async def redo_note(
     """消息下面的「再改一版」：先换回，再照同一句话重改这一处。"""
     from app.services.group_notes import redo_note as redo
 
+    ensure_not_teardown(book, "让编辑部改书")
     return await redo(session, redis, book.id, message_id, body.step if body else None, background_tasks)
 
 
@@ -246,6 +248,7 @@ async def run_chat_suggestion(
         row = await session.get(SettingSuggestion, suggestion_id)
         if row is None or row.kind != "chat":
             raise HTTPException(404, "群聊建议不存在")
+        await ensure_book_not_teardown(session, row.book_id, "让编辑部改书")
         if row.status != "pending":
             raise HTTPException(409, "这条建议已经处理过")
         await ensure_idle(session, row.book_id)
@@ -286,6 +289,9 @@ async def apply_plan(
 ):
     from app.services.chat_plans import request_apply
 
+    message = await session.get(MeetingMessage, message_id)
+    if message is not None:
+        await ensure_book_not_teardown(session, message.book_id, "让编辑部改书")
     return await request_apply(session, redis, message_id, body.items if body else None, background_tasks)
 
 
@@ -293,4 +299,7 @@ async def apply_plan(
 async def undo_plan_created(message_id: int, index: int, session=SessionDep, redis: Redis = Depends(get_redis)):
     from app.services.chat_plans import undo_created
 
+    message = await session.get(MeetingMessage, message_id)
+    if message is not None:
+        await ensure_book_not_teardown(session, message.book_id, "让编辑部改书")
     return await undo_created(session, redis, message_id, index)

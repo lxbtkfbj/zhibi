@@ -14,7 +14,7 @@ from app import library_config as config
 from app.agents import schemas as s
 from app.agents.context import format_requirements
 from app.agents.editorial import persona
-from app.api.deps import SessionDep, ensure_idle, get_book, get_redis
+from app.api.deps import SessionDep, ensure_idle, ensure_not_teardown, get_book, get_redis
 from app.api.library import _splice_error, _validate_changed_target
 from app.db import get_sessionmaker
 from app.library_schemas import CandidateOut, SuggestionOut
@@ -375,6 +375,7 @@ async def review(
     session: AsyncSession = SessionDep,
     redis: Redis = Depends(get_redis),
 ):
+    ensure_not_teardown(book, "让编辑部改书")
     return await review_library(session, redis, book)
 
 
@@ -385,11 +386,14 @@ async def check(
     session: AsyncSession = SessionDep,
     redis: Redis = Depends(get_redis),
 ):
+    ensure_not_teardown(book, "让编辑部改书")
     return await review_library(session, redis, book, body)
 
 
 async def review_concept_change(session, redis, book_id, old_story: str, *, single_attempt=False) -> None:
     book = await session.get(Book, book_id)
+    if book.source == "teardown":
+        return
     new_story = (book.concept or {}).get("story", "")
     if old_story == new_story:
         return
@@ -429,6 +433,7 @@ async def rewrite(
     session: AsyncSession = SessionDep,
     redis: Redis = Depends(get_redis),
 ):
+    ensure_not_teardown(book, "让编辑部改书")
     return await book_saves.editorial(
         session, book.id, "lorekeeper", "编辑部帮写：", lambda: _rewrite(body, book, session, redis)
     )
@@ -440,6 +445,7 @@ async def fill_gaps(
     session: AsyncSession = SessionDep,
     redis: Redis = Depends(get_redis),
 ):
+    ensure_not_teardown(book, "让编辑部改书")
     return await book_saves.editorial(
         session, book.id, "lorekeeper", "编辑部补空缺：", lambda: _fill_gaps(book, session, redis)
     )

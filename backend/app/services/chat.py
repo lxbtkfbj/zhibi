@@ -4,6 +4,7 @@ import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager, suppress
+from types import SimpleNamespace
 
 from sqlalchemy import select
 
@@ -95,13 +96,13 @@ async def answered_ids(session, book_id, thread, reset_after):
     return {i for p in payloads if ((p or {}).get("thread") or "group") == thread for i in p.get("reply_to", [])}
 
 
-async def stream_reply(redis, book_id, role, reply_id, values):
+async def stream_reply(redis, book_id, role, reply_id, values, *, template="chat_reply"):
     parts: list[str] = []
     pushed = 0.0
 
     async def consume():
         nonlocal pushed
-        async for chunk in stream_model(book_id, role, "chat_reply", purpose=f"聊天·{SPEAKER_NAMES[role]}", **values):
+        async for chunk in stream_model(book_id, role, template, purpose=f"聊天·{SPEAKER_NAMES[role]}", **values):
             parts.append(chunk)
             now = time.monotonic()
             if now - pushed >= PUSH_EVERY:
@@ -186,11 +187,33 @@ async def answer(
         book = await session.get(Book, book_id)
         if book is None:
             return
-        values = await reply_values(session, book, thread, role, rows, unanswered, summary)
-        if related is not None:
+        template = "chat_teardown" if book.source == "teardown" else "chat_reply"
+        if book.source == "teardown":
+            from app.services.teardown_chat import values as teardown_values
+
+            asked = {message.id for message in unanswered}
+            message = SimpleNamespace(
+                content="\n\n".join(message.content for message in unanswered), payload=unanswered[-1].payload
+            )
+            reply = await session.get(MeetingMessage, reply_id)
+            values = await teardown_values(
+                session,
+                book,
+                role,
+                message,
+                [row for row in rows if row.id not in asked],
+                summary,
+                tools=False,
+                retry=bool(reply and (reply.payload or {}).get("again") == "retry"),
+            )
+            if related is not None and related != "（没有）":
+                values["related"] += "\n\n" + related
+        else:
+            values = await reply_values(session, book, thread, role, rows, unanswered, summary)
+        if related is not None and book.source != "teardown":
             values["related"] = related
         await session.rollback()
-        text, state = await stream_reply(redis, book_id, role, reply_id, values)
+        text, state = await stream_reply(redis, book_id, role, reply_id, values, template=template)
         text = text.strip()
         if state == "done" and not text:
             state, error = "failed", "模型什么也没说"

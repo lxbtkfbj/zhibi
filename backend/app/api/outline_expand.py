@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents import editorial
 from app.agents.planning import attach_new_foreshadowings, fit_chapter_counts
 from app.agents.setup_puzzle import clean_reveals
-from app.api.deps import SessionDep, ensure_idle, get_redis
+from app.api.deps import SessionDep, ensure_book_not_teardown, ensure_idle, get_redis
 from app.db import get_sessionmaker
 from app.graphs.deps import GraphDeps
 from app.graphs.write_book import prepare_unit_chapters
@@ -34,6 +34,7 @@ async def reserve(session, model, row_id):
     row = await session.get(model, row_id)
     if row is None:
         raise HTTPException(404, "记录不存在")
+    await ensure_book_not_teardown(session, row.book_id, "让编辑部改书")
     await lock_book(session, row.book_id)
     try:
         await ensure_idle(session, row.book_id)
@@ -203,6 +204,7 @@ async def expand_volume(volume_id: uuid.UUID, session: AsyncSession = SessionDep
     row = await session.get(Volume, volume_id)
     if row is None:
         raise HTTPException(404, "记录不存在")
+    await ensure_book_not_teardown(session, row.book_id, "让编辑部改书")
     return await book_saves.editorial(
         session, row.book_id, "chief", "主编提前拆好了：", lambda: _expand_volume(volume_id, session, redis)
     )
@@ -213,6 +215,7 @@ async def expand_unit(unit_id: uuid.UUID, session: AsyncSession = SessionDep, re
     row = await session.get(PlotUnit, unit_id)
     if row is None:
         raise HTTPException(404, "记录不存在")
+    await ensure_book_not_teardown(session, row.book_id, "让编辑部改书")
     return await book_saves.editorial(
         session, row.book_id, "chief", "主编提前出了章纲：", lambda: _expand_unit(unit_id, session, redis)
     )

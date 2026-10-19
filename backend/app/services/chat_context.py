@@ -4,6 +4,7 @@ import re
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.orm import defer
 
 from app.agents.context import (
     format_foreshadowing,
@@ -233,7 +234,8 @@ async def related_of(session, ctx, chapters, text):
                 )
             )
             if c.status == "final":
-                chapter_lines.append("原文片段：" + (best_excerpt(c.content, text) or c.content[:300]))
+                content = await chapter_content(session, c)
+                chapter_lines.append("原文片段：" + (best_excerpt(content, text) or content[:300]))
     if chapter_lines:
         blocks.append("\n".join(chapter_lines))
     for n in references(text, "卷", 2):
@@ -321,8 +323,15 @@ async def extras_of(session, ctx, chapters, role, text):
         if style := format_style(ctx.book.style_reference or ""):
             blocks.append("【文风参考】\n" + style)
         if done:
-            blocks.append("【最近定稿一章的结尾】\n" + done[-1].content[-1500:])
+            blocks.append("【最近定稿一章的结尾】\n" + (await chapter_content(session, done[-1]))[-1500:])
     return "\n\n".join(blocks)
+
+
+async def chapter_content(session, chapter):
+    """全书目录不加载正文；只有明确引用的一章再单独取，避免异步隐式懒加载。"""
+    if "content" in chapter.__dict__:
+        return chapter.content or ""
+    return await session.scalar(select(Chapter.content).where(Chapter.id == chapter.id)) or ""
 
 
 def pending_of(job, ctx):
@@ -359,7 +368,11 @@ def pending_of(job, ctx):
 
 async def reply_values(session, book, thread, role, rows, unanswered, summary):
     ctx = await load_context(session, book)
-    chapters = list(await session.scalars(select(Chapter).where(Chapter.book_id == book.id).order_by(Chapter.index)))
+    chapters = list(
+        await session.scalars(
+            select(Chapter).where(Chapter.book_id == book.id).options(defer(Chapter.content)).order_by(Chapter.index)
+        )
+    )
     job = await session.scalar(
         select(Job)
         .where(Job.book_id == book.id, Job.status.in_(["queued", "running", "waiting_author"]))

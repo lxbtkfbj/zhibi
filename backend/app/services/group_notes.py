@@ -150,7 +150,7 @@ async def receive_note(body, background_tasks, book, session, redis):
         **({"ask": body.ask} if body.ask and not body.to else {}),
     }
     plan = None
-    if not body.to and (said := SAVE_WORDS.fullmatch(text)):
+    if book.source != "teardown" and not body.to and (said := SAVE_WORDS.fullmatch(text)):
         # 「存个档」「存个档，叫开局定稿」：程序直接认，不调模型
         from app.api.saves import manual_save
 
@@ -169,7 +169,18 @@ async def receive_note(body, background_tasks, book, session, redis):
             )
         await publish(redis, book_id, "saves", {"id": save.id})
         return MeetingMessageOut(**data)
-    if wants_plan(text):
+    if book.source == "teardown":
+        # 拆的书每句话都当提问：包括「存档」「总结」「按这个来」和明确要改的指令。
+        # 私聊沿用原来的无工具路径；群聊按当前角色模型能力选择查资料或直接回答。
+        from app.services.chat_agent import pick_role, supports_tools
+
+        role = body.to or body.ask or pick_role(text)
+        tools = not body.to and await supports_tools(role)
+        payload.update(outcome={"kind": "agent" if tools else "chat"}, chat_role=role, ask_only=True)
+        if tools:
+            payload["turn"] = "tools"
+        task = "agent" if tools else "reply"
+    elif wants_plan(text):
         payload["outcome"] = {"kind": "plan_pending"}
         task = "plan"
     elif accepts_plan(text):
@@ -857,6 +868,12 @@ async def route_background(book_id, redis, known_id=None, known_intent=None):
                 break
             mid, text, viewing = message.id, message.content, (message.payload or {}).get("viewing")
             conv = (message.payload or {}).get("conv")
+            book = await session.get(Book, book_id)
+            if book.source == "teardown":
+                # 重启捡到的旧 pending 也只回答，不能绕回分流和写书路径。
+                await update_message(session, redis, message, outcome={"kind": "chat"}, ask_only=True)
+                needs_reply = True
+                continue
             # 编辑部动书之前：作者自己改过还没存的，先存一档
             await book_saves.before_ai(session, book_id)
             try:

@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from app.api.deps import SessionDep, get_book
 from app.models import Book, Chapter, PlotUnit, StoryNode, Volume
@@ -17,7 +18,15 @@ async def outline_tree(book: Book = Depends(get_book), session: AsyncSession = S
     )
     volumes = list(await session.scalars(select(Volume).where(Volume.book_id == book.id).order_by(Volume.index)))
     units = list(await session.scalars(select(PlotUnit).where(PlotUnit.book_id == book.id).order_by(PlotUnit.index)))
-    chapters = list(await session.scalars(select(Chapter).where(Chapter.book_id == book.id).order_by(Chapter.index)))
+    chapters = list(
+        await session.scalars(
+            select(Chapter)
+            .options(defer(Chapter.content, raiseload=True))
+            .where(Chapter.book_id == book.id)
+            .order_by(Chapter.index)
+        )
+    )
+    teardown = book.source == "teardown"
     by_volume = {volume.id: [unit for unit in units if unit.volume_id == volume.id] for volume in volumes}
     volume_chapters = {
         volume.id: [chapter for chapter in chapters if chapter.volume_id == volume.id] for volume in volumes
@@ -42,7 +51,13 @@ async def outline_tree(book: Book = Depends(get_book), session: AsyncSession = S
         return "planned"
 
     def volume_out(volume):
-        return {
+        def chapter_out(chapter):
+            result = {"index": chapter.index, "title": chapter.title, "status": chapter.status}
+            if teardown:
+                result["word_count"] = chapter.word_count
+            return result
+
+        result = {
             "id": volume.id,
             "index": volume.index,
             "title": volume.title,
@@ -59,14 +74,30 @@ async def outline_tree(book: Book = Depends(get_book), session: AsyncSession = S
                     "chapter_count": unit.chapter_count,
                     "status": unit.status,
                     "locked": unit.locked,
-                    "chapters": [
-                        {"index": chapter.index, "title": chapter.title, "status": chapter.status}
-                        for chapter in unit_chapters[unit.id]
-                    ],
+                    **({"virtual": False} if teardown else {}),
+                    "chapters": [chapter_out(chapter) for chapter in unit_chapters[unit.id]],
                 }
                 for unit in by_volume[volume.id]
             ],
         }
+        if teardown:
+            result["open"] = str(volume.id) == (book.teardown or {}).get("open_volume_id")
+            unassigned = [chapter for chapter in volume_chapters[volume.id] if chapter.unit_id is None]
+            if unassigned:
+                result["units"].append(
+                    {
+                        "id": f"unassigned-{volume.id}",
+                        "virtual": True,
+                        "index": None,
+                        "title": "还没归单元",
+                        "summary": "",
+                        "chapter_count": len(unassigned),
+                        "status": "done",
+                        "locked": True,
+                        "chapters": [chapter_out(chapter) for chapter in unassigned],
+                    }
+                )
+        return result
 
     def arc_status(own, planned):
         if not planned:

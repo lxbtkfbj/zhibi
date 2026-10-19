@@ -167,9 +167,7 @@ async def test_revise_keeps_what_author_did_not_mention(client, queued):
         "tags": ["凡人"],
         "target_length": None,
     }
-    res = await client.post(
-        "/api/book-drafts", json={"idea": "点子", "current": current, "feedback": "简介再抓人一点"}
-    )
+    res = await client.post("/api/book-drafts", json={"idea": "点子", "current": current, "feedback": "简介再抓人一点"})
     assert res.status_code == 200, res.text
     draft = res.json()
     assert draft["title"] == "我自己起的名"

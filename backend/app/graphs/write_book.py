@@ -1355,7 +1355,9 @@ async def prepare_unit_chapters(state: WriteState, runtime: Runtime[GraphDeps], 
         await d.emit.status("chief", f"{label}章纲有 {len(issues)} 处问题，主编按检查结果重出一次…")
         await d.check_cancel()
     if (expected is not None and len(plans) != expected) or not plans:
-        raise LLMError(f"章纲数量不符：需要 {expected or '若干'} 章，主编给了 {len(plans)} 章。原章数和章纲已保留，请重试。")
+        raise LLMError(
+            f"章纲数量不符：需要 {expected or '若干'} 章，主编给了 {len(plans)} 章。原章数和章纲已保留，请重试。"
+        )
     if not persist:
         return {"plans": plans, "issues": issues, "remark": result.remark, "label": label}
     async with d.sessionmaker() as session:

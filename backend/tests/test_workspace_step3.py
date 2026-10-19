@@ -44,13 +44,20 @@ async def test_rewrite_character_extra_quietly_and_undo(client, sessionmaker):
     book = await blank_book(client)
     hero = (
         await client.post(
-            f"/api/books/{book}/characters", json={"name": "陈默", "role_type": "主角", "extra": {"软肋": "怕死，更怕妹妹死"}}
+            f"/api/books/{book}/characters",
+            json={"name": "陈默", "role_type": "主角", "extra": {"软肋": "怕死，更怕妹妹死"}},
         )
     ).json()
     before = await messages(sessionmaker)
     res = await client.post(
         f"/api/books/{book}/library/rewrite",
-        json={"target_type": "character", "target_id": hero["id"], "path": "extra.软肋@3:8", "mode": "expand", "quiet": True},
+        json={
+            "target_type": "character",
+            "target_id": hero["id"],
+            "path": "extra.软肋@3:8",
+            "mode": "expand",
+            "quiet": True,
+        },
     )
     assert res.status_code == 200, res.text
     body = res.json()
@@ -69,12 +76,21 @@ async def test_rewrite_character_extra_quietly_and_undo(client, sessionmaker):
 async def test_options_quietly_then_choose_returns_undo(client, sessionmaker):
     book = await blank_book(client)
     entry = (
-        await client.post(f"/api/books/{book}/world-entries", json={"category": "特殊规则", "name": "借寿", "content": "寿命能借，三年后收回。"})
+        await client.post(
+            f"/api/books/{book}/world-entries",
+            json={"category": "特殊规则", "name": "借寿", "content": "寿命能借，三年后收回。"},
+        )
     ).json()
     before = await messages(sessionmaker)
     res = await client.post(
         f"/api/books/{book}/library/rewrite",
-        json={"target_type": "entry", "target_id": entry["id"], "path": "content@0:5", "mode": "options", "quiet": True},
+        json={
+            "target_type": "entry",
+            "target_id": entry["id"],
+            "path": "content@0:5",
+            "mode": "options",
+            "quiet": True,
+        },
     )
     assert res.status_code == 200, res.text
     candidate = res.json()["candidate"]
@@ -107,7 +123,13 @@ async def test_draft_characters_follow_the_book_columns_and_skip_taken_names(cli
     # 名字撞了已有的就不要
     assert [e["name"] for e in entries] == ["演示角色2", "演示角色3"]
     # 栏目按显示名写，交回来按存内容时认的名字
-    assert entries[0]["values"] == {"定位": "配角", "所属": "（演示）第2条的门派", "外貌": "（演示）第2条的外貌", "软肋": "（演示）第2条的软肋", "实力与地位": "（演示）第2条的实力与地位"}
+    assert entries[0]["values"] == {
+        "定位": "配角",
+        "所属": "（演示）第2条的门派",
+        "外貌": "（演示）第2条的外貌",
+        "软肋": "（演示）第2条的软肋",
+        "实力与地位": "（演示）第2条的实力与地位",
+    }
     # 什么都没存
     library = (await client.get(f"/api/books/{book}/library")).json()
     assert [c["name"] for c in library["characters"]] == ["演示角色1"]
@@ -115,7 +137,12 @@ async def test_draft_characters_follow_the_book_columns_and_skip_taken_names(cli
     # 收下一条：按新增一条存，来源记成从候选里收下的
     res = await client.post(
         f"/api/books/{book}/characters",
-        json={"name": entries[0]["name"], "role_type": "配角", "appearance": entries[0]["values"]["外貌"], "source": "candidate"},
+        json={
+            "name": entries[0]["name"],
+            "role_type": "配角",
+            "appearance": entries[0]["values"]["外貌"],
+            "source": "candidate",
+        },
     )
     assert res.status_code == 201, res.text
     assert res.json()["source"] == "candidate"
@@ -131,10 +158,18 @@ async def test_draft_ladder_and_goldfinger_and_custom(client):
 
     res = await client.post(
         f"/api/books/{book}/drafts",
-        json={"category": "金手指", "count": 2, "facts": [{"key": "是什么", "label": "是什么"}], "sections": [{"key": "能做什么", "label": "能做什么"}]},
+        json={
+            "category": "金手指",
+            "count": 2,
+            "facts": [{"key": "是什么", "label": "是什么"}],
+            "sections": [{"key": "能做什么", "label": "能做什么"}],
+        },
     )
     assert res.status_code == 200, res.text
-    assert res.json()["entries"][1]["values"] == {"是什么": "（演示）第2条的是什么", "能做什么": "（演示）第2条的能做什么"}
+    assert res.json()["entries"][1]["values"] == {
+        "是什么": "（演示）第2条的是什么",
+        "能做什么": "（演示）第2条的能做什么",
+    }
 
     res = await client.post(f"/api/books/{book}/drafts", json={"category": "custom:nothing", "count": 1})
     assert res.status_code == 404
@@ -145,19 +180,36 @@ async def test_draft_ladder_and_goldfinger_and_custom(client):
 async def test_rewrite_finds_the_quote_when_offsets_drift(client):
     book = await blank_book(client)
     entry = (
-        await client.post(f"/api/books/{book}/world-entries", json={"category": "特殊规则", "name": "借寿", "content": "前言。寿命能借，三年后收回。"})
+        await client.post(
+            f"/api/books/{book}/world-entries",
+            json={"category": "特殊规则", "name": "借寿", "content": "前言。寿命能借，三年后收回。"},
+        )
     ).json()
     # 页面算的位置偏了三个字：按选中的原字重新找
     res = await client.post(
         f"/api/books/{book}/library/rewrite",
-        json={"target_type": "entry", "target_id": entry["id"], "path": "content@0:5", "mode": "expand", "quote": "寿命能借，", "quiet": True},
+        json={
+            "target_type": "entry",
+            "target_id": entry["id"],
+            "path": "content@0:5",
+            "mode": "expand",
+            "quote": "寿命能借，",
+            "quiet": True,
+        },
     )
     assert res.status_code == 200, res.text
     assert res.json()["applied"]["after"] == "前言。寿命能借，（已按要求修改）三年后收回。"
     # 原字已经不在了：不改
     res = await client.post(
         f"/api/books/{book}/library/rewrite",
-        json={"target_type": "entry", "target_id": entry["id"], "path": "content@0:3", "mode": "expand", "quote": "没有这句", "quiet": True},
+        json={
+            "target_type": "entry",
+            "target_id": entry["id"],
+            "path": "content@0:3",
+            "mode": "expand",
+            "quote": "没有这句",
+            "quiet": True,
+        },
     )
     assert res.status_code == 409
 
@@ -168,14 +220,28 @@ async def test_rewrite_finds_the_quote_when_offsets_drift(client):
 async def test_fill_entry_only_fills_empty_columns_and_can_be_undone(client):
     book = await blank_book(client)
     hero = (
-        await client.post(f"/api/books/{book}/characters", json={"name": "封不觉", "role_type": "主角", "gender": "男", "age": "19"})
+        await client.post(
+            f"/api/books/{book}/characters", json={"name": "封不觉", "role_type": "主角", "gender": "男", "age": "19"}
+        )
     ).json()
     assert hero["status"] == "later"
     res = await client.post(f"/api/books/{book}/fill-entry", json={"target_type": "character", "target_id": hero["id"]})
     assert res.status_code == 200, res.text
     body = res.json()
     # 定位、性别、年龄写过了不补；所属、别名和正文栏目补上
-    assert body["filled"] == ["所属", "别名", "外貌", "性格与说话方式", "身世", "想要什么", "软肋", "能力", "成长与结局", "备注", "实力与地位"]
+    assert body["filled"] == [
+        "所属",
+        "别名",
+        "外貌",
+        "性格与说话方式",
+        "身世",
+        "想要什么",
+        "软肋",
+        "能力",
+        "成长与结局",
+        "备注",
+        "实力与地位",
+    ]
     library = (await client.get(f"/api/books/{book}/library")).json()
     person = library["characters"][0]
     assert person["gender"] == "男" and person["age"] == "19" and person["role_type"] == "主角"
@@ -188,7 +254,9 @@ async def test_fill_entry_only_fills_empty_columns_and_can_be_undone(client):
 
     # 每一栏都写了：什么也不补
     rule = (
-        await client.post(f"/api/books/{book}/world-entries", json={"category": "特殊规则", "name": "借寿", "content": "寿命能借。"})
+        await client.post(
+            f"/api/books/{book}/world-entries", json={"category": "特殊规则", "name": "借寿", "content": "寿命能借。"}
+        )
     ).json()
     res = await client.post(f"/api/books/{book}/fill-entry", json={"target_type": "entry", "target_id": rule["id"]})
     assert res.json()["filled"] == []

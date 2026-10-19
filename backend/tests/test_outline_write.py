@@ -30,7 +30,9 @@ async def client():
 
 
 async def outline_book(client):
-    book = (await client.post("/api/books", json={"start_setup": False, "title": "万古邪帝", "genre": "玄幻"})).json()["book"]["id"]
+    book = (await client.post("/api/books", json={"start_setup": False, "title": "万古邪帝", "genre": "玄幻"})).json()[
+        "book"
+    ]["id"]
     arc = (await client.post(f"/api/books/{book}/arcs", json={"title": "青阳城篇", "text": "主角在青阳城崛起"})).json()
     volume = (await client.post(f"/api/books/{book}/volumes", json={"target_node_id": arc["id"]})).json()
     unit = (await client.post(f"/api/volumes/{volume['id']}/units", json={"title": "入城"})).json()
@@ -129,12 +131,18 @@ async def test_group_chat_writes_the_page_the_author_is_looking_at(client):
 
     book, _, volume, unit = await outline_book(client)
     viewing = {"target_type": "unit", "target_id": unit["id"], "label": "大纲 · 单元 1「入城」"}
-    res = await client.post(f"/api/books/{book}/notes", json={"content": "帮我写一下这个单元的剧情概要", "viewing": viewing})
+    res = await client.post(
+        f"/api/books/{book}/notes", json={"content": "帮我写一下这个单元的剧情概要", "viewing": viewing}
+    )
     assert res.status_code == 201, res.text
     assert res.json()["payload"]["viewing"] == viewing
     message = await final_message(client, book, res.json()["id"])
     outcome = message["payload"]["outcome"]
-    assert outcome["kind"] == "outline" and outcome["target_type"] == "unit" and outcome["target_label"] == "单元 1「入城」"
+    assert (
+        outcome["kind"] == "outline"
+        and outcome["target_type"] == "unit"
+        and outcome["target_label"] == "单元 1「入城」"
+    )
     assert outcome["before"] == {"name": "入城", "text": ""}
     tree = (await client.get(f"/api/books/{book}/outline-tree")).json()
     assert tree["arcs"][0]["volumes"][0]["units"][0]["summary"].startswith("（演示）")

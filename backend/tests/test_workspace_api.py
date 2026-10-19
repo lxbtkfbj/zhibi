@@ -46,10 +46,17 @@ async def test_entry_field_values_merge_into_fields(client):
     book = await blank_book(client)
     res = await client.post(
         f"/api/books/{book}/world-entries",
-        json={"category": "势力划分", "name": "青冥宗", "content": "东荒第一宗门", "fields": [{"name": "领头的", "value": "青冥老祖"}]},
+        json={
+            "category": "势力划分",
+            "name": "青冥宗",
+            "content": "东荒第一宗门",
+            "fields": [{"name": "领头的", "value": "青冥老祖"}],
+        },
     )
     entry = res.json()
-    res = await client.patch(f"/api/world-entries/{entry['id']}", json={"field_values": {"对主角": "敌", "领头的": "宗主"}})
+    res = await client.patch(
+        f"/api/world-entries/{entry['id']}", json={"field_values": {"对主角": "敌", "领头的": "宗主"}}
+    )
     assert res.status_code == 200, res.text
     assert res.json()["fields"] == [{"name": "领头的", "value": "宗主"}, {"name": "对主角", "value": "敌"}]
     res = await client.patch(f"/api/world-entries/{entry['id']}", json={"field_values": {"领头的": ""}})
@@ -97,13 +104,23 @@ async def test_entry_layout_only_touches_its_own_category(client):
     place = (
         await client.post(
             f"/api/books/{book}/world-entries",
-            json={"category": "世界与地图", "name": "后山", "content": "禁地", "fields": [{"name": "归谁管", "value": "老祖"}]},
+            json={
+                "category": "世界与地图",
+                "name": "后山",
+                "content": "禁地",
+                "fields": [{"name": "归谁管", "value": "老祖"}],
+            },
         )
     ).json()
     overview = (
         await client.post(
             f"/api/books/{book}/world-entries",
-            json={"category": "世界与地图", "name": "世界概况", "content": "九天大陆", "fields": [{"name": "归谁管", "value": "x"}]},
+            json={
+                "category": "世界与地图",
+                "name": "世界概况",
+                "content": "九天大陆",
+                "fields": [{"name": "归谁管", "value": "x"}],
+            },
         )
     ).json()
     res = await client.put(
