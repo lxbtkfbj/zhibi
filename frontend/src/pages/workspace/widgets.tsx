@@ -1,7 +1,7 @@
 /** 工作台里各页共用的小部件：点上去就能改的字、小菜单、左边目录的壳、中间那一页纸。 */
 
 import clsx from 'clsx'
-import { ChevronDown, Lock, LockOpen, MoreHorizontal, Pin, Search, Sparkles, Trash2, X } from 'lucide-react'
+import { ChevronDown, Lock, LockOpen, MoreHorizontal, Pin, Search, Trash2, X } from 'lucide-react'
 import { type ReactNode, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { COLUMN_KEY, COLUMN_MAX, COLUMN_MIN, ColumnWidthContext, SideFooterContext, zoomOf } from './column'
 import type { VField } from './model'
@@ -144,9 +144,9 @@ export function Menu({ trigger, children, align = 'right', className }: { trigge
   )
 }
 
-/** 设定卡片右上角：补齐、锁住、删掉三个小图标，鼠标移到卡上才出来（锁住的一直显示锁）。删要点两次。 */
-function CardIcons({ locked, onLock, onDelete, deleteLabel, onFill, pinned, onPin }: {
-  locked?: boolean; onLock?: () => void; onDelete?: () => void; deleteLabel: string; onFill?: () => void; pinned?: boolean; onPin?: () => void
+/** 设定卡片右上角：置顶、锁住、删掉几个小图标，鼠标移到卡上才出来（锁住的一直显示锁）。删要点两次。 */
+function CardIcons({ locked, onLock, onDelete, deleteLabel, pinned, onPin }: {
+  locked?: boolean; onLock?: () => void; onDelete?: () => void; deleteLabel: string; pinned?: boolean; onPin?: () => void
 }) {
   const [sure, setSure] = useState(false)
   const icon = 'flex size-8 items-center justify-center rounded-md text-ink-3 transition-colors hover:bg-line/60 hover:text-ink'
@@ -158,11 +158,6 @@ function CardIcons({ locked, onLock, onDelete, deleteLabel, onFill, pinned, onPi
           title={pinned ? '置顶了：排在目录最上面，编辑部每写一章都带上他；点一下取消' : '置顶：排在目录最上面，编辑部每写一章都带上他'}
           aria-label={pinned ? '取消置顶' : '置顶'} className={clsx(icon, pinned ? 'text-chief' : hidden)}>
           <Pin className={clsx('size-4', pinned && 'fill-current')} />
-        </button>
-      )}
-      {onFill && (
-        <button type="button" onClick={onFill} title="让编辑部补齐空着的栏目" aria-label="让编辑部补齐空着的栏目" className={clsx(icon, hidden)}>
-          <Sparkles className="size-4" />
         </button>
       )}
       {onLock && (
@@ -183,15 +178,15 @@ function CardIcons({ locked, onLock, onDelete, deleteLabel, onFill, pinned, onPi
 }
 
 /** 卡片右上角：设定卡片是三个小图标；大纲、正文那种有好几项的，是一个「⋯」小菜单。删要点两次。 */
-export function CardMenu({ locked, onLock, onDelete, deleteLabel = '删掉这一条', onFill, items = [], pinned, onPin }: {
-  locked?: boolean; onLock?: () => void; onDelete?: () => void; deleteLabel?: string; onFill?: () => void
+export function CardMenu({ locked, onLock, onDelete, deleteLabel = '删掉这一条', items = [], pinned, onPin }: {
+  locked?: boolean; onLock?: () => void; onDelete?: () => void; deleteLabel?: string
   /** 角色卡：置顶 */
   pinned?: boolean; onPin?: () => void
   /** 再多几项：大纲上的在前面插、在后面插、上移、下移 */
   items?: { label: string; onClick: () => void }[]
 }) {
   const [sure, setSure] = useState(false)
-  if (!items.length) return <CardIcons locked={locked} onLock={onLock} onDelete={onDelete} deleteLabel={deleteLabel} onFill={onFill} pinned={pinned} onPin={onPin} />
+  if (!items.length) return <CardIcons locked={locked} onLock={onLock} onDelete={onDelete} deleteLabel={deleteLabel} pinned={pinned} onPin={onPin} />
   return (
     <div className="absolute top-5 right-5 z-10">
     <Menu
@@ -204,7 +199,6 @@ export function CardMenu({ locked, onLock, onDelete, deleteLabel = '删掉这一
       {(close) => (
         <>
           {items.map((item) => <button key={item.label} type="button" className={menuItem} onClick={() => { close(); item.onClick() }}>{item.label}</button>)}
-          {onFill && <button type="button" className={menuItem} onClick={() => { close(); onFill() }}>让编辑部补齐空着的栏目</button>}
           {onLock && <button type="button" className={menuItem} onClick={() => { close(); onLock() }}>{locked ? '解锁，AI 可以改' : '锁住，AI 不改'}</button>}
           {onDelete && (
             <button type="button" className={clsx(menuItem, sure && 'text-seal hover:text-seal')}

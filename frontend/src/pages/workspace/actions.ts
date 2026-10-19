@@ -108,7 +108,6 @@ export interface WorkspaceActions {
   /** 退回到某一版（撤销编辑部刚改的） */
   revert?(versionId: string): Promise<void>
   /** 让编辑部把这一条空着的栏目补上，写过的不动 */
-  fillEntry?(entry: VEntry): Promise<{ filled: string[]; revertVersionId?: string | null }>
   /** 编辑部帮写大纲上的这一段（结局、篇、卷、单元写名字和一段话，章写章纲），直接写进去；before 是改之前的样子，撤销就存回去 */
   writeNode?(node: VNode, request: string): Promise<{ note: string; before: NodeChange }>
   /** 这一段能不能让编辑部写：开写了的不行 */

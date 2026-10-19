@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { ArrowLeft, BookOpen, ChevronDown, ChevronRight, ChevronUp, Globe, Inbox, Lock, Minus, PanelRight, PictureInPicture2, Pin, Plus, Sparkles, Wand2, X } from 'lucide-react'
+import { ArrowLeft, BookOpen, ChevronDown, ChevronRight, ChevronUp, Globe, Inbox, Lock, Minus, PanelRight, PictureInPicture2, Pin, Plus, X } from 'lucide-react'
 import { type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { ChatViewing } from '../../api/types'
@@ -428,25 +428,6 @@ function MetaRow({ items, readOnly }: { items: MetaItem[]; readOnly?: boolean })
 }
 
 
-/** 让编辑部把这一条空着的栏目补上：补的时候卡上说一声，补好底下能撤销。不能补的（推出来的、没起名的、锁住的、阶梯）不给。 */
-function useFill(entry: VEntry): { fill?: () => void; filling: boolean } {
-  const { actions, notify } = useWorkspace()
-  const [filling, setFilling] = useState(false)
-  if (!actions.fillEntry || entry.readonly || entry.locked || entry.kind === 'ladder' || entry.id.startsWith('draft-')) return { filling }
-  const fill = () => {
-    setFilling(true)
-    actions.fillEntry!(entry)
-      .then((r) => notify?.(r.filled.length ? `补好了 ${r.filled.length} 栏：${r.filled.join('、')}` : '每一栏都写了，没补', r.revertVersionId))
-      .catch((error: unknown) => notify?.(`没补成：${errorText(error)}`))
-      .finally(() => setFilling(false))
-  }
-  return { fill, filling }
-}
-
-function FillingNote({ filling }: { filling: boolean }) {
-  return filling ? <p className="mt-2 flex items-center gap-1.5 text-[13px] text-lore"><Sparkles className="size-3.5" />设定师在补空着的栏目…</p> : null
-}
-
 /** 卡片上的几处改动都走这里：存哪一栏由工作台决定。 */
 function useEntrySaver(entry: VEntry) {
   const { actions } = useWorkspace()
@@ -534,23 +515,21 @@ function CharacterCard({ book, entry, nav, fresh }: { book: VBook; entry: VEntry
   const relations = entry.relations ?? []
   const people = entry.kind === 'character'
   const field = (key: string) => (text: string) => saveEntry({ fields: { [key]: text } })
-  const { fill, filling } = useFill(entry)
   return (
     <section id={`entry-${entry.id}`} data-entry={entry.id} className={clsx(paperCard, 'group/card relative scroll-mt-6')}>
       {!readOnly && (
-        <CardMenu locked={entry.locked} onLock={draft ? undefined : () => saveEntry({ locked: !entry.locked })} onFill={fill}
+        <CardMenu locked={entry.locked} onLock={draft ? undefined : () => saveEntry({ locked: !entry.locked })}
           pinned={!!entry.pinnedAt} onPin={draft || !actions.pinEntry ? undefined : () => save(actions.pinEntry!(entry, !entry.pinnedAt))}
           onDelete={() => save(actions.deleteEntry(entry))} deleteLabel={draft ? '不要这一条了' : '删掉这一条'} />
       )}
       <PendingNote id={entry.id} />
-      <div className="flex flex-wrap items-center gap-3 pr-36">
+      <div className="flex flex-wrap items-center gap-3 pr-28">
         <Editable autoFocus={fresh} value={entry.name} readOnly={readOnly} placeholder="起个名字" className={titleClass}
           onSave={(name) => { if (name.trim()) saveEntry({ name }) }} />
         <Tags entry={entry} />
         {entry.dead && <span className="rounded-full bg-ink/80 px-2.5 py-0.5 text-xs text-paper-2">已死</span>}
       </div>
       <DraftNote entry={entry} />
-      <FillingNote filling={filling} />
       {readOnly && <p className="mt-2 text-[13px] text-ink-3">这一条从「{holder?.name}」的角色卡推出来，到角色卡上去改。</p>}
       <Editable value={entry.oneLine} readOnly={readOnly} onSave={(oneLine) => saveEntry({ oneLine })} spot={`e|${entry.id}|@oneLine`} placeholder="一句话说清这是谁、这是什么" className="mt-3 font-serif text-lg leading-relaxed text-ink-2 2xl:text-xl" />
       <MetaRow readOnly={readOnly} items={[
@@ -570,7 +549,7 @@ function CharacterCard({ book, entry, nav, fresh }: { book: VBook; entry: VEntry
           {sections.map((f) => (
             <Section key={f.key ?? f.label} field={f} readOnly={readOnly} onSave={field(f.key ?? f.label)} spot={`e|${entry.id}|${f.key ?? f.label}`}>
               {['身世', '来历'].includes(f.key ?? f.label) && secret && <div className="mt-2"><LinkChip icon={<Lock className="size-3" />} onClick={() => nav.openEntry(secret.id)}>另有秘密：{secret.name}</LinkChip></div>}
-              {(f.key ?? f.label) === '能力' && goldfinger && <div className="mt-2"><LinkChip icon={<Sparkles className="size-3" />} onClick={() => nav.openEntry(goldfinger.id)}>金手指：{goldfinger.name}</LinkChip></div>}
+              {(f.key ?? f.label) === '能力' && goldfinger && <div className="mt-2"><LinkChip onClick={() => nav.openEntry(goldfinger.id)}>金手指：{goldfinger.name}</LinkChip></div>}
             </Section>
           ))}
           {people && !draft && (!readOnly || relations.length > 0) && <Relations book={book} entry={entry} nav={nav} readOnly={readOnly} />}
@@ -593,19 +572,17 @@ function PlainCard({ book, entry, category, nav, fresh }: { book: VBook; entry: 
   const [newLevel, setNewLevel] = useState(-1)
   const onlyContent = entry.sections.length === 1 && (entry.sections[0].key ?? entry.sections[0].label) === '内容'
   const setLevel = (i: number, part: 'name' | 'text', value: string) => saveEntry({ levels: levels.map((l, j) => (j === i ? { ...l, [part]: value } : l)) })
-  const { fill, filling } = useFill(entry)
   return (
     <section id={`entry-${entry.id}`} data-entry={entry.id} className={clsx(paperCard, 'group/card relative scroll-mt-6')}>
-      <CardMenu locked={entry.locked} onLock={draft ? undefined : () => saveEntry({ locked: !entry.locked })} onFill={fill}
+      <CardMenu locked={entry.locked} onLock={draft ? undefined : () => saveEntry({ locked: !entry.locked })}
         onDelete={() => save(actions.deleteEntry(entry))} deleteLabel={draft ? '不要这一条了' : '删掉这一条'} />
       <PendingNote id={entry.id} />
-      <div className="flex flex-wrap items-center gap-3 pr-28">
+      <div className="flex flex-wrap items-center gap-3 pr-20">
         <Editable autoFocus={fresh} value={entry.name} placeholder={example ? `起个名字，比如「${example.name}」` : '起个名字'} className={titleClass}
           onSave={(name) => { if (name.trim()) saveEntry({ name }) }} />
         <Tags entry={entry} />
       </div>
       <DraftNote entry={entry} />
-      <FillingNote filling={filling} />
       <MetaRow items={[
         ...(parent ? [{ label: '属于', value: parent.name, link: () => nav.openEntry(parent.id) }] : []),
         ...entry.facts.map(([label, value, placeholder, key]) => ({ label, value, placeholder, onSave: (text: string) => saveEntry({ fields: { [key ?? label]: text } }) })),
@@ -1168,7 +1145,7 @@ function WriteHelp({ node }: { node: VNode }) {
         setWriting(false)
       })
   }
-  if (writing) return <p className="flex items-center gap-1.5 text-[13px] text-chief"><Sparkles className="size-3.5" />主编在写{what}，一般半分钟上下，写好直接换上…</p>
+  if (writing) return <p className="flex items-center gap-2 text-[13px] text-chief"><span aria-hidden className="size-2 shrink-0 rounded-full bg-chief motion-safe:animate-pulse" />主编在写{what}，一般半分钟上下，写好直接换上…</p>
   if (!open) return <div><AskButton onClick={() => setOpen(true)}>{empty ? `编辑部帮写${what}` : `编辑部帮改写${what}`}</AskButton></div>
   return (
     <div className="rounded-2xl border border-line bg-subtle p-5">
@@ -2036,7 +2013,7 @@ export function Workspace({ book: base, actions, right, sideFooter, chat, chatTo
         <SelectionActions pageRef={pageRef} onToast={setToast} onUndo={onUndo} />
         {undo && (
           <div className="fixed bottom-8 left-1/2 z-50 flex max-w-[min(640px,90vw)] -translate-x-1/2 items-center gap-3 rounded-full bg-ink px-5 py-2.5 text-[13px] text-paper-2 shadow-[var(--shadow-lift)]">
-            <Wand2 className="size-3.5 shrink-0" /><span className="line-clamp-2">{undo.text}</span>
+            <span className="line-clamp-2">{undo.text}</span>
             <button type="button" className="shrink-0 whitespace-nowrap underline underline-offset-4 hover:text-white" onClick={() => {
               const { versionId, restore } = undo
               setUndo(null)
@@ -2047,7 +2024,7 @@ export function Workspace({ book: base, actions, right, sideFooter, chat, chatTo
         )}
         {toast && !undo && (
           <div className="fixed bottom-8 left-1/2 z-50 flex max-w-[min(640px,90vw)] -translate-x-1/2 items-center gap-2 rounded-full bg-ink px-5 py-2.5 text-[13px] text-paper-2 shadow-[var(--shadow-lift)]">
-            <Wand2 className="size-3.5 shrink-0" />{toast}
+            {toast}
           </div>
         )}
       </div>

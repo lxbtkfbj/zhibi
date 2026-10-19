@@ -1,7 +1,7 @@
 /** 编辑部帮拆：单元出章纲、卷拆成单元。先出一版草稿给作者看，作者改、删、收下才放进大纲；能再出一版，收下了也能撤销。 */
 
 import clsx from 'clsx'
-import { RotateCcw, Sparkles, X } from 'lucide-react'
+import { RotateCcw, X } from 'lucide-react'
 import { useState } from 'react'
 import type { VNode } from './model'
 import { smallButton } from './styles'
@@ -92,7 +92,7 @@ export function SplitPanel({ node, split }: { node: VNode; split: Split }) {
   if (state.step === 'working') {
     return (
       <div className="mt-5 rounded-2xl border-2 border-dashed border-chief/25 bg-chief-soft/30 p-5">
-        <p className="flex items-center gap-1.5 text-[14px] text-chief"><Sparkles className="size-4" />主编在{chapter ? '出章纲' : '拆单元'}，一般要两三分钟，拆一整卷要四五分钟，出好了在这里给你看…</p>
+        <p className="flex items-center gap-2 text-[14px] text-chief"><span aria-hidden className="size-2 shrink-0 rounded-full bg-chief motion-safe:animate-pulse" />主编在{chapter ? '出章纲' : '拆单元'}，一般要两三分钟，拆一整卷要四五分钟，出好了在这里给你看…</p>
         <div className="mt-4 space-y-3">
           {[0, 1, 2].map((i) => <div key={i} className="h-20 rounded-xl bg-card/70 motion-safe:animate-pulse" />)}
         </div>

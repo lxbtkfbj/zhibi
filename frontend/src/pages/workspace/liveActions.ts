@@ -343,12 +343,6 @@ export function useLiveBook(bookId: string) {
       // 开写了的章、卷、单元不写；章纲只有还没开写的能写
       canWrite: (node) => !!node.ref && (node.kind === '章' ? node.progress === '已规划' : !node.progress || node.progress === '已规划'),
       revert: (versionId) => done(post(`/versions/${versionId}/revert`)).then(() => undefined),
-      fillEntry: async (entry) => {
-        const reply = await done(post<{ filled: string[]; revert_version_id?: string | null }>(`/books/${bookId}/fill-entry`, {
-          target_type: isCharacter(entry) ? 'character' : 'entry', target_id: entry.id,
-        }))
-        return { filled: reply.filled, revertVersionId: reply.revert_version_id }
-      },
       canDelete: (node) => {
         if (node.ref?.type === 'volume' || node.ref?.type === 'unit') return true
         if (node.kind === '章') return !!node.ref && node.progress === '已规划'

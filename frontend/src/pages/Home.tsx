@@ -1,4 +1,4 @@
-import { ArrowRight, Feather, Plus, Sparkles, Trash2 } from 'lucide-react'
+import { ArrowRight, Feather, Plus, Trash2 } from 'lucide-react'
 import { motion, useReducedMotion } from 'motion/react'
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
@@ -47,7 +47,6 @@ function Composer() {
           onClick={() => setIdea(IDEAS[Math.floor(Math.random() * IDEAS.length)])}
           className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[13px] text-ink-3 transition-colors hover:bg-line/50 hover:text-ink"
         >
-          <Sparkles className="size-3.5" />
           给我一个灵感
         </button>
         <span className="ml-auto hidden text-xs text-ink-3 sm:inline">Ctrl + Enter</span>

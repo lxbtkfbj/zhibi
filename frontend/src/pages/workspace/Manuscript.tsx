@@ -1,7 +1,7 @@
 /** 正文：左边目录按卷、单元排章；中间一页纸读正文、改正文；开写、停下、拍板。拍板的卡片长在要看的那一页上。 */
 
 import clsx from 'clsx'
-import { ChevronDown, ChevronLeft, ChevronRight, PenLine, Sparkles } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, PenLine } from 'lucide-react'
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useSave, useWorkspace } from './actions'
 import { chapterNodes, cn, countWords, findEntry, findNode, splitTitle, type VBook, type VGate, type VNode, type WritePlan, type WritingGates } from './model'
@@ -139,7 +139,7 @@ export function GateCard({ gate, writing, nav, where }: { gate: VGate; writing: 
         </ul>
       )}
       {gate.revising ? (
-        <p className="mt-4 flex items-center gap-1.5 text-[13px] text-chief"><Sparkles className="size-3.5" />主编在照你说的改，一般半分钟上下，改好了直接换上…</p>
+        <p className="mt-4 flex items-center gap-2 text-[13px] text-chief"><span aria-hidden className="size-2 shrink-0 rounded-full bg-chief motion-safe:animate-pulse" />主编在照你说的改，一般半分钟上下，改好了直接换上…</p>
       ) : asking ? (
         <div className="mt-4">
           <textarea autoFocus value={text} onChange={(e) => setText(e.target.value)} rows={2} placeholder={REVISE_HINT[gate.kind]}
@@ -536,7 +536,7 @@ export function ChapterPage({ book, id, writing, nav }: { book: VBook; id: strin
         )}
         {live !== undefined ? (
           <>
-            <p className="mb-6 flex items-center gap-2 text-[13px] text-writer"><Sparkles className="size-3.5" />写手正在写这一章，写完先过审稿，再由设定师记下变化。</p>
+            <p className="mb-6 flex items-center gap-2 text-[13px] text-writer"><span aria-hidden className="size-2 shrink-0 rounded-full bg-writer motion-safe:animate-pulse" />写手正在写这一章，写完先过审稿，再由设定师记下变化。</p>
             <LiveText text={live} />
           </>
         ) : text !== undefined && status !== 'planned' ? (
