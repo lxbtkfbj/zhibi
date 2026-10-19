@@ -34,6 +34,8 @@ export interface BookContextValue {
   viewing?: () => ChatViewing | null
   /** 新书页上有：打开存档那一栏（带上一档的号就直接点开那一档） */
   openSaves?: (saveId?: number) => void
+  /** 新书页上有：打开待处理那一栏 */
+  openPending?: () => void
   /** 新书页上有：群聊正在看哪一段对话；null 是最近聊的那一段 */
   chatConv?: string | null
   setChatConv?: (id: string | null) => void

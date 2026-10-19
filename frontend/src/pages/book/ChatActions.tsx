@@ -41,7 +41,7 @@ export function DiffBlock({ diff }: { diff: ChangeDiff }) {
 
 /** step：一句话拆成好几件事时，这是第几件（换回原来的、再改一版都只管那一件） */
 export function ChatOutcome({ message, result, step }: { message: MeetingMessage; result?: NonNullable<MeetingMessage["payload"]>["outcome"]; step?: number }) {
-  const { bookId, manualNavigate, messages, openTarget, openSaves } = useBookContext()
+  const { bookId, manualNavigate, messages, openTarget, openSaves, openPending } = useBookContext()
   const requirements = useAuthorRequirements(bookId)
   const library = useLibrary(bookId)
   const qc = useQueryClient()
@@ -81,7 +81,10 @@ export function ChatOutcome({ message, result, step }: { message: MeetingMessage
       if (action === '换回原来的' || action === '再改一版') {
         await post(`/books/${bookId}/notes/${message.id}/${action === '换回原来的' ? 'revert' : 'redo'}`, step === undefined ? {} : { step })
         refresh()
-      } else if ((outcome.kind === 'later' || outcome.kind === 'suggestion')) manualNavigate(`/books/${bookId}/library?suggestions=1`)
+      } else if ((outcome.kind === 'later' || outcome.kind === 'suggestion')) {
+        if (openPending) openPending()
+        else manualNavigate(`/books/${bookId}/library?suggestions=1`)
+      }
       // 新书页上：直接打开那一条，不跳回旧版
       else if (openTarget && outcome.target_type && outcome.target_id) openTarget(outcome.target_type, outcome.target_id)
       else {

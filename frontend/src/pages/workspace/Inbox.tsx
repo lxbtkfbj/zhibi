@@ -131,6 +131,43 @@ function Item({ suggestion, fresh, focused, onDone }: { suggestion: LibrarySugge
   )
 }
 
+/** 让编辑部再看一遍设定：看还缺什么（补漏）、把设定从头查一遍（找对不上的）。看出来的放进待处理。旧版书页的「补漏」「检查」搬到这里。 */
+function AskEditorial() {
+  const { bookId, working } = useBookContext()
+  const qc = useQueryClient()
+  const [doing, setDoing] = useState<'gaps' | 'review' | null>(null)
+  const [said, setSaid] = useState('')
+  const [error, setError] = useState<unknown>(null)
+  const run = async (kind: 'gaps' | 'review') => {
+    setDoing(kind)
+    setSaid('')
+    setError(null)
+    try {
+      const res = await post<{ suggestions?: LibrarySuggestion[] }>(`/books/${bookId}/library/${kind === 'gaps' ? 'fill-gaps' : 'review'}`)
+      const n = res.suggestions?.length ?? 0
+      setSaid(n ? `看完了，多了 ${n} 条，在下面` : kind === 'gaps' ? '看完了，没发现缺什么' : '查完了，没发现对不上的')
+      await qc.invalidateQueries({ queryKey: libraryKeys.suggestions(bookId) })
+    } catch (cause) {
+      setError(cause)
+    } finally {
+      setDoing(null)
+    }
+  }
+  const ask = 'h-8 flex-1 rounded-lg border border-line-2 bg-card px-2 text-[13px] text-ink-2 transition-colors hover:border-ink-3/50 hover:text-ink disabled:opacity-50'
+  return (
+    <div>
+      <div className="flex gap-2">
+        <button type="button" disabled={!!doing || working} onClick={() => void run('gaps')} className={ask}
+          title={working ? '编辑部正在干活，等这一轮做完' : '设定师照简介和大纲看看设定还缺哪几条，看出来的放进待处理'}>{doing === 'gaps' ? '设定师在看…' : '看看设定还缺什么'}</button>
+        <button type="button" disabled={!!doing || working} onClick={() => void run('review')} className={ask}
+          title={working ? '编辑部正在干活，等这一轮做完' : '审稿把设定从头查一遍，前后对不上、不好看的放进待处理'}>{doing === 'review' ? '审稿在查…' : '把设定查一遍'}</button>
+      </div>
+      {said && <p className="mt-1.5 text-xs text-ink-3">{said}</p>}
+      <ErrorText error={error} />
+    </div>
+  )
+}
+
 export function PendingPanel({ open, focus, onClose }: { open: boolean; focus: string | null; onClose: () => void }) {
   const { bookId } = useBookContext()
   const qc = useQueryClient()
@@ -185,6 +222,7 @@ export function PendingPanel({ open, focus, onClose }: { open: boolean; focus: s
       </div>
       <div className="scroll-thin min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3">
         <p className="text-[13px] leading-relaxed text-ink-3">编辑部觉得该改、又没直接动手的，放在这里等你定。有具体改法的点「同意」就照着改，改完当场给你看改前改后；只说了毛病的，可以「让编辑部改」。</p>
+        <AskEditorial />
         {concrete.length > 1 && (
           <button type="button" disabled={busy} onClick={() => void acceptAll()} className="h-8 w-full rounded-lg border border-line-2 bg-card text-[13px] text-ink-2 transition-colors hover:border-ink-3/50 hover:text-ink disabled:opacity-50">
             {busy ? '正在照着改…' : `有具体改法的 ${concrete.length} 条全部同意`}

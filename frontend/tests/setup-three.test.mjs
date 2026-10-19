@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { THREE_PIECES, pieceStatuses } from '../src/lib/storyMap.ts'
 import { artifactTarget, pendingTarget, progressText } from '../src/lib/workspace.ts'
 import { initialWriteRequest, waitForSetupCompletion } from '../src/lib/setupThree.ts'
@@ -29,27 +29,13 @@ test('确认开写等待同一任务成功，不在运行中、失败、取消�
   assert.deepEqual(initialWriteRequest({ chapters_final: 3, trial_read_done: true }), { until: 'count', count: 10 })
 })
 
-test('正式页面使用后端类别和候选接口，不复制类别配置，不保留新建提问选项', () => {
+test('首页不保留新建提问选项，只剩「开新书」进新建页', () => {
   const home = readFileSync(new URL('../src/pages/Home.tsx', import.meta.url), 'utf8')
-  const page = readFileSync(new URL('../src/pages/book/sections/LibraryPage.tsx', import.meta.url), 'utf8')
-  const pitches = readFileSync(new URL('../src/pages/book/PitchSelection.tsx', import.meta.url), 'utf8')
-  // 页面只负责点选，提交在书稿底部的操作条里。
-  const actionBar = readFileSync(new URL('../src/pages/book/ActionBar.tsx', import.meta.url), 'utf8')
   assert.ok(!home.includes('先问我几个问题'))
   // 首页只剩「开新书」，进新建页；开书方式那一排已经去掉
   assert.ok(home.includes("navigate('/new'"))
-  assert.ok(page.includes('useLibraryConfig'))
-  assert.ok(page.includes('SetupGate'))
-  assert.ok(actionBar.includes('index: picked.index + 1'))
-  assert.ok(pitches.includes('pending.recommended === index + 1'))
 })
 
-
-test('旧流程只有只读产出和重开入口，不再提供重新打开这一块', () => {
-  const preview = readFileSync(new URL('../src/pages/book/SetupArtifactPreview.tsx', import.meta.url), 'utf8')
-  const decisions = readFileSync(new URL('../src/pages/book/PieceDecisions.tsx', import.meta.url), 'utf8')
-  assert.ok(preview.includes('needsSetupRestart(book, job)'))
-  assert.ok(preview.includes('<fieldset disabled'))
-  assert.ok(!decisions.includes("action: 'reopen'"))
-  assert.ok(!decisions.includes('重新打开这一块'))
+test('旧版书页退役：旧的开书流程页面（选方向、拍板条、只读产出）都拿掉了', () => {
+  for (const path of ['pages/book/sections/LibraryPage.tsx', 'pages/book/PitchSelection.tsx', 'pages/book/ActionBar.tsx', 'pages/book/SetupArtifactPreview.tsx', 'pages/book/PieceDecisions.tsx']) assert.equal(existsSync(new URL(`../src/${path}`, import.meta.url)), false)
 })

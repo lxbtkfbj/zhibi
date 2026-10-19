@@ -91,13 +91,7 @@ test('展开任务有中文进度，单元章纲开关共用本书和新书默�
   assert.match(shared, /checked=\{value.chapters_approval \?\? false\}/)
 })
 
-test('确认视图不提供改一句，旧页面与专用问卷组件已退役，通用写作组件仍保留', () => {
-  const pendingPage = readFileSync(new URL('../src/pages/book/sections/PendingArcReview.tsx', import.meta.url), 'utf8')
-  assert.ok(!pendingPage.includes('RewriteField'))
-  assert.ok(pendingPage.includes('segmentReview.submit'))
-  assert.ok(pendingPage.includes('segmentPinEnd'))
-  const layout = readFileSync(new URL('../src/pages/book/BookLayout.tsx', import.meta.url), 'utf8')
-  assert.ok(layout.includes('segmentLock.current'))
+test('旧版书页已退役（2026-10-19）：旧页面、专用问卷组件和只给旧页面用的写作组件都拿掉了', () => {
   for (const path of ['pages/book/sections/NextSegmentPage.tsx', 'lib/nextSegmentQuestions.ts', 'components/QuestionSection.tsx', 'lib/questionTypes.ts']) assert.equal(existsSync(new URL(`../src/${path}`, import.meta.url)), false)
-  for (const path of ['components/FactTable.tsx', 'components/EmotionCurve.tsx', 'components/WritingLabels.tsx', 'components/ForeshadowChips.tsx']) assert.equal(existsSync(new URL(`../src/${path}`, import.meta.url)), true)
+  for (const path of ['pages/book/BookLayout.tsx', 'pages/book/sections/PendingArcReview.tsx', 'components/FactTable.tsx', 'components/EmotionCurve.tsx', 'components/WritingLabels.tsx', 'components/ForeshadowChips.tsx']) assert.equal(existsSync(new URL(`../src/${path}`, import.meta.url)), false)
 })

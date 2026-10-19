@@ -1,7 +1,7 @@
-/** 新书页的编辑部聊天（接真书）：只看群聊里正在看的那一段对话，消息换成聊天界面要的样子；发话带上点了谁、作者正在看哪一页、
+/** 书页的编辑部聊天（接真书）：只看群聊里正在看的那一段对话，消息换成聊天界面要的样子；发话带上点了谁、作者正在看哪一页、
  *  是哪一段对话；回答边写边推（chat_delta），「停」「重新回答」走后台；作者的话能「从这里重来」（只退聊天）。
  *  编辑部干活的进度压成一行：正在做的只在最底下留一行跟着变；做完的一行小字带「去看」；等拍板的一行「……等你看 · 去看」；
- *  大块产出只放在页面上。旧版书页的私聊还在旧版里。 */
+ *  大块产出只放在页面上。 */
 
 import { AlertTriangle, ListChecks } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
@@ -184,8 +184,8 @@ function elapsed(since: string | null | undefined, now: number): string {
 }
 
 /** 聊天最底下一行：编辑部正在做什么（跟着变，做完消失），或者什么等你看 */
-function WorkNow({ job, messages, writing, go, navigate, bookId }: {
-  job: Job; messages: MeetingMessage[]; writing?: WritingControl; go?: Go; navigate: (path: string) => void; bookId: string
+function WorkNow({ job, messages, writing, go, bookId }: {
+  job: Job; messages: MeetingMessage[]; writing?: WritingControl; go?: Go; bookId: string
 }) {
   const running = job?.status === 'queued' || job?.status === 'running'
   const [now, setNow] = useState(() => Date.now())
@@ -219,9 +219,8 @@ function WorkNow({ job, messages, writing, go, navigate, bookId }: {
     const unit = at.node?.startsWith('u:') ? at.node.slice(2) : undefined
     onGo = at.chapter ? () => go('manuscript', at.chapter!) : volume ? () => go('volume', volume) : unit ? () => go('unit', unit) : () => go('node', at.node ?? 'book')
   } else {
-    const target = pendingTarget(job.pending, bookId)
-    label = target?.label
-    if (target) onGo = () => navigate(target.path)
+    // 以前的开书流程停在半路：新书页上没有它的拍板卡，顶栏下面那一行能停下开书
+    label = pendingTarget(job.pending, bookId)?.label
   }
   return (
     <p data-testid="work-now" className={`${row} text-seal-dark`}>
@@ -233,7 +232,7 @@ function WorkNow({ job, messages, writing, go, navigate, bookId }: {
 }
 
 export function LiveChat({ writing }: { writing?: WritingControl }) {
-  const { bookId, messages, job, waiting, working, viewing, focusComposer, openTarget, outline, manualNavigate, setChatConv } = useBookContext()
+  const { bookId, messages, job, waiting, working, viewing, focusComposer, openTarget, outline, setChatConv } = useBookContext()
   const feedback = useGroupFeedback()
   const { conv, latest, convs } = useCurrentConv()
   const [sending, setSending] = useState(false)
@@ -297,7 +296,7 @@ export function LiveChat({ writing }: { writing?: WritingControl }) {
       </div>
     ) : undefined,
     footer: job && ['queued', 'running', 'waiting_author'].includes(job.status)
-      ? <WorkNow job={job} messages={messages} writing={writing} go={openTarget} navigate={manualNavigate} bookId={bookId} />
+      ? <WorkNow job={job} messages={messages} writing={writing} go={openTarget} bookId={bookId} />
       : undefined,
     placeholder: working ? '插句话或者问一句都行，例如：从下一章开始节奏快一点；打 @ 点名找谁' : undefined,
     sendError: <ErrorText error={error} />,
