@@ -17,6 +17,7 @@ from sqlalchemy import select
 
 from app.config import get_settings
 from app.llm import demo
+from app.llm.router import ResolvedProfile, tool_support
 from app.main import create_app
 from app.models import Book, Job, MeetingMessage, StoryThread
 from app.services import jobs
@@ -116,12 +117,29 @@ async def test_profiles_and_roles(client):
 
     res = await client.post(f"/api/llm/profiles/{demo_profile['id']}/test")
     assert res.json()["ok"] is True
+    # 演示模式不真调工具：说不准，不说能也不说不能
+    assert res.json()["tools"] is None and res.json()["tools_message"]
 
     res = await client.patch(f"/api/llm/profiles/{profile['id']}", json={"model": "deepseek-reasoner", "api_key": ""})
     assert res.json()["model"] == "deepseek-reasoner"
     assert res.json()["has_key"] is True  # 留空不清除已保存的 Key
 
     assert (await client.post("/api/llm/profiles", json={"name": "演示", "provider": "demo"})).status_code == 409
+
+
+async def test_tool_support_follows_chat_agent_rules():
+    """本机模型、JSON 模式不让编辑部调工具，测试时不用真叫它调就能说清楚"""
+    local = ResolvedProfile(name="本机", provider="openai_compatible", base_url="http://127.0.0.1:11434/v1", model="m")
+    assert (await tool_support(local))[0] is False
+    json_mode = ResolvedProfile(
+        name="中转",
+        provider="openai_compatible",
+        base_url="https://a.example/v1",
+        model="m",
+        structured_method="json_mode",
+    )
+    tools, message = await tool_support(json_mode)
+    assert tools is False and "JSON" in message
 
 
 @pytest.mark.usefixtures("legacy_piece_gates")

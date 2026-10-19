@@ -65,6 +65,39 @@ async def new_conversation(book: Book = Depends(get_book), session=SessionDep):
     return {"id": str(row.id), "title": row.title, "created_at": row.created_at.isoformat()}
 
 
+async def conversation_of(session, book, conv_id):
+    row = await chat_convs.find(session, book.id, conv_id)
+    if row is None:
+        raise HTTPException(404, "这段对话不存在")
+    return row
+
+
+@router.post("/books/{book_id}/chat/conversations/{conv_id}/archive")
+async def archive_conversation(
+    conv_id: str, book: Book = Depends(get_book), session=SessionDep, redis: Redis = Depends(get_redis)
+):
+    """归档：收到以前的对话最下面，不再算现在聊的"""
+    await chat_convs.archive(session, redis, book.id, await conversation_of(session, book, conv_id), True)
+    return {"ok": True}
+
+
+@router.post("/books/{book_id}/chat/conversations/{conv_id}/unarchive")
+async def unarchive_conversation(
+    conv_id: str, book: Book = Depends(get_book), session=SessionDep, redis: Redis = Depends(get_redis)
+):
+    await chat_convs.archive(session, redis, book.id, await conversation_of(session, book, conv_id), False)
+    return {"ok": True}
+
+
+@router.delete("/books/{book_id}/chat/conversations/{conv_id}")
+async def delete_conversation(
+    conv_id: str, book: Book = Depends(get_book), session=SessionDep, redis: Redis = Depends(get_redis)
+):
+    """删除这一段和它的聊天记录；书不动"""
+    removed = await chat_convs.remove(session, redis, book.id, await conversation_of(session, book, conv_id))
+    return {"ok": True, "removed": removed}
+
+
 async def reply_of(session, book, message_id):
     m = await session.get(MeetingMessage, message_id)
     if m is None or m.book_id != book.id or m.kind != "speech" or not (m.payload or {}).get("reply_to"):

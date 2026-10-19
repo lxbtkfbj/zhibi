@@ -162,6 +162,61 @@ async def test_rewind_first_line_clears_title_and_summary(client, sessionmaker, 
         assert not await dialogue(session, bid, "group", conv=conv_id)
 
 
+async def test_archive_hides_and_speaking_restores(client, sessionmaker):
+    bid = await seed(sessionmaker)
+    a = (await say(client, bid, "楚风现在什么境界？"))["payload"]["conv"]
+    b = (await client.post(f"/api/books/{bid}/chat/conversations")).json()["id"]
+    await say(client, bid, "主角叫什么？", conv=b)
+    # 归档现在聊的那一段：现在聊的换成另一段，归档的还列着、带 archived
+    assert (await client.post(f"/api/books/{bid}/chat/conversations/{b}/archive")).status_code == 200
+    listing = await convs(client, bid)
+    assert [(c["id"], c["current"], c["archived"]) for c in listing] == [(b, False, True), (a, True, False)]
+    # 编辑部干活的进度、旧版不给 conv 的话都记在没归档的那一段
+    assert (await say(client, bid, "他下一步干什么？"))["payload"]["conv"] == a
+    # 在归档的那一段再说话：自动取消归档，又成了最近聊的
+    assert (await say(client, bid, "主角多大？", conv=b))["payload"]["conv"] == b
+    listing = await convs(client, bid)
+    assert [(c["id"], c["current"], c["archived"]) for c in listing] == [(b, True, False), (a, False, False)]
+    # 全都归档了：开一段新的当现在聊的
+    for conv in (a, b):
+        await client.post(f"/api/books/{bid}/chat/conversations/{conv}/archive")
+    listing = await convs(client, bid)
+    assert listing[0]["current"] and listing[0]["id"] not in (a, b) and not listing[0]["archived"]
+    assert (await client.post(f"/api/books/{bid}/chat/conversations/{a}/unarchive")).status_code == 200
+    assert not next(c for c in await convs(client, bid) if c["id"] == a)["archived"]
+    assert (await client.post(f"/api/books/{bid}/chat/conversations/{uuid.uuid4()}/archive")).status_code == 404
+
+
+async def test_delete_removes_the_chat_not_the_book(client, sessionmaker):
+    bid = await seed(sessionmaker)
+    first = await say(client, bid, "楚风的性格改成冷静沉稳")
+    a = first["payload"]["conv"]
+    b = (await client.post(f"/api/books/{bid}/chat/conversations")).json()["id"]
+    kept = await say(client, bid, "主角叫什么？", conv=b)
+    # 这一段还在回答：不能删
+    async with sessionmaker() as session:
+        reply = await session.get(MeetingMessage, (await reply_of(client, bid, first["id"]))["id"])
+        reply.payload = {**reply.payload, "state": "streaming"}
+        await session.commit()
+    res = await client.delete(f"/api/books/{bid}/chat/conversations/{a}")
+    assert res.status_code == 409 and "先停下" in res.json()["detail"]
+    async with sessionmaker() as session:
+        reply = await session.get(MeetingMessage, reply.id)
+        reply.payload = {**reply.payload, "state": "done"}
+        await session.commit()
+    res = await client.delete(f"/api/books/{bid}/chat/conversations/{a}")
+    assert res.status_code == 200 and res.json()["removed"] >= 2
+    left = await messages(client, bid)
+    assert all((m["payload"] or {}).get("conv") != a for m in left)
+    assert any(m["id"] == kept["id"] for m in left)
+    assert [c["id"] for c in await convs(client, bid)] == [b]
+    async with sessionmaker() as session:
+        # 只删聊天：书不动，那句话改的地方照样在
+        hero = await session.scalar(select(Character).where(Character.book_id == bid, Character.name == "楚风"))
+        assert hero.personality
+    assert (await client.delete(f"/api/books/{bid}/chat/conversations/{a}")).status_code == 404
+
+
 async def test_old_page_reset_starts_a_new_conversation(client, sessionmaker):
     bid = await seed(sessionmaker)
     note = await say(client, bid, "楚风现在什么境界？")

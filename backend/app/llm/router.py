@@ -800,3 +800,40 @@ async def ping(profile: ResolvedProfile) -> str:
         await clients.aclose()
     text = str(reply.content).strip()
     return text[:200] if text else "连接成功（模型在思考，没有直接回复；可在高级参数里把推理强度设为 none）"
+
+
+PROBE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "look_up",
+        "description": "查一条设定",
+        "parameters": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]},
+    },
+}
+
+
+async def tool_support(profile: ResolvedProfile) -> tuple[bool | None, str]:
+    """测试时顺带看：群聊里编辑部用这个模型能不能自己查资料、自己动手。
+    和 chat_agent.supports_tools 同一套规矩（本机模型、JSON 模式不调），能调的再真叫它调一次。"""
+    if profile.provider == "demo":
+        return None, "演示模式不真调工具"
+    url = urlparse(profile.base_url or "")
+    if url.hostname in LOCAL_HOSTS or url.port == 11434:
+        return False, "本机模型不让编辑部自己查资料、动手（太慢）：群聊里先判断要做什么，再一件件做"
+    if profile.structured_method == "json_mode":
+        return (
+            False,
+            "这个接口以前不认工具调用，已改用 JSON 模式：群聊里编辑部不会自己查资料、动手，先判断要做什么，再一件件做",
+        )
+    clients = _HttpClients()
+    try:
+        client, async_client = clients.for_profile(profile)
+        llm = build_chat_model(profile, http_client=client, http_async_client=async_client).bind_tools([PROBE_TOOL])
+        reply = await llm.ainvoke([HumanMessage("请调用 look_up 工具，name 填「测试」。")])
+    except Exception as exc:  # 测试按钮不该报 500：不认工具的接口什么错都可能回
+        return False, f"调工具出错了：{str(exc)[:200]}"
+    finally:
+        await clients.aclose()
+    if getattr(reply, "tool_calls", None):
+        return True, "能调工具：群聊里编辑部会自己查资料、自己动手"
+    return False, "叫它调工具它没调：群聊里编辑部用它时会退回老办法，先判断要做什么，再一件件做"

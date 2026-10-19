@@ -4,6 +4,7 @@
 消息的 payload.conv 记着属于哪一段：作者的话发在作者正在看的那一段；回答、方案卡跟着作者那句话；
 编辑部干活的进度、系统的话记在最近聊的那一段（最近说过话、或者刚开的那段）。
 「从这里重来」只退聊天：那句话和后面的聊天标成 dropped，不再显示、不再带给编辑部；书不跟着退。
+归档：收起来不算「现在聊的」，以前的对话最下面能找回，在那一段再说话自动取消；删除：连这一段的聊天记录一起删，书不动。
 """
 
 import uuid
@@ -43,10 +44,10 @@ def chat_part(message) -> bool:
 
 
 async def current(session, book_id) -> ChatConversation:
-    """最近聊的那一段；一段都没有就开一段"""
+    """最近聊的那一段（归档的不算）；一段都没有就开一段"""
     row = await session.scalar(
         select(ChatConversation)
-        .where(ChatConversation.book_id == book_id)
+        .where(ChatConversation.book_id == book_id, ChatConversation.archived_at.is_(None))
         .order_by(ChatConversation.last_at.desc(), ChatConversation.created_at.desc())
         .limit(1)
     )
@@ -100,6 +101,7 @@ async def stamp(session, book_id, payload):
 async def spoke(session, conv: ChatConversation, text: str) -> None:
     """作者在这一段说了一句：这一段成了最近聊的；还没名字的按这句起名"""
     conv.last_at = func.clock_timestamp()
+    conv.archived_at = None
     if not conv.title:
         conv.title = title_of(text)
 
@@ -133,7 +135,8 @@ async def start(session, book_id) -> ChatConversation:
 
 
 async def listing(session, book_id) -> list[dict]:
-    """以前的对话：最近聊的在前；没说过话的不列（最近那一段除外，它就是「新对话」）"""
+    """以前的对话：最近聊的在前；没说过话的不列（最近那一段除外，它就是「新对话」）；归档的带 archived，前端收在最下面"""
+    now = await current(session, book_id)
     rows = list(
         await session.scalars(
             select(ChatConversation)
@@ -164,11 +167,43 @@ async def listing(session, book_id) -> list[dict]:
             "created_at": row.created_at.isoformat(),
             "last_at": row.last_at.isoformat(),
             "notes": counts.get(str(row.id), 0),
-            "current": i == 0,
+            "current": row.id == now.id,
+            "archived": row.archived_at is not None,
         }
-        for i, row in enumerate(rows)
-        if i == 0 or counts.get(str(row.id))
+        for row in rows
+        if row.id == now.id or counts.get(str(row.id))
     ]
+
+
+async def archive(session, redis, book_id, conv: ChatConversation, archived: bool) -> None:
+    """归档、取消归档：只是收起来，聊天记录都在"""
+    conv.archived_at = func.clock_timestamp() if archived else None
+    await session.commit()
+    await publish(
+        redis, book_id, "conversations", {"conv": str(conv.id), "action": "archive" if archived else "unarchive"}
+    )
+
+
+async def remove(session, redis, book_id, conv: ChatConversation) -> int:
+    """删除这一段：连这一段的聊天记录一起删（存档里不存聊天，删了找不回）；书不动。
+    不占群聊的锁：别的段正在回答时也能删，这一段还在回答、还在照办才挡住。"""
+    rows = list(
+        await session.scalars(
+            select(MeetingMessage)
+            .where(MeetingMessage.book_id == book_id, MeetingMessage.payload["conv"].astext == str(conv.id))
+            .with_for_update()
+        )
+    )
+    if any((m.payload or {}).get("state") in LIVE for m in rows):
+        raise HTTPException(409, "这段还在回答，先停下再删")
+    if any(((m.payload or {}).get("outcome") or {}).get("kind") in BUSY for m in rows if m.speaker == "author"):
+        raise HTTPException(409, "编辑部还在照这段里的话办，办完再删")
+    for m in rows:
+        await session.delete(m)
+    await session.delete(conv)
+    await session.commit()
+    await publish(redis, book_id, "conversations", {"conv": str(conv.id), "action": "delete"})
+    return len(rows)
 
 
 async def rewind(session, redis, book_id, conv: ChatConversation, from_id: int) -> list[int]:

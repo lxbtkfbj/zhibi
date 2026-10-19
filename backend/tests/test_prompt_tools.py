@@ -378,6 +378,8 @@ async def test_usage_totals_do_not_understate_partly_unknown_counts(sessionmaker
     items = {row["role"]: row for row in global_usage["items"]}
     assert items["chief"]["prompt_tokens"] == 5
     assert items["writer"]["prompt_tokens"] is None
+    # 按模型：没记配置名、模型名的算一组，未知的用量照样不当成 0
+    assert [(row["calls"], row["prompt_tokens"]) for row in global_usage["by_model"]] == [(3, None)]
     book_usage = (await client.get(f"/api/books/{book.id}/usage")).json()
     assert book_usage["calls"] == 3 and book_usage["prompt_tokens"] is None and book_usage["completion_tokens"] == 16
     assert book_usage["by_role"]["writer"]["prompt_tokens"] is None

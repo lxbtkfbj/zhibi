@@ -64,6 +64,9 @@ class ProfileOut(ORM):
 class TestResult(BaseModel):
     ok: bool
     message: str
+    # 群聊里编辑部能不能用它自己查资料、动手：True 能、False 不能、None 不适用（演示模式、连不上）
+    tools: bool | None = None
+    tools_message: str = ""
 
 
 class ModelListIn(BaseModel):

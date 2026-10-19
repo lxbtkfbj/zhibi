@@ -60,3 +60,5 @@ class ChatConversation(UUIDPk, Base):
     last_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.clock_timestamp())
     summary: Mapped[str] = mapped_column(Text, default="", server_default="")
     summarized_until: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    # 作者归档了这一段：不再算「现在聊的」，以前的对话里收在最下面；在这一段再说话就自动取消归档
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

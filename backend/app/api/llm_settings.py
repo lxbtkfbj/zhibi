@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import SessionDep
 from app.crypto import SecretError, decrypt, encrypt
 from app.llm.discovery import ModelDiscoveryError, fetch_models, normalize_base_url
-from app.llm.router import LLMError, ResolvedProfile, ping
+from app.llm.router import LLMError, ResolvedProfile, ping, tool_support
 from app.models import ROLES, LlmProfile, RoleAssignment
 from app.schemas import ModelListIn, ModelListOut, ProfileIn, ProfileOut, ProfilePatch, TestResult
 
@@ -125,10 +125,12 @@ async def delete_profile(profile_id: uuid.UUID, session: AsyncSession = SessionD
 async def test_profile(profile_id: uuid.UUID, session: AsyncSession = SessionDep) -> TestResult:
     profile = await _get(session, profile_id)
     try:
-        reply = await ping(ResolvedProfile.from_row(profile))
+        resolved = ResolvedProfile.from_row(profile)
+        reply = await ping(resolved)
     except (LLMError, SecretError) as exc:
         return TestResult(ok=False, message=str(exc)[:500])
-    return TestResult(ok=True, message=reply)
+    tools, tools_message = await tool_support(resolved)
+    return TestResult(ok=True, message=reply, tools=tools, tools_message=tools_message)
 
 
 @router.get("/roles", response_model=dict[str, uuid.UUID | None])

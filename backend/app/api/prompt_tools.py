@@ -184,4 +184,21 @@ async def usage(session: AsyncSession = SessionDep) -> dict:
     )
     items = [dict(row) for row in (await session.execute(query)).mappings()]
     total = {key: sum_known(row[key] for row in items) for key in ("calls", "prompt_tokens", "completion_tokens")}
-    return {"items": items, "total": total}
+    # 按模型：花多少钱主要看用的是哪个模型（配置名、模型名都是调用当时记下的）
+    by_model = [
+        dict(row)
+        for row in (
+            await session.execute(
+                select(
+                    LlmCall.profile_name,
+                    LlmCall.model,
+                    func.count(LlmCall.id).label("calls"),
+                    token_sum(LlmCall.prompt_tokens).label("prompt_tokens"),
+                    token_sum(LlmCall.completion_tokens).label("completion_tokens"),
+                )
+                .group_by(LlmCall.profile_name, LlmCall.model)
+                .order_by(func.count(LlmCall.id).desc())
+            )
+        ).mappings()
+    ]
+    return {"items": items, "total": total, "by_model": by_model}
