@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { ArrowLeft, ArrowUp, BookOpen, Check, ChevronDown, ChevronRight, ChevronUp, Globe, Inbox, Lock, Minus, PanelRight, PictureInPicture2, Plus, Sparkles, Wand2, X } from 'lucide-react'
+import { ArrowLeft, BookOpen, Check, ChevronDown, ChevronRight, ChevronUp, Globe, Inbox, Lock, Minus, PanelRight, PictureInPicture2, Plus, Sparkles, Wand2, X } from 'lucide-react'
 import { type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { ChatViewing } from '../../api/types'
@@ -14,7 +14,7 @@ import {
   ROLE_ORDER, applyTemplate, cn, emptyCategory, findEntry, findNode, isLadder, nounOf, splitTitle, templateOf, undecidedParts,
   type CardTemplate, type FieldItem, type VBook, type VCategory, type VEntry, type VNode,
 } from './model'
-import { CHAT, PENDING } from './sampleBook'
+import { PENDING } from './sampleBook'
 import { ChapterPage, GateCard, ManuscriptDirectory, ManuscriptHome, WritingStrip } from './Manuscript'
 import { type WritingControl, gateTarget } from './writing'
 import { SplitPanel } from './Split'
@@ -1418,37 +1418,6 @@ function BookColumn({ book, outline, onTab, manuscript }: { book: VBook; outline
 
 /* ---------------- 编辑部 ---------------- */
 
-/** 原型里的聊天：假的几句话。 */
-export function SampleChat() {
-  return (
-    <>
-      <div className="scroll-thin min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
-        {CHAT.map((msg, i) =>
-          msg.who === '作者' ? (
-            <div key={i} className="flex justify-end">
-              <p className="max-w-[80%] rounded-2xl rounded-br-md bg-author-bubble px-4 py-2.5 text-[15px] leading-relaxed text-ink">{msg.text}</p>
-            </div>
-          ) : (
-            <div key={i} className="flex gap-3">
-              <span className={clsx('flex size-9 shrink-0 items-center justify-center rounded-full font-serif text-[15px]', ROLE_STYLE[msg.who])}>{msg.who[0]}</span>
-              <div className="min-w-0 max-w-[85%]">
-                <p className="mb-1 text-[13px] text-ink-3">{msg.who}</p>
-                <p className="rounded-2xl rounded-tl-md border border-line bg-card px-4 py-2.5 text-[15px] leading-relaxed text-ink">{msg.text}</p>
-              </div>
-            </div>
-          ),
-        )}
-      </div>
-      <div className="border-t border-line p-4">
-        <div className="flex items-end gap-2 rounded-xl border border-line-2 bg-card px-4 py-2.5 focus-within:border-ink-3">
-          <textarea rows={1} placeholder="跟编辑部说点什么" className="max-h-32 min-h-6 flex-1 resize-none bg-transparent text-[15px] leading-6 text-ink [field-sizing:content] placeholder:text-ink-3 focus:outline-none" />
-          <button type="button" className="flex size-8 shrink-0 items-center justify-center rounded-full bg-ink text-paper-2 hover:bg-ink-2" aria-label="发送"><ArrowUp className="size-4" /></button>
-        </div>
-      </div>
-    </>
-  )
-}
-
 function ChatHeader({ dock, setDock, onDragStart }: { dock: Dock; setDock: (dock: Dock) => void; onDragStart?: (e: ReactPointerEvent) => void }) {
   return (
     <div onPointerDown={onDragStart} className={clsx('flex h-14 shrink-0 items-center gap-2.5 border-b border-line px-4', onDragStart && 'cursor-grab active:cursor-grabbing')}>
@@ -2022,7 +1991,7 @@ export function Workspace({ book: base, actions, right, chat, chatBadge, openCha
     return ids
   }, [base.outline, outlineQuery])
   const live = actions.live
-  const chatSize = live ? { width: 520, height: 640 } : { width: 380, height: 520 }
+  const chatSize = { width: 520, height: 640 }
 
   return (
     <ActionsContext.Provider value={tools}>

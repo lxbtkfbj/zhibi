@@ -13,7 +13,9 @@ import { useLocalBook } from './actions'
 import { type ApiParts, bookFromApi } from './fromApi'
 import type { VBook, VNode } from './model'
 import { SAMPLE_BOOK, emptyBook } from './sampleBook'
-import { SampleChat, SampleInbox, type Tab, Workspace } from './Workspace'
+import { EditorialChat } from './Chat'
+import { useChatSim } from './chatSim'
+import { SampleInbox, type Tab, Workspace } from './Workspace'
 import { DEMOS, type DemoKind, useWritingSim } from './writingSim'
 
 const SNAPSHOTS = [
@@ -117,6 +119,7 @@ function PrototypeDesk({ book: initial, switcher, source }: { book: VBook; switc
   const [start] = useState(() => ({ tab: TABS[params.get('tab') ?? ''], node: params.get('node') ?? undefined, chapter: params.get('chapter') ?? undefined }))
   const [book, actions, setBook] = useLocalBook(initial)
   const sim = useWritingSim(book, setBook, initial)
+  const chat = useChatSim(initial)
   const openRef = useRef<((type: string, id: string) => void) | null>(null)
   // 书架上的真书：点开一章才去读正文；快照的正文已经在书里
   const live = source.startsWith('live:') ? source.slice(5) : ''
@@ -136,7 +139,7 @@ function PrototypeDesk({ book: initial, switcher, source }: { book: VBook; switc
   )
   return (
     <>
-      <Workspace book={book} actions={actions} right={right} chat={<SampleChat />} writing={writing} openRef={openRef} start={start} />
+      <Workspace book={book} actions={actions} right={right} chat={<EditorialChat chat={chat} />} writing={writing} openRef={openRef} start={start} />
       {initial.id === 'sample' && (
         <DemoMenu onPick={(kind) => {
           const go = sim.demo(kind)
