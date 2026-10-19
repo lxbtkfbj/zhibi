@@ -164,6 +164,11 @@ def split(data: bytes, *, short=500, fallback_size=3000) -> dict:
             dropped += 1
             continue
         seen.add(digest)
+        # 标题后面紧跟着下一个标题（真书里有「第543章、刮目相看！」后面紧跟「第544章 刮目相看！」）：空章，默认不算正文
+        if not piece.text:
+            piece.flags.append("空的")
+            kept.append(piece)
+            continue
         brief = len(piece.text) < short and "按字数切的" not in piece.flags
         # 有章号的是正文，除非又短又是请假、感言这类（作者常拿一个章号发请假条）；
         # 没章号的（请假条、完本感言）看标题。只是短的标「太短」，照样算正文。
