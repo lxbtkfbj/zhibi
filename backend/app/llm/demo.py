@@ -932,8 +932,19 @@ def _library_review(user: str) -> s.LibraryReview:
 
 def _library_intent(user: str) -> s.LibraryIntent:
     note = _match(r"【作者的话】\n(.*?)(?=\n\n要求：|\Z)", user).strip()
+    # 一句话好几件事：「……，然后……」拆开，后面的放进 more
+    if "然后" in note:
+        head, _, tail = note.partition("然后")
+        first = _library_intent(user.replace(f"【作者的话】\n{note}", f"【作者的话】\n{head.strip('，, ')}"))
+        first.more = [tail.strip("，, ")]
+        return first
     if "测试分流出错" in note:
         raise RuntimeError("演示分流出错")
+    # 开局和结尾：开局是第一篇，结尾是全书结局，算两件
+    if any(w in note for w in ("开局", "开头")) and any(w in note for w in ("结尾", "结局")):
+        return s.LibraryIntent(
+            kind="写大纲", outline_target="开局", instruction=note, more=["把全书结局写一下"], reply="好，开局和结局我来写。"
+        )
     # 新建设定：「写一张封不觉的角色卡」「新建一个角色王二」「帮我加一个地点」
     if any(w in note for w in ("角色卡", "新建", "加一个")):
         named = re.search(r"写一张(.+?)的角色卡|新建一个(?:角色)?(.+?)(?:角色|人物|$)", note)

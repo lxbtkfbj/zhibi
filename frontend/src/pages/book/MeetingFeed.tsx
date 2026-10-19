@@ -703,7 +703,7 @@ function MessageRow({ message, fromGroup, continued }: { message: MeetingMessage
       {message.kind === 'decision' && message.content.startsWith('【和作者商量定的方案')
         ? <PlanSubmitted text={message.content} />
         : <div title={time(message.created_at)} className="max-w-[min(85%,40rem)] rounded-[16px_4px_16px_16px] bg-author-bubble px-4 py-2.5 chat-text leading-[1.75] text-ink"><Folded text={message.content} /></div>}
-      {!fromGroup && <ChatOutcome message={message} />}
+      {!fromGroup && <StepOutcomes message={message} />}
     </div>
   )
   return (
@@ -860,5 +860,19 @@ export function MeetingFeed({
       {writing && <LiveDraftRow draft={writing} fromGroup={conversation !== 'group'} />}
       {working && conversation === 'group' && !liveStatus && !writing && <div className="flex justify-center py-2 text-ink-2"><TypingDots /></div>}
     </div>
+  )
+}
+
+/** 一句话里做了好几件事：每件一行结果；最后一件还在做时，下面接着显示正在做什么。 */
+function StepOutcomes({ message }: { message: MeetingMessage }) {
+  const steps = message.payload?.steps
+  if (!steps?.length) return <ChatOutcome message={message} />
+  const current = message.payload?.outcome
+  const busy = current && (current.kind === 'working' || current.kind === 'pending')
+  return (
+    <>
+      {steps.map((step, index) => <ChatOutcome key={index} message={message} result={step} />)}
+      {busy && <ChatOutcome message={message} result={current} />}
+    </>
   )
 }

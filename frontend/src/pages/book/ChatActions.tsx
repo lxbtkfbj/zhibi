@@ -36,6 +36,12 @@ export function ChatOutcome({ message, result }: { message: MeetingMessage; resu
     try {
       if (action === '撤销') {
         if (outcome.requirement_id) { await del(`/requirements/${outcome.requirement_id}`); await qc.invalidateQueries({ queryKey: settingsKeys.requirements(bookId) }) }
+        else if (outcome.kind === 'outline' && outcome.created_id) {
+          // 这一篇是编辑部新加的：整篇删掉
+          await del(`/arcs/${outcome.created_id}`)
+          setUndone(true)
+          void qc.invalidateQueries({ queryKey: ['workspace', bookId] })
+        }
         else if (outcome.kind === 'outline' && outcome.before && outcome.target_type && outcome.target_id) {
           // 大纲帮写：把改之前的样子存回去
           await post(`/books/${bookId}/outline/restore`, { target_type: outcome.target_type, target_id: outcome.target_id, before: outcome.before })

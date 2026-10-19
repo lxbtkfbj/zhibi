@@ -1,6 +1,8 @@
 """群聊先落消息，再按消息序号串行判断；聊天永不偷偷变成要求。"""
 
 import asyncio
+import re
+import uuid
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
@@ -10,7 +12,7 @@ from app.agents.schemas import LibraryIntent
 from app.api.library_ai import RewriteIn, call_model, rewrite_target, say
 from app.db import get_sessionmaker
 from app.models import Book, Job, MeetingMessage, SettingSuggestion, SettingVersion
-from app.schemas import DraftRequest, MeetingMessageOut
+from app.schemas import ArcCreate, DraftRequest, MeetingMessageOut
 from app.services import jobs
 from app.services.chat import conversation_lock, reply_background
 from app.services.chat_context import (
@@ -36,7 +38,7 @@ from app.services.desk import (
 from app.services.library import lock_book
 from app.services.library_context import load_context
 from app.services.meeting import message_dict, post_message, publish
-from app.services.outline_write import resolve_outline_target, write_outline_node
+from app.services.outline_write import new_arc_number, resolve_outline_target, write_outline_node
 from app.services.requirements import SCOPE_INPUTS, add_requirement
 from app.services.versions import target_type_of
 
@@ -336,6 +338,13 @@ async def write_outline_from_chat(session, redis, book, message, intent):
     book_id, message_id = book.id, message.id
     viewing = (message.payload or {}).get("viewing")
     found = await resolve_outline_target(session, book, intent.outline_target, viewing)
+    created = None
+    if found is None and (number := await new_arc_number(session, book, intent.outline_target)):
+        # 要写的那一篇还没有、又正好是下一篇：先在最后加上空的一篇，再写
+        from app.api.workspace import create_arc
+
+        created = (await create_arc(ArcCreate(), book, session))["id"]
+        found = ("segment", created, f"第 {number} 篇")
     if found is None:
         said = intent.outline_target if intent.outline_target and intent.outline_target != "正在看的" else ""
         await update_message(session, redis, message, outcome={"kind": "not_found", "target_name": said or "这一段"})
@@ -350,7 +359,16 @@ async def write_outline_from_chat(session, redis, book, message, intent):
         return False
     target_type, target_id, label = found
     await update_message(session, redis, message, outcome={"kind": "working", "text": f"主编在写{label}"})
-    result = await write_outline_node(session, book, target_type, target_id, intent.instruction or message.content)
+    try:
+        result = await write_outline_node(session, book, target_type, target_id, intent.instruction or message.content)
+    except Exception:
+        if created:
+            # 没写成：刚加的空篇也拿掉
+            from app.api.workspace import delete_arc
+
+            await session.rollback()
+            await delete_arc(uuid.UUID(created), session)
+        raise
     message = await session.get(MeetingMessage, message_id)
     outcome = {
         "kind": "outline",
@@ -358,15 +376,22 @@ async def write_outline_from_chat(session, redis, book, message, intent):
         "target_id": target_id,
         "target_label": label,
         "before": result["before"],
+        # 新加的这一篇：撤销就把整篇删掉
+        **({"created_id": created} if created else {}),
     }
     await update_message(session, redis, message, outcome=outcome)
-    note = result.get("note", "").strip()
+    note = result.get("note", "").strip().removeprefix("思路：").removeprefix("这次的思路：")
     await say(
         session,
         redis,
         book_id,
         "chief",
-        f"{label}写好了，已经换上去，在大纲上看。" + (f"这次的思路：{note}" if note else ""),
+        (
+            f"大纲里还没有{label}，我在最后加上了，写好了，在大纲上看。"
+            if created
+            else f"{label}写好了，已经换上去，在大纲上看。"
+        )
+        + (f"这次的思路：{note}" if note else ""),
     )
     return False
 
@@ -454,6 +479,46 @@ async def revert_id(session, target_type, target_id):
     return str(versions[1].id)
 
 
+SPLIT_NOTE = "\n（这是作者上一句话里拆出来的一件事，前面那几件已经在做了，只按这一件判断）"
+OUTLINE_WORDS = re.compile(r"结局|结尾|开局|开头|第\s*[0-9一二两三四五六七八九十]+\s*[篇卷章]")
+
+
+def failure_reason(exc) -> str:
+    return "判断超时" if isinstance(exc, TimeoutError) else str(getattr(exc, "detail", exc))
+
+
+async def apply_steps(session, redis, message, first, more, viewing):
+    """一句话里要做好几件事：一件一件做，后一件做之前再判断一次（前一件做完，设定和大纲可能变了）。
+    每件的结果都记在这条消息的 payload.steps 里；后面的没做成，不影响前面做好的。"""
+    mid, book_id = message.id, message.book_id
+    steps, needs_reply = [], False
+    for said in [None, *more]:
+        try:
+            if said is None:
+                intent = first
+            else:
+                intent = await classify(session, book_id, said + SPLIT_NOTE, viewing)
+                # 拆出来的这一句里说清了写大纲上哪一段（结局、第几篇），就照这一句找，不再听模型另认
+                if intent.kind == "写大纲" and OUTLINE_WORDS.search(said):
+                    intent.outline_target = said
+                # 拆出来的这一件，作者的话就是改写后的那一句
+                intent.instruction = intent.instruction or said
+                intent.requirement = intent.requirement or said
+            intent.more = []
+            message = await session.get(MeetingMessage, mid)
+            needs_reply |= await apply_intent(session, redis, message, intent)
+            message = await session.get(MeetingMessage, mid)
+            await session.refresh(message)
+            steps.append(dict((message.payload or {}).get("outcome") or {}))
+        except Exception as exc:
+            await session.rollback()
+            steps.append({"kind": "failed", "reason": failure_reason(exc)})
+        message = await session.get(MeetingMessage, mid)
+        if message:
+            await update_message(session, redis, message, steps=steps)
+    return needs_reply
+
+
 async def route_background(book_id, redis, known_id=None, known_intent=None):
     needs_reply = False
     async with conversation_lock(redis, book_id, "routing"), get_sessionmaker()() as session:
@@ -473,11 +538,15 @@ async def route_background(book_id, redis, known_id=None, known_intent=None):
             mid, text, viewing = message.id, message.content, (message.payload or {}).get("viewing")
             try:
                 intent = known_intent if mid == known_id else await classify(session, book_id, text, viewing)
-                needs_reply |= await apply_intent(session, redis, message, intent)
+                more = [step.strip() for step in intent.more or [] if step.strip()][:3]
+                if more:
+                    needs_reply |= await apply_steps(session, redis, message, intent, more, viewing)
+                else:
+                    needs_reply |= await apply_intent(session, redis, message, intent)
             except Exception as exc:
                 await session.rollback()
                 message = await session.get(MeetingMessage, mid)
-                reason = "判断超时" if isinstance(exc, TimeoutError) else str(getattr(exc, "detail", exc))
+                reason = failure_reason(exc)
                 if message:
                     await update_message(session, redis, message, outcome={"kind": "failed", "reason": reason})
     if needs_reply:

@@ -8,6 +8,7 @@ import uuid
 from typing import Any
 
 from fastapi import HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents import schemas as s
@@ -300,6 +301,28 @@ CN_NUMBERS = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六":
 OUTLINE_TYPES = ("book", "segment", "volume", "unit", "chapter")
 
 
+OPENING_WORDS = ("开局", "开头", "开篇")
+NEW_ARC_WORDS = ("新的一篇", "新一篇", "再加一篇", "加一篇", "下一篇", "新建一篇")
+
+
+async def new_arc_number(session: AsyncSession, book: Book, words: str) -> int | None:
+    """群聊里要写的那一篇还没有、又正好是接在最后的下一篇（「第二篇」「开局」「再加一篇」）：返回它是第几篇。
+    跳着说（只有一篇却说第五篇）、或者书的卷没有分篇的，返回 None，不乱建。"""
+    import re
+
+    ctx = await load_context(session, book)
+    arcs = [node for node in ctx.nodes if node.kind not in ("opening", "ending")]
+    if not arcs and await session.scalar(select(Volume.id).where(Volume.book_id == book.id).limit(1)):
+        return None
+    words = words or ""
+    match = re.search(r"第\s*([0-9一二两三四五六七八九十]+)\s*篇", words)
+    if match:
+        return len(arcs) + 1 if _number(match.group(1)) == len(arcs) + 1 else None
+    if any(word in words for word in NEW_ARC_WORDS) or (not arcs and any(word in words for word in OPENING_WORDS)):
+        return len(arcs) + 1
+    return None
+
+
 def _number(text: str) -> int | None:
     if text.isdigit():
         return int(text)
@@ -335,9 +358,12 @@ async def resolve_outline_target(
         return await named(seeing["target_type"], str(seeing["target_id"]))
     if not words:
         return None
-    if "结局" in words or words in ("全书", "整本书"):
+    if "结局" in words or "结尾" in words or words in ("全书", "整本书"):
         return await named("book", "book")
     arcs = [node for node in ctx.nodes if node.kind not in ("opening", "ending")]
+    # 开头就是第一篇那段话
+    if any(word in words for word in OPENING_WORDS) and arcs:
+        return await named("segment", str(arcs[0].id))
     match = re.search(r"第\s*([0-9一二两三四五六七八九十]+)\s*(篇|卷|章)", words)
     if match and (n := _number(match.group(1))):
         kind = match.group(2)

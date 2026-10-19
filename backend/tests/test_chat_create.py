@@ -100,3 +100,41 @@ async def test_editing_a_missing_entry_says_how_to_create_it(client, monkeypatch
     assert outcome["kind"] == "not_found"
     meeting = (await client.get(f"/api/books/{book}/meeting")).json()
     assert "设定库里还没有「封不觉」" in meeting[-1]["content"]
+
+
+async def test_chat_adds_the_next_segment_and_writes_it(client):
+    from tests.test_outline_write import outline_book
+
+    book, *_ = await outline_book(client)
+    outcome = (await say(client, book, "第二篇也写一下"))["payload"]["outcome"]
+    assert outcome["kind"] == "outline" and outcome["target_type"] == "segment" and outcome["created_id"]
+    tree = (await client.get(f"/api/books/{book}/outline-tree")).json()
+    assert [arc["title"] for arc in tree["arcs"]][0] == "青阳城篇" and len(tree["arcs"]) == 2
+    assert tree["arcs"][1]["node_id"] == outcome["created_id"] and tree["arcs"][1]["text"]
+    meeting = (await client.get(f"/api/books/{book}/meeting")).json()
+    assert "我在最后加上了" in meeting[-1]["content"]
+
+    # 撤销：新加的那一篇整篇删掉
+    assert (await client.delete(f"/api/arcs/{outcome['created_id']}")).status_code == 204
+    # 跳着说的不乱建
+    outcome = (await say(client, book, "第五篇也写一下"))["payload"]["outcome"]
+    assert outcome["kind"] == "not_found"
+    assert len((await client.get(f"/api/books/{book}/outline-tree")).json()["arcs"]) == 1
+
+
+async def test_one_message_with_several_things_does_each_in_turn(client):
+    book = await new_book(client)
+    message = await say(client, book, "帮我想一个书本的开局和结尾，写进大纲")
+    assert "steps" in message["payload"], message["payload"]
+    steps = message["payload"]["steps"]
+    # 开局是第一篇（还没有就新加），结尾是全书结局
+    assert [step["kind"] for step in steps] == ["outline", "outline"]
+    assert steps[0]["target_type"] == "segment" and steps[0]["created_id"]
+    assert steps[1]["target_type"] == "book"
+    tree = (await client.get(f"/api/books/{book}/outline-tree")).json()
+    assert len(tree["arcs"]) == 1 and tree["arcs"][0]["text"]
+
+    # 后一件没做成，不影响前一件
+    message = await say(client, book, "新建一个角色王二，然后测试分流出错")
+    steps = message["payload"]["steps"]
+    assert [step["kind"] for step in steps] == ["created", "failed"]

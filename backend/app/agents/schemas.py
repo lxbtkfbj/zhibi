@@ -674,6 +674,10 @@ class LibraryIntent(Lenient):
         description="提问闲聊时才写：谁来回答最合适：问设定、前后对不对、谁知道什么找设定师；问怎么写、文风找写手；要挑毛病找审稿；其余找主编",
     )
     reply: str = Field(default="", description="改设定、新建设定、写大纲、写作要求时，主编在群聊里回作者的一句话；提问闲聊留空")
+    more: list[str] = Field(
+        default_factory=list,
+        description="作者这句话里还要编辑部做的别的事：上面只填第一件，其余每件改写成一句能单独交给编辑部的话，照作者说的先后排，最多 3 件；只有一件事留空",
+    )
 
 
 class BookDraft(Lenient):

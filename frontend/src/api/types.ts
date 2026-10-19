@@ -516,7 +516,7 @@ export interface MeetingMessage {
   /** note：作者在编辑部工作时插的话 */
   kind: 'plan' | 'speech' | 'artifact' | 'status' | 'decision' | 'error' | 'note'
   content: string
-  payload: { type?: string; data?: unknown; thread?: Speaker | 'group'; reply_to?: number[]; quote?: { text: string; where: string }; viewing?: ChatViewing; outcome?: ChatOutcome; plan?: ChatPlan; status?: 'open' | 'superseded' | 'applying' | 'applied'; results?: ChatOutcome[] } | null
+  payload: { type?: string; data?: unknown; thread?: Speaker | 'group'; reply_to?: number[]; quote?: { text: string; where: string }; viewing?: ChatViewing; outcome?: ChatOutcome; steps?: ChatOutcome[]; plan?: ChatPlan; status?: 'open' | 'superseded' | 'applying' | 'applied'; results?: ChatOutcome[] } | null
   created_at: string | null
 }
 
@@ -594,6 +594,8 @@ export interface ChatOutcome {
   items?: { target_type: 'character' | 'entry'; target_id: string; name: string }[]
   /** outline：编辑部写大纲上的那一段之前的样子，撤销就存回去 */
   before?: Record<string, unknown>
+  /** outline：那一篇是这次新加的，撤销就把整篇删掉 */
+  created_id?: string
   plan_id?: number
   label?: string
   undone?: boolean
