@@ -5,9 +5,9 @@ from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.encoders import jsonable_encoder
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from redis.asyncio import Redis
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -50,7 +50,7 @@ from app.schemas import (
     WorldEntryBase,
     WorldEntryOut,
 )
-from app.services import book_saves
+from app.services import book_saves, suggestions
 from app.services.library import ensure_unlocked, load_target, lock_book, parse_uuid, validate_entry
 from app.services.library_cascade import generate_cascade_suggestions
 from app.services.library_context import load_context
@@ -617,7 +617,8 @@ async def _accept_suggestion(row_id: uuid.UUID, session: AsyncSession = SessionD
     book = await session.get(Book, book_id)
     old_story = (book.concept or {}).get("story", "")
     try:
-        await _apply_suggestion(session, suggestion)
+        # 改前改后记在建议上：新书页的待处理当场摆出来，能「换回原来的」
+        await suggestions.applied(session, suggestion, lambda: _apply_suggestion(session, suggestion))
         await session.commit()
     except ValueError as exc:
         raise _splice_error(exc) from exc
@@ -639,19 +640,19 @@ async def ignore_suggestion(row_id: uuid.UUID, session: AsyncSession = SessionDe
     return suggestion
 
 
-async def _accept_all_suggestions(
-    book: Book = Depends(get_book), session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)
-):
+async def _accept_all_suggestions(book: Book, session: AsyncSession, redis: Redis, only_changes: bool = False):
     await lock_book(session, book.id)
     book_id = book.id
     old_story = (book.concept or {}).get("story", "")
-    ids = list(
+    rows = list(
         await session.scalars(
-            select(SettingSuggestion.id)
+            select(SettingSuggestion)
             .where(SettingSuggestion.book_id == book.id, SettingSuggestion.status == "pending")
             .order_by(SettingSuggestion.created_at, SettingSuggestion.id)
         )
     )
+    # 新书页的「全部同意」只管有具体改法的；只说了毛病的、群聊里说的要作者自己点
+    ids = [row.id for row in rows if not (only_changes and suggestions.can_hand_over(row))]
     accepted, skipped = [], []
     for suggestion_id in ids:
         try:
@@ -660,7 +661,7 @@ async def _accept_all_suggestions(
                 suggestion = await session.scalar(
                     select(SettingSuggestion).where(SettingSuggestion.id == suggestion_id).with_for_update()
                 )
-                await _apply_suggestion(session, suggestion)
+                await suggestions.applied(session, suggestion, lambda row=suggestion: _apply_suggestion(session, row))
             accepted.append(suggestion_id)
         except HTTPException as exc:
             skipped.append({"id": suggestion_id, "reason": exc.detail})
@@ -707,8 +708,46 @@ async def accept_suggestion(row_id: uuid.UUID, session: AsyncSession = SessionDe
 
 @router.post("/books/{book_id}/suggestions/accept-all")
 async def accept_all_suggestions(
-    book: Book = Depends(get_book), session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)
+    only_changes: bool = False,
+    book: Book = Depends(get_book),
+    session: AsyncSession = SessionDep,
+    redis: Redis = Depends(get_redis),
 ):
     return await book_saves.editorial(
-        session, book.id, "lorekeeper", "收下了全部建议：", lambda: _accept_all_suggestions(book, session, redis)
+        session,
+        book.id,
+        "lorekeeper",
+        "收下了全部建议：",
+        lambda: _accept_all_suggestions(book, session, redis, only_changes),
     )
+
+
+@router.get("/books/{book_id}/suggestion-changes")
+async def suggestion_changes(book: Book = Depends(get_book), session: AsyncSession = SessionDep):
+    """同意过的建议现在还能不能「换回原来的」"""
+    result = await suggestions.changes(session, book.id)
+    await session.commit()
+    return result
+
+
+@router.post("/suggestions/{row_id}/revert", response_model=SuggestionOut)
+async def revert_suggestion(row_id: uuid.UUID, session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)):
+    """同意以后的「换回原来的」：这一处后来又被动过就 409"""
+    return await suggestions.revert(session, redis, row_id)
+
+
+class HandOverIn(BaseModel):
+    # 发在作者正在看的那一段对话；不给就是最近聊的那一段
+    conv: str | None = None
+
+
+@router.post("/suggestions/{row_id}/to-chat", status_code=201)
+async def hand_over_suggestion(
+    row_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
+    body: HandOverIn | None = None,
+    session: AsyncSession = SessionDep,
+    redis: Redis = Depends(get_redis),
+):
+    """让编辑部改：只说了毛病的、群聊里说了当时没改的，当成作者在聊天里说的一句话"""
+    return await suggestions.hand_over(session, redis, row_id, body.conv if body else None, background_tasks)

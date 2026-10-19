@@ -244,3 +244,50 @@ def test_pick_role_and_router_helpers():
     Message.response_metadata = {"finish_reason": "lengthlength"}
     assert _truncated(Message())
     assert {t["function"]["name"] for t in chat_tools.tool_specs(read_only=True)} == set(chat_tools.QUERY_TOOLS)
+
+
+async def test_writing_tool_arguments_counts_as_activity(sessionmaker, monkeypatch):
+    """模型写工具参数时不出字：也要吐 tick，看守才知道它还在动，不会按「没动静」掐掉（真模型试出来的）。"""
+    from types import SimpleNamespace
+
+    from langchain_core.messages import AIMessageChunk
+
+    rounds = []
+
+    class Fake:
+        def bind_tools(self, tools, **kwargs):
+            return self
+
+        async def astream(self, history):
+            rounds.append(len(history))
+            if len(rounds) == 1:
+                # 真的流里，工具名和 id 只在第一块
+                for name, args, cid in (("look_up_settings", '{"names": ', "c1"), (None, '["楚风"]}', None)):
+                    yield AIMessageChunk(
+                        content="", tool_call_chunks=[{"name": name, "args": args, "id": cid, "index": 0}]
+                    )
+            else:
+                yield AIMessageChunk(content="查过了")
+
+    async def resolve(self, role):
+        return SimpleNamespace(provider="openai", name="假", model="假", structured_method="function_calling")
+
+    async def record(self, *args, **kwargs):
+        return None
+
+    monkeypatch.setattr(LLMRouter, "resolve", resolve)
+    monkeypatch.setattr(LLMRouter, "_chat_model", lambda self, profile, streaming=False: Fake())
+    monkeypatch.setattr(LLMRouter, "_record", record)
+    llm = LLMRouter(sessionmaker)
+    seen = []
+
+    async def run_tool(call):
+        seen.append((call.name, call.args))
+        return "楚风：凝气境"
+
+    events = [
+        e async for e in llm.tool_rounds("chief", "系统", "问", chat_tools.tool_specs(True), run_tool, purpose="试")
+    ]
+    await llm.aclose()
+    assert seen == [("look_up_settings", {"names": ["楚风"]})]
+    assert events == [("tick", ""), ("tick", ""), ("text", "查过了")]

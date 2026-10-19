@@ -20,7 +20,7 @@ function useNoteChanges(bookId: string, enabled: boolean) {
 }
 
 /** 一栏的「原来」「改成」：原来浅色，改成正常色；太长折起来，点开看全文 */
-function DiffBlock({ diff }: { diff: ChangeDiff }) {
+export function DiffBlock({ diff }: { diff: ChangeDiff }) {
   const [open, setOpen] = useState(false)
   const long = diff.before.length + diff.after.length > 220 || (diff.before + diff.after).split('\n').length > 6
   const clamp = !open && long ? 'line-clamp-3' : ''

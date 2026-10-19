@@ -272,6 +272,8 @@ async def drive(turn: Turn, system: str, user: str) -> str:
             max_rounds=MAX_ROUNDS,
         ):
             turn.touch()
+            if kind == "tick":
+                continue
             if kind == "reset":
                 turn.parts.clear()
                 continue
@@ -312,6 +314,9 @@ async def watch(turn: Turn, task: asyncio.Task) -> str | None:
 def failure(exc) -> str:
     from app.services.group_notes import failure_reason
 
+    # 这一轮自己的超时（多久没动静、多久没做完）照实说，不说成「判断超时」
+    if isinstance(exc, TimeoutError) and str(exc):
+        return f"超时了：{exc}"
     return failure_reason(exc) or type(exc).__name__
 
 

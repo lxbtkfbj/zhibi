@@ -10,6 +10,7 @@ import {
   ActionsContext, type CategoryStyle, type DraftItem, type EntryChange, type RewriteMode, type RewriteOutcome, type WorkspaceActions,
   blankEntry, childKind, draftToEntry, entryIn, useSave, useWorkspace, withFields,
 } from './actions'
+import { PendingNote } from './Inbox'
 import {
   ROLE_ORDER, applyTemplate, cn, emptyCategory, findEntry, findNode, isLadder, nounOf, splitTitle, templateOf, undecidedParts,
   type CardTemplate, type FieldItem, type VBook, type VCategory, type VEntry, type VNode,
@@ -571,6 +572,7 @@ function CharacterCard({ book, entry, nav, fresh }: { book: VBook; entry: VEntry
         <CardMenu locked={entry.locked} onLock={draft ? undefined : () => saveEntry({ locked: !entry.locked })} onFill={fill}
           onDelete={() => save(actions.deleteEntry(entry))} deleteLabel={draft ? '不要这一条了' : '删掉这一条'} />
       )}
+      <PendingNote id={entry.id} />
       <div className="flex flex-wrap items-center gap-3 pr-28">
         <Editable autoFocus={fresh} value={entry.name} readOnly={readOnly} placeholder="起个名字" className={titleClass}
           onSave={(name) => { if (name.trim()) saveEntry({ name }) }} />
@@ -628,6 +630,7 @@ function PlainCard({ book, entry, category, nav, fresh }: { book: VBook; entry: 
     <section id={`entry-${entry.id}`} data-entry={entry.id} className={clsx(paperCard, 'group/card relative scroll-mt-6')}>
       <CardMenu locked={entry.locked} onLock={draft ? undefined : () => saveEntry({ locked: !entry.locked })} onFill={fill}
         onDelete={() => save(actions.deleteEntry(entry))} deleteLabel={draft ? '不要这一条了' : '删掉这一条'} />
+      <PendingNote id={entry.id} />
       <div className="flex flex-wrap items-center gap-3 pr-28">
         <Editable autoFocus={fresh} value={entry.name} placeholder={example ? `起个名字，比如「${example.name}」` : '起个名字'} className={titleClass}
           onSave={(name) => { if (name.trim()) saveEntry({ name }) }} />
@@ -1260,6 +1263,7 @@ function OutlinePage({ book, outline, id, nav, onAdd, onInsert, onMove, fresh, w
   ] : []
   return (
     <Sheet narrow>
+      {node.ref && <PendingNote id={node.ref.id} />}
       {(actions.canDelete(node) || arrange.length > 0) && (
         <CardMenu items={arrange} onDelete={actions.canDelete(node) ? () => {
           nav.openNode(path.at(-2)?.id ?? 'book')

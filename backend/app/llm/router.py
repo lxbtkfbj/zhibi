@@ -527,7 +527,8 @@ class LLMRouter:
     ) -> AsyncIterator[tuple[str, str]]:
         """多来回调工具（聊天里接话的人自己查、自己动手）：模型调了工具就执行，把结果交回去再问；
         哪一来回不调工具了，那一来回的字就是回答，边写边吐 ("text", 字)。调工具的那一来回要是先说了几句，
-        吐 ("reset", "") 让调用方清掉。最后一来回不许再调工具，逼它把话说完。
+        吐 ("reset", "") 让调用方清掉。模型在写工具参数（不出字）时也吐 ("tick", "")：调用方据此知道它还在动。
+        最后一来回不许再调工具，逼它把话说完。
         只看有没有调工具，不看结束原因（中转拼出来的结束原因不可靠）。每个来回记一条调用记录。"""
         profile = await self.resolve(role)
         names = [tool["function"]["name"] for tool in tools]
@@ -547,7 +548,7 @@ class LLMRouter:
             }
             text, calls = "", []
             async for kind, value in self._tool_round(role, profile, history, tools, done, last, request, purpose):
-                if kind == "text":
+                if kind in ("text", "tick"):
                     yield kind, value
                 else:
                     text, calls = value
@@ -604,6 +605,9 @@ class LLMRouter:
                     if piece:
                         parts.append(piece)
                         yield "text", piece
+                    else:
+                        # 在写工具参数、在想：不出字，但还在动
+                        yield "tick", ""
                 calls = _tool_calls(message, len(done))
                 if _truncated(message):
                     error = "模型输出被截断"

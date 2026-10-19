@@ -39,6 +39,8 @@ export interface BookContextValue {
   setChatConv?: (id: string | null) => void
   focusComposer: number
   focusChat: () => void
+  /** 新书页上有：只把编辑部的窗口打开，不把光标放进输入框（不然按 Esc 会停下正在写的回答） */
+  showChat?: () => void
   requestFeedback: () => void
   requestNodeFeedback: (node: Pick<StoryNode, 'id' | 'index' | 'title'>) => void
   composerNode: NodeFeedback | null

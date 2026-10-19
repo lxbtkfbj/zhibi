@@ -89,6 +89,8 @@ export interface LibrarySuggestion {
   payload: Record<string, unknown>
   origin: Record<string, unknown>
   status: string
+  created_at?: string
+  resolved_at?: string | null
 }
 export interface LibraryVersion { id: string; version: number; source: string; note: string; created_at: string; snapshot: Record<string, unknown> }
 export interface RewriteInput { target_type: TargetType; target_id: string; path: string; mode: RewriteMode; instruction?: string }
@@ -143,6 +145,10 @@ export function useLibraryCategoryActions(bookId: string) {
   const remove = useMutation({ mutationFn: (id: string) => del(`/setting-categories/${id}`), onSuccess: invalidate })
   return { save, remove }
 }
+/** 新书页待处理：同意过的（看改前改后、换回原来的），现在还能不能换回 */
+export const useAcceptedSuggestions = (id: string, enabled = true) => useQuery({ queryKey: [...libraryKeys.suggestions(id), 'accepted'], enabled, queryFn: () => get<LibrarySuggestion[]>(`/books/${id}/suggestions?status=accepted`) })
+export const useSuggestionChanges = (id: string, enabled = true) => useQuery({ queryKey: [...libraryKeys.suggestions(id), 'changes'], enabled, staleTime: 0, queryFn: () => get<Record<string, boolean>>(`/books/${id}/suggestion-changes`) })
+
 export function useLibrarySuggestionActions(bookId: string) {
   const invalidate = useInvalidateLibrary(bookId)
   const resolve = useMutation({ mutationFn: ({ id, action }: { id: string; action: 'accept' | 'ignore' }) => post<LibrarySuggestion>(`/suggestions/${id}/${action}`), onSuccess: invalidate })

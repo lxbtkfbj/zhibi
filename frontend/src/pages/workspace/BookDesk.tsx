@@ -1,11 +1,12 @@
-/** 新书页：接真书。编辑部浮窗里只有一个聊天（第五步：@ 点名、边写边显示、停、重新回答）；开写、正文、拍板在新书页上；
- *  顶栏「存档」是整本书的存档（第五步第二批）。待处理还在旧版。 */
+/** 新书页：接真书。编辑部浮窗里只有一个聊天（第五步：@ 点名、边写边显示、停、重新回答、新对话、从这里重来）；开写、正文、拍板在新书页上；
+ *  顶栏「存档」是整本书的存档（第五步第二批），「待处理」是编辑部等你定的建议（第四步第二批），都在右边一栏。 */
 
 import { useIsMutating } from '@tanstack/react-query'
 import { Settings } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useBook, useJobActions, useOutline } from '../../api/hooks'
+import { useLibrarySuggestions } from '../../api/library'
 import type { BookDetail, ChatViewing, Conversation, LiveDraft, MeetingMessage } from '../../api/types'
 import { EmptyState } from '../../components/ui'
 import type { ChatQuote } from '../../lib/chat'
@@ -19,7 +20,9 @@ import { LiveChat } from './LiveChat'
 import { flushAutoSave, useLiveBook } from './liveActions'
 import { SavesButton, SavesPanel } from './Saves'
 import { useLiveWriting } from './liveWriting'
-import { InboxButton, Workspace } from './Workspace'
+import { PendingButton, PendingPanel } from './Inbox'
+import { PendingContext, pendingTarget } from './pending'
+import { Workspace } from './Workspace'
 
 /** 现有聊天要的那一套状态：和旧版书页一样，只是不跟着编辑部跳页面。 */
 function useEditorial(bookId: string, book: BookDetail, onOpen: () => void): { ctx: BookContextValue; unread: number; messages: MeetingMessage[]; draft: LiveDraft | null } {
@@ -52,7 +55,7 @@ function useEditorial(bookId: string, book: BookDetail, onOpen: () => void): { c
     following: false, followTarget, resumeFollow: () => undefined,
     // 聊天里点到书稿的地方：新书页还没有的，先去旧版
     manualNavigate: (path) => { void navigate(path) },
-    focusComposer, focusChat: () => { onOpen(); setFocusComposer((n) => n + 1) },
+    focusComposer, focusChat: () => { onOpen(); setFocusComposer((n) => n + 1) }, showChat: onOpen,
     requestFeedback: () => { setConversation('group'); setFocusComposer((n) => n + 1) },
     requestNodeFeedback: (node) => {
       const selection = nodeFeedback(node)
@@ -106,14 +109,34 @@ function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
   const openRef = useRef<((type: string, id: string) => void) | null>(null)
   const viewingRef = useRef<(() => ChatViewing | null) | null>(null)
   // 存档那一栏：开没开、点开的是哪一档
-  const [saves, setSaves] = useState<{ open: boolean; id: number | null }>({ open: false, id: null })
-  const closeSaves = useCallback(() => setSaves({ open: false, id: null }), [])
+  const [saves, setSavesState] = useState<{ open: boolean; id: number | null }>({ open: false, id: null })
+  // 待处理那一栏：开没开、要找到挂在哪一条上的建议；和存档那一栏同一个位置，开一个就关另一个
+  const [pending, setPendingState] = useState<{ open: boolean; focus: string | null }>({ open: false, focus: null })
+  const setSaves = useCallback((next: { open: boolean; id: number | null }) => {
+    setSavesState(next)
+    if (next.open) setPendingState({ open: false, focus: null })
+  }, [])
+  const setPending = useCallback((next: { open: boolean; focus: string | null }) => {
+    setPendingState(next)
+    if (next.open) setSavesState({ open: false, id: null })
+  }, [])
+  const closeSaves = useCallback(() => setSaves({ open: false, id: null }), [setSaves])
+  const closePending = useCallback(() => setPending({ open: false, focus: null }), [setPending])
+  const suggestions = useLibrarySuggestions(bookId)
+  const notes = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const s of suggestions.data ?? []) {
+      const at = pendingTarget(s)?.id
+      if (at) counts.set(at, (counts.get(at) ?? 0) + 1)
+    }
+    return { count: (id: string) => counts.get(id) ?? 0, open: (id?: string) => setPending({ open: true, focus: id ?? null }) }
+  }, [suggestions.data, setPending])
   const context = useMemo(() => ({
     ...ctx,
     openTarget: (type: string, id: string) => openRef.current?.(type, id),
     viewing: () => viewingRef.current?.() ?? null,
     openSaves: (id?: number) => setSaves({ open: true, id: id ?? null }),
-  }), [ctx])
+  }), [ctx, setSaves])
   // 关页面、切到别的页面时：手改了还没存的，存一档
   useEffect(() => {
     const leave = () => flushAutoSave(bookId, true)
@@ -131,12 +154,7 @@ function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
   const right = (
     <>
       <SavesButton open={saves.open} onClick={() => setSaves(saves.open ? { open: false, id: null } : { open: true, id: null })} />
-      <InboxButton count={book.pending}>
-        <div className="px-3 py-2.5">
-          <p className="text-[13px] leading-relaxed text-ink">编辑部挂着 {book.pending} 条建议。新书页还没做处理建议的地方，先去旧版的设定库里看。</p>
-          <Link to={`/books/${bookId}/library`} className="mt-1.5 inline-block text-xs text-chief hover:underline">去旧版处理</Link>
-        </div>
-      </InboxButton>
+      <PendingButton count={suggestions.data?.length ?? book.pending} open={pending.open} onClick={() => setPending(pending.open ? { open: false, focus: null } : { open: true, focus: null })} />
       <Link to={`/books/${bookId}/concept`} title="还没搬过来的功能，先在旧版里用" className="rounded-lg px-2.5 py-1.5 text-sm text-ink-3 transition-colors hover:bg-line/50 hover:text-ink">回旧版</Link>
       <Link to={`/books/${bookId}/settings`} className="rounded-lg p-2 text-ink-3 transition-colors hover:bg-line/50 hover:text-ink" aria-label="本书设置" title="本书设置">
         <Settings className="size-4" />
@@ -145,10 +163,13 @@ function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
   )
   return (
     <BookContext.Provider value={context}>
+      <PendingContext.Provider value={notes}>
       <Workspace book={book} actions={actions} right={right} notice={<JobNotice book={detail} />} openRef={openRef} viewingRef={viewingRef}
         chat={<LiveChat writing={writing} />} chatTools={<ChatConvs />}
         chatBadge={unread} openChat={openChat} writing={writing} />
       <SavesPanel open={saves.open} saveId={saves.id} onClose={closeSaves} onOpenSave={(id) => setSaves({ open: true, id })} />
+      <PendingPanel open={pending.open} focus={pending.focus} onClose={closePending} />
+      </PendingContext.Provider>
     </BookContext.Provider>
   )
 }
