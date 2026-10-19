@@ -369,6 +369,9 @@ async def reply_values(session, book, thread, role, rows, unanswered, summary):
     note = "\n\n".join(m.content for m in unanswered)
     quotes = [(m.payload or {}).get("quote") for m in unanswered if (m.payload or {}).get("quote")]
     quote = "\n\n".join(f"【作者选中的原文】（{q['where']}）\n{q['text'][:2000]}" for q in quotes)
+    # 作者这次说的单独放在【作者这次说的】，最近的对话里不再重复
+    asked = {m.id for m in unanswered}
+    rows = [m for m in rows if m.id not in asked]
     query = note + "\n" + quote + "\n" + "\n".join(m.content for m in rows[-4:])
     return dict(
         where="私聊" if thread != "group" else "编辑部群聊",

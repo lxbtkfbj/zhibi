@@ -79,12 +79,14 @@ def viewing_text(viewing):
     return viewing.get("label") or "（作者在看某一页，没有名字）"
 
 
-async def classify(session, book_id, text, viewing=None, conv=None):
+async def classify(session, book_id, text, viewing=None, conv=None, before=None):
     book = await session.get(Book, book_id)
     ctx = await load_context(session, book)
-    # 最近几句只看这句话所在的那一段对话（不给就是最近聊的那一段）
+    # 最近几句只看这句话所在的那一段对话（不给就是最近聊的那一段）；
+    # before：这句话已经存进对话了，只看它前面的，不然这句话在提示词里出现两遍
     state = await conversation_state(session, book_id, "group", conv)
-    recent = dialogue_text((await dialogue(session, book_id, "group", conv=state.id))[-6:])
+    rows = await dialogue(session, book_id, "group", conv=state.id)
+    recent = dialogue_text([m for m in rows if before is None or m.id < before][-6:])
     library, outline = ctx.library, ctx.outline
     await session.commit()
     return await asyncio.wait_for(
@@ -814,7 +816,7 @@ async def apply_steps(session, redis, message, first, more, viewing):
                 intent = first
             else:
                 intent = await classify(
-                    session, book_id, said + SPLIT_NOTE, viewing, (message.payload or {}).get("conv")
+                    session, book_id, said + SPLIT_NOTE, viewing, (message.payload or {}).get("conv"), before=mid
                 )
                 # 拆出来的这一句里说清了写大纲上哪一段（结局、第几篇），就照这一句找，不再听模型另认
                 if intent.kind == "写大纲" and OUTLINE_WORDS.search(said):
@@ -858,7 +860,11 @@ async def route_background(book_id, redis, known_id=None, known_intent=None):
             # 编辑部动书之前：作者自己改过还没存的，先存一档
             await book_saves.before_ai(session, book_id)
             try:
-                intent = known_intent if mid == known_id else await classify(session, book_id, text, viewing, conv)
+                intent = (
+                    known_intent
+                    if mid == known_id
+                    else await classify(session, book_id, text, viewing, conv, before=mid)
+                )
                 more = [step.strip() for step in intent.more or [] if step.strip()][:3]
                 if more:
                     needs_reply |= await apply_steps(session, redis, message, intent, more, viewing)

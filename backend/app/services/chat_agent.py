@@ -556,7 +556,7 @@ async def fall_back(redis, book_id, message_id, reply_id, role) -> bool:
             message = await session.get(MeetingMessage, message_id)
             text, viewing = message.content, (message.payload or {}).get("viewing")
             conv = (message.payload or {}).get("conv")
-            intent = await group_notes.classify(session, book_id, text, viewing, conv)
+            intent = await group_notes.classify(session, book_id, text, viewing, conv, before=message_id)
             if intent.kind == "提问闲聊" and not intent.more:
                 state = await conversation_state(session, book_id, "group", conv)
                 await session.commit()
