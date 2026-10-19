@@ -119,8 +119,9 @@ async def save_card_layout(
             raise HTTPException(422, "阶梯类没有栏目可调")
     elif not people and category not in ENTRY_CATEGORIES:
         raise HTTPException(422, "这一类没有栏目可调")
-    if people and ("定位" in body.dropped or "定位" not in {f.key for f in body.facts}):
-        raise HTTPException(422, "「定位」按它分组，不能删")
+    # 「定位」2026-10-19 起页面上不显示了（改成置顶），栏目里可以没有它；但不能连旧数据一起清掉
+    if people and "定位" in body.dropped:
+        raise HTTPException(422, "「定位」的旧数据不能删")
 
     characters: list[Character] = (
         list(await session.scalars(select(Character).where(Character.book_id == book.id))) if people else []

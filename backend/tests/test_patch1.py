@@ -544,7 +544,8 @@ async def test_legacy_prefill_combined_and_existing_text(flow, sessionmaker):
     assert "已按要求修改" in changed["concept"]["story"]
     assert "作者手改的结尾。" in changed["concept"]["story"]
     changed_library = await flow("GET", f"/books/{bid}/library")
-    assert "已按要求修改" in next(c for c in changed_library["characters"] if c["role_type"] == "导师")["background"]
+    # 2026-10-19 起定位不给编辑部看了：「师父」只能从卡的内容里认，演示模型认不出，这一句只记成要求
+    assert all("已按要求修改" not in c["background"] for c in changed_library["characters"])
     req = await flow("GET", f"/books/{bid}/requirements")
     assert any("大纲卷首要快" in r["text"] for r in req)
     await flow("POST", f"/jobs/{jid}/piece", {"action": "confirm", "piece": "settings"})

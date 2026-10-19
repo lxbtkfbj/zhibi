@@ -1,8 +1,9 @@
 """设定库：人物、关系、世界观、伏笔。"""
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -16,8 +17,10 @@ class Character(UUIDPk, Timestamps, Base):
     book_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("books.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(100))
     aliases: Mapped[list] = mapped_column(JSONB, default=list)
-    # 主角 / 配角 / 反派 / 龙套 等
+    # 主角 / 配角 / 反派 / 龙套 等（2026-10-19 起页面上不显示，改成置顶；旧值留着）
     role_type: Mapped[str] = mapped_column(String(30), default="配角")
+    # 置顶：排在角色目录最上面（后置顶的在上），编辑部每写一章都带上他的卡
+    pinned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     gender: Mapped[str] = mapped_column(String(20), default="")
     age: Mapped[str] = mapped_column(String(50), default="")
     appearance: Mapped[str] = mapped_column(Text, default="")

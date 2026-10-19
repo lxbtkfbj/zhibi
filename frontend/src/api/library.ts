@@ -14,6 +14,8 @@ export interface LibraryItem {
   content?: string
   category?: string
   role_type?: string
+  /** 置顶的时间（角色） */
+  pinned_at?: string | null
   status: string
   tags: string[]
   locked: boolean

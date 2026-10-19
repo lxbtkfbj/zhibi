@@ -68,7 +68,8 @@ function characterEntry(item: LibraryItem, relations: Relationship[], names: Map
   return {
     id: item.id, kind: 'character', category: '角色列表', name: item.name, oneLine: text(item.one_line), tags: item.tags ?? [], locked: item.locked, role,
     dead: item.is_alive === false,
-    facts: [['定位', role], ['所属', text(extra['所属']), '哪个宗门、家族、势力'], ['性别', column('性别')], ['年龄', column('年龄')], ['别名', column('别名')]],
+    pinnedAt: item.pinned_at ?? undefined,
+    facts: [['所属', text(extra['所属']), '哪个宗门、家族、势力'], ['性别', column('性别')], ['年龄', column('年龄')], ['别名', column('别名')]],
     sections,
     now: now.some(([, value]) => value) ? now : undefined,
     relations: [...toLead, ...relations
@@ -168,7 +169,9 @@ export function bookFromApi(parts: ApiParts): VBook {
   const concept = parts.book.concept ?? {}
   const { library } = parts
   const names = new Map(library.characters.map((c) => [c.id, c.name]))
-  const lead = library.characters.find((c) => (LEGACY_ROLES[c.role_type ?? ''] ?? c.role_type) === '主角')?.id
+  // 「和主角的关系」那一栏挂在谁身上：最后置顶的那个，没有置顶的照旧认定位是主角的
+  const lead = [...library.characters].filter((c) => c.pinned_at).sort((a, b) => (b.pinned_at ?? '').localeCompare(a.pinned_at ?? ''))[0]?.id
+    ?? library.characters.find((c) => (LEGACY_ROLES[c.role_type ?? ''] ?? c.role_type) === '主角')?.id
   const characters = library.characters.map((c) => characterEntry(c, parts.relationships, names, lead))
   const builtinName = (key: string) => CATEGORY_DEFS.find((d) => d.from.includes(key))?.name
 

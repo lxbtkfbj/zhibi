@@ -53,7 +53,7 @@ from app.schemas import (
 from app.services import book_saves, suggestions
 from app.services.library import ensure_unlocked, load_target, lock_book, parse_uuid, validate_entry
 from app.services.library_cascade import generate_cascade_suggestions
-from app.services.library_context import load_context
+from app.services.library_context import load_context, main_cast
 from app.services.meeting import post_message
 from app.services.splice import read_path, set_field, splice
 from app.services.versions import apply_snapshot, previous_version_id, record_version, snapshot_of
@@ -124,6 +124,7 @@ async def get_library(book: Book = Depends(get_book), session: AsyncSession = Se
             }
         )
     focus_tags = set(config.FOCUS_TAGS)
+    main = main_cast(characters, (book.concept or {}).get("story", ""))
     pending = await session.scalar(
         select(func.count())
         .select_from(SettingSuggestion)
@@ -134,7 +135,7 @@ async def get_library(book: Book = Depends(get_book), session: AsyncSession = Se
         "characters": [CharacterOut.model_validate(row) for row in characters],
         "entries": [WorldEntryOut.model_validate(row) for row in entries],
         "focus": {
-            "characters": [str(r.id) for r in characters if r.role_type == "主角" or focus_tags.intersection(r.tags)],
+            "characters": [str(r.id) for r in characters if r in main or focus_tags.intersection(r.tags)],
             "entries": [str(r.id) for r in entries if focus_tags.intersection(r.tags)],
         },
         "suggestions_pending": pending,

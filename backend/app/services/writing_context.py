@@ -42,7 +42,7 @@ from app.agents.playbook import pick, usage_text
 from app.agents.rhythm import rhythm_text
 from app.book_settings import settings_of
 from app.models import Book, Chapter, Character, PlotUnit, Secret, Volume, WorldEntry
-from app.services.library_context import LibraryContext, load_context
+from app.services.library_context import LibraryContext, load_context, main_cast
 from app.services.requirements import active_requirements, requirement_text
 from app.services.setup_store import load_ledger, load_nodes, load_secrets, load_threads, unit_dict, volume_dict
 
@@ -92,7 +92,7 @@ async def public_secrets(session: AsyncSession, secrets: list[dict], context: Li
 
 def planning_library(context: LibraryContext) -> tuple[str, str]:
     """统一复用设定库目录与全文格式，不再回读迁移前的主角卡或世界卡。"""
-    protagonists = [row for row in context.characters if row.role_type == "主角"]
+    protagonists = main_cast(context.characters, (context.book.concept or {}).get("story", ""))
     picked: list[Character | WorldEntry] = list(protagonists)
     picked.extend(row for row in context.targets if "金手指" in (row.tags or []) and row not in picked)
     secret_id = (context.book.concept or {}).get("secret_entry_id")
@@ -287,10 +287,11 @@ def character_states(characters: list[Character]) -> str:
     return "\n".join(format_character_state(_char_dict(c)) for c in major) or "（暂无）"
 
 
-def character_profiles(characters: list[Character], names: list[str]) -> str:
-    """出场人物的完整资料；主角总是带上。"""
+def character_profiles(characters: list[Character], names: list[str], story: str = "") -> str:
+    """出场人物的完整资料；置顶的主要人物总是带上。"""
     wanted = set(names)
-    picked = [c for c in characters if c.name in wanted or c.role_type == "主角"]
+    main = main_cast(characters, story)
+    picked = [c for c in characters if c.name in wanted or c in main]
     # 章纲里写的是别名或称呼时也尽量带上
     for c in characters:
         if c not in picked and any(alias in wanted for alias in c.aliases or []):
@@ -749,10 +750,11 @@ async def chapter_plan_blocks(
     library = await load_context(session, book)
     characters = public_library(library).characters
     mentioned = " ".join([*(unit.key_events or []), *(volume.new_characters or [])])
+    main = main_cast(characters, (book.concept or {}).get("story", ""))
     names = [
         c.name
         for c in characters
-        if c.role_type == "主角" or any(name in mentioned for name in [c.name, *(c.aliases or [])] if name)
+        if c in main or any(name in mentioned for name in [c.name, *(c.aliases or [])] if name)
     ]
     nodes = await load_nodes(session, book.id)
     first_segment = next((node["segment"] for node in nodes if (node.get("segment") or {}).get("number") == 1), {})
@@ -837,7 +839,7 @@ async def chapter_blocks(session: AsyncSession, book: Book, chapter: Chapter) ->
         "concept": format_concept({**(book.concept or {}), "chapter_words": chapter_words(book)}),
         "outline": format_chapter_outline(outline),
         "unit": format_unit(unit_dict(unit)) if unit else "（暂无）",
-        "characters": character_profiles(characters, names),
+        "characters": character_profiles(characters, names, (book.concept or {}).get("story", "")),
         "world": writer_world(library, mention, materials.get("world") if materials else None),
         "library": visible.library,
         "recent": await recent_summaries(session, book.id, chapter.index, count=3),

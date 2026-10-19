@@ -1,6 +1,7 @@
 """设定库的查看与手动修改。"""
 
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -182,6 +183,23 @@ async def create_character(body: CharacterBase, book: Book = Depends(get_book), 
 @router.patch("/characters/{row_id}", response_model=CharacterOut)
 async def update_character(row_id: uuid.UUID, body: CharacterPatch, session: AsyncSession = SessionDep):
     return await _update(session, Character, row_id, body)
+
+
+class PinIn(BaseModel):
+    pinned: bool
+
+
+@router.post("/characters/{row_id}/pin", response_model=CharacterOut)
+async def pin_character(row_id: uuid.UUID, body: PinIn, session: AsyncSession = SessionDep):
+    """置顶、取消置顶：排在角色目录最上面（后置顶的在上），编辑部每写一章都带上他的卡。
+    只是排个顺序、告诉编辑部谁要一直记着，不算改了这张卡：不记版本，编辑部在干活时也能点。"""
+    row = await session.get(Character, row_id)
+    if row is None:
+        raise HTTPException(404, "条目不存在")
+    row.pinned_at = datetime.now(UTC) if body.pinned else None
+    await session.commit()
+    await session.refresh(row)
+    return row
 
 
 @router.delete("/characters/{row_id}", status_code=204)

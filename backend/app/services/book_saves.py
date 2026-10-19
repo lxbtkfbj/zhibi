@@ -114,7 +114,12 @@ def digest(data: Any) -> str:
 
 def row_data(model, mapping) -> dict:
     skip = BOOK_SKIP if model is Book else ("updated_at",)
-    return {key: plain(value) for key, value in mapping.items() if key not in skip}
+    # 没置顶的不记这一栏：加这一栏以前存的档，不会因为它对不上而算成每个人都改了
+    return {
+        key: plain(value)
+        for key, value in mapping.items()
+        if key not in skip and not (key == "pinned_at" and value is None)
+    }
 
 
 @dataclass
@@ -242,6 +247,7 @@ CHAR_LABELS = {
     **{column: label for label, column in CHARACTER_CATEGORY["state_fields"]},
     "one_line": "一句话",
     "tags": "标签",
+    "pinned_at": "置顶",
     "locked": "锁住",
     "position": "顺序",
     "source": "来源",

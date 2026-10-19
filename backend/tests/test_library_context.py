@@ -136,7 +136,7 @@ def test_concept_new_secret_fallback_and_legacy(context):
 
 def test_catalog_and_full_text_are_exact_and_category_ordered(context):
     assert context.library == (
-        "【角色卡片】\n- 楚风（主角）（已锁）：敢拿命下注的少年。\n"
+        "【角色卡片】\n- 楚风（主要人物）（已锁）：敢拿命下注的少年。\n"
         "【等级体系】\n- 武道境界：修士的境界。\n"
         "【世界与地图】\n- 天风国：各城归皇室管。\n- 青阳城（属于天风国）：楚风出发的地方。\n"
         "【往事与秘密】\n- 底牌：骗局\n【厉鬼】（自建类别）\n"

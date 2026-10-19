@@ -19,8 +19,10 @@ export interface VEntry {
   oneLine: string
   tags: string[]
   locked: boolean
-  /** 角色的定位，用来在目录里分组 */
+  /** 角色的定位（旧的；2026-10-19 起页面上不显示，原型的示例书还在用它排顺序） */
   role?: string
+  /** 角色置顶的时间：排在目录最上面（后置顶的在上），编辑部每写一章都带上他 */
+  pinnedAt?: string
   /** 角色已经死了：名字旁边标一下，不用「此刻」里写「活着」 */
   dead?: boolean
   /** 名字下面的短字段：显示名、内容、空着时的提示、存内容时认的名字（不写就是显示名） */
@@ -259,7 +261,7 @@ export const CHARACTER_PLACEHOLDERS: Record<string, string> = {
 
 /** 每一类默认有哪几栏：facts 是名字下面的小字，sections 是正文栏目。作者可以按书改。 */
 export const DEFAULT_FIELDS: Record<string, { facts: string[]; sections: string[] }> = {
-  角色列表: { facts: ['定位', '所属', '性别', '年龄', '别名'], sections: CHARACTER_FIELDS },
+  角色列表: { facts: ['所属', '性别', '年龄', '别名'], sections: CHARACTER_FIELDS },
   金手指: { facts: ['是什么', '谁知道'], sections: ['能做什么', '规矩和限制', '代价', '怎么变强', '来历'] },
   地点列表: { facts: ['归谁管'], sections: ['内容'] },
   势力列表: { facts: ['领头的', '对主角', '地盘'], sections: ['内容'] },
@@ -395,7 +397,14 @@ export function defaultTemplateFor(category: VCategory): CardTemplate {
 }
 
 export function templateOf(book: VBook, category: VCategory): CardTemplate {
-  return book.layouts[category.key] ?? defaultTemplateFor(category)
+  const template = book.layouts[category.key] ?? defaultTemplateFor(category)
+  // 「定位」不显示了（改成置顶）；以前存下的栏目里有它也不摆
+  return category.name === '角色列表' && !category.custom ? { ...template, facts: template.facts.filter((f) => f.key !== '定位') } : template
+}
+
+/** 置顶的角色，后置顶的在前 */
+export function pinnedFirst(entries: VEntry[]): VEntry[] {
+  return entries.filter((e) => e.pinnedAt).sort((a, b) => (b.pinnedAt ?? '').localeCompare(a.pinnedAt ?? ''))
 }
 
 function hintOf(key: string): string | undefined {

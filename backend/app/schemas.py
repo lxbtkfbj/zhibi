@@ -649,6 +649,8 @@ class CharacterOut(CharacterBase, ORM):
     id: uuid.UUID
     first_appearance_chapter: int | None
     source: str = "ai"
+    # 置顶的时间：有就是置顶了，后置顶的排在上面
+    pinned_at: datetime | None = None
 
 
 class CharacterPatch(BaseModel):

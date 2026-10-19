@@ -4,6 +4,7 @@ import re
 import uuid
 from collections import Counter
 from copy import deepcopy
+from datetime import UTC, datetime
 
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -126,6 +127,7 @@ async def _character(session, book_id, data, *, protagonist=False, position=0):
     tags = list(row.tags or [])
     if protagonist:
         row.role_type = "主角"
+        row.pinned_at = row.pinned_at or datetime.now(UTC)
         tags = list(dict.fromkeys([*tags, "主角"]))
     elif row.status == "must":
         tags = list(dict.fromkeys([*tags, "第一卷"]))
@@ -215,9 +217,7 @@ async def save_library_focus(session: AsyncSession, book_id: uuid.UUID, focus: d
         if same is not None:
             await _fill_focus(session, book_id, same, {key: finger.get(key, "") for key in ("one_line", "content")})
         else:
-            row, writable, before = await _entry(
-                session, book_id, {**finger, "category": GOLDFINGER}, tags=["金手指"]
-            )
+            row, writable, before = await _entry(session, book_id, {**finger, "category": GOLDFINGER}, tags=["金手指"])
             if writable:
                 await _version(session, book_id, "entry", row, before, "开书：金手指")
 

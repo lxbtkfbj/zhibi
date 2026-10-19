@@ -1000,9 +1000,8 @@ def _library_intent(user: str) -> s.LibraryIntent:
     names = re.findall(r"^- ([^\n（：]+)", library, re.M)
     name = next((name for name in names if name in note), "")
     if not name and "主角" in note:
-        name = next(iter(re.findall(r"^- ([^（：\n]+)（主角）", library, re.M)), "")
-    if not name and "师父" in note:
-        name = next(iter(re.findall(r"^- ([^（：\n]+)（导师）", library, re.M)), "")
+        # 定位不给编辑部看了：主要人物（置顶的，没人置顶时是主角）里的第一个
+        name = next(iter(re.findall(r"^- ([^（：\n]+)（主要人物）", library, re.M)), "")
     if not name and "境界" in note:
         name = next((name for name in names if "境界" in name), "")
     if name and any(w in note for w in ("改", "换", "重想")):

@@ -204,6 +204,7 @@ export function useLiveBook(bookId: string) {
         return row.id
       },
       deleteEntry: (entry) => done(del(`/${isCharacter(entry) ? 'characters' : 'world-entries'}/${entry.id}`)).then(() => undefined),
+      pinEntry: (entry, pinned) => done(post(`/characters/${entry.id}/pin`, { pinned })).then(() => undefined),
       saveRelation: async (entry, relation, text) => {
         if (relation.toLead) await done(patch(`/characters/${entry.id}`, { relation: text }))
         else if (relation.id) await done(patch(`/relationships/${relation.id}`, { description: text }))

@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { ArrowLeft, BookOpen, Check, ChevronDown, ChevronRight, ChevronUp, Globe, Inbox, Lock, Minus, PanelRight, PictureInPicture2, Plus, Sparkles, Wand2, X } from 'lucide-react'
+import { ArrowLeft, BookOpen, ChevronDown, ChevronRight, ChevronUp, Globe, Inbox, Lock, Minus, PanelRight, PictureInPicture2, Pin, Plus, Sparkles, Wand2, X } from 'lucide-react'
 import { type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { ChatViewing } from '../../api/types'
@@ -12,7 +12,7 @@ import {
 } from './actions'
 import { PendingNote } from './Inbox'
 import {
-  ROLE_ORDER, applyTemplate, cn, emptyCategory, findEntry, findNode, isLadder, nounOf, splitTitle, templateOf, undecidedParts,
+  ROLE_ORDER, applyTemplate, cn, emptyCategory, findEntry, findNode, isLadder, nounOf, pinnedFirst, splitTitle, templateOf, undecidedParts,
   type CardTemplate, type FieldItem, type VBook, type VCategory, type VEntry, type VNode,
 } from './model'
 import { PENDING } from './sampleBook'
@@ -21,7 +21,7 @@ import { type WritingControl, gateTarget } from './writing'
 import { SplitPanel } from './Split'
 import { useSplit } from './useSplit'
 import {
-  AskButton, CardMenu, Crumb, DirectoryShell, Editable, LinkChip, Menu, Prose, Section, Sheet, SideColumn,
+  AskButton, CardMenu, Crumb, DirectoryShell, Editable, LinkChip, Prose, Section, Sheet, SideColumn,
 } from './widgets'
 import { ColumnWidthContext, useColumnWidth, zoomOf } from './column'
 import { paperCard, readText, rowSelected, smallButton, titleClass } from './styles'
@@ -156,13 +156,20 @@ function treeRows(entries: VEntry[]): { entry: VEntry; depth: number }[] {
   return rows
 }
 
+/** 置顶多于这么多人时，目录里提醒一句 */
+const PIN_LIMIT = 5
+
 function roleOrder(entries: VEntry[]): string[] {
   return [...ROLE_ORDER, ...new Set(entries.map((e) => e.role ?? '配角').filter((r) => !ROLE_ORDER.includes(r)))]
 }
 
 /** 右边连着排的顺序和左边目录一样：角色按定位分组，地点按树。 */
 function orderEntries(category: VCategory): VEntry[] {
-  if (category.name === '角色列表' && !category.custom) return roleOrder(category.entries).flatMap((role) => category.entries.filter((e) => (e.role ?? '配角') === role))
+  if (category.name === '角色列表' && !category.custom) {
+    // 和左边目录一样：置顶的在前；没人置顶的书（原型的示例书）照旧按定位排
+    if (category.entries.some((e) => e.pinnedAt)) return [...pinnedFirst(category.entries), ...category.entries.filter((e) => !e.pinnedAt)]
+    return roleOrder(category.entries).flatMap((role) => category.entries.filter((e) => (e.role ?? '配角') === role))
+  }
   return treeRows(category.entries).map((r) => r.entry)
 }
 
@@ -184,27 +191,27 @@ function EntryList({ entries, selected, onSelect }: { entries: VEntry[]; selecte
   )
 }
 
+/** 角色目录：置顶的在最上面（后置顶的在上），其他人照原来的顺序一列。置顶的人多了提醒一句。 */
 function CharacterGroups({ entries, selected, onSelect }: { entries: VEntry[]; selected: string; onSelect: (id: string) => void }) {
-  const roles = roleOrder(entries)
-  const [closed, setClosed] = useState<string[]>(() => (entries.filter((e) => e.role === '配角').length > 4 ? ['配角'] : []))
+  const pinned = pinnedFirst(entries)
+  const rest = entries.filter((e) => !e.pinnedAt)
   return (
     <>
-      {roles.map((role) => {
-        const members = entries.filter((e) => (e.role ?? '配角') === role)
-        if (!members.length) return null
-        const open = !closed.includes(role) || members.some((m) => m.id === selected)
-        return (
-          <div key={role} className="mb-1">
-            <button type="button" onClick={() => setClosed(open ? [...closed, role] : closed.filter((r) => r !== role))}
-              className="flex w-full items-center gap-1.5 px-2.5 pt-2 pb-1 text-left text-xs text-ink-3 hover:text-ink">
-              {role}
-              <span className="tabular-nums">{members.length}</span>
-              {!open && <span className="ml-auto">展开</span>}
-            </button>
-            {open && members.map((entry) => <EntryButton key={entry.id} entry={entry} selected={selected} onSelect={onSelect} />)}
-          </div>
-        )
-      })}
+      {pinned.length > 0 && (
+        <div className="mb-1">
+          <p className="flex items-center gap-1.5 px-2.5 pt-2 pb-1 text-xs text-ink-3">
+            <Pin className="size-3" />置顶<span className="tabular-nums">{pinned.length}</span>
+          </p>
+          {pinned.map((entry) => <EntryButton key={entry.id} entry={entry} selected={selected} onSelect={onSelect} />)}
+          {pinned.length > PIN_LIMIT && <p className="px-2.5 pt-1 text-[11px] leading-relaxed text-seal-dark">置顶的人每写一章都带上，人多了资料会变多、冲淡这一章的重点</p>}
+        </div>
+      )}
+      {rest.length > 0 && (
+        <div className="mb-1">
+          {pinned.length > 0 && <p className="px-2.5 pt-2 pb-1 text-xs text-ink-3">其他人 <span className="tabular-nums">{rest.length}</span></p>}
+          {rest.map((entry) => <EntryButton key={entry.id} entry={entry} selected={selected} onSelect={onSelect} />)}
+        </div>
+      )}
     </>
   )
 }
@@ -399,7 +406,17 @@ function Tags({ entry }: { entry: VEntry }) {
 
 interface MetaItem { label: string; value?: string; placeholder?: string; link?: () => void; onSave?: (text: string) => void; picker?: ReactNode }
 
-/** 名字下面一行小字：定位、性别、年龄这类短的。 */
+function AppearsRow({ items, nav }: { items: VEntry['appears']; nav: Nav }) {
+  if (!items.length) return null
+  return (
+    <div className="mt-8 flex flex-wrap items-center gap-2 border-t border-line pt-5 text-[13px] text-ink-3">
+      <span className="mr-1">出现在</span>
+      {items.map((a) => <LinkChip key={a.node} icon={<BookOpen className="size-3" />} onClick={() => nav.openNode(a.node)}>{a.label}</LinkChip>)}
+    </div>
+  )
+}
+
+/** 名字下面一行小字：所属、性别、年龄这类短的。 */
 function MetaRow({ items, readOnly }: { items: MetaItem[]; readOnly?: boolean }) {
   if (!items.length) return null
   return (
@@ -416,48 +433,6 @@ function MetaRow({ items, readOnly }: { items: MetaItem[]; readOnly?: boolean })
   )
 }
 
-const ROLE_HINTS: Record<string, string> = {
-  主角: '故事跟着他走',
-  女主: '和主角走感情线的那一位（男频）',
-  男主: '和主角走感情线的那一位（女频）',
-  班底: '跟着主角一起干的自己人',
-  对手: '和主角作对的，大反派小反派都算',
-  导师: '教主角、带主角的人',
-  配角: '其余有名有姓、会再出场的',
-}
-
-/** 角色的定位：从几种里挑，按它分组。男频只给女主、女频只给男主（已经选了另一个的照样显示）。 */
-function RolePicker({ value, onPick, readOnly, channel }: { value: string; onPick: (role: string) => void; readOnly?: boolean; channel?: string }) {
-  if (readOnly) return <span className="font-serif text-[16px] text-ink">{value}</span>
-  const hide = channel === '男频' ? '男主' : channel === '女频' ? '女主' : ''
-  const roles = ROLE_ORDER.filter((role) => role !== hide || role === value)
-  return (
-    <Menu align="left" trigger={(_, toggle) => (
-      <button type="button" onClick={toggle} className="-mx-2 flex items-center gap-1 rounded-md px-2 font-serif text-[16px] text-ink hover:bg-subtle">
-        {value}<ChevronDown className="size-3.5 text-ink-3" />
-      </button>
-    )}>
-      {(close) => roles.map((role) => (
-        <button key={role} type="button" onClick={() => { close(); if (role !== value) onPick(role) }}
-          className={clsx('flex w-72 items-baseline gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-subtle', role === value && 'bg-subtle')}>
-          <span className={clsx('w-8 shrink-0', role === value ? 'font-medium text-ink' : 'text-ink-2')}>{role}</span>
-          <span className="text-xs text-ink-3">{ROLE_HINTS[role]}</span>
-          {role === value && <Check className="ml-auto size-3.5 shrink-0 self-center text-ink-2" />}
-        </button>
-      ))}
-    </Menu>
-  )
-}
-
-function AppearsRow({ items, nav }: { items: VEntry['appears']; nav: Nav }) {
-  if (!items.length) return null
-  return (
-    <div className="mt-8 flex flex-wrap items-center gap-2 border-t border-line pt-5 text-[13px] text-ink-3">
-      <span className="mr-1">出现在</span>
-      {items.map((a) => <LinkChip key={a.node} icon={<BookOpen className="size-3" />} onClick={() => nav.openNode(a.node)}>{a.label}</LinkChip>)}
-    </div>
-  )
-}
 
 /** 让编辑部把这一条空着的栏目补上：补的时候卡上说一声，补好底下能撤销。不能补的（推出来的、没起名的、锁住的、阶梯）不给。 */
 function useFill(entry: VEntry): { fill?: () => void; filling: boolean } {
@@ -570,10 +545,11 @@ function CharacterCard({ book, entry, nav, fresh }: { book: VBook; entry: VEntry
     <section id={`entry-${entry.id}`} data-entry={entry.id} className={clsx(paperCard, 'group/card relative scroll-mt-6')}>
       {!readOnly && (
         <CardMenu locked={entry.locked} onLock={draft ? undefined : () => saveEntry({ locked: !entry.locked })} onFill={fill}
+          pinned={!!entry.pinnedAt} onPin={draft || !actions.pinEntry ? undefined : () => save(actions.pinEntry!(entry, !entry.pinnedAt))}
           onDelete={() => save(actions.deleteEntry(entry))} deleteLabel={draft ? '不要这一条了' : '删掉这一条'} />
       )}
       <PendingNote id={entry.id} />
-      <div className="flex flex-wrap items-center gap-3 pr-28">
+      <div className="flex flex-wrap items-center gap-3 pr-36">
         <Editable autoFocus={fresh} value={entry.name} readOnly={readOnly} placeholder="起个名字" className={titleClass}
           onSave={(name) => { if (name.trim()) saveEntry({ name }) }} />
         <Tags entry={entry} />
@@ -584,9 +560,7 @@ function CharacterCard({ book, entry, nav, fresh }: { book: VBook; entry: VEntry
       {readOnly && <p className="mt-2 text-[13px] text-ink-3">这一条从「{holder?.name}」的角色卡推出来，到角色卡上去改。</p>}
       <Editable value={entry.oneLine} readOnly={readOnly} onSave={(oneLine) => saveEntry({ oneLine })} spot={`e|${entry.id}|@oneLine`} placeholder="一句话说清这是谁、这是什么" className="mt-3 font-serif text-lg leading-relaxed text-ink-2 2xl:text-xl" />
       <MetaRow readOnly={readOnly} items={[
-        ...facts.map(([label, value, placeholder, key]) => ((key ?? label) === '定位' && people
-          ? { label, value, picker: <RolePicker value={value || '配角'} readOnly={readOnly} channel={book.channel} onPick={(role) => saveEntry({ fields: { 定位: role } })} /> }
-          : { label, value, placeholder, onSave: field(key ?? label) })),
+        ...facts.map(([label, value, placeholder, key]) => ({ label, value, placeholder, onSave: field(key ?? label) })),
         ...(holder ? [{ label: '谁在用', value: holder.name, link: () => nav.openEntry(holder.id) }] : []),
       ]} />
       {now.length > 0 && (
@@ -942,7 +916,7 @@ function CardTemplateEditor({ category, template, counts, onClose }: {
       </div>
       <p className="mb-5 text-[13px] leading-relaxed text-ink-3">改了对这本书这一类的每一条都生效；改名不丢已经写的内容。删掉的栏目，写了的内容会一起删掉。只剩一栏「内容」时，卡片上就是名字加一段话。</p>
       <div className="grid gap-6 md:grid-cols-2">
-        <FieldList title="名字下面的小字" note="短的，一两个词能说完的" items={draft.facts} counts={counts} locked={people ? ['定位'] : []}
+        <FieldList title="名字下面的小字" note="短的，一两个词能说完的" items={draft.facts} counts={counts} locked={[]}
           onEdit={(facts) => setDraft({ ...draft, facts })} onCommit={(facts, dropped) => commit({ ...draft, facts }, dropped)}
           addPlaceholder={people ? '加一栏，比如：武器、坐骑、职业' : '加一栏，比如：品阶、产地'} />
         <FieldList title="正文栏目" note="要写一段话的" items={draft.sections} counts={counts} locked={[]}
@@ -1716,7 +1690,7 @@ function SelectionActions({ pageRef, onToast, onUndo }: {
 
 function firstSelection(book: VBook): string {
   const characters = book.categories.find((c) => c.name === '角色列表')?.entries ?? []
-  const lead = characters.find((c) => c.role === '主角') ?? characters[0]
+  const lead = pinnedFirst(characters)[0] ?? characters.find((c) => c.role === '主角') ?? characters[0]
   return lead?.id ?? (book.categories.find((c) => c.entries.length)?.entries[0]?.id ?? 'overview')
 }
 

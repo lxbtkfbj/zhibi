@@ -13,7 +13,6 @@ from app.library_config import (
     CHARACTER_CATEGORY,
     GENRE_DEFAULTS,
     GOLDFINGER,
-    LEGACY_ROLE_TYPES,
     STATUSES,
 )
 from app.models import Book, Character, PlotUnit, SettingCategory, StoryNode, Volume, WorldEntry
@@ -51,6 +50,18 @@ def genre_defaults(genre: str) -> str:
 # 设定全文加起来在这个字数以内，就整份带给模型；超过了只带主角、金手指、等级体系的全文，其余列目录
 FULL_LIBRARY_BUDGET = 20000
 GIST_LIMIT = 40
+
+
+def main_cast(characters, story: str = "") -> list:
+    """主要人物：作者置顶的（后置顶的在前）。一个都没置顶时：以前定位是「主角」的；再没有就按简介里提到的名字认主角。
+    编辑部每写一章都带上他们的卡。"""
+    pinned = sorted((c for c in characters if getattr(c, "pinned_at", None)), key=lambda c: c.pinned_at, reverse=True)
+    if pinned:
+        return pinned
+    legacy = [c for c in characters if c.role_type == "主角"]
+    if legacy:
+        return legacy
+    return [c for c in characters if c.name and c.name in (story or "")][:1]
 
 
 def gist(target: Any) -> str:
@@ -119,6 +130,7 @@ class LibraryContext:
     @property
     def library(self) -> str:
         lines = []
+        main = main_cast(self.characters, (self.book.concept or {}).get("story", ""))
         for category in self.categories:
             targets = [target for target in self.targets if self.category(target)["key"] == category["key"]]
             if not targets:
@@ -126,8 +138,9 @@ class LibraryContext:
             lines.append(f"【{category['name']}】" + ("（自建类别）" if not category.get("builtin", True) else ""))
             for target in targets:
                 label = target.name
-                if isinstance(target, Character) and target.role_type:
-                    label += f"（{LEGACY_ROLE_TYPES.get(target.role_type, target.role_type)}）"
+                if isinstance(target, Character) and target in main:
+                    # 定位页面上不显示了；置顶的（没人置顶时是主角）是主要人物，编辑部每章都带上
+                    label += "（主要人物）"
                 if isinstance(target, WorldEntry) and target.parent_id:
                     parent = next((entry for entry in self.entries if entry.id == target.parent_id), None)
                     if parent:
@@ -144,7 +157,7 @@ class LibraryContext:
     def is_core(self, target: Character | WorldEntry) -> bool:
         """主角、金手指、等级体系：编辑部干什么活都得知道细节的几条。"""
         if isinstance(target, Character):
-            return target.role_type == "主角"
+            return target in main_cast(self.characters, (self.book.concept or {}).get("story", ""))
         return target.category in (GOLDFINGER, "等级体系") or "金手指" in (target.tags or [])
 
     @property

@@ -76,6 +76,8 @@ export interface WorkspaceActions {
   /** 新建一条（draft 是作者在空卡片上写好的，或从编辑部帮写的候选里收下的），返回新的 id */
   createEntry(category: VCategory, draft: VEntry, options?: { fromCandidate?: boolean }): Promise<string>
   deleteEntry(entry: VEntry): Promise<void>
+  /** 角色置顶、取消置顶 */
+  pinEntry?(entry: VEntry, pinned: boolean): Promise<void>
   saveRelation(entry: VEntry, relation: NonNullable<VEntry['relations']>[number], text: string): Promise<void>
   addRelation(entry: VEntry, to: string, kind: string, text: string): Promise<void>
   deleteRelation(entry: VEntry, relation: NonNullable<VEntry['relations']>[number]): Promise<void>
@@ -377,7 +379,7 @@ export function blankEntry(category: VCategory): VEntry {
   const base = { id, category: category.name, name: '', oneLine: '', tags: [], locked: false, facts: [] as VEntry['facts'], sections: [] as VEntry['sections'], appears: [] }
   // 栏目由这本书这一类的栏目去摆，这里只定是哪种卡
   if (category.name === '角色列表' && !category.custom) {
-    return { ...base, kind: 'character', role: '配角', facts: [['定位', '配角']], sections: CHARACTER_FIELDS.map((key) => ({ key, label: key, text: '' })) }
+    return { ...base, kind: 'character', role: '配角', sections: CHARACTER_FIELDS.map((key) => ({ key, label: key, text: '' })) }
   }
   if (category.name === '金手指' && !category.custom) return { ...base, kind: 'goldfinger', tags: ['金手指'] }
   if ((category.name === '等级体系' && !category.custom) || category.custom?.style === 'ladder') return { ...base, kind: 'ladder', overview: '', levels: [{ name: '', text: '' }, { name: '', text: '' }] }
