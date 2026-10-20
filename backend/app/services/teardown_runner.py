@@ -19,7 +19,6 @@ from app.models import Book, Chapter, Job, PlotUnit, Volume
 from app.prompts import render
 from app.services import book_saves
 from app.services.meeting import Emitter, job_dict, publish
-from app.services.teardown_roster import Roster
 
 log = logging.getLogger(__name__)
 MAX_CHARS = 12000
@@ -116,6 +115,7 @@ class Runner:
         self.calls: list[dict] = []
         self.retry_failed_only = False
         self.retry_previous: dict | None = None
+        self.settings_only = False
 
     async def initialize(self, book_id: uuid.UUID | None = None) -> None:
         async with self.sm() as session:
@@ -135,6 +135,7 @@ class Runner:
             self.target = min(int((book.teardown or {}).get("upto") or self.total), self.total)
             self.original = bool((book.teardown or {}).get("original_volumes"))
             self.retry_failed_only = bool(job and (job.params or {}).get("retry_failed_only"))
+            self.settings_only = bool(job and (job.params or {}).get("settings_only"))
             previous = (job.params or {}).get("previous_teardown", {}) if job else {}
             if self.retry_failed_only and previous.get("stage") == "stopped":
                 self.retry_previous = previous
@@ -272,14 +273,16 @@ class Runner:
         started = time.monotonic()
         self.active[number] = [c.index for c in chapters]
         await self.progress()
-        _, existing, _, _ = await self.snapshot()
-        roster = Roster()
-        roster.add(
+        book, existing, _, _ = await self.snapshot()
+        from app.services.teardown_settings import people_of
+
+        roster, _, _ = people_of(
             [
                 {"index": c.index, **((c.teardown or {}).get("read") or {})}
                 for c in existing
-                if (c.teardown or {}).get("read_version")
-            ]
+                if (c.teardown or {}).get("read_version") is not None
+            ],
+            (book.teardown or {}).get("names") if book else None,
         )
         roster_text = roster.text("\n".join(c.content for c in chapters))
         found, error = await self.read_call(chapters, roster_text)
@@ -659,14 +662,14 @@ class Runner:
                 return
             job.status, job.error = "running", ""
             book.teardown = {**book.teardown, "stage": "running", "stop_reason": None, "stop_note": ""}
-            if not self.original and book.teardown.get("open_volume_id"):
+            if not self.settings_only and not self.original and book.teardown.get("open_volume_id"):
                 opened = await session.get(Volume, uuid.UUID(str(book.teardown["open_volume_id"])))
                 if opened is not None:
                     opened.title = "还没收尾"
             await session.commit()
         await self.progress()
         # worker 恢复不重复发开始；只允许显式启动的一条群聊消息由 API 发送。
-        grouper = asyncio.create_task(self.grouping())
+        grouper = asyncio.create_task(self.grouping()) if not self.settings_only else None
         try:
             _, chapters, _, _ = await self.snapshot()
             wanted = [
@@ -679,18 +682,19 @@ class Runner:
                 )
             ]
             first_alone = not any((c.teardown or {}).get("read_version") for c in chapters)
-            self.changed.set()
-            await self.read_chapters(wanted, first_alone=first_alone)
-            self.reading_done = True
-            self.changed.set()
-            await grouper
+            if not self.settings_only:
+                self.changed.set()
+                await self.read_chapters(wanted, first_alone=first_alone)
+                self.reading_done = True
+                self.changed.set()
+                await grouper
         except Exception as exc:
             self.stop = TeardownStopped(
                 "error", f"拆的时候出错了（{one_line(exc)}），停下了。点「接着拆」从停的地方往下拆，读过的不重读。"
             )
             log.exception("拆书 %s 失败", self.book_id)
         finally:
-            if not grouper.done():
+            if grouper is not None and not grouper.done():
                 grouper.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await grouper
@@ -729,6 +733,26 @@ class Runner:
         if reason is not None and self.retry_previous is not None and not author_stop:
             reason = self.retry_previous.get("stop_reason") or reason
             note = self.retry_previous.get("stop_note") or note
+        settings_result = None
+        settings_error = ""
+        if not author_stop and reason in (None, "upto"):
+            from app.services.teardown_settings import collect_settings
+
+            try:
+                settings_result = await collect_settings(self)
+            except JobCancelled:
+                author_stop = True
+            except Exception as exc:
+                settings_result = getattr(exc, "result", None)
+                settings_error = f"整理设定没做完（{one_line(exc)}），点「接着拆」再试一次。"
+                log.exception("拆书 %s 整理设定未完成", self.book_id)
+            if await self.cancelled():
+                author_stop = True
+            if author_stop:
+                reason, note = "author", f"你点了停下，停在第 {max(read, default=0)} 章。"
+        await self.progress("closing")
+        if settings_error:
+            note += settings_error
         stage = "done" if reason is None else "stopped"
         async with self.sm() as session:
             book = await session.get(Book, self.book_id)
@@ -747,6 +771,20 @@ class Runner:
         )
         if failed:
             message += f"有 {len(failed)} 章没读成：第 {'、'.join(map(str, failed))} 章，点「再试一次」重读这几章。"
+        if settings_result is not None and not author_stop:
+            if not settings_error:
+                message += (
+                    f"设定也整理好了：{settings_result['characters']} 张角色卡、"
+                    f"{settings_result['entries']} 条设定，简介页有「这本书好在哪」。"
+                )
+            skipped = settings_result.get("skipped", [])
+            if skipped:
+                names = "、".join(skipped[:5])
+                if len(skipped) > 5:
+                    names += f"等 {len(skipped)} 条"
+                message += f"{names} 有新内容，你改过的没动。"
+        if settings_error and stage == "done":
+            message += settings_error
         await Emitter(self.sm, self.redis, self.book_id, self.job_id).say("lorekeeper", message)
         # 终态是收尾完成的承诺：存档和最后一句话都已持久化，才能让 API 显示任务结束。
         async with self.sm() as session:

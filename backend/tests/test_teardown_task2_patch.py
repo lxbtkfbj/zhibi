@@ -224,6 +224,12 @@ async def test_failed_retry_does_not_bypass_target_rules(
     client, sessionmaker, upto, read, failed, requested, status, retry
 ):
     bid = await seed(sessionmaker, upto=upto, read=read, failed=failed)
+    # 这里验证已整理完成后仍遵守第二批的目标约束；未整理的旧书现在可以
+    # 在同一目标只整理，另由第三批 settings-only 用例覆盖，不能混为旧规则。
+    async with sessionmaker() as session:
+        book = await session.get(Book, bid)
+        book.teardown = {**book.teardown, "settings": {"upto": read}}
+        await session.commit()
     response = await client.post(f"/api/teardown/{bid}/start", json={"upto": requested})
     assert response.status_code == status, response.text
     async with sessionmaker() as session:

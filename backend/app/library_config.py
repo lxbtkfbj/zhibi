@@ -7,6 +7,7 @@ SOURCES = {
     "candidate": "从选择里挑的",
     "suggestion": "按建议改的",
     "writing": "写作中记下的",
+    "teardown": "拆书拆出来的",
     "migration": "从旧设定迁移的",
     "revert": "退回过",
 }

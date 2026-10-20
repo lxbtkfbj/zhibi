@@ -53,6 +53,8 @@ def book_info(book, chapters, volumes, units=()) -> str:
         progress = f"拆到第 {max(read, default=0)} 章停下了：前 {len(read)} 章有章纲，归成了 {len(units)} 个单元、{volume_count} 卷；后面的还没拆，设定还没整理。"
     elif stage == "done":
         progress = f"拆完了：每章都有章纲，归成了 {len(units)} 个单元、{volume_count} 卷；设定还没整理。"
+    if settings_upto := (info.get("settings") or {}).get("upto"):
+        progress = progress.replace("设定还没整理", f"设定整理到第 {settings_upto} 章")
     return f"书名：《{book.title}》{author}\n导入了 {len(chapters)} 章，{words}；{volume_text}。\n{progress}"
 
 

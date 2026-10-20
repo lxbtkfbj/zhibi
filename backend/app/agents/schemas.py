@@ -1112,3 +1112,160 @@ class TeardownVolume(BaseModel):
 class TeardownVolumes(BaseModel):
     volumes: list[TeardownVolume]
     open_from: int | None = Field(None, description="从第几章起还没收尾；都收完了就不填")
+
+
+# fmt: off
+class TeardownCardMoment(BaseModel):
+    chapter: int = Field(description="第几章")
+    what: str = Field(description="做了什么")
+    shows: str = Field(description="立住了这个人的什么")
+
+
+class TeardownTie(BaseModel):
+    who: str = Field(description="对方的名字")
+    relation: str = Field(description="什么关系，变过的写从什么变成什么")
+    since_chapter: int | None = Field(None, description="从第几章起是这个关系，看不出留空")
+
+
+class TeardownNow(BaseModel):
+    power: str = Field("", description="实力与地位")
+    location: str = Field("", description="此刻在哪")
+    condition: str = Field("", description="此刻处境")
+    want: str = Field("", description="此刻想要什么")
+    alive: bool = Field(True, description="还活着没有")
+
+
+class TeardownCard(BaseModel):
+    name: str = Field(description="最正式的名字")
+    aliases: list[str] = Field(default_factory=list, description="专指这个人的别的叫法：外号、昵称、旧叫法；亲属和关系称呼不算")
+    one_line: str = Field(description="一句话说清这是谁，30 字以内")
+    role_type: Literal["主角", "女主", "男主", "班底", "对手", "导师", "配角"] = Field(description="定位")
+    belongs: str = Field("", description="所属：哪个家族、门派、公司、圈子；看不出留空")
+    gender: str = Field("", description="性别")
+    age: str = Field("", description="年龄")
+    appearance: str = Field("", description="外貌")
+    personality: str = Field("", description="性格与说话方式")
+    background: str = Field("", description="身世")
+    goal: str = Field("", description="想要什么")
+    weakness: str = Field("", description="软肋")
+    abilities: str = Field("", description="能力")
+    growth: str = Field("", description="成长与结局：从什么样变成什么样、第几章变的；死了写第几章、怎么死的")
+    now: TeardownNow = Field(default_factory=TeardownNow, description="此刻")
+    moments: list[TeardownCardMoment] = Field(default_factory=list, description="名场面，两到四场")
+    ties: list[TeardownTie] = Field(default_factory=list, description="和书里别的人的关系")
+    missing: list[str] = Field(default_factory=list, description="记录里没有、只好留空的栏目名")
+
+
+class TeardownLevel(BaseModel):
+    name: str = Field(description="这一级叫什么")
+    note: str = Field(description="原文怎么说这一级")
+    protagonist_chapter: int | None = Field(None, description="主角第几章到了这一级，看不出留空")
+
+
+class TeardownLadder(BaseModel):
+    name: str = Field(description="这套等级叫什么，比如「修炼境界」")
+    how_up: str = Field("", description="怎么往上升、难在哪")
+    levels: list[TeardownLevel] = Field(description="按高低排，低的在前")
+
+
+class TeardownLadders(BaseModel):
+    ladders: list[TeardownLadder] = Field(default_factory=list)
+    missing: list[str] = Field(default_factory=list, description="拿不准、记录里看不出的，一句一条")
+
+
+class TeardownGoldfinger(BaseModel):
+    name: str
+    aliases: list[str] = Field(default_factory=list)
+    what: str = Field(description="是什么")
+    knowers: str = Field("", description="谁知道")
+    can: str = Field("", description="能做什么")
+    rules: str = Field("", description="规矩和限制")
+    cost: str = Field("", description="代价")
+    grows: str = Field("", description="怎么变强：后来陆续冒出来的本事，按章写")
+    origin: str = Field("", description="来历")
+    first_chapter: int | None = Field(None, description="第几章出现")
+
+
+class TeardownGoldfingers(BaseModel):
+    items: list[TeardownGoldfinger] = Field(default_factory=list)
+    missing: list[str] = Field(default_factory=list, description="拿不准、记录里看不出的，一句一条")
+
+
+class TeardownPlace(BaseModel):
+    name: str
+    aliases: list[str] = Field(default_factory=list)
+    parent: str = Field("", description="属于哪里：上一级地方的名字，最大的留空")
+    note: str = Field(description="这是什么地方，一两句")
+    first_chapter: int | None = Field(None, description="第一次出现在第几章")
+
+
+class TeardownPlaces(BaseModel):
+    world: str = Field("", description="世界概况：什么时代、超凡力量公开还是藏着、普通人知道多少、钱用什么")
+    items: list[TeardownPlace] = Field(default_factory=list)
+    missing: list[str] = Field(default_factory=list, description="拿不准、记录里看不出的，一句一条")
+
+
+class TeardownFaction(BaseModel):
+    name: str
+    aliases: list[str] = Field(default_factory=list)
+    note: str = Field(description="什么组织，一两句")
+    leader: str = Field("", description="谁领头")
+    stance: str = Field("", description="和主角是敌是友")
+    turf: str = Field("", description="地盘在哪")
+    members: list[str] = Field(default_factory=list, description="成员")
+    first_chapter: int | None = Field(None, description="第一次出现在第几章")
+
+
+class TeardownFactions(BaseModel):
+    items: list[TeardownFaction] = Field(default_factory=list)
+    missing: list[str] = Field(default_factory=list, description="拿不准、记录里看不出的，一句一条")
+
+
+class TeardownItem(BaseModel):
+    name: str
+    aliases: list[str] = Field(default_factory=list)
+    note: str = Field(description="是什么、有什么用，一两句")
+    grade: str = Field("", description="品阶")
+    holder: str = Field("", description="在谁手里")
+    first_chapter: int | None = Field(None, description="第一次出现在第几章")
+
+
+class TeardownItems(BaseModel):
+    items: list[TeardownItem] = Field(default_factory=list)
+    missing: list[str] = Field(default_factory=list, description="拿不准、记录里看不出的，一句一条")
+
+
+class TeardownSecret(BaseModel):
+    name: str = Field(description="这个秘密叫什么，几个字")
+    truth: str = Field(description="真相是什么")
+    knowers: str = Field("", description="谁知道")
+    planted_chapter: int | None = Field(None, description="第几章埋下")
+    revealed_chapter: int | None = Field(None, description="第几章揭开，还没揭开留空")
+
+
+class TeardownSecrets(BaseModel):
+    items: list[TeardownSecret] = Field(default_factory=list)
+    missing: list[str] = Field(default_factory=list, description="拿不准、记录里看不出的，一句一条")
+
+
+class TeardownRule(BaseModel):
+    name: str
+    aliases: list[str] = Field(default_factory=list)
+    note: str = Field(description="管什么、怎么运作、限制和代价，一两句")
+    first_chapter: int | None = Field(None, description="第一次出现在第几章")
+
+
+class TeardownRules(BaseModel):
+    items: list[TeardownRule] = Field(default_factory=list)
+    missing: list[str] = Field(default_factory=list, description="拿不准、记录里看不出的，一句一条")
+
+
+class TeardownPoint(BaseModel):
+    topic: Literal["开头", "节奏", "变强", "在等什么", "桥段", "立得住的人"]
+    text: str = Field(description="先说结论，再说第几章怎么做的，最后说想学的作者可以怎么用；150 字以内")
+
+
+class TeardownMerits(BaseModel):
+    points: list[TeardownPoint] = Field(description="五六条，每条都带第几章")
+    missing: list[str] = Field(default_factory=list, description="想写却缺数字、缺记录的，一句一条")
+# fmt: on

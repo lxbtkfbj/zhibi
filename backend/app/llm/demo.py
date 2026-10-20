@@ -1303,7 +1303,10 @@ def _teardown_volume_text(user: str) -> s.TeardownVolumeText:
 
 async def respond(schema: type[BaseModel], system: str, user: str) -> BaseModel:
     await asyncio.sleep(DELAY_S)
-    from app.llm import demo_setup
+    from app.llm import demo_setup, demo_teardown
+
+    if schema in demo_teardown.SCHEMAS:
+        return demo_teardown.respond(schema, user)
 
     handlers = {
         s.TeardownRead: lambda: _teardown_read(user),

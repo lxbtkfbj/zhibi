@@ -52,7 +52,7 @@ def prompt_names_for(system: str, user: str) -> list[str]:
     return list(dict.fromkeys(name for name, content in _rendered.get() if content in system or content in user))
 
 
-def render(name: str, **values: str) -> str:
+def render(name: str, /, **values: str) -> str:
     text = _load(name)
     # 一次替换，作者原文里的 {{...}} 不会被二次解释成模板变量。
     missing = sorted(set(VARIABLE.findall(text)) - values.keys())

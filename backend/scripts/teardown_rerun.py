@@ -42,7 +42,7 @@ async def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="单独重跑拆书的一步（使用当前环境的数据库和拆书模型）")
-    parser.add_argument("step", choices=("read", "units", "volumes"))
+    parser.add_argument("step", choices=("read", "units", "volumes", "settings", "merits"))
     parser.add_argument("--book", type=uuid.UUID, required=True)
     parser.add_argument("--from", dest="first", type=int)
     parser.add_argument("--to", dest="last", type=int)

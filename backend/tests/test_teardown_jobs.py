@@ -88,10 +88,10 @@ async def test_target_at_or_beyond_total_is_full(client, sessionmaker, upto):
 @pytest.mark.parametrize(
     "stage,read,failed,upto,expected",
     [
-        ("stopped", 3, (), 3, 422),
+        ("stopped", 3, (), 3, 200),  # 第三批：旧书允许只整理设定
         ("stopped", 3, (), 2, 422),
         ("stopped", 3, (), 4, 200),
-        ("done", 5, (), None, 409),
+        ("done", 5, (), None, 200),
         ("done", 5, (2,), None, 200),
         ("confirming", 0, (), None, 409),
     ],

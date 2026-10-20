@@ -39,6 +39,9 @@ CATALOG = [
     ("teardown_units", "拆书：归单元", "拆书", "teardown", "把读好的章归成单元"),
     ("teardown_volumes", "拆书：归卷", "拆书", "teardown", "原书没分卷时把单元归成卷"),
     ("teardown_volume_text", "拆书：写卷", "拆书", "teardown", "原书分了卷时写这一卷的那段话"),
+    ("teardown_card", "拆书：写角色卡", "拆书", "teardown", "只用各章记录写角色卡和名场面"),
+    ("teardown_world", "拆书：整理设定", "拆书", "teardown", "只用各章记录逐类整理设定库"),
+    ("teardown_merits", "拆书：这本书好在哪", "拆书", "teardown", "照程序算好的数字写这本书好在哪"),
     (
         "chat_agent",
         "聊天：自己查、自己动手",
@@ -78,6 +81,14 @@ BY_NAME = {row[0]: row for row in CATALOG}
 
 VARIABLE_LABELS = {
     "title": "书名",
+    "name": "名单上的名字",
+    "aliases": "别称",
+    "dossier": "各章记下的人物记录",
+    "kind": "这次整理的类别",
+    "context": "主角变化或角色所属",
+    "things": "各章记下的设定记录",
+    "kind_rule": "这一类的整理要求",
+    "facts": "程序算好的数字和摘出的记录",
     "first": "起始章号",
     "last": "结束章号",
     "index": "卷序号",

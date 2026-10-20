@@ -28,17 +28,23 @@ async def plan(session, book_id: uuid.UUID, step: str, first: int | None, last: 
     if busy:
         raise HTTPException(409, "正在拆，点「停下」才能改")
     total = await session.scalar(select(func.max(Chapter.index)).where(Chapter.book_id == book_id)) or 0
-    if step not in ("read", "units", "volumes"):
-        raise HTTPException(422, "步骤只能是 read、units 或 volumes")
+    if step not in ("read", "units", "volumes", "settings", "merits"):
+        raise HTTPException(422, "步骤只能是 read、units、volumes、settings 或 merits")
     if step == "read" and (first is None or last is None):
         raise HTTPException(422, "重读要同时给 --from 和 --to")
     if step == "volumes" and (first is not None or last is not None):
         raise HTTPException(422, "归卷不接受 --from 或 --to")
+    if step in ("settings", "merits") and (first is not None or last is not None):
+        raise HTTPException(422, "整理设定和好在哪不接受 --from 或 --to")
     if step == "units" and last is not None:
         raise HTTPException(422, "归单元不接受 --to")
     if (first is not None and not 1 <= first <= total) or (last is not None and not (first or 1) <= last <= total):
         raise HTTPException(422, f"章号必须在第 1–{total} 章以内，且起点不能大于终点")
-    if step == "read":
+    if step in ("settings", "merits"):
+        from app.services.teardown_settings import estimate_calls
+
+        calls = await estimate_calls(session, book, merits_only=step == "merits")
+    elif step == "read":
         rows = list(
             await session.scalars(
                 select(Chapter)
@@ -109,8 +115,12 @@ async def run_rerun(job_id, sm, redis, router):
             await runner.read_range(params["from"], params["to"])
         elif step == "units":
             await runner.regroup_units(params.get("from"))
-        else:
+        elif step == "volumes":
             await runner.regroup_volumes()
+        else:
+            from app.services.teardown_settings import collect_settings
+
+            await collect_settings(runner, force=True, merits_only=step == "merits")
         async with sm() as session:
             await book_saves.checkpoint(session, book_id, "system", f"重跑：{step}", force=True)
         status, error = "succeeded", ""
