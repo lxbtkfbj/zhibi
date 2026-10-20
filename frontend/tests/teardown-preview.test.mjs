@@ -115,5 +115,13 @@ test('书房继续写作和自己的书架不混入拆书；拆书卡片用确�
   assert.match(home, /teardownBooks\.length > 0/)
   assert.match(home, /state=\{teardown && !confirming \? \{ teardownIntro: true \} : undefined\}/)
   assert.match(home, /aria-label="删除"/)
-  assert.equal((home.match(/>拆一本书<\/Button>/g) ?? []).length, 2)
+  assert.equal((home.match(/>拆一本书<\/Button>/g) ?? []).length, 1)
+})
+
+test('书架标题不重复显示拆书和开书按钮，保留顶部入口与开新书卡片', () => {
+  const home = readFileSync(new URL('../src/pages/Home.tsx', import.meta.url), 'utf8')
+  const shelfHeader = home.slice(home.indexOf('{books && ('), home.indexOf('<FretDivider'))
+  assert.doesNotMatch(shelfHeader, /<Button/)
+  assert.match(home, /<Button variant="seal" size="lg" onClick=\{submit\}>/)
+  assert.match(home, /<Link to="\/new" className="group flex flex-col items-center">/)
 })

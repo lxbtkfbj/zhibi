@@ -151,7 +151,6 @@ export function Home() {
   const ownBooks = books?.filter(book => book.source !== 'teardown')
   const teardownBooks = books?.filter(book => book.source === 'teardown')
   const latest = ownBooks?.[0]
-  const navigate = useNavigate()
 
   return (
     <div className="pb-20">
@@ -197,10 +196,6 @@ export function Home() {
               <h2 className="font-serif text-2xl font-bold">
                 书架 <span className="ml-1 text-base font-normal text-ink-3">{ownBooks?.length ?? 0} 本</span>
               </h2>
-              <div className="flex shrink-0 gap-1.5">
-                <Button variant="ghost" size="sm" onClick={() => navigate('/teardown/new')}>拆一本书</Button>
-                <Button variant="seal" size="sm" onClick={() => navigate('/new')}>开新书<Plus className="size-3.5" /></Button>
-              </div>
             </div>
             <FretDivider className="mb-4" />
             <div className="grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 lg:grid-cols-5">
