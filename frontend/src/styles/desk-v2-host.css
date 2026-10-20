@@ -1,0 +1,33 @@
+/* Restore the browser defaults the standalone specification has, before its
+   mechanically scoped stylesheet. Tailwind's preflight is not in the sample. */
+.desk-v2 { line-height: normal; font-size: 16px; -webkit-font-smoothing: auto; }
+.desk-v2 :where(*,::before,::after):where(:not(.desk-legacy, .desk-legacy *)) { border-style: none; }
+.desk-v2 :where(h1,h2,h3,h4,p,ol,ul,li,small,b,strong,em,i):where(:not(.desk-legacy, .desk-legacy *)) { all: revert; box-sizing: border-box; }
+.desk-v2.desk-zoom { height: calc(100dvh / var(--desk-zoom) / var(--desk-scale)); }
+.desk-v2 .search input { all: unset; min-width: 0; width: 100%; }
+.desk-v2 a, .desk-v2 .toc-foot { cursor: pointer; }
+.desk-v2 button:disabled, .desk-v2 [aria-disabled=true] { cursor: default; opacity: .5; }
+.desk-v2 .progress > .ell { max-width: 300px; }
+.desk-v2 .stop-error { width: 6px; height: 6px; border-radius: 50%; background: var(--seal); }
+.desk-v2 .tools { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.desk-v2 .reading-prose { margin-top: 26px; }
+
+/* The surrounding app and dialogs keep their existing layout and controls. */
+.desk-v2-theme {
+  --color-paper: #f7f2e9; --color-paper-2: #faf4ea; --color-card: #fffcf6;
+  --color-sidebar: #f3ece0; --color-subtle: #faf4ea; --color-conversation: #f7f2e9;
+  --color-manuscript: #fffcf6; --color-pane-left: #f3ece0; --color-pane-mid: #e8dfcf;
+  --color-page: #fffcf6; --color-ink: #2a2420; --color-ink-2: #554c43; --color-ink-3: #6f665b;
+  --color-line: #e2d6c2; --color-line-2: #d6c7ad; --color-divider: #e2d6c2;
+  --color-seal: #b4432e; --color-seal-dark: #8f3322; --color-seal-soft: #f6e4dc;
+  --color-chief: #3d4f7c; --color-chief-soft: #e7eaf3;
+  --color-lore: #2f7a6e; --color-lore-soft: #e0efe9;
+  --color-writer: #9a5f27; --color-writer-soft: #f5ead9;
+}
+
+
+.desk-v2 .search input::placeholder { color: inherit; opacity: 1; }
+
+/* Keep the existing manuscript typography after the standalone UA reset. */
+.desk-v2 .chapter-prose > * { margin-bottom: .45em; text-indent: 2em; text-align: justify; text-wrap: pretty; }
+.desk-v2 .chapter-prose > *:last-child { margin-bottom: 0; }

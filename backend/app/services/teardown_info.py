@@ -8,6 +8,8 @@ def teardown_summary(book, preview: dict | None = None) -> dict | None:
     confirming = data.get("stage") == "confirming"
     split = data.get("split") or {}
     preview = preview or {}
+    settings = data.get("settings") or {}
+    merits = data.get("merits") or {}
     return {
         "stage": data.get("stage", "imported"),
         "author": data.get("author", ""),
@@ -25,4 +27,13 @@ def teardown_summary(book, preview: dict | None = None) -> dict | None:
         "upto": data.get("upto"),
         "stop_reason": data.get("stop_reason"),
         "stop_note": data.get("stop_note"),
+        "names": data.get("names") or {},
+        "settings": {"upto": settings.get("upto")} if settings else None,
+        "merits": {
+            "upto": merits.get("upto"),
+            "points": merits.get("points") or [],
+            "missing": merits.get("missing") or [],
+        }
+        if merits
+        else None,
     }

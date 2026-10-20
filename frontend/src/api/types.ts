@@ -292,10 +292,13 @@ export interface TeardownSummary {
   upto?: number | null
   stop_reason?: 'author' | 'upto' | 'model' | 'error' | null
   stop_note?: string | null
+  settings?: { upto?: number }
+  merits?: { points: { topic: string; text: string }[]; missing?: string[]; upto?: number }
 }
 
 export interface TeardownProgressData {
-  doing: 'queued' | 'read' | 'units' | 'volumes' | 'closing'
+  doing: 'queued' | 'read' | 'units' | 'volumes' | 'closing' | 'settings'
+  settings?: { done: number; total: number; now: string }
   reading?: [number, number] | number[] | null
   range?: [number, number] | number[]
   read: number
@@ -529,6 +532,7 @@ export interface WorldEntry {
 }
 
 export interface Relationship {
+  since_chapter?: number | null
   id: string
   source_id: string
   target_id: string

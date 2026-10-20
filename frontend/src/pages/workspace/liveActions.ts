@@ -13,6 +13,12 @@ import { findEntry, findNode, type VBook, type VEntry } from './model'
 
 export const workspaceKey = (bookId: string) => ['workspace', bookId] as const
 
+/** 正文、审稿和设定变化不能只靠字数变化换 key；同字数手改/重写也要重新读。 */
+export const refreshWorkspace = (qc: QueryClient, bookId: string) => Promise.all([
+  qc.invalidateQueries({ queryKey: workspaceKey(bookId) }),
+  qc.invalidateQueries({ queryKey: ['desk-v2-chapter', bookId] }),
+])
+
 /** 作者自己改了书：停手 3 分钟自动存一档；关页面、切走时也存（后台比一下，跟上一档一样就不存） */
 const AUTO_SAVE_MS = 180_000
 const autoSaves = new Map<string, ReturnType<typeof setTimeout>>()
@@ -110,7 +116,7 @@ export function useLiveBook(bookId: string) {
   useEffect(() => { bookRef.current = book }, [book])
 
   const actions = useMemo<WorkspaceActions>(() => {
-    const refresh = () => qc.invalidateQueries({ queryKey: workspaceKey(bookId) })
+    const refresh = () => refreshWorkspace(qc, bookId)
     // 改完刷新整本书；其他页面（旧版书页、书架）下次打开再读
     const done = async <T,>(task: Promise<T>): Promise<T> => {
       const result = await task
@@ -179,7 +185,7 @@ export function useLiveBook(bookId: string) {
           return
         }
         if (change.overview !== undefined) body.content = change.overview
-        if (change.levels !== undefined) body.levels = change.levels
+        if (change.levels !== undefined) body.levels = change.levels.map(({ protagonistChapter, ...level }) => ({ ...level, ...(protagonistChapter !== undefined ? { protagonist_chapter: protagonistChapter } : {}) }))
         Object.assign(body, entryBody(entry.category, change.fields ?? {}))
         await done(patch(`/world-entries/${entry.id}`, body))
       },
@@ -198,7 +204,7 @@ export function useLiveBook(bookId: string) {
           one_line: draft.oneLine,
           content: draft.kind === 'ladder' ? draft.overview ?? '' : content ?? '',
           fields: Object.entries(field_values ?? {}).filter(([, v]) => v.trim()).map(([name, value]) => ({ name, value })),
-          ...(draft.kind === 'ladder' ? { levels: draft.levels ?? [] } : {}),
+          ...(draft.kind === 'ladder' ? { levels: (draft.levels ?? []).map(({ protagonistChapter, ...level }) => ({ ...level, ...(protagonistChapter !== undefined ? { protagonist_chapter: protagonistChapter } : {}) })) } : {}),
           tags: draft.tags,
           source,
         }))

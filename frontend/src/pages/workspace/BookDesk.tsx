@@ -29,6 +29,7 @@ import { useSettingsModal } from '../../lib/settingsModal'
 import { PendingBallTag, PendingButton, PendingList } from './Inbox'
 import { PendingContext, pendingTarget } from './pending'
 import { Workspace } from './Workspace'
+import { Icon } from './desk-v2/shared'
 
 /** 现有聊天要的那一套状态：和旧版书页一样，只是不跟着编辑部跳页面。 */
 function useEditorial(bookId: string, book: BookDetail, onOpen: () => void): { ctx: BookContextValue; unread: number; messages: MeetingMessage[]; draft: LiveDraft | null } {
@@ -199,8 +200,8 @@ function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
   if (loading) return <div className="flex h-dvh items-center justify-center bg-paper text-[15px] text-ink-3">正在读这本书…</div>
   if (error || !book) return <EmptyState title="这本书没读出来"><Link to="/" className="text-seal underline">回到书房</Link></EmptyState>
   const right = (
-    <button type="button" onClick={openSystemSettings} className="rounded-lg p-2 text-ink-3 transition-colors hover:bg-line/50 hover:text-ink" aria-label="系统设置" title="系统设置">
-      <Settings className="size-4" />
+    <button type="button" onClick={openSystemSettings} style={{ all: 'unset', display: 'flex', cursor: 'pointer' }} aria-label="系统设置" title="系统设置">
+      <Icon name="settings" />
     </button>
   )
   const pendingCount = suggestions.data?.length ?? book.pending
@@ -217,7 +218,7 @@ function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
       <div className={!teardown && inbox.open ? 'hidden' : 'contents'}><LiveChat writing={writing} /></div>
     </>
   )
-  const row = 'flex h-9 w-full items-center gap-2 rounded-md px-2.5 text-sm text-ink-2 transition-colors hover:bg-line/50 hover:text-ink'
+  const row = 'toc-foot'
   const sideFooter = (
     <>
       <SavesRow className={row} open={saves.open} onClick={() => setSaves(saves.open ? { open: false, id: null } : { open: true, id: null })} />

@@ -44,6 +44,11 @@ def spans(numbers: list[int]) -> str:
     return "、".join(out)
 
 
+def moment_shows(shows: str) -> str:
+    """模型已带「立住（了）：」时只去前缀，正文保留，不润色。"""
+    return re.sub(r"^(?:(?:立住了|立住)[：:\s]*)+", "", shows.strip())
+
+
 def people_of(reads: list[dict], names: dict | None = None) -> tuple[Roster, list[dict], str]:
     """名单先照第二批重算，再套卡上已认定的名字；调用键仍认最初名单。"""
     roster = Roster()
@@ -149,7 +154,7 @@ def dossier_of(person: dict, limit: int = 12000) -> str:
         blocks[index].append(text)
     moment_chapters = []
     for index, row in person["moments"]:
-        blocks[index].append(f"第 {index} 章名场面：{row['what']}——立住了{row['shows']}")
+        blocks[index].append(f"第 {index} 章名场面：{row['what']}——立住了{moment_shows(row['shows'])}")
         moment_chapters.append(index)
     indices = sorted(blocks)
     full = "\n".join(line for index in indices for line in blocks[index])
@@ -326,17 +331,14 @@ class SettingsWriter:
                 row = Character(book_id=book.id, name=name, source="teardown")
                 session.add(row)
             row.name, row.source = name, "teardown"
-            aliases = [*person["aliases"], *(card.aliases if card else [])]
+            aliases = list(card.aliases) if card else list(person["aliases"])
             canonical_name = accept_card_name(person, card, roster, []) if card else person["name"]
             if canonical_name != person["name"]:
-                aliases.append(person["name"])
                 names[person["key_name"]] = canonical_name
             elif person["key_name"] != canonical_name and person["key_name"] in person["aliases"]:
                 # 逐章 was 已把旧称和真名合为一人；把同一行的新名字登记下来，
                 # 后续按新名单直接返回真名时，调用键仍不会漂移。
                 names[person["key_name"]] = canonical_name
-            if name != canonical_name:
-                aliases.append(canonical_name)
             row.aliases = list(dict.fromkeys(a.strip() for a in aliases if a.strip() and a.strip() != name))
             row.one_line = card.one_line if card else person["note"]
             row.first_appearance_chapter = person["first"]
@@ -355,7 +357,11 @@ class SettingsWriter:
                 )
                 keys.extend(["location", "condition", "want", "is_alive"])
                 moments = [m for m in card.moments if 1 <= m.chapter <= self.upto]
-                write_value(row, "名场面", "\n".join(f"第 {m.chapter} 章：{m.what}——立住了{m.shows}" for m in moments))
+                write_value(
+                    row,
+                    "名场面",
+                    "\n".join(f"第 {m.chapter} 章：{m.what}——立住了{moment_shows(m.shows)}" for m in moments),
+                )
                 keys.append("value:名场面")
                 self.missing.extend(card.missing)
             else:
@@ -444,6 +450,25 @@ class SettingsWriter:
             self.save_input(state, job.key, job.user, job.values, missing=result.missing)
             self.save_state(book, state)
             await session.commit()
+
+    async def merits(self, result, *, user: str, values: dict):
+        """模型回答和离线试整理结果共用同一写库入口。"""
+        async with self.runner.sm() as session:
+            book = await self.book(session)
+            state = self.state(book)
+            book.teardown = {
+                **(book.teardown or {}),
+                "merits": {
+                    "upto": self.upto,
+                    "at": datetime.now(UTC).isoformat(),
+                    "points": [point.model_dump() for point in result.points],
+                    "missing": result.missing,
+                },
+            }
+            self.save_input(state, "merits", user, values, missing=result.missing)
+            self.save_state(book, state)
+            await session.commit()
+        self.missing.extend(result.missing)
 
     async def link_parents(self):
         async with self.runner.sm() as session:
@@ -790,22 +815,7 @@ async def collect_settings(runner, *, force=False, merits_only=False) -> dict:
     if should_call:
 
         async def store_merits(result):
-            async with runner.sm() as session:
-                current = await writer.book(session)
-                saved = writer.state(current)
-                current.teardown = {
-                    **(current.teardown or {}),
-                    "merits": {
-                        "upto": upto,
-                        "at": datetime.now(UTC).isoformat(),
-                        "points": [point.model_dump() for point in result.points],
-                        "missing": result.missing,
-                    },
-                }
-                writer.save_input(saved, "merits", user, values, missing=result.missing)
-                writer.save_state(current, saved)
-                await session.commit()
-                writer.missing.extend(result.missing)
+            await writer.merits(result, user=user, values=values)
 
         await call(s.TeardownMerits, user, "拆书：这本书好在哪", "这本书好在哪", store_merits, key="merits")
     await writer.check()

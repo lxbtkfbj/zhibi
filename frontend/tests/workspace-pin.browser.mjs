@@ -26,12 +26,14 @@ const shot = async (file) => {
 
 try {
   await page.goto(`${base}/desk/${bookId}`)
+  await page.locator('.tabs').getByText('设定', { exact: true }).click()
+  await page.locator('.toc .row').filter({ hasText: '角色列表' }).first().click()
   const dir = page.locator('aside, nav').first()
-  await expect(page.getByRole('button', { name: names[0], exact: true }).first()).toBeVisible({ timeout: 30_000 })
+  await expect(page.locator('.toc .row').getByText(names[0], { exact: true }).first()).toBeVisible({ timeout: 30_000 })
   await expect(page.getByText('定位', { exact: true })).toHaveCount(0)
   // 一个一个置顶：后置顶的排在目录最上面
   for (const [i, name] of names.entries()) {
-    await page.getByRole('button', { name, exact: true }).first().click()
+    await page.locator('.toc .row').getByText(name, { exact: true }).first().click()
     const id = await page.locator('section[data-entry]').filter({ has: page.getByText(name, { exact: true }) }).first().getAttribute('data-entry')
     const card = page.locator(`section[data-entry="${id}"]`)
     await card.hover()

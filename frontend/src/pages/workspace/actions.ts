@@ -15,7 +15,7 @@ export interface EntryChange {
   oneLine?: string
   fields?: Record<string, string>
   overview?: string
-  levels?: { name: string; text: string }[]
+  levels?: VEntry['levels']
   locked?: boolean
 }
 

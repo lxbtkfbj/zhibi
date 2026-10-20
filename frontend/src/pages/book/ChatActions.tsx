@@ -69,6 +69,7 @@ export function ChatOutcome({ message, result, step }: { message: MeetingMessage
   const isRequirement = outcome.kind === 'requirement' || outcome.kind === 'to_job'
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ['workspace', bookId] })
+    void qc.invalidateQueries({ queryKey: ['desk-v2-chapter', bookId] })
     void qc.invalidateQueries({ queryKey: settingsKeys.requirements(bookId) })
     void qc.invalidateQueries({ queryKey: ['saves', bookId] })
   }
@@ -147,7 +148,7 @@ function ChatOptions({ bookId, candidateId, targetType, targetId }: { bookId: st
   }, [bookId, candidateId, targetType, targetId])
   if (!candidate) return <ErrorText error={error} />
   const refresh = () => {
-    for (const key of [['workspace', bookId], ['library', bookId]]) void qc.invalidateQueries({ queryKey: key })
+    for (const key of [['workspace', bookId], ['desk-v2-chapter', bookId], ['library', bookId]]) void qc.invalidateQueries({ queryKey: key })
   }
   const choose = async (index: number) => {
     setBusy(true); setError(null)

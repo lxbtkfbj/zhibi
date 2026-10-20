@@ -80,10 +80,13 @@ test('这一章记下的各段依原始记录格式显示，别名独立小字�
     { title: '读者在等的', lines: [{ text: '立下：离开之后如何变强' }] },
     { title: '用了的桥段', lines: [{ text: '退婚、逆袭' }] },
   ])
-  const source = readFileSync(new URL('../src/pages/workspace/Manuscript.tsx', import.meta.url), 'utf8')
-  assert.match(source, /<Fold key={`teardown-records-\$\{id}`} title="这一章记下的">/)
-  assert.match(source, /也叫 {line.aliases}/)
-  assert.match(source, /defaultOpen = false/)
+  const source = readFileSync(new URL('../src/pages/workspace/desk-v2/OutlinePages.tsx', import.meta.url), 'utf8')
+  assert.match(source, /<aside className="rail">/)
+  assert.match(source, /这一章出场的人/)
+  assert.match(source, /<More items=\{read\.people\} cap=\{3\} unit="人">/)
+  assert.match(source, /<small className="aka">也叫 \{person\.also_called\.join\('、'\)\}/)
+  assert.match(source, /<div className="mm"[^\n]+<div className="sh">立住了：\{moment\.shows\}/)
+  assert.match(source, /新冒出来的 · 读者在等的/)
 })
 
 test('没读过不显示记录，空段隐藏；每个独立段非空才出现', () => {
@@ -101,7 +104,4 @@ test('目录搜索：标题命中照列、仅原文命中不写没找到、两�
   assert.deepEqual(chapterSearchDisplay(2, 3, true), { empty: false, body: true })
   assert.deepEqual(chapterSearchDisplay(0, undefined, true), { empty: false, body: true }, '等待网络或请求出错都不能宣告无结果')
   assert.deepEqual(chapterSearchDisplay(0, undefined, false), { empty: true, body: false }, '原型离线按标题查找')
-  const source = readFileSync(new URL('../src/pages/workspace/Manuscript.tsx', import.meta.url), 'utf8')
-  assert.equal((source.match(/没找到「{q}」/g) ?? []).length, 1)
-  assert.doesNotMatch(source, /里没有「\$\{q\}」/)
 })

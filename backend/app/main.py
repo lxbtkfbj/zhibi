@@ -23,6 +23,7 @@ from app.api import (
     saves,
     story_map,
     teardown,
+    teardown_digest,
     workspace,
 )
 from app.config import get_settings
@@ -87,6 +88,7 @@ def create_app() -> FastAPI:
         workspace,
         saves,
         teardown,
+        teardown_digest,
     ):
         application.include_router(module.router, prefix="/api")
     return application

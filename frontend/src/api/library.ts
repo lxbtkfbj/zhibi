@@ -6,7 +6,7 @@ export type TargetType = 'entry' | 'character' | 'concept' | 'segment' | 'volume
 export type RewriteMode = 'options' | 'instruction' | 'expand' | 'shorten'
 export type LibraryStyle = 'card' | 'ladder' | 'paragraph'
 export interface LibraryField { name: string; value: string }
-export interface LibraryLevel { name: string; text: string }
+export interface LibraryLevel { name: string; text: string; protagonist_chapter?: number | null }
 export interface LibraryItem {
   id: string
   name: string
@@ -25,6 +25,8 @@ export interface LibraryItem {
   aliases: string[]
   fields?: LibraryField[]
   levels?: LibraryLevel[]
+  created_chapter?: number | null
+  first_appearance_chapter?: number | null
   parent_id?: string | null
   secret_id?: string | null
   gender?: string
@@ -118,7 +120,7 @@ export function useInvalidateLibrary(bookId: string) {
   const qc = useQueryClient()
   return () => Promise.all([
     libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), libraryKeys.candidates(bookId), libraryKeys.versions(bookId),
-    keys.book(bookId), keys.bible(bookId), keys.outline(bookId), keys.nodes(bookId), keys.chapters(bookId), keys.secrets(bookId), ['outline-tree', bookId],
+    keys.book(bookId), keys.bible(bookId), keys.outline(bookId), keys.nodes(bookId), keys.chapters(bookId), keys.secrets(bookId), ['outline-tree', bookId], ['desk-v2-chapter', bookId],
   ].map(queryKey => qc.invalidateQueries({ queryKey })))
 }
 export function useRewrite(bookId: string) {

@@ -9,7 +9,7 @@ import {
 } from './model.ts'
 
 export interface ApiParts {
-  book: { id: string; title: string; genre: string; concept: Record<string, unknown>; source?: BookSummary['source']; teardown?: TeardownSummary | null; card_layouts?: Record<string, CardTemplate>; chapter_words?: number }
+  book: { id: string; title: string; genre: string; concept: Record<string, unknown>; source?: BookSummary['source']; teardown?: TeardownSummary | null; card_layouts?: Record<string, CardTemplate>; chapter_words?: number; created_at?: string }
   library: LibrarySnapshot
   outline: OutlineTree
   relationships: Relationship[]
@@ -68,13 +68,13 @@ function characterEntry(item: LibraryItem, relations: Relationship[], names: Map
   return {
     id: item.id, kind: 'character', category: '角色列表', name: item.name, oneLine: text(item.one_line), tags: item.tags ?? [], locked: item.locked, role,
     dead: item.is_alive === false,
-    pinnedAt: item.pinned_at ?? undefined,
+    pinnedAt: item.pinned_at ?? undefined, firstAppearanceChapter: item.first_appearance_chapter, createdChapter: item.created_chapter,
     facts: [['所属', text(extra['所属']), '哪个宗门、家族、势力'], ['性别', column('性别')], ['年龄', column('年龄')], ['别名', column('别名')]],
     sections,
     now: now.some(([, value]) => value) ? now : undefined,
     relations: [...toLead, ...relations
       .filter((r) => r.source_id === item.id || r.target_id === item.id)
-      .map((r) => ({ id: r.id, to: r.source_id === item.id ? r.target_id : r.source_id, kind: r.kind, text: r.description }))
+      .map((r) => ({ id: r.id, to: r.source_id === item.id ? r.target_id : r.source_id, kind: r.kind, text: r.description, sinceChapter: r.since_chapter }))
       .filter((r) => names.has(r.to))],
     appears: [],
   }
@@ -84,10 +84,10 @@ function characterEntry(item: LibraryItem, relations: Relationship[], names: Map
 function settingEntry(item: LibraryItem, category: string): VEntry {
   const base = {
     id: item.id, category, name: item.name, oneLine: '', tags: item.tags ?? [], locked: item.locked,
-    parent: item.parent_id ?? undefined, facts: [] as VEntry['facts'], sections: [] as VField[], appears: [],
+    createdChapter: item.created_chapter, parent: item.parent_id ?? undefined, facts: [] as VEntry['facts'], sections: [] as VField[], appears: [],
   }
   if (item.style === 'ladder') {
-    return { ...base, kind: 'ladder', overview: text(item.content) || text(item.one_line), levels: (item.levels ?? []).map((l) => ({ name: l.name, text: l.text })) }
+    return { ...base, kind: 'ladder', overview: text(item.content) || text(item.one_line), levels: (item.levels ?? []).map((l) => ({ name: l.name, text: l.text, protagonistChapter: l.protagonist_chapter })) }
   }
   const key = contentKey(category)
   const goldfinger = category === '金手指'
@@ -214,7 +214,7 @@ export function bookFromApi(parts: ApiParts): VBook {
 
   const length = typeof concept.target_length === 'number' ? concept.target_length : undefined
   const book: VBook = {
-    id: parts.book.id,
+    id: parts.book.id, createdAt: parts.book.created_at,
     source: parts.book.source,
     teardown: parts.book.teardown,
     title: (parts.book.source === 'teardown' ? parts.book.title : text(concept.title) || parts.book.title) || '未命名',

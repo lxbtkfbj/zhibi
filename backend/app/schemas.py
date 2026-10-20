@@ -577,6 +577,11 @@ class SettingField(BaseModel):
 class SettingLevel(BaseModel):
     name: str = ""
     text: str = ""
+    protagonist_chapter: int | None = None
+
+
+class SettingLevelOut(SettingLevel):
+    protagonist_chapter: int | None = None
 
 
 def clean_extra(value: dict[str, str] | None, keep_empty: bool = False) -> dict[str, str] | None:
@@ -740,6 +745,7 @@ class WorldEntryOut(WorldEntryBase, ORM):
     style: SettingStyle = "paragraph"
     source: str = "ai"
     created_chapter: int | None = None
+    levels: list["SettingLevelOut"] = []
 
 
 class WorldEntryPatch(BaseModel):
@@ -794,6 +800,7 @@ class RelationshipOut(ORM):
     target_id: uuid.UUID
     kind: str
     description: str
+    since_chapter: int | None = None
 
 
 class RelationshipPatch(BaseModel):

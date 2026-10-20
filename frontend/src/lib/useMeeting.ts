@@ -51,6 +51,7 @@ export function useMeeting(bookId: string) {
           qc.setQueryData(['outline-tree', bookId], outline)
           // 正文详情惰性读取；下次点开时重新取，不拉全书正文。
           void qc.invalidateQueries({ queryKey: keys.chapters(bookId), refetchType: 'none' })
+          void qc.invalidateQueries({ queryKey: ['desk-v2-chapter', bookId], refetchType: 'none' })
         }
       } catch {
         // 暂时断网保留已有大纲；重连或下一次保存事件会再拉，不清空作者正在看的内容。
@@ -64,7 +65,13 @@ export function useMeeting(bookId: string) {
     const pending = new Map<string, readonly unknown[]>()
     let timer: ReturnType<typeof setTimeout> | undefined
     const refresh = (queryKeys: readonly (readonly unknown[])[]) => {
-      for (const key of queryKeys) pending.set(JSON.stringify(key), key)
+      for (const key of queryKeys) {
+        pending.set(JSON.stringify(key), key)
+        if (key[0] === 'workspace') {
+          const chapterKey = ['desk-v2-chapter', bookId]
+          pending.set(JSON.stringify(chapterKey), chapterKey)
+        }
+      }
       timer ??= setTimeout(() => {
         timer = undefined
         const all = [...pending.values()]
@@ -80,7 +87,7 @@ export function useMeeting(bookId: string) {
     })
     source.addEventListener('error', () => setConnected(false))
     source.addEventListener('book', () => {
-      for (const key of [keys.book(bookId), keys.books, keys.nodes(bookId), keys.bible(bookId), keys.outline(bookId), keys.threads(bookId), keys.secrets(bookId), keys.chapters(bookId), libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), libraryKeys.candidates(bookId), libraryKeys.versions(bookId), ['outline-tree', bookId], ['workspace', bookId], ['saves', bookId], settingsKeys.book(bookId), settingsKeys.requirements(bookId)]) {
+      for (const key of [keys.book(bookId), keys.books, keys.nodes(bookId), keys.bible(bookId), keys.outline(bookId), keys.threads(bookId), keys.secrets(bookId), keys.chapters(bookId), libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), libraryKeys.candidates(bookId), libraryKeys.versions(bookId), ['outline-tree', bookId], ['workspace', bookId], ['desk-v2-chapter', bookId], ['saves', bookId], settingsKeys.book(bookId), settingsKeys.requirements(bookId)]) {
         void qc.invalidateQueries({ queryKey: key })
       }
     })
@@ -90,7 +97,7 @@ export function useMeeting(bookId: string) {
       if (isTeardown() && teardownGate('saved') === 'parts') refreshTeardownParts()
     })
     source.addEventListener('library', () => {
-      for (const key of [libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), libraryKeys.candidates(bookId), libraryKeys.versions(bookId), ['outline-tree', bookId], ['workspace', bookId], keys.bible(bookId)]) void qc.invalidateQueries({ queryKey: key })
+      for (const key of [libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), libraryKeys.candidates(bookId), libraryKeys.versions(bookId), ['outline-tree', bookId], ['workspace', bookId], ['desk-v2-chapter', bookId], keys.bible(bookId)]) void qc.invalidateQueries({ queryKey: key })
     })
     source.addEventListener('message', (event) => {
       const message = JSON.parse((event as MessageEvent).data) as MeetingMessage
@@ -150,13 +157,13 @@ export function useMeeting(bookId: string) {
           clearTimeout(partsTimer)
           partsTimer = undefined
           partsAgain = false
-          for (const queryKey of [keys.book(bookId), ['workspace', bookId], keys.books, keys.usage(bookId)]) void qc.invalidateQueries({ queryKey })
+          for (const queryKey of [keys.book(bookId), ['workspace', bookId], ['desk-v2-chapter', bookId], keys.books, keys.usage(bookId)]) void qc.invalidateQueries({ queryKey })
         }
         return
       }
       if (SETTLED.has(job.status)) {
         setDraft({ bookId, draft: null })
-        const all = [keys.book(bookId), keys.outline(bookId), keys.bible(bookId), keys.threads(bookId), keys.nodes(bookId), keys.secrets(bookId), keys.chapters(bookId), keys.usage(bookId), keys.books, libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), libraryKeys.candidates(bookId), libraryKeys.versions(bookId), ['outline-tree', bookId], ['workspace', bookId]]
+        const all = [keys.book(bookId), keys.outline(bookId), keys.bible(bookId), keys.threads(bookId), keys.nodes(bookId), keys.secrets(bookId), keys.chapters(bookId), keys.usage(bookId), keys.books, libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), libraryKeys.candidates(bookId), libraryKeys.versions(bookId), ['outline-tree', bookId], ['workspace', bookId], ['desk-v2-chapter', bookId]]
         for (const key of all) {
           qc.invalidateQueries({ queryKey: key })
         }

@@ -1,5 +1,5 @@
 @import "tailwindcss";
-@import "@fontsource/noto-serif-sc/500.css";
+@import "@fontsource/noto-serif-sc/600.css";
 @import "@fontsource/noto-serif-sc/700.css";
 
 @theme {
@@ -126,10 +126,6 @@
 }
 /* 新书页按 1600 宽排的版，大屏上整页等比放大（2560 宽放大到 1.25 倍）；浏览器自己的缩放照样能用。 */
 :root { --desk-zoom: 1; }
-@media (min-width: 1800px) { :root { --desk-zoom: 1.1; } }
-@media (min-width: 2200px) { :root { --desk-zoom: 1.2; } }
-@media (min-width: 2500px) { :root { --desk-zoom: 1.25; } }
-@media (min-width: 3200px) { :root { --desk-zoom: 1.5; } }
 :root { --desk-scale: 1; }
 /* --desk-scale 是外观里的「界面大小」，乘在按屏幕宽度算的倍数上 */
 .desk-zoom {

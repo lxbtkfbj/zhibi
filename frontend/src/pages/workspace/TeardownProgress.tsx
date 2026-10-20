@@ -16,6 +16,7 @@ export interface TeardownControl {
 }
 
 const TeardownControlContext = createContext<TeardownControl | null>(null)
+export const useTeardownControl = () => useContext(TeardownControlContext)
 export const TeardownControlProvider = TeardownControlContext.Provider
 
 const button = 'h-7 rounded-md border border-line-2 bg-card px-3 text-[13px] text-ink-2 transition-colors hover:border-ink-3/50 hover:text-ink disabled:opacity-40'

@@ -1,0 +1,36 @@
+[data-theme=ink] .desk-v2 {
+  --desk: #1c1916; --chrome: #23201c; --toc: #211e1a; --paper: #2b2723; --paper-2: #302b26; --rule: #3b352f; --rule-2: #4a433b; --ink: #e9e0d0; --ink-2: #c3b8a6; --ink-3: #a29788; --seal: #d0644b; --seal-dark: #e78066; --seal-soft: #3a2621; --seal-line: #5a3529; --indigo: #9fb0d6; --indigo-soft: #262b38; --indigo-line: #3a4258; --jade: #7cc2b4; --jade-soft: #1f2f2b; --jade-line: #2f4a43; --ochre: #d9a066; --ochre-soft: #33281c; --ochre-line: #4d3a26;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .36  0 0 0 0 .27  0 0 0 0 .17  0 0 0 .035 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+}
+[data-theme=ink] .desk-v2-theme {
+  --color-paper: #23201c; --color-paper-2: #302b26; --color-card: #2b2723;
+  --color-sidebar: #211e1a; --color-subtle: #302b26; --color-conversation: #23201c;
+  --color-manuscript: #2b2723; --color-pane-left: #211e1a; --color-pane-mid: #1c1916;
+  --color-page: #2b2723; --color-ink: #e9e0d0; --color-ink-2: #c3b8a6; --color-ink-3: #a29788;
+  --color-line: #3b352f; --color-line-2: #4a433b; --color-divider: #3b352f;
+  --color-seal: #d0644b; --color-seal-dark: #e78066; --color-seal-soft: #3a2621;
+  --color-chief: #9fb0d6; --color-chief-soft: #262b38; --color-lore: #7cc2b4; --color-lore-soft: #1f2f2b;
+  --color-writer: #d9a066; --color-writer-soft: #33281c;
+}
+
+[data-theme=ink] .desk-v2 .track { background: var(--rule); }
+[data-theme=ink] .desk-v2 .page { border: 1px solid var(--rule); }
+[data-theme=ink] .desk-v2 .rb { background: var(--paper-2); border: 1px solid var(--rule); }
+[data-theme=ink] .desk-v2 .note { border: 1px solid var(--rule); }
+[data-theme=ink] .desk-v2 .plist li { border-bottom: 1px dashed var(--rule); }
+[data-theme=ink] .desk-v2 .plist .bar { background: var(--rule); }
+[data-theme=ink] .desk-v2 .ucard { border: 1px solid var(--rule); }
+[data-theme=ink] .desk-v2 .beat { border: 1px solid var(--rule); }
+[data-theme=ink] .desk-v2 .ctable td { border-bottom: 1px solid var(--rule); }
+[data-theme=ink] .desk-v2 .merit { border-bottom: 1px dashed var(--rule); }
+[data-theme=ink] .desk-v2 .side-box { border: 1px solid var(--rule); }
+[data-theme=ink] .desk-v2 .tile { border: 1px solid var(--rule); }
+[data-theme=ink] .desk-v2 .moments li { border-bottom: 1px dashed var(--rule); }
+[data-theme=ink] .desk-v2 .continue { background: linear-gradient(135deg, var(--paper-2), var(--ochre-soft)); }
+[data-theme=ink] .desk-v2 .urow { border-bottom: 1px solid var(--rule); }
+[data-theme=ink] .desk-v2 .urow .pg { background: var(--rule); }
+[data-theme=ink] .desk-v2 .skel i { background: var(--rule); }
+[data-theme=ink] .desk-v2 .ball { background: var(--ink); color: var(--paper); }
+
+[data-theme=ink] .desk-v2 .rhythm i[data-empty=true] { background: var(--rule) !important; border-color: var(--rule) !important; }
+[data-theme=ink] .desk-v2 .rhythm i.wait { background: repeating-linear-gradient(135deg, var(--toc) 0 6px, var(--rule) 6px 12px); }

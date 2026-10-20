@@ -24,11 +24,19 @@ API = f"http://127.0.0.1:8000/api/books/{BOOK}"
 TRIAL = ROOT / "data/拆书试验/逆天邪神前五十章"
 
 
-def names_in(rec: dict) -> list[str]:
+def mapped_name(name: str, names: dict) -> str:
+    name, seen = name.strip(), set()
+    while name in names and names[name] and name not in seen:
+        seen.add(name)
+        name = names[name].strip()
+    return name
+
+
+def names_in(rec: dict, names: dict | None = None) -> list[str]:
     """一章里出场的人：照记录里写的名字，一章算一次。"""
     out = []
     for p in rec.get("people", []):
-        n = p["name"].strip()
+        n = mapped_name(p["name"], names or {})
         if n and n not in out:
             out.append(n)
     return out
@@ -51,6 +59,7 @@ def main() -> None:
     args = ap.parse_args()
     API = f"{args.api.rstrip('/')}/books/{args.book}"
     book = get("")
+    name_map = (book.get("teardown") or {}).get("names") or {}
     tree = get("/outline-tree")
     chapters = get("/chapters?with_outline=true")
     volumes = [v for arc in tree["arcs"] for v in arc["volumes"]]
@@ -69,7 +78,7 @@ def main() -> None:
     def people_count(a: int, b: int):
         cnt, first = collections.Counter(), {}
         for i in range(a, b + 1):
-            for n in names_in(records.get(i, {})):
+            for n in names_in(records.get(i, {}), name_map):
                 cnt[n] += 1
                 first.setdefault(n, i)
         # 出场章数多的在前，一样多的按第一次出场先后
@@ -91,7 +100,7 @@ def main() -> None:
     # 主角：读过的各章里出场章数最多的人；他的变化：名字是他、别称里有他、或者 was 是他的那几条
     hero = people_count(1, max(records))[0][0]
     def is_hero(p):
-        return p["name"].strip() == hero or hero in [a.strip() for a in p.get("also_called", [])] or p.get("was", "").strip() == hero
+        return mapped_name(p["name"], name_map) == hero or hero in [mapped_name(a, name_map) for a in p.get("also_called", [])] or mapped_name(p.get("was", ""), name_map) == hero
     changes = [[i, p["change"]] for i in sorted(records) for p in records[i].get("people", []) if is_hero(p) and p.get("change")]
 
     # 试整理设定的结果
@@ -107,8 +116,8 @@ def main() -> None:
     # 角色卡上的人在哪几章出场：拿卡上的名字和别称，去已拆的各章记录里找（名字、别称、was 对上一个就算）
     appear = {}
     for card in cards:
-        names = {card["card"]["name"], *card["card"].get("aliases", [])}
-        appear[card["card"]["name"]] = [i for i in sorted(records) if any(p["name"].strip() in names or p.get("was", "").strip() in names or names & {a.strip() for a in p.get("also_called", [])} for p in records[i].get("people", []))]
+        card_names = {card["card"]["name"], *card["card"].get("aliases", [])}
+        appear[card["card"]["name"]] = [i for i in sorted(records) if any(p["name"].strip() in card_names or p.get("was", "").strip() in card_names or card_names & {a.strip() for a in p.get("also_called", [])} for p in records[i].get("people", []))]
 
     data = {
         "book": {"title": book["title"], "teardown": book.get("teardown"), "volumes": [{"index": v["index"], "title": v["title"], "chapters": v["chapter_count"]} for v in volumes]},

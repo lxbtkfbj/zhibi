@@ -7,7 +7,7 @@ import { keys } from '../../api/hooks'
 import { settingsKeys, useBookSettings } from '../../api/settings'
 import type { BookDetail, Chapter, Job, LiveDraft, MeetingMessage, Pending } from '../../api/types'
 import type { ApiParts } from './fromApi'
-import { workspaceKey } from './liveActions'
+import { refreshWorkspace } from './liveActions'
 import { cn, type VGate, type VNode, type VWriting, type WritePlan, type WritingGates } from './model'
 import { type ChapterDetail, type WritingControl, timesOf } from './writing'
 
@@ -125,7 +125,7 @@ export function useLiveWriting({ bookId, detail, parts, messages, draft }: {
   const refresh = useCallback(async () => {
     await Promise.all([
       qc.invalidateQueries({ queryKey: keys.book(bookId) }),
-      qc.invalidateQueries({ queryKey: workspaceKey(bookId) }),
+      refreshWorkspace(qc, bookId),
     ])
   }, [qc, bookId])
   const setJob = useCallback((next: Job) => {
@@ -143,7 +143,7 @@ export function useLiveWriting({ bookId, detail, parts, messages, draft }: {
   // 写着的时候，每写完一章、换到下一步，目录和字数跟着刷新
   const progress = writingJob ? `${writingJob.id}|${writingJob.status}|${draft?.chapter ?? ''}|${draft?.done ?? ''}|${messages.filter((m) => m.job_id === writingJob.id && m.kind === 'artifact').length}` : ''
   useEffect(() => {
-    if (progress) void qc.invalidateQueries({ queryKey: workspaceKey(bookId) })
+    if (progress) void refreshWorkspace(qc, bookId)
   }, [progress, qc, bookId])
 
   return {

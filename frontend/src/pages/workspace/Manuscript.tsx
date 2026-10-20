@@ -307,7 +307,7 @@ export function ManuscriptDirectory({ book, selected, onSelect, onSearchSelect, 
 /* ---------------- 开写 ---------------- */
 
 /** 停在哪由你定：四个开关，写到那里停下来请你看。 */
-function GateToggles({ writing, nav }: { writing: WritingControl; nav: ManuscriptNav }) {
+export function GateToggles({ writing, nav }: { writing: WritingControl; nav: ManuscriptNav }) {
   return (
     <section>
       <h3 className="mb-1.5 text-[13px] tracking-[0.15em] text-ink-3">停在哪由你定</h3>
@@ -430,7 +430,7 @@ const escapeHtml = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '
 const toHtml = (text: string, word = '') => paragraphsOf(text).map((p) => `<p>${textMatches(p, word).map(part => part.match ? `<mark data-text-match class="rounded-sm bg-seal/15 text-seal-dark">${escapeHtml(part.text)}</mark>` : escapeHtml(part.text)).join('')}</p>`).join('')
 
 /** 正文：点哪改哪，离开就存，Esc 撤回这次改的。页面上一段一个块，存的时候一段一行。 */
-function ChapterText({ text, onSave, readOnly, spot, searchWord = '', searchToken }: { text: string; onSave?: (text: string) => void; readOnly?: boolean; spot?: string; searchWord?: string; searchToken?: number }) {
+export function ChapterText({ text, onSave, readOnly, spot, searchWord = '', searchToken }: { text: string; onSave?: (text: string) => void; readOnly?: boolean; spot?: string; searchWord?: string; searchToken?: number }) {
   const ref = useRef<HTMLDivElement>(null)
   const saved = useRef(text)
   const highlight = useRef('')
@@ -473,7 +473,7 @@ function ChapterText({ text, onSave, readOnly, spot, searchWord = '', searchToke
 }
 
 /** 写手正在写：字一句句冒出来，最后一句后面跟着光标。 */
-function LiveText({ text }: { text: string }) {
+export function LiveText({ text }: { text: string }) {
   const paragraphs = paragraphsOf(text)
   return (
     <div aria-live="polite" className="chapter-prose">
@@ -500,7 +500,7 @@ function Fold({ title, count, defaultOpen = false, children }: { title: string; 
 }
 
 /** 按意见重写这一章。 */
-function RewritePanel({ node, later, onCancel, onGo }: { node: VNode; later: number; onCancel: () => void; onGo: (request: string) => void }) {
+export function RewritePanel({ node, later, onCancel, onGo }: { node: VNode; later: number; onCancel: () => void; onGo: (request: string) => void }) {
   const [request, setRequest] = useState('')
   return (
     <div className="mb-9 rounded-2xl border border-line bg-subtle p-5">

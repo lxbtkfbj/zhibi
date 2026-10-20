@@ -1,3 +1,4 @@
+import { Icon } from './desk-v2/shared'
 /** 新书页的「存档」：居中弹窗，整本书一档一档往后存（设计说明 9.13「第二批：存档」）。
  *  最上面「存一档」；下面时间倒排、按天分组，手动存的带书签最显眼，自动存的连着几条折成一行；
  *  点开一档看和现在比改了哪些，能「回到这一档」（整本，连正文）。 */
@@ -282,7 +283,7 @@ function SaveDetail({ saveId, onBack }: { saveId: number; onBack: () => void }) 
       setConfirm(false)
       setDone(true)
       // 整本书换过了：书、设定、大纲、正文、本书设置、写作要求都重新读
-      for (const key of [['workspace', bookId], ['book', bookId], ['books'], savesKey(bookId), ['chapters', bookId], ['outline-tree', bookId], ['book-settings', bookId], ['author-requirements', bookId]]) void qc.invalidateQueries({ queryKey: key })
+      for (const key of [['workspace', bookId], ['desk-v2-chapter', bookId], ['book', bookId], ['books'], savesKey(bookId), ['chapters', bookId], ['outline-tree', bookId], ['book-settings', bookId], ['author-requirements', bookId]]) void qc.invalidateQueries({ queryKey: key })
     } catch (cause) { setError(cause) } finally { setBusy(false); busyRef.current = false }
   }
   const data = detail.data
@@ -419,10 +420,10 @@ export function SavesRow({ open, onClick, className }: { open: boolean; onClick:
   }, [])
   const last = latest.data?.items[0]
   return (
-    <button type="button" onClick={onClick} aria-pressed={open} title="整本书的存档：看改了什么、回到以前的哪一档"
+    <div role="button" tabIndex={0} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }} onClick={onClick} aria-pressed={open} title="整本书的存档：看改了什么、回到以前的哪一档"
       className={clsx(className, open && 'bg-line/50 text-ink')}>
-      <Save className="size-4 shrink-0" />存档
-      <span className="ml-auto truncate text-xs text-ink-3">{last ? savedAgo(last.created_at, now) : latest.isPending ? '' : latest.isError ? '暂未读到' : '还没存过'}</span>
-    </button>
+      <Icon name="save" />存档
+      <span className="muted">{last ? savedAgo(last.created_at, now) : latest.isPending ? '' : latest.isError ? '暂未读到' : '还没存过'}</span>
+    </div>
   )
 }

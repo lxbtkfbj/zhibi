@@ -19,6 +19,8 @@ export interface VEntry {
   name: string
   /** 角色、金手指的一句话；段落类不用 */
   oneLine: string
+  createdChapter?: number | null
+  firstAppearanceChapter?: number | null
   tags: string[]
   locked: boolean
   /** 角色的定位（旧的；2026-10-19 起页面上不显示，原型的示例书还在用它排顺序） */
@@ -34,14 +36,14 @@ export interface VEntry {
   /** 角色此刻的状态，设定师每章更新；全空就不显示 */
   now?: [string, string][]
   /** id 是真书里关系那一行；toLead 是旧数据「和主角的关系」那一栏 */
-  relations?: { id?: string; to: string; kind: string; text: string; toLead?: boolean }[]
+  relations?: { id?: string; to: string; kind: string; text: string; toLead?: boolean; sinceChapter?: number | null }[]
   /** 身世里「另有秘密」指向的条目 */
   secret?: string
   /** 角色的金手指条目 / 金手指的主人 */
   goldfinger?: string
   holder?: string
   overview?: string
-  levels?: { name: string; text: string }[]
+  levels?: { name: string; text: string; protagonistChapter?: number | null }[]
   /** 地点属于哪里：父条目 id */
   parent?: string
   appears: { node: string; label: string }[]
@@ -125,6 +127,7 @@ export interface VBook {
   tags: string[]
   length?: number
   chapterWords: number
+  createdAt?: string
   blurb: string
   /** 世界概况：一本书只有一篇，单独放在设定最上面 */
   world: string

@@ -36,6 +36,8 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
     const media = window.matchMedia('(prefers-color-scheme: dark)')
     const apply = () => {
       const root = document.documentElement
+      root.classList.add('desk-v2-theme')
+      root.style.setProperty('--desk-zoom', String(Math.min(1.5, Math.max(1, window.innerWidth / 1700), Math.max(1, window.innerHeight / 800))))
       root.dataset.theme = appearance.theme === 'system' ? (media.matches ? 'ink' : 'paper') : appearance.theme
       root.dataset.font = appearance.font
       root.dataset.reducedMotion = String(appearance.reducedMotion)
@@ -46,7 +48,8 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
     }
     apply()
     media.addEventListener('change', apply)
-    return () => media.removeEventListener('change', apply)
+    window.addEventListener('resize', apply)
+    return () => { media.removeEventListener('change', apply); window.removeEventListener('resize', apply) }
   }, [appearance])
   useEffect(() => {
     const sync = (event: StorageEvent) => { if (event.key === KEY) setValue(saved()) }
