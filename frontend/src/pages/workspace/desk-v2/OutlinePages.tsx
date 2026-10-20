@@ -4,6 +4,7 @@ import { createElement, type CSSProperties, type ReactNode, useEffect, useState 
 import { get } from '../../../api/client'
 import type { TeardownChapterData } from '../../../api/types'
 import { readingChapterNumber } from '../../../lib/teardownReading'
+import { endingState, longestWaits, rhythmCaption, waitDuration, waitDurationText, waitsState, type TeardownWaitItem, type TeardownWaits } from '../../../lib/teardownWholebook'
 import { childKind, useSave, useWorkspace } from '../actions'
 import { CountField, WriteHelp } from '../Workspace'
 import { PendingNote } from '../Inbox'
@@ -11,8 +12,10 @@ import { GateCard, type ManuscriptNav } from '../Manuscript'
 import { chapterNodes, cn, findEntry, findNode, splitTitle, type VBook, type VNode } from '../model'
 import { SplitPanel } from '../Split'
 import { useSplit } from '../useSplit'
+import { useTeardownControl } from '../TeardownProgress'
 import { gateTarget, type ChapterDetail, type WritingControl } from '../writing'
 import { Chip, Icon, More, clean } from './shared'
+import { currentRead, nodes } from './settingsData'
 
 export interface DeskDigest {
   people: { name: string; chapters: number; first: number }[]
@@ -83,7 +86,7 @@ export function useDeskChapter(book: VBook, node: VNode | undefined, writing?: W
 
 function DigestRail({ node, digest, nav, book }: { node: VNode; digest?: DeskDigest; nav: ManuscriptNav; book: VBook }) {
   if (!digest || !digest.people.length && !digest.changes.length && !digest.waits.length && !digest.things.length) return null
-  const volume = node.kind === '卷', people = volume ? digest.people.slice(0, 8) : digest.people
+  const volume = node.kind === '卷' || node.kind === '篇', arc = node.kind === '篇', people = volume ? digest.people.slice(0, 8) : digest.people
   const entries = book.categories.flatMap(category => category.entries)
   const openPerson = (name: string) => { const entry = entries.find(item => item.name === name || item.facts.some(([label, value]) => label === '别名' && value.split('、').includes(name))); if (entry) nav.openEntry(entry.id) }
   const person = (item: DeskDigest['people'][number]) => <li key={item.name}>
@@ -91,10 +94,10 @@ function DigestRail({ node, digest, nav, book }: { node: VNode; digest?: DeskDig
     <span className="bar"><b style={{ width: `${item.chapters / (volume ? people[0]?.chapters || 1 : rangeLength(node) || 1) * 100}%` }} /></span>
   </li>
   return <aside className="rail">
-    {!!people.length && <div className="rb"><h3>{volume ? '这一卷的人' : '这一单元的人'}<span className="n">出场章数</span></h3><ul className="plist">
+    {!!people.length && <div className="rb"><h3>{arc ? '这一篇的人' : volume ? '这一卷的人' : '这一单元的人'}<span className="n">出场章数</span></h3><ul className="plist">
       {volume ? people.map(person) : <More items={people} cap={6} unit="人">{person}</More>}
     </ul></div>}
-    {volume ? !!digest.changes.length && <div className="rb"><h3>主角这一卷怎么变的<span className="n">{digest.changes.length} 条，框里往下翻</span></h3><ul className="tl scrollbox">
+    {volume ? !!digest.changes.length && <div className="rb"><h3>{arc ? '主角这一篇怎么变的' : '主角这一卷怎么变的'}<span className="n">{digest.changes.length} 条，框里往下翻</span></h3><ul className="tl scrollbox">
       {digest.changes.map((item, index) => <li key={index}><b onClick={() => nav.openNode(`c${item.chapter}`)}>第 {item.chapter} 章</b>{item.change}</li>)}
     </ul></div> : <>
       {!!digest.waits.length && <div className="rb"><h3>读者在等的事<span className="n">{digest.waits.length} 条</span></h3><ul className="tl"><More items={digest.waits} cap={4}>{(item, index) => <li key={index}><b onClick={() => nav.openNode(`c${item.chapter}`)}>第 {item.chapter} 章{item.action}</b>{item.what}</li>}</More></ul></div>}
@@ -146,14 +149,50 @@ interface OutlineProps {
   fresh: boolean; writing?: WritingControl
 }
 
+function OverviewChildren({ items, book, nav, arc = false }: { items: VNode[]; book: VBook; nav: ManuscriptNav; arc?: boolean }) {
+  const volumes = nodes(book.outline).filter(item => item.kind === '卷')
+  const volumeRange = (item: VNode) => {
+    const children = item.children ?? []
+    return [volumes.findIndex(volume => volume.id === children[0]?.id) + 1, volumes.findIndex(volume => volume.id === children.at(-1)?.id) + 1]
+  }
+  return <><div className="sec"><div className="label">节奏<span className="n">{rhythmCaption(arc ? '篇' : '卷')}</span></div><div className="rhythm">{items.map((item, index) => <i key={item.id} className={item.virtual ? 'wait' : undefined} style={{ '--w': rangeLength(item) } as CSSProperties} title={item.virtual ? `第 ${volumeRange(item)[0]}–${volumeRange(item)[1]} 卷还没归篇` : `第 ${item.range?.[0]}–${item.range?.[1]} 章「${nodeName(item)}」`} onClick={() => nav.openNode(item.id)}>{item.virtual ? '…' : cn(index + 1)}</i>)}</div></div>
+    <div className="sec"><div className="label">{arc ? '篇' : '卷'}<span className="n">那段话只显示前三行，点进去看全部</span></div><div className="ugrid">{items.filter(item => !item.virtual).map((item, index) => <div className="ucard" key={item.id} title={item.text} onClick={() => nav.openNode(item.id)}><div className="hd"><span className="seal-no">{cn(index + 1)}</span><span className="ell">{nodeName(item)}</span></div><div className="rg">第 {item.range?.[0]}–{item.range?.[1]} 章 · {rangeLength(item)} 章{arc ? ` · ${item.children?.length ?? 0} 卷` : ''}</div><p>{item.text}</p></div>)}</div></div></>
+}
+
+function WaitsPage({ book, data, nav, active, stage }: { book: VBook; data?: TeardownWaits; nav: ManuscriptNav; active: boolean; stage: string }) {
+  const last = data?.last ?? currentRead(book), summary = book.teardown?.waits
+  const items = data?.items ?? [], open = items.filter(item => item.resolved == null), resolved = longestWaits(items.filter(item => item.resolved != null), last)
+  const total = data ? items.length : summary?.total ?? 0, openCount = data ? open.length : summary?.open ?? 0
+  const hasLedger = data?.upto != null || !!summary
+  const itemView = (item: TeardownWaitItem) => <li key={item.code}><b onClick={() => nav.openNode(`c${item.planted}`)}>{item.resolved == null ? `第 ${item.planted} 章立下` : `第 ${item.planted} 章 → 第 ${item.resolved} 章`}</b><span className={`chip ${item.kind === '期待' ? 'ochre' : 'indigo'}`}>{item.kind}</span>{item.what}{item.resolved != null ? `：${item.how}` : ''}<span className="small">{waitDurationText(item, last)}</span></li>
+  return <section className="page"><div className="kicker">全书</div><h1>读者在等的事</h1><div className="meta">整理到第 {data?.upto ?? summary?.upto ?? 0} 章 · 一共 {total} 件 · 兑现了 {total - openCount} 件 · 还吊着 {openCount} 件</div><p className="small">期待：读者知道会发生，等着看怎么发生；伏笔：读者不知道答案，等着揭开。从立下到兑现隔了几章，就是读者被吊了多久。</p><div className="rule1" />
+    {hasLedger ? <><div className="sec"><div className="label">还吊着的<span className="n">{openCount} 件，按立下先后</span></div><ul className="tl"><More items={open} cap={30} unit="件">{itemView}</More></ul></div><div className="sec"><div className="label">兑现了的<span className="n">{total - openCount} 件，吊得久的在前</span></div><ul className="tl"><More items={resolved} cap={30} unit="件">{itemView}</More></ul></div></> : <p className="state">{waitsState(last, stage, active)}</p>}
+  </section>
+}
+
+function WholebookPage({ book, nav, data }: { book: VBook; nav: ManuscriptNav; data?: TeardownWaits }) {
+  const { actions } = useWorkspace(), save = useSave()
+  const node = book.outline, all = nodes(node), arcs = (node.children ?? []).filter(item => item.kind === '篇' && !item.virtual)
+  const hasArcs = arcs.length > 0, volumes = all.filter(item => item.kind === '卷'), units = all.filter(item => item.kind === '单元' && !item.virtual)
+  const total = book.teardown?.chapters ?? chapterNodes(node).length, last = currentRead(book)
+  const ending = node.ref?.type === 'segment', parts = node.text.replace(/。$/, '').split('；')
+  const summary = book.teardown?.waits, items = data?.items ?? [], longest = longestWaits(items, data?.last ?? last).slice(0, 5)
+  return <><section className="page"><div className="kicker">全书</div><h1>全书</h1><div className="meta">{total} 章{hasArcs ? ` · ${arcs.length} 篇` : ''} · {volumes.length} 卷 · {units.length} 个单元</div><div className="rule1" />
+    {ending ? <div className="sec"><div className="label">结局<span className="n">原书在第 {total} 章完结</span></div>{parts.length === 4 ? <div className="beats4">{['主线怎么了结', '主角最后到了哪', '各人的去向', '停在什么画面'].map((label, index) => <div className="beat" key={label}><b>{label}</b><NodeEdit as="span" value={node.text} label="全书结局" save={actions.canEdit(node, 'text') ? value => save(actions.saveNode(node, { text: value })) : undefined}>{parts[index]}</NodeEdit></div>)}</div> : <NodeEdit className="lead" value={node.text} label="全书结局" save={actions.canEdit(node, 'text') ? value => save(actions.saveNode(node, { text: value })) : undefined} />}</div> : <p className="state">{endingState(book.teardown, last, total)}</p>}
+    <OverviewChildren items={hasArcs ? node.children ?? [] : volumes} arc={hasArcs} book={book} nav={nav} />
+  </section>{!!summary && summary.total > 0 && <aside className="rail"><div className="rb"><h3>读者在等的事<span className="n">整理到第 {summary.upto} 章</span></h3><p className="small">一共 {summary.total} 件：兑现了 {summary.total - summary.open} 件，还吊着 {summary.open} 件。下面是吊得最久的。</p><ul className="tl">{longest.map(item => <li key={item.code}><b onClick={() => nav.openNode(`c${item.planted}`)}>{item.resolved == null ? `第 ${item.planted} 章 → 还吊着` : `第 ${item.planted} 章 → 第 ${item.resolved} 章`}</b>{item.what}（{waitDuration(item, data?.last ?? last)} 章）</li>)}</ul><a className="more" onClick={() => nav.openNode('waits')}>全部 {summary.total} 件 ›</a></div></aside>}</>
+}
+
 export function DeskOutline(props: OutlineProps) {
   const { book, id, nav, writing } = props
   const { actions } = useWorkspace(), save = useSave()
   const path = findNode(book.outline, id) ?? [book.outline], node = path[path.length - 1]
   const teardown = book.source === 'teardown', outline = outlineOf(node)
+  const control = useTeardownControl()
+  const waits = useQuery({ queryKey: ['desk-v2-waits', book.id, book.teardown?.waits?.upto, book.teardown?.waits?.total, book.teardown?.waits?.open, book.teardown?.last_read], queryFn: () => get<TeardownWaits>(`/books/${book.id}/teardown/waits`), enabled: teardown && (id === 'book' || id === 'waits'), retry: false })
   const chapter = useDeskChapter(book, node.kind === '章' ? node : undefined, writing)
   const readCount = chapterNodes(book.outline).filter(item => item.teardown?.read).length
-  const digest = useQuery({ queryKey: ['desk-v2-digest', book.id, node.id, readCount], queryFn: () => get<DeskDigest>(`/books/${book.id}/teardown/digest?${node.kind === '卷' ? 'volume' : 'unit'}=${encodeURIComponent(node.ref!.id)}`), enabled: teardown && (node.kind === '卷' || node.kind === '单元') && !!node.ref, retry: false })
+  const digest = useQuery({ queryKey: ['desk-v2-digest', book.id, node.id, readCount], queryFn: () => get<DeskDigest>(`/books/${book.id}/teardown/digest?${node.kind === '篇' ? 'arc' : node.kind === '卷' ? 'volume' : 'unit'}=${encodeURIComponent(node.ref!.id)}`), enabled: teardown && (node.kind === '篇' || node.kind === '卷' || node.kind === '单元') && !!node.ref, retry: false })
   const parent = path.at(-2), volume = path.find(item => item.kind === '卷'), unit = path.find(item => item.kind === '单元')
   const units = (node.children ?? []).filter(item => !item.virtual), hang = node.children?.find(item => item.virtual)
   const number = readingChapterNumber(node), body = node.body, count = rangeLength(node)
@@ -164,6 +203,9 @@ export function DeskOutline(props: OutlineProps) {
   const edits = (label: string) => actions.canEdit(node, 'text') ? (value: string) => save(actions.saveNode(node, { sections: { [label]: value } })) : undefined
   const title = <NodeEdit as="h1" value={editableNodeName(node)} label={`给${node.kind}起个名字`} save={actions.canEdit(node, 'name') && !node.virtual && node.kind !== '全书' ? value => { if (node.kind !== '章' || value.trim()) save(actions.saveNode(node, { name: value.trim() })) } : undefined}>{nodeName(node)}</NodeEdit>
   useEffect(() => { if (!props.fresh) return; document.querySelector<HTMLElement>('.page [data-editable]')?.click() }, [props.fresh, node.id])
+  if (teardown && id === 'waits') return <WaitsPage book={book} data={waits.data} nav={nav} active={!!control?.job && ['queued', 'running'].includes(control.job.status) || ['queued', 'running'].includes(book.teardown?.stage ?? '')} stage={book.teardown?.stage ?? 'imported'} />
+  if (teardown && node.kind === '全书') return <WholebookPage book={book} nav={nav} data={waits.data} />
+  if (teardown && node.kind === '篇' && node.virtual) return <section className="page"><div className="kicker">全书</div><h1>还没归篇</h1><div className="meta">{count} 章 · 第 {node.range?.[0]}–{node.range?.[1]} 章 · {node.children?.length ?? 0} 卷</div><div className="rule1" /><p className="state">这几卷还没归篇：拆到后面、凑够一个大阶段，收尾时主编再把它们归成篇。</p><OverviewChildren items={node.children ?? []} book={book} nav={nav} /></section>
   if (node.kind === '章') return <>
     <section className="page">
       <div className="kicker">第 {number} 章 · {unit && !unit.virtual ? `${nodePrefix(unit)} 第 ${number - (unit.range?.[0] ?? number) + 1} / ${rangeLength(unit)} 章` : `${volume ? `${nodePrefix(volume)} ${nodeName(volume)} · ` : ''}还没归单元`}</div>
@@ -188,11 +230,11 @@ export function DeskOutline(props: OutlineProps) {
     </section>{teardown && <DigestRail node={node} digest={digest.data} nav={nav} book={book} />}</>
   }
   return <><section className="page">{!teardown && node.ref && <PendingNote id={node.ref.id} />}<div className="kicker">{nodeName(node)} · {parent ? nodeName(parent) : '全书'}</div>{title}
-    <div className="meta">{count} 章{node.range ? ` · 第 ${node.range[0]}–${node.range[1]} 章` : ''} · {units.length} 个{node.kind === '卷' ? '单元' : childKind(node) ?? '单元'}{hang?.range && <> · <span style={{ color: 'var(--ochre)' }}>还没拆完：第 {hang.range[0]}–{hang.range[1]} 章还没归单元，拆完这一卷再写这一卷的那段话</span></>}</div>
+    <div className="meta">{count} 章{node.range ? ` · 第 ${node.range[0]}–${node.range[1]} 章` : ''} · {units.length}{teardown && node.kind === '篇' ? ' 卷' : ` 个${node.kind === '卷' ? '单元' : childKind(node) ?? '单元'}`}{hang?.range && <> · <span style={{ color: 'var(--ochre)' }}>还没拆完：第 {hang.range[0]}–{hang.range[1]} 章还没归单元，拆完这一卷再写这一卷的那段话</span></>}</div>
     {(!teardown || !!clean(node.text)) && <NodeEdit className="lead" value={node.text} label="那段话" spot={!teardown && !node.virtual ? `n|${node.id}` : undefined} save={actions.canEdit(node, 'text') ? value => save(actions.saveNode(node, { text: value })) : undefined}>{node.text || '还没写'}</NodeEdit>}
-    <div className="rule1" /><div className="sec"><div className="label">节奏<span className="n">一格一个单元，宽窄是章数</span></div><div className="rhythm">{units.map((item, index) => <i key={item.id} style={{ '--w': rangeLength(item) } as CSSProperties} title={`第 ${item.range?.[0]}–${item.range?.[1]} 章「${nodeName(item)}」`} onClick={() => nav.openNode(item.id)}>{cn(index + 1)}</i>)}{hang && <i className="wait" style={{ '--w': rangeLength(hang) } as CSSProperties} title={`第 ${hang.range?.[0]}–${hang.range?.[1]} 章还没归单元`} onClick={() => nav.openNode(hang.id)}>…</i>}</div></div>
+    <div className="rule1" /><div className="sec"><div className="label">节奏<span className="n">{rhythmCaption(childKind(node) ?? '单元')}</span></div><div className="rhythm">{units.map((item, index) => <i key={item.id} style={{ '--w': rangeLength(item) } as CSSProperties} title={`第 ${item.range?.[0]}–${item.range?.[1]} 章「${nodeName(item)}」`} onClick={() => nav.openNode(item.id)}>{cn(index + 1)}</i>)}{hang && <i className="wait" style={{ '--w': rangeLength(hang) } as CSSProperties} title={`第 ${hang.range?.[0]}–${hang.range?.[1]} 章还没归单元`} onClick={() => nav.openNode(hang.id)}>…</i>}</div></div>
     <div className="sec"><div className="label">{node.kind === '卷' ? '单元' : childKind(node) ?? '单元'}<span className="n">那段话只显示前三行，点进去看全部</span></div><div className="ugrid">{units.map((item, index) => <div className="ucard" key={item.id} title={item.text} onClick={() => nav.openNode(item.id)}><div className="hd"><span className="seal-no">{cn(index + 1)}</span><span className="ell">{nodeName(item)}</span></div><div className="rg">第 {item.range?.[0]}–{item.range?.[1]} 章 · {rangeLength(item)} 章</div><p>{item.text}</p></div>)}</div></div>
     {node.virtual && <p className="state">这些章还没拆，拆的时候会归进单元。</p>}
     {!teardown && <AuthorControls {...props} node={node} />}
-  </section>{teardown && node.kind === '卷' && <DigestRail node={node} digest={digest.data} nav={nav} book={book} />}</>
+  </section>{teardown && (node.kind === '卷' || node.kind === '篇') && <DigestRail node={node} digest={digest.data} nav={nav} book={book} />}</>
 }

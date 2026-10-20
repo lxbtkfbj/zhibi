@@ -11,6 +11,7 @@ from app.models import Book, Chapter, Job
 from app.services import book_saves, jobs
 from app.services.library import lock_book
 from app.services.meeting import job_dict, post_message, publish
+from app.services.teardown_info import needs_closing
 
 
 async def active(session, book_id):
@@ -29,12 +30,12 @@ async def _validate_start(session, book, upto):
     chapters = (await session.execute(select(Chapter.index, Chapter.teardown).where(Chapter.book_id == book.id))).all()
     meta = book.teardown or {}
     last = max((index for index, record in chapters if (record or {}).get("read_version") is not None), default=0)
-    needs_settings = last > (meta.get("settings") or {}).get("upto", 0)
+    closing = needs_closing(meta, last, len(chapters))
     retry_done = meta.get("stage") == "done" and any("read_failed" in (record or {}) for _, record in chapters)
     if (
         meta.get("stage") not in {"imported", "stopped"}
         and not retry_done
-        and not (meta.get("stage") == "done" and needs_settings)
+        and not (meta.get("stage") == "done" and closing)
     ):
         raise HTTPException(409, "这本书现在不能开始拆")
     if await active(session, book.id):
@@ -51,7 +52,7 @@ async def _validate_start(session, book, upto):
         and any(index <= target and "read_failed" in (record or {}) for index, record in chapters)
     )
     retry = retry_done or retry_stopped
-    if target <= last and not retry and not (needs_settings and target == last):
+    if target <= last and not retry and not (closing and target == last):
         raise HTTPException(422, f"已经拆到第 {last} 章了，要拆得更多才能接着拆")
     return total, upto, retry
 
@@ -77,7 +78,7 @@ async def start(session, redis, book: Book, upto: int | None = None):
         )
         or 0
     )
-    settings_only = target == last and not retry and (before.get("settings") or {}).get("upto", 0) < last
+    settings_only = target == last and not retry and needs_closing(before, last, total)
     chapters = (
         await session.execute(
             select(Chapter.index, Chapter.teardown, Chapter.unit_id).where(

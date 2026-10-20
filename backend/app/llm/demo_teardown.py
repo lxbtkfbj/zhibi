@@ -5,6 +5,9 @@ import re
 from app.agents import schemas as s
 
 SCHEMAS = {
+    s.TeardownArcs,
+    s.TeardownEnding,
+    s.TeardownWaitLedger,
     s.TeardownCardMoment,
     s.TeardownTie,
     s.TeardownNow,
@@ -27,6 +30,72 @@ SCHEMAS = {
     s.TeardownPoint,
     s.TeardownMerits,
 }
+
+
+def _arcs(user):
+    rows = re.findall(r"^第 (\d+) 卷「([^」]*)」（第 \d+–\d+ 章）：(.*)$", user, re.M)
+    final = "这是全书最后几卷：全部归完，open_from 写 null。" in user
+    closed = rows if final else rows[:-1]
+    arcs = []
+    for offset in range(0, len(closed), 2):
+        group = closed[offset : offset + 2]
+        arcs.append(
+            s.TeardownArc(
+                first=int(group[0][0]),
+                last=int(group[-1][0]),
+                title=group[0][1][:8] or "演示阶段",
+                text="；".join(row[2] for row in group)[:150],
+            )
+        )
+    return s.TeardownArcs(arcs=arcs, open_from=int(rows[-1][0]) if rows and not final else None)
+
+
+def _ending(user):
+    if not re.search(r"文件最后有「.+?」，原书应该在这里完结。", user):
+        return s.TeardownEnding(ended=False)
+    summaries = [summary for _, summary in re.findall(r"^第 (\d+) 章「[^」]*」：(.*?)｜.*$", user, re.M)]
+    text = (
+        "；".join(summary.replace("；", "，")[:45] for summary in (summaries[-4:] + summaries[-1:] * 4)[:4])
+        if summaries
+        else ""
+    )
+    return s.TeardownEnding(ended=bool(text), text=text)
+
+
+def _waits(user):
+    known = {
+        what: (code, int(chapter))
+        for code, chapter, what in re.findall(r"^([EF]\d+)｜[^｜]+｜第 (\d+) 章立下｜([^｜]+)｜", user, re.M)
+    }
+    result = s.TeardownWaitLedger()
+    chapter, resolved, hinted = None, set(), set()
+    for line in user.splitlines():
+        if match := re.match(r"^第 (\d+) 章：", line):
+            chapter = int(match[1])
+        elif chapter and (match := re.match(r"^  (立下|提起|兑现)：(.+)$", line)):
+            action, what = match[1], match[2].strip()
+            if action == "立下" and what not in known:
+                ref = f"N{len(result.new) + 1}"
+                result.new.append(
+                    s.TeardownWaitNew(
+                        ref=ref,
+                        chapter=chapter,
+                        kind="伏笔" if re.search("身份|真相|来历|幕后|谁", what) else "期待",
+                        what=what[:40],
+                    )
+                )
+                known[what] = (ref, chapter)
+            elif what in known:
+                code, planted = known[what]
+                if chapter < planted or code in resolved:
+                    continue
+                if action == "兑现":
+                    result.resolved.append(s.TeardownWaitDone(code=code, chapter=chapter, how=what[:30]))
+                    resolved.add(code)
+                elif (code, chapter) not in hinted:
+                    result.hinted.append(s.TeardownWaitHint(code=code, chapter=chapter))
+                    hinted.add((code, chapter))
+    return result
 
 
 def _last(user):
@@ -158,6 +227,12 @@ def _merits(user):
 
 
 def respond(schema, user):
+    if schema is s.TeardownArcs:
+        return _arcs(user)
+    if schema is s.TeardownEnding:
+        return _ending(user)
+    if schema is s.TeardownWaitLedger:
+        return _waits(user)
     if schema is s.TeardownCard:
         return _card(user)
     if schema is s.TeardownCardMoment:

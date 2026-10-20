@@ -283,6 +283,7 @@ function SaveDetail({ saveId, onBack }: { saveId: number; onBack: () => void }) 
       setConfirm(false)
       setDone(true)
       // 整本书换过了：书、设定、大纲、正文、本书设置、写作要求都重新读
+      for (const queryKey of [['desk-v2-waits', bookId], ['desk-v2-digest', bookId]]) void qc.invalidateQueries({ queryKey })
       for (const key of [['workspace', bookId], ['desk-v2-chapter', bookId], ['book', bookId], ['books'], savesKey(bookId), ['chapters', bookId], ['outline-tree', bookId], ['book-settings', bookId], ['author-requirements', bookId]]) void qc.invalidateQueries({ queryKey: key })
     } catch (cause) { setError(cause) } finally { setBusy(false); busyRef.current = false }
   }

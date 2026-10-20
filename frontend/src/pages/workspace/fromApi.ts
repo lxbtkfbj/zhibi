@@ -143,16 +143,17 @@ function outlineNodes(tree: OutlineTree, chapters: ChapterBrief[], ending?: stri
       })),
     }))
   // 写到再定的篇里，排在最前面的那一篇可以直接加卷
-  const next = tree.arcs.find((arc) => !arc.planned && !isLaterEnding(arc))
+  const next = tree.arcs.find((arc) => !arc.virtual && !arc.planned && !isLaterEnding(arc))
   const children: VNode[] = tree.segmented
     ? tree.arcs.map((arc, i): VNode => {
       const rest = isLaterEnding(arc)
       return {
-        id: `a:${arc.node_id ?? i}`, kind: '篇', title: rest ? `第${cn(i + 1)}篇` : `第${cn(i + 1)}篇　${arc.title}`, text: arcText(arc),
+        id: arc.virtual ? 'a:unassigned' : `a:${arc.node_id ?? i}`, kind: '篇', title: arc.virtual ? '还没归篇' : rest ? `第${cn(i + 1)}篇` : `第${cn(i + 1)}篇　${arc.title}`, text: arcText(arc),
+        ...(arc.virtual ? { virtual: true } : {}),
         later: rest || !arc.planned, next: arc === next, locked: arc.locked, uses: [],
         childKind: '卷', children: volumes(arc.volumes),
         // 「后面的篇」（结局之前还没定的那一段）不能改；其余的篇都能改名字和那段话
-        ...(arc.node_id && !rest ? { ref: { type: 'segment' as const, id: arc.node_id } } : {}),
+        ...(arc.node_id && !rest && !arc.virtual ? { ref: { type: 'segment' as const, id: arc.node_id } } : {}),
       }
     })
     : volumes(tree.arcs.flatMap((arc) => arc.volumes))

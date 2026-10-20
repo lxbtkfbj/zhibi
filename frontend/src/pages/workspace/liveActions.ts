@@ -240,7 +240,7 @@ export function useLiveBook(bookId: string) {
         else if (ref.type === 'segment' && node.kind === '全书' && change.text !== undefined) await done(patch(`/nodes/${ref.id}`, { event: change.text }))
         // 写到再定的篇：名字和那段话就是节点上的
         else if (ref.type === 'segment' && node.later) await done(patch(`/nodes/${ref.id}`, { ...(change.name !== undefined ? { title: change.name } : {}), ...(change.text !== undefined ? { event: change.text } : {}) }))
-        else if (ref.type === 'segment') await done(patch(`/nodes/${ref.id}`, { segment: { ...(change.name !== undefined ? { title: change.name } : {}), ...(change.text !== undefined ? { text: change.text } : {}) } }))
+        else if (ref.type === 'segment') await done(patch(`/nodes/${ref.id}`, { ...(parts.current?.book.source === 'teardown' && change.name !== undefined ? { title: change.name } : {}), segment: { ...(change.name !== undefined ? { title: change.name } : {}), ...(change.text !== undefined ? { text: change.text } : {}) } }))
       },
       // 新加的都排在同一层的最后面
       addNode: async (parent) => {

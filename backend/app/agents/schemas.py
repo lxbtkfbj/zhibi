@@ -1268,4 +1268,45 @@ class TeardownPoint(BaseModel):
 class TeardownMerits(BaseModel):
     points: list[TeardownPoint] = Field(description="五六条，每条都带第几章")
     missing: list[str] = Field(default_factory=list, description="想写却缺数字、缺记录的，一句一条")
+
+
+class TeardownArc(BaseModel):
+    first: int = Field(description="这一篇从第几卷起（卷号）")
+    last: int = Field(description="到第几卷止（卷号）")
+    title: str = Field(description="篇名，4–8 个字")
+    text: str = Field(description="这一篇的那段话，150 字以内，四句，用分号隔开")
+
+
+class TeardownArcs(BaseModel):
+    arcs: list[TeardownArc] = Field(description="从第一个收住的卷起，一篇挨一篇")
+    open_from: int | None = Field(None, description="从第几卷起还没收住、先不归；全部归完写 null")
+
+
+class TeardownEnding(BaseModel):
+    ended: bool = Field(description="原书是不是在最后一章完结了")
+    text: str = Field("", description="全书结局，200 字以内，四句，用分号隔开；没完结写空")
+
+
+class TeardownWaitNew(BaseModel):
+    ref: str = Field(description="新起的编号：N1、N2……")
+    chapter: int = Field(description="第一次立下的那一章")
+    kind: Literal["期待", "伏笔"]
+    what: str = Field(description="这件事，20 字以内")
+
+
+class TeardownWaitHint(BaseModel):
+    code: str = Field(description="编号：还吊着的事里的，或者 new 里的 N 编号")
+    chapter: int = Field(description="哪一章又提起")
+
+
+class TeardownWaitDone(BaseModel):
+    code: str = Field(description="编号：还吊着的事里的，或者 new 里的 N 编号")
+    chapter: int = Field(description="哪一章了结")
+    how: str = Field(description="怎么了结的，30 字以内")
+
+
+class TeardownWaitLedger(BaseModel):
+    new: list[TeardownWaitNew] = Field(default_factory=list, description="这一段新立下的事")
+    hinted: list[TeardownWaitHint] = Field(default_factory=list, description="又提起、还没了结的")
+    resolved: list[TeardownWaitDone] = Field(default_factory=list, description="了结了的")
 # fmt: on

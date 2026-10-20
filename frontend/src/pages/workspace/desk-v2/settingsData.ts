@@ -10,6 +10,7 @@ export function nodes(root: VNode): VNode[] {
 }
 
 export function currentRead(book: VBook): number {
+  if (book.teardown?.last_read !== undefined) return book.teardown.last_read
   return Math.max(0, ...nodes(book.outline).filter(node => node.kind === '章' && node.teardown?.read).map(node => node.range?.[0] ?? 0))
 }
 
@@ -21,7 +22,8 @@ export function emptyTeardownSettingsMeta(book: VBook, job: Job | null): string 
   if (view.active && pending?.doing === 'settings') return '设定师在整理设定，整理完这里就有了'
   if (view.stage === 'running') return '拆书收尾时会整理设定，到时这里就有了'
   const last = currentRead(book)
-  if (last > 0 && (view.stage === 'stopped' || view.stage === 'queued')) return `设定还没整理：点右上角「接着拆」，拆到第 ${last} 章不变，只整理设定，不重读原文`
+  if (last > 0 && (view.stage === 'stopped' || view.stage === 'queued')) return `设定还没整理：点右上角「接着拆」，选「只整理前 ${last} 章」，不重读原文`
+  if (view.stage === 'done') return '设定还没整理：点右上角「补上整理」，不重读原文'
   if (last === 0) return '还没开拆，拆过的章会整理成角色卡和设定'
   return '设定还没整理'
 }

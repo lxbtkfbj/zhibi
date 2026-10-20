@@ -49,11 +49,13 @@ from app.services.writing_context import chapter_words
 router = APIRouter(tags=["books"])
 
 
-def summary(book: Book, job_status: str | None = None, preview: dict | None = None, *, read: int = 0) -> BookSummary:
+def summary(
+    book: Book, job_status: str | None = None, preview: dict | None = None, *, read: int = 0, last_read: int = 0
+) -> BookSummary:
     out = BookSummary.model_validate(book)
     out.logline = (book.concept or {}).get("logline", "")
     out.job_status = job_status
-    out.teardown = teardown_summary(book, preview, read=read)
+    out.teardown = teardown_summary(book, preview, read=read, last_read=last_read)
     return out
 
 
@@ -66,17 +68,18 @@ async def detail(session: AsyncSession, book: Book) -> BookDetail:
     job = await jobs.active_job(session, book.id)
     out.active_job = JobOut.model_validate(job) if job else None
     out.job_status = job.status if job else None
-    count, words, read = (
+    count, words, read, last_read = (
         await session.execute(
             select(
                 func.count().filter(Chapter.status == "final"),
                 func.coalesce(func.sum(Chapter.word_count).filter(Chapter.status == "final"), 0),
                 func.count().filter(Chapter.teardown["read_version"].astext.is_not(None)),
+                func.coalesce(func.max(Chapter.index).filter(Chapter.teardown["read_version"].astext.is_not(None)), 0),
             ).where(Chapter.book_id == book.id)
         )
     ).one()
     out.chapters_final, out.words_final = int(count), int(words)
-    out.teardown = teardown_summary(book, preview, read=int(read))
+    out.teardown = teardown_summary(book, preview, read=int(read), last_read=int(last_read))
     out.chapter_words = chapter_words(book)
     return out
 
@@ -105,19 +108,29 @@ async def list_books(session: AsyncSession = SessionDep) -> list[BookSummary]:
         else {}
     )
     read_by_book = (
-        dict(
-            (
+        {
+            book_id: (int(count), int(last))
+            for book_id, count, last in (
                 await session.execute(
-                    select(Chapter.book_id, func.count())
+                    select(Chapter.book_id, func.count(), func.max(Chapter.index))
                     .where(Chapter.book_id.in_(teardown_ids), Chapter.teardown["read_version"].astext.is_not(None))
                     .group_by(Chapter.book_id)
                 )
             ).all()
-        )
+        }
         if teardown_ids
         else {}
     )
-    return [summary(b, status_by_book.get(b.id), previews.get(b.id), read=read_by_book.get(b.id, 0)) for b in rows]
+    return [
+        summary(
+            b,
+            status_by_book.get(b.id),
+            previews.get(b.id),
+            read=read_by_book.get(b.id, (0, 0))[0],
+            last_read=read_by_book.get(b.id, (0, 0))[1],
+        )
+        for b in rows
+    ]
 
 
 @router.post("/books", response_model=BookCreated, status_code=201)

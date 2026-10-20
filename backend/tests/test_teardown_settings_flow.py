@@ -11,7 +11,8 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.graphs.deps import JobCancelled, cancel_key
 from app.main import create_app
-from app.models import Book, Job, MeetingMessage
+from app.models import Book, Chapter, Job, MeetingMessage
+from app.prompts import default_content
 from app.services import jobs
 from app.services.teardown_rerun import plan, prepare, run_rerun
 from app.services.teardown_runner import Runner
@@ -46,26 +47,49 @@ async def test_settings_only_start_when_old_book_has_no_settings(client, session
         assert not job.params["retry_failed_only"]
 
 
-async def test_settings_only_does_not_read_or_regroup(sessionmaker, redis, monkeypatch):
+async def test_settings_only_does_not_read_and_groups_before_collecting(sessionmaker, redis, monkeypatch):
+    monkeypatch.setattr("app.prompts._load", default_content)
+    monkeypatch.setattr("app.llm.demo.DELAY_S", 0)
     bid, jid = await create_book(sessionmaker, count=8, upto=5, read=True)
     async with sessionmaker() as session:
         job = await session.get(Job, jid)
         job.params = {**job.params, "settings_only": True}
+        for chapter in await session.scalars(select(Chapter).where(Chapter.book_id == bid, Chapter.index > 5)):
+            chapter.teardown = {
+                key: value for key, value in chapter.teardown.items() if key not in ("read_version", "read")
+            }
         await session.commit()
-    collect = AsyncMock(return_value={"characters": 2, "entries": 3, "skipped": ["小甲"]})
+    runner = Runner(jid, sessionmaker, redis, DemoRouter())
+    grouping = AsyncMock(wraps=runner.grouping)
+    read_chapters = AsyncMock(side_effect=AssertionError("不许重读"))
+    monkeypatch.setattr(runner, "grouping", grouping)
+    monkeypatch.setattr(runner, "read_chapters", read_chapters)
+
+    async def after_grouping(current):
+        grouping.assert_awaited_once()
+        assert current.reading_done is True
+        _, chapters, _, _ = await current.snapshot()
+        assert all(c.unit_id for c in chapters if c.index <= 5)
+        return {"characters": 2, "entries": 3, "skipped": ["小甲"]}
+
+    collect = AsyncMock(side_effect=after_grouping)
     monkeypatch.setattr("app.services.teardown_settings.collect_settings", collect)
-    monkeypatch.setattr(Runner, "read_chapters", AsyncMock(side_effect=AssertionError("不许重读")))
-    monkeypatch.setattr(Runner, "grouping", AsyncMock(side_effect=AssertionError("不许归单元")))
-    await Runner(jid, sessionmaker, redis, DemoRouter()).run()
+    await runner.run()
     collect.assert_awaited_once()
+    grouping.assert_awaited_once()
+    read_chapters.assert_not_awaited()
     async with sessionmaker() as session:
         job = await session.get(Job, jid)
         book = await session.get(Book, bid)
         assert job.status == "succeeded" and book.teardown["stop_reason"] == "upto"
         messages = list(await session.scalars(select(MeetingMessage).where(MeetingMessage.job_id == jid)))
-        assert messages[-1].content.endswith(
+        assert (
             "设定也整理好了：2 张角色卡、3 条设定，简介页有「这本书好在哪」。小甲 有新内容，你改过的没动。"
+            in messages[-1].content
         )
+        assert messages[-1].content.endswith("读者在等的事整理到第 5 章：一共 0 件，还吊着 0 件。")
+        chapters = list(await session.scalars(select(Chapter).where(Chapter.book_id == bid, Chapter.index > 5)))
+        assert all("read_version" not in chapter.teardown for chapter in chapters)
 
 
 async def test_finish_settings_failure_is_nonfatal_and_can_retry(sessionmaker, redis, monkeypatch):

@@ -140,3 +140,41 @@ test('编辑部HTTP采纳/撤销候选不必等SSE，公共设定刷新失效同
   const candidateRefresh = chat.slice(chat.lastIndexOf('const refresh = () =>'), chat.indexOf('const choose = async'))
   assert.match(candidateRefresh, /\['desk-v2-chapter', bookId\]/)
 })
+
+test('拆书收尾同章数重做也失效台账和篇摘要，不等待query key变化；进度事件不刷新账', async t => {
+  const qc = cache(t), listeners = new Map()
+  qc.setQueryData(keys.book('book-a'), { source: 'teardown' })
+  const keysToCheck = [['desk-v2-waits', 'book-a', 100, 10, 4, 100], ['desk-v2-digest', 'book-a', 'a:one', 100]]
+  for (const key of keysToCheck) qc.setQueryData(key, { text: '旧数据' })
+  qc.setQueryData(['desk-v2-waits', 'book-b'], { text: '别书不受影响' })
+  const module = load('../src/lib/useMeeting.ts', {
+    '@tanstack/react-query': { useQueryClient: () => qc }, react, '../api/hooks': { keys }, '../api/settings': { settingsKeys },
+    '../api/library': { libraryKeys }, '../api/client': { get: async () => ({}) }, './teardownRefresh': { teardownRefreshGate },
+  }, { EventSource: class { addEventListener(name, fn) { listeners.set(name, fn) } close() {} } })
+  module.useMeeting('book-a')
+  listeners.get('job')({ data: JSON.stringify({ id: 'closing', kind: 'teardown', status: 'running' }) })
+  for (const key of keysToCheck) assert.equal(qc.getQueryState(key).isInvalidated, false)
+  listeners.get('job')({ data: JSON.stringify({ id: 'closing', kind: 'teardown', status: 'succeeded' }) })
+  for (const key of keysToCheck) assert.equal(qc.getQueryState(key).isInvalidated, true)
+  assert.equal(qc.getQueryState(['desk-v2-waits', 'book-b']).isInvalidated, false)
+  assert.match(read('../src/pages/workspace/Saves.tsx'), /\['desk-v2-waits', bookId\], \['desk-v2-digest', bookId\]/)
+})
+
+test('拆书篇改名同时存节点title和segment.title，作者的篇仍保持旧请求形状', async t => {
+  const qc = cache(t), bodies = []
+  const setParts = source => ({ book: { source }, library: { entries: [] } })
+  let parts = setParts('teardown')
+  const module = load('../src/pages/workspace/liveActions.ts', {
+    '@tanstack/react-query': { useQueryClient: () => qc, useQuery: () => ({ data: parts }) }, react,
+    '../../api/client': { patch: async (url, body) => bodies.push([url, body]) }, '../../api/hooks': { keys },
+    './fromApi': { bookFromApi: () => ({}), CHARACTER_COLUMNS: {}, ENTRY_CATEGORY: {}, WORLD_OVERVIEW: '世界概况' }, './model': {},
+  })
+  const arc = { id: 'a:one', kind: '篇', ref: { type: 'segment', id: 'one' } }
+  await module.useLiveBook('book-a').actions.saveNode(arc, { name: '作者篇名', text: '作者那段话' })
+  assert.deepEqual(bodies.pop(), ['/nodes/one', { title: '作者篇名', segment: { title: '作者篇名', text: '作者那段话' } }])
+  parts = setParts('new')
+  await module.useLiveBook('book-a').actions.saveNode(arc, { name: '作者自己的篇' })
+  assert.deepEqual(bodies.pop(), ['/nodes/one', { segment: { title: '作者自己的篇' } }])
+  await module.useLiveBook('book-a').actions.saveNode({ kind: '全书', ref: { type: 'segment', id: 'ending' } }, { text: '四句结局' })
+  assert.deepEqual(bodies.pop(), ['/nodes/ending', { event: '四句结局' }])
+})

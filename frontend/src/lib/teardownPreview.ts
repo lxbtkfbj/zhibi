@@ -37,7 +37,7 @@ export interface TeardownAppendPreview extends TeardownPreview {
   previous: { chapters: number; last: { index: number; title: string }; original_volumes: boolean }
   junction: { kind: '跳了' | '倒回去了' | null; a: number | null; b: number | null; missing: number }
   duplicates: { leading: { number: number; title: string }[]; content: number }
-  reopen: { kind: 'unit' | 'summary' | 'volume'; title: string; first?: number; last?: number }[]
+  reopen: ({ kind: 'unit' | 'summary' | 'volume'; title: string; first?: number; last?: number } | { kind: 'ending' })[]
   ignored_volumes: number
   volumes: { index: number; title: string; chapters: number; continued: boolean }[]
   selection?: { order: number; title: string; raw_title?: string; number: number | null; volume: number; excluded: boolean; flags: string[] }[]

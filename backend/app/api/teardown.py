@@ -7,12 +7,12 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis
-from sqlalchemy import insert, select
+from sqlalchemy import delete, insert, select
 from starlette.concurrency import run_in_threadpool
 
 from app.api.books import detail
 from app.api.deps import SessionDep, get_book, get_redis
-from app.models import Book, Chapter, PlotUnit, TeardownSource, Volume
+from app.models import Book, Chapter, PlotUnit, StoryNode, TeardownSource, Volume
 from app.schemas import JobOut
 from app.services import book_saves, jobs, teardown_append, teardown_jobs, teardown_split
 from app.services.library import lock_book
@@ -278,7 +278,16 @@ async def append_plan(session, book, data, filename, size, *, encoding=None, inc
     if not chapters or not volumes:
         raise HTTPException(422, "这本书还没有原文")
     plan = teardown_append.plan(
-        book, chapters, volumes, units, result, filename, size, include=include, encoding_auto=not encoding
+        book,
+        chapters,
+        volumes,
+        units,
+        result,
+        filename,
+        size,
+        include=include,
+        encoding_auto=not encoding,
+        nodes=list(await session.scalars(select(StoryNode).where(StoryNode.book_id == book.id))),
     )
     return result, plan, chapters, volumes, units
 
@@ -370,9 +379,13 @@ async def import_append(
                     chapter.unit_id = None
             await session.flush()
             await session.delete(unit)
+        elif entry["kind"] == "ending":
+            await session.execute(delete(StoryNode).where(StoryNode.book_id == book.id, StoryNode.kind == "ending"))
+            meta.pop("ending", None)
         else:
             volume = next(volume for volume in volumes if str(volume.id) == entry["id"])
             volume.summary = ""
+            volume.target_node_id = None
             if entry["kind"] == "volume":
                 volume.title, volume.status = "还没收尾", "planned"
                 meta["open_volume_id"] = str(volume.id)

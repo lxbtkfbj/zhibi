@@ -479,15 +479,33 @@ class Runner:
         for _ in range(3):
             try:
                 parsed = await self.call_user(schema, user, purpose)
-                groups = parsed.units if schema is s.TeardownUnits else parsed.volumes
+                groups = (
+                    parsed.units
+                    if schema is s.TeardownUnits
+                    else parsed.arcs
+                    if schema is s.TeardownArcs
+                    else parsed.volumes
+                )
                 problem = check_groups(groups, a, b, parsed.open_from, close=close, bounds=bounds)
+                if not problem and schema is s.TeardownArcs:
+                    covered = sum(item.last - item.first + 1 for item in groups)
+                    maximum = math.ceil(covered / 2)
+                    if len(groups) > maximum:
+                        problem = f"分了 {len(groups)} 篇，最多 {maximum} 篇"
+                    elif any(not item.title.strip() for item in groups):
+                        problem = "篇名不能空"
+            except JobCancelled:
+                raise
             except Exception as exc:
                 problem = one_line(exc)
             if not problem:
                 return parsed
             user = original + f"\n\n【上次归得不对】{problem}。请照要求重新归。"
-        kind = "单元" if schema is s.TeardownUnits else "卷"
-        raise TeardownStopped("error", f"主编归第 {a}–{b} 章的{kind}归了三次都对不上，停下了。点「接着拆」再试一次。")
+        kind = "单元" if schema is s.TeardownUnits else "篇" if schema is s.TeardownArcs else "卷"
+        measure = "卷" if schema is s.TeardownArcs else "章"
+        raise TeardownStopped(
+            "error", f"主编归第 {a}–{b} {measure}的{kind}归了三次都对不上，停下了。点「接着拆」再试一次。"
+        )
 
     async def volumes_once(self, *, final: bool = False) -> bool:
         book, chapters, units, volumes = await self.snapshot()
@@ -669,7 +687,7 @@ class Runner:
             await session.commit()
         await self.progress()
         # worker 恢复不重复发开始；只允许显式启动的一条群聊消息由 API 发送。
-        grouper = asyncio.create_task(self.grouping()) if not self.settings_only else None
+        grouper = asyncio.create_task(self.grouping())
         try:
             _, chapters, _, _ = await self.snapshot()
             wanted = [
@@ -685,9 +703,10 @@ class Runner:
             if not self.settings_only:
                 self.changed.set()
                 await self.read_chapters(wanted, first_alone=first_alone)
-                self.reading_done = True
-                self.changed.set()
-                await grouper
+            # 只整理也必须补归没收住的单元和卷；否则全书已读时会永远卡在 finish。
+            self.reading_done = True
+            self.changed.set()
+            await grouper
         except Exception as exc:
             self.stop = TeardownStopped(
                 "error", f"拆的时候出错了（{one_line(exc)}），停下了。点「接着拆」从停的地方往下拆，读过的不重读。"
@@ -735,31 +754,64 @@ class Runner:
             note = self.retry_previous.get("stop_note") or note
         settings_result = None
         settings_error = ""
+        arcs_result = ending_result = waits_result = None
+        arcs_failed = False
+        closing_errors = []
         if not author_stop and reason in (None, "upto"):
+            from app.services.teardown_closing import collect_arcs, collect_ending, collect_waits
             from app.services.teardown_settings import collect_settings
 
-            try:
-                settings_result = await collect_settings(self)
-            except JobCancelled:
-                author_stop = True
-            except Exception as exc:
-                settings_result = getattr(exc, "result", None)
-                settings_error = f"整理设定没做完（{one_line(exc)}），点「接着拆」再试一次。"
-                log.exception("拆书 %s 整理设定未完成", self.book_id)
+            for name, collect in (
+                ("归篇", lambda: collect_arcs(self, final=reason is None)),
+                ("写全书结局", lambda: collect_ending(self)),
+                ("整理设定", lambda: collect_settings(self)),
+                ("整理读者在等的事", lambda: collect_waits(self)),
+            ):
+                if author_stop or (name == "写全书结局" and reason is not None):
+                    continue
+                try:
+                    result = await collect()
+                    if name == "归篇":
+                        arcs_result = result
+                    elif name == "写全书结局":
+                        ending_result = result
+                    elif name == "整理设定":
+                        settings_result = result
+                    else:
+                        waits_result = result
+                except JobCancelled:
+                    author_stop = True
+                except Exception as exc:
+                    closing_errors.append(f"{name}没做完（{one_line(exc)}），")
+                    if name == "归篇":
+                        arcs_failed = True
+                    if name == "整理设定":
+                        settings_result = getattr(exc, "result", None)
+                        settings_error = closing_errors[-1]
+                    log.exception("拆书 %s %s未完成", self.book_id, name)
             if await self.cancelled():
                 author_stop = True
             if author_stop:
                 reason, note = "author", f"已手动停下，停在第 {max(read, default=0)} 章。"
         await self.progress("closing")
-        if settings_error:
-            note += settings_error
         stage = "done" if reason is None else "stopped"
+        closing_error = "".join(closing_errors)
+        if closing_error:
+            button = "补上整理" if stage == "done" else "接着拆"
+            closing_error += f"点「{button}」再试一次。"
+            note += closing_error
         async with self.sm() as session:
             book = await session.get(Book, self.book_id)
             job = await session.get(Job, self.job_id)
             if book is None or job is None:
                 return
-            book.teardown = {**book.teardown, "stage": stage, "stop_reason": reason, "stop_note": note}
+            book.teardown = {
+                **book.teardown,
+                "stage": stage,
+                "stop_reason": reason,
+                "stop_note": note,
+                **({"arcs": {**(book.teardown.get("arcs") or {}), "failed": True}} if arcs_failed else {}),
+            }
             await session.commit()
             await book_saves.checkpoint(
                 session, self.book_id, "lorekeeper", "拆完了" if stage == "done" else "停下拆书"
@@ -783,8 +835,22 @@ class Runner:
                 if len(skipped) > 5:
                     names += f"等 {len(skipped)} 条"
                 message += f"{names} 有新内容，你改过的没动。"
-        if settings_error and stage == "done":
-            message += settings_error
+        if not author_stop:
+            if arcs_result and arcs_result["count"]:
+                message += f"归成了 {arcs_result['count']} 篇。"
+            if ending_result:
+                message += (
+                    "写了全书结局，在大纲的「全书」那一页。"
+                    if ending_result["ended"]
+                    else f"主编看了最后几章，原书到第 {self.total} 章还没收住全书，没写结局。"
+                )
+            if waits_result and waits_result["upto"]:
+                message += (
+                    f"读者在等的事整理到第 {waits_result['upto']} 章：一共 {waits_result['total']} 件，"
+                    f"还吊着 {waits_result['open']} 件。"
+                )
+        if closing_error and stage == "done":
+            message += closing_error
         await Emitter(self.sm, self.redis, self.book_id, self.job_id).say("lorekeeper", message)
         # 终态是收尾完成的承诺：存档和最后一句话都已持久化，才能让 API 显示任务结束。
         async with self.sm() as session:

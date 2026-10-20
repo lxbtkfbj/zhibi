@@ -16,10 +16,16 @@ router = APIRouter(tags=["teardown"])
 async def digest(
     unit: uuid.UUID | None = None,
     volume: uuid.UUID | None = None,
+    arc: uuid.UUID | None = None,
     book: Book = Depends(get_book),
     session: AsyncSession = SessionDep,
 ) -> dict:
-    return await teardown_digest.digest(session, book, unit=unit, volume=volume)
+    return await teardown_digest.digest(session, book, unit=unit, volume=volume, arc=arc)
+
+
+@router.get("/books/{book_id}/teardown/waits")
+async def waits(book: Book = Depends(get_book), session: AsyncSession = SessionDep) -> dict:
+    return await teardown_digest.waits(session, book)
 
 
 @router.get("/books/{book_id}/teardown/appearances")

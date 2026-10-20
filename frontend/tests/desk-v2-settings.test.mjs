@@ -40,7 +40,7 @@ const emptyBook = (stage = 'stopped') => ({
   ] }] },
 })
 const teardownJob = (status, doing) => ({ kind: 'teardown', status, pending: { teardown: { doing, read: 2, target: 100, total: 498 } } })
-const stoppedEmptyMeta = '设定还没整理：点右上角「接着拆」，拆到第 3 章不变，只整理设定，不重读原文'
+const stoppedEmptyMeta = '设定还没整理：点右上角「接着拆」，选「只整理前 3 章」，不重读原文'
 
 test('小修1空设定页四行现状逐字匹配，最后读过的章不是已读章数或目标', () => {
   assert.equal(emptyTeardownSettingsMeta(emptyBook(), teardownJob('running', 'settings')), '设定师在整理设定，整理完这里就有了')

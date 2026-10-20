@@ -87,6 +87,7 @@ export function useMeeting(bookId: string) {
     })
     source.addEventListener('error', () => setConnected(false))
     source.addEventListener('book', () => {
+      if (isTeardown()) for (const queryKey of [['desk-v2-waits', bookId], ['desk-v2-digest', bookId]]) void qc.invalidateQueries({ queryKey })
       for (const key of [keys.book(bookId), keys.books, keys.nodes(bookId), keys.bible(bookId), keys.outline(bookId), keys.threads(bookId), keys.secrets(bookId), keys.chapters(bookId), libraryKeys.snapshot(bookId), libraryKeys.suggestions(bookId), libraryKeys.candidates(bookId), libraryKeys.versions(bookId), ['outline-tree', bookId], ['workspace', bookId], ['desk-v2-chapter', bookId], ['saves', bookId], settingsKeys.book(bookId), settingsKeys.requirements(bookId)]) {
         void qc.invalidateQueries({ queryKey: key })
       }
@@ -157,7 +158,7 @@ export function useMeeting(bookId: string) {
           clearTimeout(partsTimer)
           partsTimer = undefined
           partsAgain = false
-          for (const queryKey of [keys.book(bookId), ['workspace', bookId], ['desk-v2-chapter', bookId], keys.books, keys.usage(bookId)]) void qc.invalidateQueries({ queryKey })
+          for (const queryKey of [keys.book(bookId), ['workspace', bookId], ['desk-v2-chapter', bookId], ['desk-v2-waits', bookId], ['desk-v2-digest', bookId], keys.books, keys.usage(bookId)]) void qc.invalidateQueries({ queryKey })
         }
         return
       }

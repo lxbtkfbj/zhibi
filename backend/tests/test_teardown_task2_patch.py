@@ -2,6 +2,7 @@
 
 import re
 import uuid
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -208,27 +209,35 @@ async def test_full_target_normalization_retry_does_not_fill_unattempted_gaps(
 
 
 @pytest.mark.parametrize(
-    "upto,read,failed,requested,status,retry",
+    "upto,read,failed,requested,status,retry,closing_only",
     [
-        (6, 6, (), 6, 422, None),
-        (6, 6, (7,), 6, 422, None),
-        (6, 6, (2,), 5, 422, None),
-        (None, 8, (), None, 422, None),
-        (None, 8, (), 8, 422, None),
-        (6, 6, (2,), 7, 200, False),
-        (6, 7, (2,), 7, 422, None),
-        (6, 5, (), 6, 200, False),
+        (6, 6, (), 6, 422, None, None),
+        (6, 6, (7,), 6, 422, None, None),
+        (6, 6, (2,), 5, 422, None, None),
+        (None, 8, (), None, 200, False, True),
+        (None, 8, (), 8, 200, False, True),
+        (6, 6, (2,), 7, 200, False, False),
+        (6, 7, (2,), 7, 422, None, None),
+        (6, 5, (), 6, 200, False, False),
     ],
 )
 async def test_failed_retry_does_not_bypass_target_rules(
-    client, sessionmaker, upto, read, failed, requested, status, retry
+    client, sessionmaker, redis, monkeypatch, upto, read, failed, requested, status, retry, closing_only
 ):
     bid = await seed(sessionmaker, upto=upto, read=read, failed=failed)
-    # 这里验证已整理完成后仍遵守第二批的目标约束；未整理的旧书现在可以
-    # 在同一目标只整理，另由第三批 settings-only 用例覆盖，不能混为旧规则。
+    # 部分范围的设定和读者账都已整理时，仍遵守原目标约束；但全书已读、
+    # stage 仍 stopped 时，第五批 §6 要允许只整理，补上未归完的单元和卷。
     async with sessionmaker() as session:
         book = await session.get(Book, bid)
-        book.teardown = {**book.teardown, "settings": {"upto": read}}
+        book.teardown = {
+            **book.teardown,
+            "settings": {"upto": read},
+            "waits": {"upto": read, "total": 0, "open": 0},
+        }
+        before = {
+            c.index: (c.content, c.teardown, c.outline, c.summary)
+            for c in await session.scalars(select(Chapter).where(Chapter.book_id == bid))
+        }
         await session.commit()
     response = await client.post(f"/api/teardown/{bid}/start", json={"upto": requested})
     assert response.status_code == status, response.text
@@ -239,6 +248,24 @@ async def test_failed_retry_does_not_bypass_target_rules(
             assert response.json()["detail"] == f"已经拆到第 {read} 章了，要拆得更多才能接着拆"
         else:
             assert job.params["retry_failed_only"] is retry
+            assert job.params["settings_only"] is closing_only
+    if closing_only:
+        no_read = AsyncMock(side_effect=AssertionError("只整理不许重读或扩读原文"))
+        monkeypatch.setattr(Runner, "read_chapters", no_read)
+        router = DemoRouter()
+        jid = uuid.UUID(response.json()["id"])
+        await Runner(jid, sessionmaker, redis, router).run()
+        no_read.assert_not_awaited()
+        assert router.read_indices == []
+        async with sessionmaker() as session:
+            book = await session.get(Book, bid)
+            assert book.teardown["stage"] == "done"
+            assert (await session.get(Job, jid)).status == "succeeded"
+            after = {
+                c.index: (c.content, c.teardown, c.outline, c.summary)
+                for c in await session.scalars(select(Chapter).where(Chapter.book_id == bid))
+            }
+            assert after == before and set(after) == set(range(1, 9))
 
 
 async def test_increasing_target_keeps_normal_resume_and_failed_retry(client, sessionmaker, redis):

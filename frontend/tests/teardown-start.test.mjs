@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { parseTeardownUpto, teardownModelName } from '../src/lib/teardownStart.ts'
+import { initialTeardownUpto, parseTeardownUpto, teardownModelName } from '../src/lib/teardownStart.ts'
 import { ROLE_KEYS, ROLE_KEY_LABEL } from '../src/lib/roles.ts'
 
 const source = relative => readFileSync(new URL(relative, import.meta.url), 'utf8')
@@ -59,10 +59,10 @@ test('已导入的开始窗居中宣纸、Esc与Tab焦点边界、提交失败�
   assert.match(dialog, /event\.key === 'Escape'/)
   assert.match(dialog, /event\.key !== 'Tab'/)
   assert.match(dialog, /previous\?\.focus\(\)/)
-  assert.match(dialog, /await onStart\(upto\); onClose\(\)/)
+  assert.match(dialog, /await onStart\(target\); onClose\(\)/)
   assert.match(dialog, /catch \(reason\) \{ setError\(reason\) \}/)
   assert.match(dialog, /<ErrorText error=\{error\}/)
-  assert.match(dialog, /if \(operating\.current \|\| !model\.ready \|\| upto === undefined\) return/)
+  assert.match(dialog, /if \(operating\.current \|\| !model\.ready \|\| target === undefined\) return/)
   assert.match(dialog, /open \? createPortal\(<StartDialog/)
 })
 
@@ -74,13 +74,10 @@ test('开始停下和导入带start只使用任务1现有接口', () => {
   assert.match(api, /stopTeardown = \(bookId: string\) => post<Job>\(`\/teardown\/\$\{bookId\}\/stop`\)/)
 })
 
-test('补完后接着拆默认全本，不把后台为retry判断保留的旧目标预填回去，其他停下原因照旧', () => {
+test('只有还没拆到的旧目标才预填；补章节不再特判，重读失败章仍使用原目标', () => {
   const desk = source('../src/pages/workspace/BookDesk.tsx')
-  assert.match(desk, /initialUpto=\{detail\.teardown\?\.stop_reason === 'added' \? null : detail\.teardown\?\.upto \?\? null\}/)
-  assert.match(desk, /retry: \(\) => start\(detail\.teardown\?\.upto \?\? null\)/, '重读失败章入口仍使用原目标')
-  const expression = desk.match(/initialUpto=\{([^}]+)\}/)[1]
-  const initialUpto = new Function('detail', `return (${expression})`)
-  assert.equal(initialUpto({ teardown: { stop_reason: 'added', upto: 300 } }), null)
-  for (const stop_reason of ['author', 'upto', 'model', 'error', undefined, null]) assert.equal(initialUpto({ teardown: { stop_reason, upto: 300 } }), 300)
-  assert.equal(initialUpto({ teardown: { upto: null } }), null)
+  assert.match(desk, /initialUpto=\{detail\.teardown\?\.upto \?\? null\}/)
+  assert.doesNotMatch(desk, /stop_reason === 'added'/)
+  assert.match(desk, /retry: \(\) => start\(detail\.teardown\?\.upto \?\? null\)/)
+  for (const [upto, last, value] of [[300, 100, '300'], [100, 100, ''], [20, 100, ''], [null, 100, ''], [undefined, 0, ''], [300, 0, '300']]) assert.equal(initialTeardownUpto(upto, last), value)
 })

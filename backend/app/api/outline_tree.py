@@ -113,7 +113,7 @@ async def outline_tree(book: Book = Depends(get_book), session: AsyncSession = S
     arcs = []
     if segmented:
         for node in nodes:
-            if node.kind == "opening":
+            if node.kind == "opening" or (teardown and node.kind == "ending" and node.segment is None):
                 continue
             own = [volume for volume in volumes if volume.target_node_id == node.id]
             plan = node.segment
@@ -129,6 +129,22 @@ async def outline_tree(book: Book = Depends(get_book), session: AsyncSession = S
                     "volumes": [volume_out(volume) for volume in own],
                 }
             )
+        if teardown:
+            unassigned = [volume for volume in volumes if volume.target_node_id is None]
+            if unassigned:
+                arcs.append(
+                    {
+                        "node_id": None,
+                        "virtual": True,
+                        "title": "还没归篇",
+                        "text": "",
+                        "status": "done",
+                        "locked": True,
+                        "planned": True,
+                        "end": None,
+                        "volumes": [volume_out(volume) for volume in unassigned],
+                    }
+                )
     else:
         arcs.append(
             {

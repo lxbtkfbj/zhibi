@@ -284,6 +284,11 @@ export interface TeardownSummary {
   chars: number
   chapters: number
   read: number
+  last_read: number
+  needs_closing: boolean
+  arcs: number
+  ending: { upto: number; ended: boolean } | null
+  waits: { upto: number; total: number; open: number } | null
   volumes: number
   number_issue_total: number
   excluded_count: number
@@ -300,7 +305,8 @@ export interface TeardownSummary {
 }
 
 export interface TeardownProgressData {
-  doing: 'queued' | 'read' | 'units' | 'volumes' | 'closing' | 'settings'
+  doing: 'queued' | 'read' | 'units' | 'volumes' | 'closing' | 'settings' | 'arcs' | 'ending' | 'waits'
+  waits?: { first: number; last: number }
   settings?: { done: number; total: number; now: string }
   reading?: [number, number] | number[] | null
   range?: [number, number] | number[]

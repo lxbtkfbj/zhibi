@@ -18,7 +18,7 @@ export function teardownAppendSelection(preview: TeardownAppendPreview, include:
       volumes = volumes.filter(volume => !volume.continued || volume.chapters > 0)
       if (counts.has(lastVolume.index) && !volumes.some(volume => volume.index === lastVolume.index)) volumes.unshift({ index: lastVolume.index, title: lastVolume.title, chapters: counts.get(lastVolume.index)!, continued: true })
     }
-    reopen = []
+    reopen = preview.reopen.filter(item => item.kind === 'ending')
     if (context.tail_unit && (!context.original_volumes || counts.has(lastVolume.index))) reopen.push({ kind: 'unit', ...context.tail_unit })
     if (context.original_volumes && lastVolume.summary) reopen.push({ kind: 'summary', title: lastVolume.title })
     if (!context.original_volumes && !context.open_volume_id) reopen.push({ kind: 'volume', title: lastVolume.title })
@@ -86,12 +86,14 @@ export function teardownAppendNotes(preview: TeardownAppendPreview): string[] {
   }
   if (preview.duplicates.content) notes.push(`另有 ${preview.duplicates.content} 章和书里的正文一模一样，不再补。`)
   for (const kind of ['unit', 'summary', 'volume'] as const) {
-    for (const item of preview.reopen.filter(item => item.kind === kind)) {
+    for (const item of preview.reopen) {
+      if (item.kind !== kind) continue
       if (kind === 'unit') notes.push(`最后一个单元「${item.title}」（第 ${item.first}–${item.last} 章）会和新补的章一起重新归`)
       if (kind === 'summary') notes.push(`最后一卷「${item.title}」那段话会重写`)
       if (kind === 'volume') notes.push(`最后一卷「${item.title}」会和新补的章一起重新归，名字和那段话会重写`)
     }
   }
+  if (preview.reopen.some(item => item.kind === 'ending')) notes.push('全书结局会删掉：补上以后拆到最后一章，再看原书完没完')
   if (!preview.previous.original_volumes && preview.ignored_volumes) notes.push(`新文件里写了 ${preview.ignored_volumes} 个卷名，这本书的卷是主编归的，不按文件分卷`)
   return notes
 }

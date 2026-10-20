@@ -32,7 +32,7 @@ def quoted_words(text: str) -> list[str]:
     return words
 
 
-def book_info(book, chapters, volumes, units=()) -> str:
+def book_info(book, chapters, volumes, units=(), nodes=()) -> str:
     info = book.teardown or {}
     author = f"（原作者：{info['author']}）" if info.get("author") else "（原作者没写）"
     chars = int((info.get("split") or {}).get("chars", sum(c.word_count or 0 for c in chapters)))
@@ -55,6 +55,19 @@ def book_info(book, chapters, volumes, units=()) -> str:
         progress = f"拆完了：每章都有章纲，归成了 {len(units)} 个单元、{volume_count} 卷；设定还没整理。"
     if settings_upto := (info.get("settings") or {}).get("upto"):
         progress = progress.replace("设定还没整理", f"设定整理到第 {settings_upto} 章")
+    arcs = [node for node in nodes if node.kind == "milestone" and node.segment is not None]
+    if arcs:
+        progress += f"全书归成了 {len(arcs)} 篇。"
+    ending = info.get("ending") or {}
+    if any(node.kind == "ending" for node in nodes):
+        progress += f"原书到第 {len(chapters)} 章完结，结局写在大纲的全书那一页。"
+    elif ending and not ending.get("ended"):
+        progress += f"主编看过最后几章，原书到第 {len(chapters)} 章还没完结。"
+    if waits := info.get("waits"):
+        progress += (
+            f"读者在等的事整理到第 {waits['upto']} 章：一共 {waits['total']} 件，"
+            f"还吊着 {waits['open']} 件（编号 E 是期待、F 是伏笔，要细节用查伏笔的工具）。"
+        )
     return f"书名：《{book.title}》{author}\n导入了 {len(chapters)} 章，{words}；{volume_text}。\n{progress}"
 
 
@@ -64,7 +77,8 @@ def outline_of(ctx, chapters, *, full: bool, open_volume_id) -> str:
 
     cut = (lambda text: (text or "").strip()) if full else first_line
     lines = []
-    for volume in ctx.volumes:
+
+    def append_volume(volume):
         title = "还没收尾" if str(volume.id) == str(open_volume_id) else volume.title
         lines.append(f"第 {volume.index} 卷「{title}」：{cut(volume.summary)}")
         lines.extend(
@@ -75,6 +89,32 @@ def outline_of(ctx, chapters, *, full: bool, open_volume_id) -> str:
         loose = [c.index for c in chapters if c.volume_id == volume.id and c.unit_id is None]
         if loose:
             lines.append(f"第 {min(loose)} 到 {max(loose)} 章还没归单元。")
+
+    nodes = getattr(ctx, "nodes", [])
+    arcs = [node for node in nodes if node.kind == "milestone" and node.segment is not None]
+    if arcs:
+        for number, node in enumerate(arcs, 1):
+            own = [volume for volume in ctx.volumes if volume.target_node_id == node.id]
+            if not own:
+                continue
+            segment = node.segment
+            lines.append(
+                f"第 {number} 篇「{segment.get('title', node.title)}」（第 {own[0].index}–{own[-1].index} 卷）："
+                f"{cut(segment.get('text', ''))}"
+            )
+            for volume in own:
+                append_volume(volume)
+        unassigned = [volume for volume in ctx.volumes if volume.target_node_id not in {node.id for node in arcs}]
+        if unassigned:
+            lines.append("还没归篇：")
+            for volume in unassigned:
+                append_volume(volume)
+    else:
+        for volume in ctx.volumes:
+            append_volume(volume)
+    ending = next((node for node in reversed(nodes) if node.kind == "ending"), None)
+    if ending:
+        lines.append(f"全书结局：{ending.event}")
     return "\n".join(lines)
 
 
@@ -113,7 +153,7 @@ async def values(session, book, role, message, rows, summary, *, tools: bool, re
         related = "【和这次的话有关的资料】\n" + ("\n\n".join(blocks) or "（没找到）")
     return dict(
         material_note="" if small else "（书比较大：设定和大纲只列了目录，要细节用工具查）",
-        book_info=book_info(book, chapters, ctx.volumes, ctx.units),
+        book_info=book_info(book, chapters, ctx.volumes, ctx.units, ctx.nodes),
         library=(full_library if small else "这里只列名字和一句话，要细节用 look_up_settings 查：\n" + ctx.library)
         if full_library
         else "（还没拆出设定）",

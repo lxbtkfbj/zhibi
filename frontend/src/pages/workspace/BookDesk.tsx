@@ -237,7 +237,7 @@ function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
         chatBadge={unread} openChat={openChat} writing={writing} />
       <SavesPanel open={saves.open} saveId={saves.id} onClose={closeSaves} onOpenSave={(id) => setSaves({ open: true, id })} />
       {!teardown && <BookSettingsDialog open={settings} onClose={closeSettings} />}
-      {teardown && <TeardownStartDialog open={startOpen} title={book.title} total={raw?.chapters.length ?? detail.teardown?.chapters ?? 0} initialUpto={detail.teardown?.stop_reason === 'added' ? null : detail.teardown?.upto ?? null} onClose={() => setStartOpen(false)} onStart={start} />}
+      {teardown && <TeardownStartDialog open={startOpen} title={book.title} total={raw?.chapters.length ?? detail.teardown?.chapters ?? 0} last={detail.teardown?.last_read ?? 0} needsClosing={!!detail.teardown?.needs_closing} stage={detail.teardown?.stage ?? 'imported'} initialUpto={detail.teardown?.upto ?? null} onClose={() => setStartOpen(false)} onStart={start} />}
       </TeardownControlProvider>
       </PendingContext.Provider>
     </BookContext.Provider>

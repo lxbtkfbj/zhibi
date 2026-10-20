@@ -9,7 +9,7 @@ export interface WorkspaceReadingPosition {
   open: string[]
 }
 
-type ReadingBook = Pick<VBook, 'id' | 'categories' | 'outline'>
+type ReadingBook = Pick<VBook, 'id' | 'categories' | 'outline'> & Pick<Partial<VBook>, 'source'>
 type Options = { live: boolean; manuscript: boolean; explicitStart?: boolean }
 const memory = new Map<string, unknown>()
 const key = (bookId: string) => `zhibi:workspace-reading:${bookId}`
@@ -41,6 +41,7 @@ export function resolveWorkspaceReadingPosition(book: ReadingBook, value: unknow
     node.children?.forEach(visit)
   }
   visit(book.outline)
+  if (book.source === 'teardown') nodes.add('waits')
   const entries = new Set(['overview', 'world', ...book.categories.flatMap(category => [`cat:${category.name}`, ...category.entries.map(entry => entry.id)])])
   const tab = tabs.includes(saved.tab as WorkspaceReadingPosition['tab']) ? saved.tab as WorkspaceReadingPosition['tab'] : fallback.tab
   return {

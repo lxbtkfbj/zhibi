@@ -5,7 +5,8 @@ from collections import Counter
 from fastapi import HTTPException
 from sqlalchemy import select
 
-from app.models import Chapter, Character, PlotUnit, Volume
+from app.agents.context import foreshadow_code
+from app.models import Chapter, Character, Foreshadowing, PlotUnit, StoryNode, Volume
 
 
 def mapped_name(name: str, names: dict) -> str:
@@ -46,20 +47,38 @@ async def read_records(session, book_id) -> list[dict]:
     ]
 
 
-async def digest(session, book, *, unit=None, volume=None) -> dict:
+async def digest(session, book, *, unit=None, volume=None, arc=None) -> dict:
     empty = {"people": [], "things": [], "waits": [], "hero": None, "changes": []}
     if book.source != "teardown":
         return empty
-    if (unit is None) == (volume is None):
-        raise HTTPException(422, "单元和卷必须且只能选一个")
-    model, target_id, key = (PlotUnit, unit, "unit_id") if unit is not None else (Volume, volume, "volume_id")
-    if not await session.scalar(select(model.id).where(model.id == target_id, model.book_id == book.id)):
-        raise HTTPException(404, "单元不存在" if unit is not None else "卷不存在")
+    if sum(value is not None for value in (unit, volume, arc)) != 1:
+        raise HTTPException(422, "单元、卷和篇必须且只能选一个")
+    model, target_id, key = (
+        (PlotUnit, unit, "unit_id")
+        if unit is not None
+        else (Volume, volume, "volume_id")
+        if volume is not None
+        else (StoryNode, arc, "volume_id")
+    )
+    lookup = select(model.id).where(model.id == target_id, model.book_id == book.id)
+    if arc is not None:
+        lookup = lookup.where(StoryNode.kind == "milestone", StoryNode.segment.is_not(None))
+    if not await session.scalar(lookup):
+        raise HTTPException(404, "单元不存在" if unit is not None else "卷不存在" if volume is not None else "篇不存在")
+    volume_ids = (
+        set(await session.scalars(select(Volume.id).where(Volume.book_id == book.id, Volume.target_node_id == arc)))
+        if arc is not None
+        else None
+    )
     names = (book.teardown or {}).get("names") or {}
     records = await read_records(session, book.id)
     all_people = people_count(records, names)
     hero = all_people[0]["name"] if all_people else None
-    scope = [row for row in records if row[key] == target_id]
+    scope = (
+        [row for row in records if row[key] in volume_ids]
+        if volume_ids is not None
+        else [row for row in records if row[key] == target_id]
+    )
     things, waits, changes, seen = [], [], [], set()
     for chapter in scope:
         index, read = chapter["index"], chapter["read"]
@@ -82,6 +101,37 @@ async def digest(session, book, *, unit=None, volume=None) -> dict:
             if hero and any(mapped_name(name, names) == hero for name in identities) and person.get("change"):
                 changes.append({"chapter": index, "change": person["change"]})
     return {"people": people_count(scope, names), "things": things, "waits": waits, "hero": hero, "changes": changes}
+
+
+async def waits(session, book) -> dict:
+    if book.source != "teardown":
+        return {"upto": None, "last": 0, "items": []}
+    last = await session.scalar(
+        select(Chapter.index)
+        .where(Chapter.book_id == book.id, Chapter.teardown["read_version"].astext.is_not(None))
+        .order_by(Chapter.index.desc())
+        .limit(1)
+    )
+    rows = await session.scalars(
+        select(Foreshadowing)
+        .where(Foreshadowing.book_id == book.id)
+        .order_by(Foreshadowing.planted_chapter, Foreshadowing.seq)
+    )
+    items = []
+    for row in rows:
+        prefix = f"第 {row.resolved_chapter} 章："
+        items.append(
+            {
+                "code": foreshadow_code({"seq": row.seq, "kind": row.kind}),
+                "kind": row.kind,
+                "what": row.description,
+                "planted": row.planted_chapter,
+                "hints": row.hint_chapters or [],
+                "resolved": row.resolved_chapter,
+                "how": (row.payoff_plan or "").removeprefix(prefix),
+            }
+        )
+    return {"upto": ((book.teardown or {}).get("waits") or {}).get("upto"), "last": last or 0, "items": items}
 
 
 async def appearances(session, book, character_id) -> dict:

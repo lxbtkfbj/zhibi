@@ -2,6 +2,7 @@ export interface OutlineChapter { index: number; title: string; status: 'planned
 export interface OutlineUnit { id: string; index: number | null; title: string; summary: string; chapter_count: number; status: string; locked: boolean; virtual?: boolean; chapters: OutlineChapter[] }
 export interface OutlineVolume { id: string; index: number; title: string; summary: string; chapter_count: number; status: string; locked: boolean; open?: boolean; units: OutlineUnit[] }
 export interface OutlineArc {
+  virtual?: boolean
   node_id: string | null
   title: string
   text: string

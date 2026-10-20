@@ -3,7 +3,21 @@
 from app.schemas import TeardownSummary
 
 
-def teardown_summary(book, preview: dict | None = None, *, read: int = 0) -> TeardownSummary | None:
+def needs_closing(meta, last, total) -> bool:
+    if not last:
+        return False
+    if ((meta.get("settings") or {}).get("upto") or 0) < last:
+        return True
+    if ((meta.get("waits") or {}).get("upto") or 0) < last:
+        return True
+    if last == total and meta.get("stage") != "done":
+        return True
+    if meta.get("stage") == "done" and (meta.get("ending") or {}).get("upto") != total:
+        return True
+    return bool((meta.get("arcs") or {}).get("failed"))
+
+
+def teardown_summary(book, preview: dict | None = None, *, read: int = 0, last_read: int = 0) -> TeardownSummary | None:
     if book.source != "teardown":
         return None
     data = book.teardown or {}
@@ -12,6 +26,8 @@ def teardown_summary(book, preview: dict | None = None, *, read: int = 0) -> Tea
     preview = preview or {}
     settings = data.get("settings") or {}
     merits = data.get("merits") or {}
+    ending = data.get("ending") or {}
+    waits = data.get("waits") or {}
     return TeardownSummary.model_validate(
         {
             "stage": data.get("stage", "imported"),
@@ -20,6 +36,13 @@ def teardown_summary(book, preview: dict | None = None, *, read: int = 0) -> Tea
             "chars": preview.get("chars", 0) if confirming else split.get("chars", 0),
             "chapters": preview.get("chapter_count", 0) if confirming else split.get("chapters", 0),
             "read": read,
+            "last_read": last_read,
+            "needs_closing": needs_closing(data, last_read, split.get("chapters", 0)),
+            "arcs": len((data.get("arcs") or {}).get("rows") or []),
+            "ending": {"upto": ending.get("upto"), "ended": ending.get("ended", False)} if ending else None,
+            "waits": {"upto": waits.get("upto"), "total": waits.get("total", 0), "open": waits.get("open", 0)}
+            if waits
+            else None,
             "volumes": len(preview.get("volumes", [])) if confirming else split.get("volumes", 0),
             "number_issue_total": preview.get("number_issue_total", 0)
             if confirming

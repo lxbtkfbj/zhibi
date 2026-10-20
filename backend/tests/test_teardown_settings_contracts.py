@@ -54,7 +54,8 @@ def test_all_twenty_one_schema_classes_are_verbatim_including_field_order():
             expected = [item.target.id for item in node.body if isinstance(item, ast.AnnAssign)]
             assert list(actual.model_fields) == expected
     assert len(names) == 21
-    assert {getattr(s, name) for name in names} == demo_teardown.SCHEMAS
+    fifth_batch = {s.TeardownArcs, s.TeardownEnding, s.TeardownWaitLedger}
+    assert {getattr(s, name) for name in names} | fifth_batch == demo_teardown.SCHEMAS
 
 
 @pytest.mark.parametrize("stage", ["running", "queued", "stopped", "done"])

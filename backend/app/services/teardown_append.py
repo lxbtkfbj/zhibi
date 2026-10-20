@@ -24,7 +24,7 @@ class AppendPlan:
     preview: dict
 
 
-def plan(book, chapters, volumes, units, result, filename, size, *, include=(), encoding_auto=True):
+def plan(book, chapters, volumes, units, result, filename, size, *, include=(), encoding_auto=True, nodes=()):
     """所有章的位置和卷号均按补上后的书计算；原始 order 专供勾回。"""
     meta = book.teardown or {}
     original = bool(meta.get("original_volumes"))
@@ -153,6 +153,8 @@ def plan(book, chapters, volumes, units, result, filename, size, *, include=(), 
         reopen.append({"kind": "summary", "id": str(last_volume.id), "title": last_volume.title})
     if not original and not meta.get("open_volume_id"):
         reopen.append({"kind": "volume", "id": str(last_volume.id), "title": last_volume.title})
+    if meta.get("ending") or any(node.kind == "ending" for node in nodes):
+        reopen.append({"kind": "ending"})
 
     preview = teardown_split.make_preview(result, filename, size, encoding_auto=encoding_auto)
     preview.update(

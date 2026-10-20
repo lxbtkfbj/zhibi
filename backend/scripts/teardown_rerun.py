@@ -26,7 +26,7 @@ async def main(args):
             print("已取消，没有改动。")
             return
         async with sm() as session:
-            job = await prepare(session, args.book, args.step, args.first, args.last)
+            job = await prepare(session, args.book, args.step, args.first, args.last, force=args.force)
             job_id = job.id
         await execute_job(job_id)
         async with sm() as session:
@@ -42,10 +42,11 @@ async def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="单独重跑拆书的一步（使用当前环境的数据库和拆书模型）")
-    parser.add_argument("step", choices=("read", "units", "volumes", "settings", "merits"))
+    parser.add_argument("step", choices=("read", "units", "volumes", "settings", "merits", "arcs", "ending", "waits"))
     parser.add_argument("--book", type=uuid.UUID, required=True)
     parser.add_argument("--from", dest="first", type=int)
     parser.add_argument("--to", dest="last", type=int)
+    parser.add_argument("--force", action="store_true", help="输入没变也重新调用模型（篇、全书结局）")
     try:
         asyncio.run(main(parser.parse_args()))
     except Exception as exc:  # noqa: BLE001 命令行只给出一句原因，不吐连接参数或密钥

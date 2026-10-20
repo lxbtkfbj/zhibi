@@ -217,6 +217,11 @@ class TeardownSummary(BaseModel):
     chars: int = 0
     chapters: int = 0
     read: int = 0
+    last_read: int = 0
+    needs_closing: bool = False
+    arcs: int = 0
+    ending: dict | None = None
+    waits: dict | None = None
     volumes: int = 0
     number_issue_total: int = 0
     excluded_count: int = 0
@@ -231,6 +236,12 @@ class TeardownSummary(BaseModel):
     merits: dict | None = None
     added: list[dict] = Field(default_factory=list)
     adding: dict | None = None
+
+    @field_validator("arcs", mode="before")
+    @classmethod
+    def arcs_count(cls, value):
+        # BookSummary/BookDetail 先校验 ORM，再换成带章数的摘要；原始状态里是内部整理记录。
+        return len(value.get("rows") or []) if isinstance(value, dict) else value
 
 
 class BookSummary(ORM):
