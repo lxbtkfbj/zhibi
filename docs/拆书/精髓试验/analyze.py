@@ -45,6 +45,14 @@ class CastSection(BaseModel):
     missing: list[str] = Field(default_factory=list)
 
 
+class CheckedSection(Section):
+    fixes: list[str] = Field(default_factory=list, description="改了什么，一句一条；没改空着")
+
+
+class CheckedCast(CastSection):
+    fixes: list[str] = Field(default_factory=list, description="改了什么，一句一条；没改空着")
+
+
 class Overview(BaseModel):
     genre: str = Field(description="一句话：这是一本什么书、读者追它主要图什么，40 字以内")
     engine: str = Field(description="一句话：这本书靠什么让人一直追下去，60 字以内")
@@ -562,6 +570,34 @@ def scene_material(book: Book, tag: str) -> str:
     return "\n".join(out)
 
 
+def section_text(sec: dict) -> str:
+    lines = []
+    for f in sec.get("figures", []):
+        lines.append(f"【人物】{f['name']}（{f['archetype']}）｜怎么立：{f['build']}｜作用：{f['role']}｜变化：{f.get('arc') or '（空）'}｜章：{f['chapters']}")
+    for i, p in enumerate(sec["points"], 1):
+        lines.append(f"【第 {i} 条】{p['title']}")
+        lines += [f"  steps {n}：{s}" for n, s in enumerate(p["steps"], 1)]
+        lines.append(f"  evidence：{p['evidence']}")
+        if p.get("note"):
+            lines.append(f"  note：{p['note']}")
+        lines.append(f"  chapters：{p['chapters']}")
+    return "\n".join(lines)
+
+
+def cited_records(book: Book, sec: dict, cap=40) -> str:
+    import re as _re
+
+    want = []
+    for item in [*sec.get("figures", []), *sec["points"]]:
+        want += item.get("chapters", [])
+        text = " ".join([item.get("evidence", ""), *item.get("steps", []), item.get("build", ""), item.get("arc", "")])
+        for m in _re.finditer(r"(\d+)(?:\s?[–\-]\s?(\d+))?\s?章", text):
+            a, b = int(m.group(1)), int(m.group(2) or m.group(1))
+            want += list(range(a, min(b, a + 3) + 1))
+    seen = [i for i in dict.fromkeys(want) if i in book.by_index][:cap]
+    return "\n".join(f"第 {i} 章：{book.by_index[i]['summary']}｜看点：{book.by_index[i]['cool_point']}" for i in sorted(seen))
+
+
 def check_points(book: Book):
     def check(parsed):
         points = parsed.points
@@ -678,6 +714,34 @@ async def run(slug: str, only: set[str] | None) -> None:
     print(f"完成 → {result_path}")
 
 
+async def check_run(slug: str, keys: list[str]) -> None:
+    """核对：拿各节写好的内容和它引到的章的记录比，改掉记录里找不到的事。结果放 result["checked"]，原稿不动，方便对比。"""
+    book = Book(slug)
+    caller = Caller(book.folder)
+    title, upto, total = book.meta["title"], book.last, book.meta["total"]
+    system = render("essence_persona", title=title, upto=upto, total=total, rules=template("rules").strip())
+    result_path = book.folder / "essence.json"
+    result = load(result_path)
+    book._people(result.get("merges", []))
+    result.setdefault("checked", {})
+    try:
+        async def one(key):
+            sec = result["sections"][key]
+            schema = CheckedCast if sec.get("figures") else CheckedSection
+            user = render("essence_check", title=title, section_name=sec["name"], section=section_text(sec), records=cited_records(book, sec))
+            parsed = await caller.call(schema, user, f"核对·{sec['name']}", system=system, check=check_points(book))
+            result["checked"][key] = {"name": sec["name"], **parsed.model_dump()}
+            save(result_path, result)
+            print(f"  {sec['name']} 改了 {len(parsed.fixes)} 处：" + "；".join(parsed.fixes))
+
+        await asyncio.gather(*(one(k) for k in keys))
+    finally:
+        await caller.close()
+
+
 if __name__ == "__main__":
-    only = set(sys.argv[2].split(",")) if len(sys.argv) > 2 else None
-    asyncio.run(run(sys.argv[1], only))
+    if len(sys.argv) > 2 and sys.argv[2].startswith("check:"):
+        asyncio.run(check_run(sys.argv[1], sys.argv[2][6:].split(",")))
+    else:
+        only = set(sys.argv[2].split(",")) if len(sys.argv) > 2 else None
+        asyncio.run(run(sys.argv[1], only))

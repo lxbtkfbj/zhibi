@@ -37,9 +37,9 @@ EXTRA = """
 .genre { margin: 0 0 6px; font-size: 13.5px; color: var(--ink-3); }
 .engine { margin: 0 0 14px; font-family: var(--serif); font-size: 19px; line-height: 1.75; color: var(--ink); }
 .bars { list-style: none; margin: 0; padding: 0; }
-.bars li { display: grid; grid-template-columns: 6.6em 1fr 2.8em; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; color: var(--ink-2); }
+.bars li { display: grid; grid-template-columns: 6.6em 1fr auto; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; color: var(--ink-2); }
 .bars i { display: block; height: 7px; border-radius: 4px; background: var(--seal-line); }
-.bars li span:last-child { text-align: right; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.bars li span:last-child { min-width: 3.2em; text-align: right; white-space: nowrap; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .feelstrip { display: flex; gap: 1px; height: 22px; }
 .feelstrip i { flex: 1; border-radius: 1px; background: #ece2d0; }
 .feelstrip i.s { background: var(--seal-line); } .feelstrip i.b { background: var(--seal); } .feelstrip i.d { background: var(--indigo-line); }
