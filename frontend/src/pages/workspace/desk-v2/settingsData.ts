@@ -1,9 +1,29 @@
 import type { Job } from '../../../api/types.ts'
 import { teardownProgressView } from '../../../lib/teardownProgress.ts'
-import type { VBook, VEntry, VNode } from '../model.ts'
+import { pinnedFirst, type VBook, type VEntry, type VNode } from '../model.ts'
 
 export const clean = (value?: string): string => value && value !== '（记录里没有）' ? value : ''
 export const wan = (number: number) => number >= 10000 ? `${Math.round(number / 10000)} 万字` : `${number} 字`
+
+/** 拆书沿用后台出场顺序；作者书保留置顶顺序，再把主角提到其余角色之前。 */
+export function orderedCharacters(entries: VEntry[], teardown: boolean): VEntry[] {
+  if (teardown) return [...entries].sort((a, b) => (a.position ?? Number.MAX_SAFE_INTEGER) - (b.position ?? Number.MAX_SAFE_INTEGER))
+  const rest = entries.filter(entry => !entry.pinnedAt)
+  return [...pinnedFirst(entries), ...rest.filter(entry => entry.role === '主角'), ...rest.filter(entry => entry.role !== '主角')]
+}
+
+/** 别名、定位不算全卡栏；作者补过任一正文或现状，就不再当成一句话卡。 */
+export function isOneLineCharacter(entry: VEntry): boolean {
+  return !!clean(entry.oneLine)
+    && entry.facts.every(([label, text, , key]) => ['别名', '定位'].includes(key ?? label) || !clean(text))
+    && entry.sections.every(section => ['别名', '定位'].includes(section.key ?? section.label) || !clean(section.text))
+    && !(entry.now ?? []).some(([, text]) => clean(text))
+    && !entry.dead
+}
+
+export function characterFieldLabel(label: string, teardown: boolean): string {
+  return teardown && label === '成长与结局' ? '变化' : label
+}
 
 export function nodes(root: VNode): VNode[] {
   return [root, ...(root.children ?? []).flatMap(nodes)]

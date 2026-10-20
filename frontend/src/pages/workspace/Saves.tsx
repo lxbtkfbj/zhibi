@@ -411,7 +411,7 @@ function savedAgo(iso: string, now: number) {
 }
 
 /** 左边一栏最下面那一行「存档 · 几分钟前存过」：点了打开居中弹窗 */
-export function SavesRow({ open, onClick, className }: { open: boolean; onClick: () => void; className: string }) {
+export function SavesRow({ open, onClick, className, icon = true }: { open: boolean; onClick: () => void; className: string; icon?: boolean }) {
   const { bookId } = useBookContext()
   const latest = useQuery({ queryKey: [...savesKey(bookId), 'latest'], queryFn: () => get<{ items: BookSave[] }>(`/books/${bookId}/saves?limit=1`) })
   const [now, setNow] = useState(() => Date.now())
@@ -423,7 +423,7 @@ export function SavesRow({ open, onClick, className }: { open: boolean; onClick:
   return (
     <div role="button" tabIndex={0} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }} onClick={onClick} aria-pressed={open} title="整本书的存档：看改了什么、回到以前的哪一档"
       className={clsx(className, open && 'bg-line/50 text-ink')}>
-      <Icon name="save" />存档
+      {icon && <Icon name="save" />}存档
       <span className="muted">{last ? savedAgo(last.created_at, now) : latest.isPending ? '' : latest.isError ? '暂未读到' : '还没存过'}</span>
     </div>
   )

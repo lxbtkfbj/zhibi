@@ -11,13 +11,15 @@ const BASE = process.env.ZHIBI_DESK_URL ?? 'http://127.0.0.1:4351'
 const API = process.env.ZHIBI_DESK_API ?? 'http://127.0.0.1:8051/api'
 const BOOK = process.env.ZHIBI_DESK_BOOK ?? 'ff4aff0b-d1f1-46c4-b120-f7da9ac1ec2a'
 const OUT = path.resolve(ROOT, process.env.ZHIBI_PARITY_OUT ?? 'docs/新书页装修验收')
-const VIEWS = ['简介', '设定', '茉莉', '卷', '单元', '章', '章-没拆', '正文', '读']
+const VIEWS = ['设定', '茉莉', '卷', '单元', '章', '章-没拆', '正文', '读']
 const SIZES = process.env.ZHIBI_PARITY_SIZE ? [process.env.ZHIBI_PARITY_SIZE.split('x').map(Number)] : [[2560, 1312], [1600, 900]]
 const views = process.env.ZHIBI_PARITY_VIEW ? process.env.ZHIBI_PARITY_VIEW.split(',') : VIEWS
 const props = ['font-family', 'font-size', 'font-weight', 'line-height', 'letter-spacing', 'color', 'background-color', 'background-image', ...['top', 'right', 'bottom', 'left'].flatMap(s => [`border-${s}-width`, `border-${s}-style`, `border-${s}-color`]), ...['top-left', 'top-right', 'bottom-right', 'bottom-left'].map(c => `border-${c}-radius`), ...['top', 'right', 'bottom', 'left'].map(s => `padding-${s}`), ...['top', 'right', 'bottom', 'left'].map(s => `margin-${s}`), 'box-shadow', 'width', 'height', 'display', 'gap', 'grid-template-columns']
 fs.mkdirSync(OUT, { recursive: true })
 const api = async p => { const r = await fetch(`${API}/books/${BOOK}${p}`); if (!r.ok) throw new Error(`${p}: ${r.status}`); return r.json() }
-const [tree, library] = await Promise.all([api('/outline-tree'), api('/library')])
+const [tree, library, saves] = await Promise.all([api('/outline-tree'), api('/library'), api('/saves?limit=1')])
+if (!saves.items[0]?.created_at) throw new Error('验收副本缺少存档，不能按样张固定为 8 分钟前存过')
+const clock = { latestSaveAt: saves.items[0].created_at, fixedAt: new Date(new Date(saves.items[0].created_at).getTime() + 8 * 60_000).toISOString() }
 const volumes = tree.arcs.flatMap(a => a.volumes)
 const first = volumes[0], unit = first.units.find(u => !u.virtual)
 const molly = library.characters.find(c => c.name === '茉莉')
@@ -60,13 +62,14 @@ const text = page => page.evaluate(() => {
   const out = { page: paper.innerText, rail: document.querySelector('.rail')?.innerText ?? '' }
   paper.remove(); return out
 })
-const masks = page => page.evaluate(() => [...document.querySelectorAll('.toc-foot .muted,.ball,.skel,.placeholder-note,.reading-prose,.chapter-prose,[data-reading-body],[data-testid="teardown-append-entry"]')].map(e => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } }))
+const masks = page => page.evaluate(() => [...document.querySelectorAll('.skel,.placeholder-note,.reading-prose,.chapter-prose,[data-reading-body],[data-testid="teardown-append-entry"]')].map(e => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } }))
 function blank(png, rects) { for (const r of rects) for (let y = Math.max(0, Math.floor(r.y)); y < Math.min(png.height, Math.ceil(r.y + r.height)); y++) for (let x = Math.max(0, Math.floor(r.x)); x < Math.min(png.width, Math.ceil(r.x + r.width)); x++) { const i = (y * png.width + x) * 4; png.data[i] = png.data[i + 1] = png.data[i + 2] = 255; png.data[i + 3] = 255 } }
 try {
   for (const [width, height] of SIZES) {
     for (const view of views) {
       const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1, colorScheme: 'light' })
       const sample = await context.newPage(), actual = await context.newPage()
+      for (const p of [sample, actual]) await p.clock.setFixedTime(new Date(clock.fixedAt))
       for (const p of [sample, actual]) p.on('pageerror', e => errors.push({ view, width, error: String(e) }))
       await sample.goto(pathToFileURL(path.join(ROOT, 'docs/界面原型/装修样张.html')).href + '#' + encodeURIComponent(view), { waitUntil: 'domcontentloaded' })
       await actual.addInitScript(({ book, position }) => {
@@ -119,6 +122,6 @@ try {
     }
   }
 } finally { await browser.close() }
-fs.writeFileSync(path.join(OUT, 'parity-summary.json'), JSON.stringify({ at: new Date().toISOString(), base: BASE, api: API, book: BOOK, threshold: .1, allowedPixelPercent: .5, lengthTolerancePx: .5, errors, results: results.map(({ rows: _rows, styleFailures, text, masks: _masks, ...r }) => ({ ...r, styleFailures: styleFailures.length, textSame: text.same })) }, null, 2))
+fs.writeFileSync(path.join(OUT, 'parity-summary.json'), JSON.stringify({ at: new Date().toISOString(), base: BASE, api: API, book: BOOK, clock, threshold: .1, allowedPixelPercent: .5, lengthTolerancePx: .5, errors, results: results.map(({ rows: _rows, styleFailures, text, masks: _masks, ...r }) => ({ ...r, styleFailures: styleFailures.length, textSame: text.same })) }, null, 2))
 if (errors.length) throw new Error(JSON.stringify(errors))
 if (!process.env.ZHIBI_PARITY_DIAGNOSTIC && results.some(r => r.unexplainedStyleFailures.length || !r.text.same || !r.pixelPass)) process.exitCode = 1

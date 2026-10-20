@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { clean, currentRead, emptyTeardownSettingsMeta, momentLines, spans, wan } from '../src/pages/workspace/desk-v2/settingsData.ts'
+import { characterFieldLabel, clean, currentRead, emptyTeardownSettingsMeta, isOneLineCharacter, momentLines, orderedCharacters, spans, wan } from '../src/pages/workspace/desk-v2/settingsData.ts'
 
 const source = readFileSync(new URL('../src/pages/workspace/desk-v2/SettingsPages.tsx', import.meta.url), 'utf8')
 const editing = readFileSync(new URL('../src/pages/workspace/desk-v2/settingsEditing.tsx', import.meta.url), 'utf8')
@@ -100,20 +100,61 @@ test('名场面按现存栏目拆章号、动作、立住的东西；不认识�
 })
 
 test('简介、总览和角色卡照样张的标签、class、小标题与折叠额度', () => {
-  for (const className of ['intro-top', 'hero', 'cover', 'lbl', 'stamp', 'statline', 'side-box', 'plist one', 'merits3', 'merit', 'tiles', 'tile', 'hd', 'kv', 'ptree', 'sub', 'facts', 'now', 't', 'moments', 'ch', 'shows', 'fields', 'f', 'rail', 'rb', 'rhythm-cap']) {
+  for (const className of ['intro-top', 'hero', 'cover', 'lbl', 'stamp', 'statline', 'side-box', 'plist one', 'tiles', 'tile', 'hd', 'kv', 'ptree', 'sub', 'facts', 'now', 't', 'moments', 'ch', 'shows', 'fields', 'f', 'rail', 'rb', 'rhythm-cap']) {
     assert.ok(prototype.includes(`class="${className}"`), `样张有 ${className}`)
     assert.ok(source.includes(`className="${className}"`), `React 有 ${className}`)
   }
-  for (const text of ['主要人物', '出场多的在前', '金手指和等级', '这本书好在哪', '主编照程序算好的数字写', '你改过的条目以后接着拆也不会被盖掉', '拆书的角色卡多这一栏', '和别人的关系', '已拆的各章', '记录里没有', '立住了：']) {
+  for (const text of ['主要人物', '出场多的在前', '金手指和等级', '你改过的条目以后接着拆也不会被盖掉', '拆书的角色卡多这一栏', '和别人的关系', '已拆的各章', '记录里没有', '立住了：']) {
     assert.ok(prototype.includes(text))
     assert.ok(source.includes(text))
   }
-  assert.match(source, /Clamp as="p" lines=\{7\}/)
+  assert.doesNotMatch(source, /data\?\.merits|className="merits3"/)
   assert.match(source, /DeskEdit as="p"[^\n]+lines=\{4\}/)
   assert.match(source, /entries: VEntry\[\]; nav: DeskNav; cap\?: number/)
   assert.match(source, /cap = 8/)
   assert.match(source, /More items={secrets} cap=\{3\}/)
   assert.doesNotMatch(source, /className="[^"]*(?:bg-card|text-ink|grid-cols-|flex-wrap|border-line)/)
+})
+
+test('角色顺序拆书只按position稳定排；作者书置顶、主角、原顺序，不改原数组', () => {
+  const entries = [
+    { id: 'side-1', role: '配角', position: 9 },
+    { id: 'pin-old', role: '配角', pinnedAt: '2026-10-19', position: 2 },
+    { id: 'hero', role: '主角', position: 0 },
+    { id: 'pin-new', role: '主角', pinnedAt: '2026-10-20', position: 3 },
+    { id: 'side-2', role: '配角', position: 9 },
+    { id: 'old', role: '配角' },
+  ]
+  const original = entries.map(entry => entry.id)
+  assert.deepEqual(orderedCharacters(entries, true).map(entry => entry.id), ['hero', 'pin-old', 'pin-new', 'side-1', 'side-2', 'old'])
+  assert.deepEqual(orderedCharacters(entries, false).map(entry => entry.id), ['pin-new', 'pin-old', 'hero', 'side-1', 'side-2', 'old'])
+  assert.deepEqual(entries.map(entry => entry.id), original)
+  assert.match(source, /orderedCharacters\(entries\('角色列表'\), book\.source === 'teardown'\)/)
+  assert.match(source, /category\.name === '角色列表' \? orderedCharacters\(category\.entries, book\.source === 'teardown'\)/)
+})
+
+test('一句话卡允许别名和定位，任何全卡栏、名场面、现状或死讯都不能冒充一句话卡', () => {
+  const entry = { oneLine: '只出场三章的掌柜。', role: '配角', facts: [['别名', '老掌柜'], ['性别', '（记录里没有）']], sections: [{ label: '身世', text: '' }], now: [] }
+  assert.equal(isOneLineCharacter(entry), true)
+  assert.equal(isOneLineCharacter({ ...entry, oneLine: '' }), false)
+  assert.equal(isOneLineCharacter({ ...entry, oneLine: '（记录里没有）' }), false)
+  assert.equal(isOneLineCharacter({ ...entry, facts: [...entry.facts, ['所属', '客栈']] }), false)
+  assert.equal(isOneLineCharacter({ ...entry, sections: [{ label: '名场面', text: '第 3 章救人' }] }), false)
+  assert.equal(isOneLineCharacter({ ...entry, sections: [{ key: '身世', label: '作者改名', text: '卖茶为生' }] }), false)
+  assert.equal(isOneLineCharacter({ ...entry, now: [['处境', '被困']] }), false)
+  assert.equal(isOneLineCharacter({ ...entry, dead: true }), false)
+  assert.match(source, /const oneLineOnly = teardown && isOneLineCharacter\(entry\)/)
+  assert.match(source, /oneLineOnly && <DeskEdit as="p" className="lead"/)
+  assert.match(source, /只记一句话<\/h3><div className="small">出场 \{seen.length\} 章。出场 5 章以上或者有名场面的人才写全卡，其余的只记一句话。/)
+})
+
+test('成长与结局只改拆书显示标题，保存字段和作者自己书保留原样', () => {
+  assert.equal(characterFieldLabel('成长与结局', true), '变化')
+  assert.equal(characterFieldLabel('成长与结局', false), '成长与结局')
+  assert.equal(characterFieldLabel('身世', true), '身世')
+  assert.match(source, /EMPTY_FIELDS\.filter\(key => !field\(entry, key\)\)\.map\(key => characterFieldLabel\(key, teardown\)\)/)
+  assert.match(source, /characterFieldLabel\(section.label, teardown\)/)
+  assert.match(source, /onSave=\{saveField\(section.key \?\? section.label\)\}/)
 })
 
 test('作者编辑和草稿保护仍走真实actions，不为样张删掉置顶、锁删、关系、栏目、阶梯和候选功能', () => {

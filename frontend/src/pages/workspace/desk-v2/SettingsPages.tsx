@@ -7,14 +7,14 @@ import { CategoryPicker, LengthInput, Row, TagPicker } from '../../../components
 import { teardownAddedText, teardownAppendEntryText } from '../../../lib/teardownAppend'
 import { useSave, useWorkspace, type CategoryStyle } from '../actions'
 import {
-  chapterNodes, cn, findEntry, isLadder, nounOf, pinnedFirst, splitTitle, templateOf, valueOf,
+  chapterNodes, cn, findEntry, isLadder, nounOf, splitTitle, templateOf, valueOf,
   type VBook, type VCategory, type VEntry,
 } from '../model'
 import { AskPanel, CardTemplateEditor } from '../Workspace'
 import { useTeardownControl } from '../TeardownProgress'
-import { Clamp, More, Refs } from './shared'
+import { More, Refs } from './shared'
 import { DeskEdit } from './settingsEditing'
-import { clean, currentRead, emptyTeardownSettingsMeta, momentLines, nodes, spans, wan } from './settingsData'
+import { characterFieldLabel, clean, currentRead, emptyTeardownSettingsMeta, isOneLineCharacter, momentLines, nodes, orderedCharacters, spans, wan } from './settingsData'
 import './settingsEditing.css'
 
 export interface DeskNav {
@@ -77,7 +77,7 @@ export function DeskIntro({ book, nav }: { book: VBook; nav: DeskNav }) {
   const teardown = book.source === 'teardown'
   const data = book.teardown
   const characters = book.categories.find(category => category.name === '角色列表')?.entries ?? []
-  const cast = (teardown ? characters : [...pinnedFirst(characters), ...characters.filter(entry => !entry.pinnedAt)]).slice(0, 6)
+  const cast = orderedCharacters(characters, teardown).slice(0, 6)
   const goldfingers = book.categories.find(category => category.name === '金手指')?.entries ?? []
   const ladder = book.categories.find(category => category.name === '等级体系')?.entries[0]
   const highest = ladder?.levels?.findLast(level => level.protagonistChapter != null)
@@ -85,7 +85,6 @@ export function DeskIntro({ book, nav }: { book: VBook; nav: DeskNav }) {
   const written = chapterNodes(book.outline).filter(node => node.body?.status === 'done').length
   const last = currentRead(book)
   const upto = data?.settings?.upto
-  const merits = data?.merits?.points ?? []
   return <section className="page full" style={{ position: 'relative' }}>
     {!teardown && <div className="settings-tools"><div className="settings-buttons"><button aria-label="基本信息" title="基本信息" onClick={() => setInfo(true)}><SlidersHorizontal /></button></div></div>}
     <div className="intro-top">
@@ -107,9 +106,7 @@ export function DeskIntro({ book, nav }: { book: VBook; nav: DeskNav }) {
         {ladder && <><div style={{ marginTop: 8 }}><Ladder entry={ladder} /></div><div className="small" style={{ marginTop: 6 }}>红色是主角到过的最高一级{highest ? `（第 ${highest.protagonistChapter} 章到）` : ''}</div></>}
       </div>}
     </div>
-    {teardown ? merits.length > 0 && <><div className="label" style={{ marginTop: 22 }}>这本书好在哪<span className="n">主编照程序算好的数字写</span></div>
-      <div className="merits3">{merits.map((point, index) => <div className="merit" key={index}><span className="chip seal">{point.topic}</span><Clamp as="p" lines={7}><Refs text={point.text} /></Clamp></div>)}</div></>
-      : <><div className="label" style={{ marginTop: 22 }}>简介</div><DeskEdit as="p" className="lead" value={book.blurb} placeholder="写给读者看的那段话" spot="b" onSave={blurb => save(actions.saveBook({ blurb }))} /></>}
+    {!teardown && <><div className="label" style={{ marginTop: 22 }}>简介</div><DeskEdit as="p" className="lead" value={book.blurb} placeholder="写给读者看的那段话" spot="b" onSave={blurb => save(actions.saveBook({ blurb }))} /></>}
     {info && <BasicInfo book={book} close={() => setInfo(false)} />}
   </section>
 }
@@ -146,7 +143,7 @@ function SettingsOverview({ book, nav }: { book: VBook; nav: DeskNav }) {
   const control = useTeardownControl()
   const emptyMeta = emptyTeardownSettingsMeta(book, control?.job ?? null)
   const entries = (name: string) => book.categories.find(category => category.name === name)?.entries ?? []
-  const people = entries('角色列表'), goldfingers = entries('金手指'), ladders = entries('等级体系'), places = entries('地点列表')
+  const people = orderedCharacters(entries('角色列表'), book.source === 'teardown'), goldfingers = entries('金手指'), ladders = entries('等级体系'), places = entries('地点列表')
   const factions = entries('势力列表'), items = entries('物品功法'), secrets = entries('往事秘密'), rules = entries('特殊规则')
   const placeIds = new Set(places.map(entry => entry.id))
   const roots = places.filter(entry => !entry.parent || !placeIds.has(entry.parent))
@@ -222,29 +219,31 @@ function CharacterPage({ book, entry, nav, fresh }: { book: VBook; entry: VEntry
   const appearances = useQuery({ queryKey: ['desk-v2-appearances', book.id, entry.id], queryFn: () => get<{ chapters: number[] }>(`/books/${book.id}/teardown/appearances?character=${encodeURIComponent(entry.id)}`), enabled: teardown && actions.live && !entry.id.startsWith('draft-'), staleTime: 10000 })
   const seen = appearances.data?.chapters ?? []
   const moments = teardown ? momentLines(entry) : []
-  const empty = EMPTY_FIELDS.filter(key => !field(entry, key))
+  const empty = EMPTY_FIELDS.filter(key => !field(entry, key)).map(key => characterFieldLabel(key, teardown))
+  const oneLineOnly = teardown && isOneLineCharacter(entry)
   const last = currentRead(book)
   const now = entry.now?.map(([label, text]) => [label === '想要' ? '此刻想要' : label, text]).filter(([, text]) => clean(text)) ?? []
   const saveField = (key: string) => entry.readonly ? undefined : (text: string) => save(actions.saveEntry(entry, { fields: { [key]: text } }))
   const sections = (teardown ? [...LONG_FIELDS.map(key => entry.sections.find(section => (section.key ?? section.label) === key)).filter(section => section != null), ...entry.sections.filter(section => !LONG_FIELDS.includes(section.key ?? section.label) && (section.key ?? section.label) !== '名场面')] : entry.sections).filter(section => clean(section.text))
   const links = (entry.relations ?? []).filter(relation => findEntry(book, relation.to))
-  const hasRail = links.length > 0 || teardown && (seen.length > 0 || empty.length > 0) || !teardown && entry.appears.length > 0
+  const hasRail = links.length > 0 || teardown && (seen.length > 0 || empty.length > 0 || oneLineOnly) || !teardown && entry.appears.length > 0
   return <><section className="page" id={`entry-${entry.id}`} data-entry={entry.id} style={{ position: 'relative' }}>
     <EntryButtons entry={entry} nav={nav} edit={() => setEditing(true)} />
     <div className="kicker">角色列表</div><DeskEdit as="h1" value={entry.name} fresh={fresh} placeholder="起个名字" onSave={entry.readonly ? undefined : name => { if (name.trim()) save(actions.saveEntry(entry, { name })) }} />
     {teardown && <div className="meta">{seen.length || entry.firstAppearanceChapter ? `第一次出场 第 ${seen[0] ?? entry.firstAppearanceChapter} 章 · 已拆的各章里出场 ${seen.length} 章 · ${moments.length} 场名场面` : '还没记下出场章号'}</div>}
+    {oneLineOnly && <DeskEdit as="p" className="lead" value={entry.oneLine} onSave={entry.readonly ? undefined : oneLine => save(actions.saveEntry(entry, { oneLine }))} spot={`e|${entry.id}|@oneLine`} />}
     <div className="facts">{teardown && clean(entry.role) && <span>定位<b>{entry.role}</b></span>}{teardown ? ['所属', '性别', '年龄', '别名'].map(key => field(entry, key) ? <span key={key}>{key}<DeskEdit as="b" value={field(entry, key)} onSave={saveField(key)} /></span> : null) : entry.facts.filter(([label]) => label !== '定位').map(([label, text, , key]) => clean(text) ? <span key={key ?? label}>{label}<DeskEdit as="b" value={text} onSave={saveField(key ?? label)} /></span> : null)}</div>
     {!teardown && clean(entry.oneLine) && <DeskEdit as="p" className="lead" value={entry.oneLine} onSave={entry.readonly ? undefined : oneLine => save(actions.saveEntry(entry, { oneLine }))} spot={`e|${entry.id}|@oneLine`} />}
     {(now.length > 0 || entry.dead) && <div className="now"><div className="t">{teardown ? `此刻 · 第 ${book.teardown?.settings?.upto ?? last} 章` : '此刻 · 设定师每写完一章更新'}</div>{now.map(([label, text]) => <Fragment key={label}><span>{label}</span><b>{text}</b></Fragment>)}{entry.dead && <><span>是否活着</span><b>已死</b></>}</div>}
     <div className="rule1" />
     {moments.length > 0 && <div className="sec" style={{ marginTop: 0 }}><div className="label">名场面{teardown && <span className="n">拆书的角色卡多这一栏</span>}</div><ul className="moments">{moments.map((moment, index) => <li key={index}><span className="ch" onClick={moment.chapter ? () => nav.openNode(`c${moment.chapter}`) : undefined}>{moment.chapter ? `第 ${moment.chapter} 章` : ''}</span><p>{moment.what ?? moment.raw}{moment.shows != null && <span className="shows">立住了：{moment.shows}</span>}</p></li>)}</ul></div>}
-    {sections.length > 0 && <div className="fields" style={{ marginTop: 18 }}>{sections.map(section => <div className="f" key={section.key ?? section.label}><div className="label">{section.label}</div><DeskEdit as="p" value={section.text} refs lines={4} onSave={saveField(section.key ?? section.label)} spot={`e|${entry.id}|${section.key ?? section.label}`} />{['身世', '来历'].includes(section.key ?? section.label) && entry.secret && <a className="link" onClick={() => nav.openEntry(entry.secret!)}>另有秘密：{findEntry(book, entry.secret)?.name}</a>}{(section.key ?? section.label) === '能力' && entry.goldfinger && <a className="link" onClick={() => nav.openEntry(entry.goldfinger!)}>金手指：{findEntry(book, entry.goldfinger)?.name}</a>}</div>)}</div>}
+    {sections.length > 0 && <div className="fields" style={{ marginTop: 18 }}>{sections.map(section => <div className="f" key={section.key ?? section.label}><div className="label">{characterFieldLabel(section.label, teardown)}</div><DeskEdit as="p" value={section.text} refs lines={4} onSave={saveField(section.key ?? section.label)} spot={`e|${entry.id}|${section.key ?? section.label}`} />{['身世', '来历'].includes(section.key ?? section.label) && entry.secret && <a className="link" onClick={() => nav.openEntry(entry.secret!)}>另有秘密：{findEntry(book, entry.secret)?.name}</a>}{(section.key ?? section.label) === '能力' && entry.goldfinger && <a className="link" onClick={() => nav.openEntry(entry.goldfinger!)}>金手指：{findEntry(book, entry.goldfinger)?.name}</a>}</div>)}</div>}
     {!teardown && !entry.readonly && <div className="settings-actions"><button className="btn seal-line" onClick={() => setRelations(true)}>新增关系</button></div>}
     {editing && <EntryEditor entry={entry} close={() => setEditing(false)} relations={() => { setEditing(false); setRelations(true) }} />}{relations && <RelationEditor book={book} entry={entry} close={() => setRelations(false)} />}
   </section>{hasRail && <aside className="rail">
     {links.length > 0 && <div className="rb"><h3 onDoubleClick={() => { if (!entry.readonly) setRelations(true) }}>和别人的关系</h3><ul className="plist">{links.map(relation => <li key={relation.id ?? relation.to + relation.kind}><span className="nm" onClick={() => nav.openEntry(relation.to)}>{findEntry(book, relation.to)?.name}</span><span className="ct">{relation.sinceChapter ? `第 ${relation.sinceChapter} 章起` : ''}</span><DeskEdit as="span" className="ds" refs value={relation.text} onSave={entry.readonly ? undefined : text => save(actions.saveRelation(entry, relation, text))} /></li>)}</ul></div>}
     {teardown && seen.length > 0 && <div className="rb"><h3>出场<span className="n">已拆的各章</span></h3><div className="small">出场 {seen.length} 章：第 {spans(seen)} 章</div><div className="rhythm" style={{ height: 16, marginTop: 10 }}>{Array.from({ length: last }, (_, index) => <i key={index} data-empty={!seen.includes(index + 1) ? 'true' : undefined} style={css({ '--w': 1, minWidth: 0, borderRadius: 2, ...(!seen.includes(index + 1) ? { background: '#efe6d6', borderColor: '#efe6d6' } : {}) })} title={`第 ${index + 1} 章`} onClick={() => nav.openNode(`c${index + 1}`)} />)}</div><div className="rhythm-cap"><span>第 1 章</span><span>第 {last} 章</span></div></div>}
-    {teardown && empty.length > 0 && <div className="rb"><h3>记录里没有</h3><div className="small">{empty.join('、')}</div></div>}
+    {oneLineOnly ? <div className="rb"><h3>只记一句话</h3><div className="small">出场 {seen.length} 章。出场 5 章以上或者有名场面的人才写全卡，其余的只记一句话。</div></div> : teardown && empty.length > 0 && <div className="rb"><h3>记录里没有</h3><div className="small">{empty.join('、')}</div></div>}
     {!teardown && entry.appears.length > 0 && <div className="rb"><h3>出场</h3>{entry.appears.map(appearance => <div key={appearance.node}><a className="link" onClick={() => nav.openNode(appearance.node)}>{appearance.label}</a></div>)}</div>}
   </aside>}</>
 }
@@ -277,8 +276,9 @@ function CategoryPage({ book, category, nav, onNewEntry, onAccept }: { book: VBo
     }
     return result
   }, [category.entries])
+  const entries = category.name === '角色列表' ? orderedCharacters(category.entries, book.source === 'teardown') : category.entries
   return <section className="page"><div className="kicker">设定</div><h1>{category.name}</h1><div className="meta">{category.entries.length} 条 · {category.about}</div><div className="settings-actions">{!isLadder(category) && <button className="btn seal-line" onClick={() => setTools('columns')}>调整栏目</button>}{book.source !== 'teardown' && <button className="btn seal-line" onClick={() => setTools('draft')}>编辑部帮写</button>}{onNewEntry && <button className="btn solid" onClick={onNewEntry}>新增{nounOf(category.name)}</button>}</div><div className="rule1" />
-    {category.entries.length ? <div>{category.entries.map(entry => <div className="settings-category-entry" key={entry.id}><div className="label"><a className="link" onClick={() => nav.openEntry(entry.id)}>{entry.name || '未命名'}</a></div>{entry.oneLine && <p className="prose">{entry.oneLine}</p>}<div className="facts">{entry.facts.filter(([, text]) => clean(text)).map(([label, text]) => <span key={label}>{label}<b>{text}</b></span>)}</div>{entry.sections.filter(section => clean(section.text)).map(section => <p className="prose" key={section.key ?? section.label}><Refs text={section.text} /></p>)}</div>)}</div> : <div className="state">{book.source === 'teardown' ? '还没拆出设定。' : '还没有这一类设定，点上面的按钮新增。'}</div>}
+    {entries.length ? <div>{entries.map(entry => <div className="settings-category-entry" key={entry.id}><div className="label"><a className="link" onClick={() => nav.openEntry(entry.id)}>{entry.name || '未命名'}</a></div>{entry.oneLine && <p className="prose">{entry.oneLine}</p>}<div className="facts">{entry.facts.filter(([, text]) => clean(text)).map(([label, text]) => <span key={label}>{label}<b>{text}</b></span>)}</div>{entry.sections.filter(section => clean(section.text)).map(section => <p className="prose" key={section.key ?? section.label}><Refs text={section.text} /></p>)}</div>)}</div> : <div className="state">{book.source === 'teardown' ? '还没拆出设定。' : '还没有这一类设定，点上面的按钮新增。'}</div>}
     {tools && <Sheet close={() => setTools(null)}>{tools === 'columns' ? <CardTemplateEditor category={category} template={templateOf(book, category)} counts={counts} onClose={() => setTools(null)} /> : <AskPanel book={book} category={category} onAccept={onAccept ?? (() => undefined)} onClose={() => setTools(null)} />}</Sheet>}
   </section>
 }

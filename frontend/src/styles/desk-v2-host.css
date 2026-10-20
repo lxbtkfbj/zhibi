@@ -3,6 +3,8 @@
 .desk-v2 { line-height: normal; font-size: 16px; -webkit-font-smoothing: auto; }
 .desk-v2 :where(*,::before,::after):where(:not(.desk-legacy, .desk-legacy *)) { border-style: none; }
 .desk-v2 :where(h1,h2,h3,h4,p,ol,ul,li,small,b,strong,em,i):where(:not(.desk-legacy, .desk-legacy *)) { all: revert; box-sizing: border-box; }
+/* The sample's universal selector does not include pseudo-elements. */
+.desk-v2 .kp .steps li::before, .desk-v2 .intro2 .learn li::before { box-sizing: content-box; }
 .desk-v2.desk-zoom { height: calc(100dvh / var(--desk-zoom) / var(--desk-scale)); }
 .desk-v2 .search input { all: unset; min-width: 0; width: 100%; }
 .desk-v2 a, .desk-v2 .toc-foot { cursor: pointer; }

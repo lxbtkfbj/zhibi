@@ -3,6 +3,7 @@ import { useProfiles, useRoles } from './hooks'
 import type { BookDetail, Job } from './types'
 import type { TeardownAppendPreview, TeardownFields, TeardownPreview } from '../lib/teardownPreview'
 import { teardownModelName } from '../lib/teardownStart'
+import { hasEssence, type TeardownEssence } from '../pages/workspace/desk-v2/essenceData'
 
 export type TeardownEncoding = 'auto' | 'utf-8' | 'gb18030' | 'utf-16' | 'big5'
 
@@ -66,6 +67,10 @@ export const changeTeardownEncoding = (bookId: string, encoding: TeardownEncodin
 export const importTeardown = (bookId: string, fields: TeardownFields, include: number[], start?: { upto: number | null }) => post<BookDetail>(`/teardown/${bookId}/import`, { ...fields, include, ...(start ? { start } : {}) })
 export const startTeardown = (bookId: string, upto: number | null) => post<Job>(`/teardown/${bookId}/start`, { upto })
 export const stopTeardown = (bookId: string) => post<Job>(`/teardown/${bookId}/stop`)
+export const getTeardownEssence = async (bookId: string): Promise<TeardownEssence | null> => {
+  const { essence } = await get<{ essence: (Omit<TeardownEssence, 'upto'> & { upto: number | null }) | null }>(`/books/${bookId}/teardown/essence`)
+  return hasEssence(essence) ? essence : null
+}
 export const uploadTeardownAppend = (bookId: string, file: File, onProgress: (percent: number) => void, signal?: AbortSignal) => uploadTeardownFile<TeardownAppendPreview>(`/api/teardown/${bookId}/append`, file, onProgress, signal)
 export const getTeardownAppendPreview = (bookId: string) => get<TeardownAppendPreview>(`/teardown/${bookId}/append`)
 export const changeTeardownAppendEncoding = (bookId: string, encoding: TeardownEncoding) => post<TeardownAppendPreview>(`/teardown/${bookId}/append/encoding`, { encoding })

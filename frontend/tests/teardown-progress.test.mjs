@@ -53,6 +53,11 @@ test('运行中只用事件进度，停下/完成从目录重建，旧终态job�
   assert.equal(teardownProgressView(fixture('confirming'), null).visible, false)
 })
 
+test('精髓整理顶栏只用当前步骤，首次半成品也不冒充读原文', () => {
+  assert.equal(teardownProgressView(fixture(), job('essence', { essence: { now: '爽点分类', done: 0, total: 26 } })).text, '主编在整理精髓：爽点分类')
+  assert.equal(teardownProgressView(fixture(), job('essence', { essence: { now: '核心要点', done: 28, total: 29 } })).text, '主编在整理精髓：核心要点')
+})
+
 test('停下马上禁用且照原文显示，失败列表可展开、重试只走提供的控制入口', () => {
   const source = readFileSync(new URL('../src/pages/workspace/TeardownProgress.tsx', import.meta.url), 'utf8')
   assert.match(source, /const busy = !!control\?\.starting \|\| stopping/)

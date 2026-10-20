@@ -232,7 +232,9 @@ function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
     <BookContext.Provider value={context}>
       <PendingContext.Provider value={notes}>
       <TeardownControlProvider value={teardown ? { job: teardownJob, stopping, starting, start, stop, retry: () => start(detail.teardown?.upto ?? null), openStart: () => setStartOpen(true), error: teardownError } : null}>
-      <Workspace book={teardown ? { ...book, teardown: detail.teardown } : book} actions={actions} right={right} sideFooter={sideFooter} notice={!teardown ? <JobNotice book={detail} /> : undefined} openRef={openRef} viewingRef={viewingRef}
+      <Workspace book={teardown ? { ...book, teardown: detail.teardown } : book} actions={actions} right={right} sideFooter={sideFooter}
+        essenceFooter={teardown ? <SavesRow className={row} open={saves.open} onClick={() => setSaves(saves.open ? { open: false, id: null } : { open: true, id: null })} icon={false} /> : undefined}
+        notice={!teardown ? <JobNotice book={detail} /> : undefined} openRef={openRef} viewingRef={viewingRef}
         chat={chat} chatTools={chatTools} chatBallNote={!teardown ? <PendingBallTag count={pendingCount} onClick={() => openInbox(null)} /> : undefined}
         chatBadge={unread} openChat={openChat} writing={writing} />
       <SavesPanel open={saves.open} saveId={saves.id} onClose={closeSaves} onOpenSave={(id) => setSaves({ open: true, id })} />

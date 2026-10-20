@@ -301,13 +301,14 @@ export interface TeardownSummary {
   added?: { at: string; file: string; first: number; last: number; chapters: number }[]
   adding?: { file: string; chapters: number } | null
   settings?: { upto?: number }
-  merits?: { points: { topic: string; text: string }[]; missing?: string[]; upto?: number }
+  essence?: { upto: number | null; points: number } | null
 }
 
 export interface TeardownProgressData {
-  doing: 'queued' | 'read' | 'units' | 'volumes' | 'closing' | 'settings' | 'arcs' | 'ending' | 'waits'
+  doing: 'queued' | 'read' | 'units' | 'volumes' | 'closing' | 'settings' | 'arcs' | 'ending' | 'waits' | 'essence'
   waits?: { first: number; last: number }
   settings?: { done: number; total: number; now: string }
+  essence?: { done: number; total: number; now: string }
   reading?: [number, number] | number[] | null
   range?: [number, number] | number[]
   read: number

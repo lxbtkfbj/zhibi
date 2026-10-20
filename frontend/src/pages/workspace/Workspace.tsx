@@ -1,14 +1,19 @@
 import clsx from 'clsx'
+import { useQuery } from '@tanstack/react-query'
 import { ChevronDown, ChevronUp, Inbox, Minus, PanelRight, PictureInPicture2 } from 'lucide-react'
 import { type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import type { ChatViewing } from '../../api/types'
 import { readEditorialDock, writeEditorialDock, type EditorialDock as Dock } from '../../lib/editorialDock'
+import { getTeardownEssence } from '../../api/teardown'
 import { teardownWorkspaceActions } from '../../lib/teardownWorkspace'
 import { DeskTop, DeskDirectory } from './desk-v2/Chrome'
 import { DeskIntro, DeskSettings } from './desk-v2/SettingsPages'
 import { DeskOutline } from './desk-v2/OutlinePages'
 import { DeskManuscript } from './desk-v2/ManuscriptPages'
+import { EssenceDirectory, EssencePage, TeardownIntro } from './desk-v2/EssencePages'
+import { ESSENCE_NAMES, type EssenceKey } from './desk-v2/essenceData'
+import { DraggableBall } from './desk-v2/DraggableBall'
 import { clearTeardownEntry, readWorkspaceReadingPosition, teardownEntryTab, writeWorkspaceReadingPosition, type WorkspaceReadingPosition } from '../../lib/workspaceReadingPosition'
 import { BookContext } from '../book/context'
 import { ActionsContext, type DraftItem, type EntryChange, type RewriteMode, type RewriteOutcome, type WorkspaceActions, blankEntry, childKind, draftToEntry, useSave, useWorkspace, withFields } from './actions'
@@ -18,7 +23,7 @@ import { type WritingControl } from './writing'
 import { ColumnWidthContext, SideFooterContext, useColumnWidth, zoomOf } from './column'
 import { readText, smallButton } from './styles'
 
-export type Tab = '简介' | '设定' | '大纲' | '正文'
+export type Tab = '简介' | '精髓' | '设定' | '大纲' | '正文'
 
 const ROLE_STYLE: Record<string, string> = {
   主编: 'bg-chief text-on-role',
@@ -732,6 +737,7 @@ export interface WorkspaceProps {
   right: ReactNode
   /** 左边一栏最下面固定的一块：真书放存档、本书设置 */
   sideFooter?: ReactNode
+  essenceFooter?: ReactNode
   /** 编辑部窗口里放什么 */
   chat: ReactNode
   /** 编辑部窗口顶上再放的按钮（真书：新对话、以前的对话） */
@@ -756,9 +762,16 @@ export interface WorkspaceProps {
   start?: { tab?: Tab; node?: string; chapter?: string }
 }
 
-export function Workspace({ book: base, actions: rawActions, right, sideFooter, chat, chatTools, chatBadge, chatBallNote, openChat, notice, openRef, viewingRef, writing, start }: WorkspaceProps) {
+export function Workspace({ book: base, actions: rawActions, right, sideFooter, essenceFooter, chat, chatTools, chatBadge, chatBallNote, openChat, notice, openRef, viewingRef, writing, start }: WorkspaceProps) {
   const teardown = base.source === 'teardown'
   const actions = useMemo(() => teardownWorkspaceActions(base.source, rawActions), [base.source, rawActions])
+  const essenceQuery = useQuery({
+    queryKey: ['teardown-essence', base.id, base.teardown?.essence?.upto, base.teardown?.stage],
+    queryFn: () => getTeardownEssence(base.id), enabled: teardown && actions.live,
+    placeholderData: previous => previous,
+    refetchInterval: ['queued', 'running'].includes(base.teardown?.stage ?? '') ? 2000 : false,
+  })
+  const essence = essenceQuery.data ?? null
   const location = useLocation()
   const navigate = useNavigate()
   const entryTab = teardownEntryTab(base.source, location.state)
@@ -789,13 +802,19 @@ export function Workspace({ book: base, actions: rawActions, right, sideFooter, 
   }), [base, firstNode, start, writing, teardown])
   const [initialPosition] = useState(() => readWorkspaceReadingPosition(base, entryTab && !start ? { ...defaultPosition, tab: entryTab } : defaultPosition, { live: actions.live, manuscript: !!writing, explicitStart: !!start || entryTab !== undefined }))
   const [tab, setTab] = useState<Tab>(initialPosition.tab)
+  const [essenceKey, setEssenceKey] = useState<EssenceKey>(initialPosition.essence ?? 'overview')
   const [entry, setEntry] = useState(initialPosition.entry)
   const [fresh, setFresh] = useState('')
   const [node, setNode] = useState(initialPosition.node)
   const [freshNode, setFreshNode] = useState('')
   // 章号跟着位置走：插在第 1 章前面的新章还是 c1，要让大纲页重新来一遍
   const [nodeNonce, setNodeNonce] = useState(0)
-  const [open, setOpen] = useState(initialPosition.open)
+  const [open, setOpen] = useState(() => {
+    if (initialPosition.directoryVersion === 1) return initialPosition.open
+    const category = base.categories.find(c => c.entries.some(e => e.id === initialPosition.entry) || `cat:${c.name}` === initialPosition.entry)
+    const id = initialPosition.entry === 'world' ? 'world' : category ? `cat:${category.name}` : null
+    return id ? [...new Set([...initialPosition.open, id])] : initialPosition.open
+  })
   // 正文里看的是哪一章；home 是正文首页（开写）
   const [chapter, setChapter] = useState(initialPosition.chapter)
   const [searchWord, setSearchWord] = useState('')
@@ -809,8 +828,8 @@ export function Workspace({ book: base, actions: rawActions, right, sideFooter, 
   const pageRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
-    writeWorkspaceReadingPosition(base, { tab, entry, node, chapter, open }, defaultPosition, { live: actions.live, manuscript: !!writing })
-  }, [actions.live, base, chapter, defaultPosition, entry, node, open, tab, writing])
+    writeWorkspaceReadingPosition(base, { tab, entry, node, chapter, open, directoryVersion: 1, ...(teardown ? { essence: essenceKey } : {}) }, defaultPosition, { live: actions.live, manuscript: !!writing })
+  }, [actions.live, base, chapter, defaultPosition, entry, node, open, tab, writing, teardown, essenceKey])
 
   useEffect(() => {
     if (entryTab === undefined) return
@@ -900,6 +919,9 @@ export function Workspace({ book: base, actions: rawActions, right, sideFooter, 
     openEntry: (id) => {
       setTab('设定')
       setEntry(id)
+      const category = book.categories.find(c => c.entries.some(e => e.id === id) || `cat:${c.name}` === id)
+      const expanded = id === 'world' || id.startsWith('cat:') ? id : category ? `cat:${category.name}` : null
+      if (expanded) setOpen(list => [...new Set([...list, expanded])])
       setFresh('')
       pageRef.current?.scrollTo({ top: 0 })
     },
@@ -908,7 +930,7 @@ export function Workspace({ book: base, actions: rawActions, right, sideFooter, 
       setNode(id)
       setFreshNode('')
       const path = findNode(base.outline, id)
-      if (path) setOpen(path.filter(n => n.kind !== '章').map(n => n.id))
+      if (path) setOpen(list => [...new Set([...list, ...path.filter(n => n.kind !== '章').map(n => n.id)])])
       pageRef.current?.scrollTo({ top: 0 })
     },
     openChapter: (id) => {
@@ -938,6 +960,7 @@ export function Workspace({ book: base, actions: rawActions, right, sideFooter, 
     if (!viewingRef) return
     viewingRef.current = () => {
       if (tab === '简介') return { target_type: 'concept', target_id: base.id, label: '简介' }
+      if (tab === '精髓') return { target_type: 'concept', target_id: base.id, label: `精髓 · ${essenceKey === 'overview' ? '核心要点' : ESSENCE_NAMES[essenceKey]}` }
       if (tab === '正文') {
         const here = findNode(base.outline, chapter)?.at(-1)
         return here?.ref ? { target_type: here.ref.type, target_id: here.ref.id, label: `正文 · ${here.title.replace('　', ' ')}` } : null
@@ -962,6 +985,7 @@ export function Workspace({ book: base, actions: rawActions, right, sideFooter, 
     setDrafts((ds) => [...ds, blank])
     setTab('设定')
     setEntry(blank.id)
+    setOpen(list => [...new Set([...list, `cat:${cat.name}`])])
     setFresh(blank.id)
   }
   // 原型里编辑部写的几条收下来
@@ -1016,6 +1040,8 @@ export function Workspace({ book: base, actions: rawActions, right, sideFooter, 
   }, [tab, node, book.outline, teardown])
 
 
+  const essenceUnready = teardown && actions.live && essenceQuery.data === undefined
+  const essencePlaceholder = (full = false) => <section className={`page${full ? ' full' : ''}`}><div className="state" role={essenceQuery.error ? 'alert' : 'status'}>{essenceQuery.error ? errorText(essenceQuery.error) : '正在读这本书…'}</div></section>
   return (
     <ActionsContext.Provider value={tools}>
       <ColumnWidthContext.Provider value={column}>
@@ -1025,13 +1051,19 @@ export function Workspace({ book: base, actions: rawActions, right, sideFooter, 
         {notice}
         <div className={`body${tab === '简介' ? ' wide' : ''}`} style={dock === 'side' ? { gridTemplateColumns: tab === '简介' ? `1fr ${sideWidth}px` : `300px 1fr ${sideWidth}px` } : undefined}>
           {tab === '简介' && <aside className="toc" />}
-          {tab !== '简介' && <DeskDirectory key={tab} book={book} tab={tab} selected={tab === '设定' ? entry : tab === '正文' ? chapter : node} open={open}
+          {tab === '精髓' && <EssenceDirectory essence={essence} selected={essenceKey} onSelect={setEssenceKey} footer={essenceFooter ?? sideFooter} />}
+          {tab !== '简介' && tab !== '精髓' && <DeskDirectory key={tab} book={book} tab={tab} selected={tab === '设定' ? entry : tab === '正文' ? chapter : node} open={open}
             onSelect={tab === '设定' ? nav.openEntry : tab === '正文' ? nav.openChapter : nav.openNode}
             onToggle={id => setOpen(list => list.includes(id) ? list.filter(x => x !== id) : [...list, id])}
             footer={sideFooter} onNewEntry={newEntry} onSearchSelect={(id, word) => { nav.openChapter(id); setSearchWord(word); setSearchToken(n => n + 1) }}
             outlineTools={<div className="tools">{outlineAdd.map(item => <button type="button" className="btn seal-line" key={item.label} onClick={item.onClick}>{item.label}</button>)}</div>} />}
           <main ref={pageRef} className="desk">
-            {tab === '简介' && <DeskIntro book={book} nav={nav} />}
+            {tab === '简介' && (teardown ? essenceUnready ? essencePlaceholder(true) : <TeardownIntro book={book} essence={essence}
+              onChapter={index => nav.openNode(`c${index}`)}
+              onUnit={index => { const units: VNode[] = []; const visit = (item: VNode) => { if (item.kind === '单元' && !item.virtual) units.push(item); item.children?.forEach(visit) }; visit(book.outline); if (units[index - 1]) nav.openNode(units[index - 1].id) }}
+              onPerson={name => { const person = book.categories.flatMap(c => c.entries).find(e => e.kind === 'character' && e.name === name); if (person) nav.openEntry(person.id) }}
+              onEssence={() => { setEssenceKey('overview'); setTab('精髓') }} onAppend={() => { void navigate(`/teardown/${book.id}/append`) }} /> : <DeskIntro book={book} nav={nav} />)}
+            {tab === '精髓' && (essenceUnready ? essencePlaceholder() : <EssencePage key={essenceKey} book={book} essence={essence} selected={essenceKey} active={['queued', 'running'].includes(book.teardown?.stage ?? '')} onChapter={index => nav.openNode(`c${index}`)} />)}
             {tab === '设定' && <DeskSettings key={aliases[entry] ?? entry} book={book} selected={entry} nav={nav} fresh={fresh === entry} onNewEntry={newEntry} onAccept={accept} cardKey={id => aliases[id] ?? id} />}
             {tab === '大纲' && <DeskOutline key={`${node}:${nodeNonce}`} book={book} id={node} nav={nav} onAdd={addNode} onInsert={insertNode} onMove={moveNode} fresh={freshNode === node} writing={writing} />}
             {tab === '正文' && <DeskManuscript key={chapter} book={book} id={chapter} writing={writing} nav={nav} searchWord={searchWord} searchToken={searchToken} />}
@@ -1042,14 +1074,13 @@ export function Workspace({ book: base, actions: rawActions, right, sideFooter, 
         {dock === 'float' && <FloatingEditorial setDock={setDock} size={chatSize} tools={chatTools}>{chat}</FloatingEditorial>}
         {dock === 'ball' && chatBallNote && <div className="fixed right-24 bottom-[36px] z-40">{chatBallNote}</div>}
         {dock === 'ball' && (
-          <div role="button" tabIndex={0} onClick={() => setDock('float')} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setDock('float') } }} title="编辑部"
-            className="ball">
+          <DraggableBall onClick={() => setDock('float')}>
             编
             {!teardown && writing?.status.state === 'working' && <span aria-hidden className="absolute -inset-1 rounded-full border-2 border-chief/25 border-t-chief motion-safe:animate-spin" />}
             {chatBadge === undefined
               ? <span className="absolute top-1 right-1 size-3 rounded-full bg-seal ring-2 ring-paper" />
               : chatBadge > 0 && <span className="absolute -top-0.5 -right-0.5 flex min-w-5 items-center justify-center rounded-full bg-seal px-1 text-[11px] leading-5 text-on-role ring-2 ring-paper">{chatBadge > 99 ? '99+' : chatBadge}</span>}
-          </div>
+          </DraggableBall>
         )}
 
         <div className="desk-legacy" style={{ display: 'contents' }}><SelectionActions pageRef={pageRef} onToast={setToast} onUndo={onUndo} teardown={teardown} /></div>

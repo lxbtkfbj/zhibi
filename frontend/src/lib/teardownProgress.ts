@@ -38,6 +38,7 @@ export function teardownProgressView(book: VBook, job: Job | null) {
     else if (pending?.doing === 'ending') text = '主编在写全书结局'
     else if (pending?.doing === 'waits') text = `主编在理读者在等的事：第 ${pending.waits?.first}–${pending.waits?.last} 章`
     else if (pending?.doing === 'settings') text = '设定师在整理设定'
+    else if (pending?.doing === 'essence') text = `主编在整理精髓：${pending.essence?.now ?? ''}`
     else {
       // 两批之间 reading 可为空；不伪造尚未开始读的章号。
       const reading = pending?.reading?.length === 2 ? `第 ${pending.reading[0]}–${pending.reading[1]} 章` : '原文'

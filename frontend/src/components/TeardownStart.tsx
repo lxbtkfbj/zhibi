@@ -95,7 +95,7 @@ function StartDialog({ title, total, last, needsClosing, stage, initialUpto, onC
         <button type="button" aria-label="关上开始拆" title="关上（Esc）" disabled={busy} onClick={onClose} className="-mt-1 -mr-2 rounded-lg p-2 text-ink-3 transition-colors hover:bg-line/50 hover:text-ink disabled:opacity-40"><X className="size-5" /></button>
       </header>
       <form onSubmit={event => { event.preventDefault(); void start() }} className="scroll-thin overflow-y-auto px-7 py-6">
-        {allRead ? <><p className="text-sm leading-relaxed text-ink-2">全书 {total} 章都读过了。这次不重读原文，只把收尾补上：没归完的单元和卷、篇、全书结局、设定、读者在等的事，做好了的不重做。</p><TeardownCost /></> : <>
+        {allRead ? <><p className="text-sm leading-relaxed text-ink-2">全书 {total} 章都读过了。这次不重读原文，只把收尾补上：没归完的单元和卷、篇、全书结局、设定、读者在等的事、精髓，做好了的不重做。</p><TeardownCost /></> : <>
           {last > 0 && <p className="mb-4 text-sm text-ink-2">已经拆到第 {last} 章，一共 {total} 章。</p>}
           <TeardownOptions total={total} value={value} onChange={setValue} disabled={busy} />
         </>}

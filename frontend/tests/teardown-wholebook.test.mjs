@@ -45,7 +45,7 @@ const chrome = load('../src/pages/workspace/desk-v2/Chrome.tsx', {
   '@tanstack/react-query': query, 'react-router-dom': { Link: ({ to, children, ...props }) => React.createElement('a', { href: to, ...props }, children) },
   '../../../api/textSearch': {}, '../../../lib/teardownReading': { ...reading, readTeardownReading: () => null },
   '../../../lib/teardownProgress': { teardownProgressView }, '../../../lib/teardownStart': start,
-  '../TeardownProgress': { useTeardownControl: () => control }, '../model': model, '../actions': workspace, './shared': shared,
+  '../TeardownProgress': { useTeardownControl: () => control }, '../model': model, '../actions': workspace, './shared': shared, './settingsData': settings,
 })
 const dialog = load('../src/components/TeardownStart.tsx', {
   clsx: (...args) => args.filter(Boolean).join(' '), 'lucide-react': { X: nullComponent },
@@ -177,7 +177,7 @@ test('9.7两种对话框逐字与三个按钮条件、已有目标预填、全�
   assert.match(renderToStaticMarkup(React.createElement(dialog.StartDialog, { ...props, initialUpto: 200 })), /value="200"/)
   for (const change of [{ last: 0 }, { needsClosing: false }]) assert.doesNotMatch(renderToStaticMarkup(React.createElement(dialog.StartDialog, { ...props, ...change })), /只整理前/)
   const full = renderToStaticMarkup(React.createElement(dialog.StartDialog, { ...props, last: 300 }))
-  for (const text of ['补上整理《测试书》', '全书 300 章都读过了。这次不重读原文，只把收尾补上：没归完的单元和卷、篇、全书结局、设定、读者在等的事，做好了的不重做。', '先不整理', '开始整理', '拆书要把整本原文发给模型']) assert.ok(full.includes(text), text)
+  for (const text of ['补上整理《测试书》', '全书 300 章都读过了。这次不重读原文，只把收尾补上：没归完的单元和卷、篇、全书结局、设定、读者在等的事、精髓，做好了的不重做。', '先不整理', '开始整理', '拆书要把整本原文发给模型']) assert.ok(full.includes(text), text)
   assert.doesNotMatch(full, /拆到第几章|只整理前/)
   const source = read('../src/components/TeardownStart.tsx')
   assert.match(source, /start = async \(target = allRead \? null : upto\)/)

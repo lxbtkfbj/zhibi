@@ -1,8 +1,11 @@
 import type { VBook, VNode } from '../pages/workspace/model'
+import type { EssenceKey } from '../pages/workspace/desk-v2/essenceData'
 
 /** 仅保存本次浏览器会话的阅读位置，不包含书稿、编辑草稿或写作状态。 */
 export interface WorkspaceReadingPosition {
-  tab: '简介' | '设定' | '大纲' | '正文'
+  tab: '简介' | '精髓' | '设定' | '大纲' | '正文'
+  essence?: EssenceKey
+  directoryVersion?: 1
   entry: string
   node: string
   chapter: string
@@ -13,7 +16,8 @@ type ReadingBook = Pick<VBook, 'id' | 'categories' | 'outline'> & Pick<Partial<V
 type Options = { live: boolean; manuscript: boolean; explicitStart?: boolean }
 const memory = new Map<string, unknown>()
 const key = (bookId: string) => `zhibi:workspace-reading:${bookId}`
-const tabs: WorkspaceReadingPosition['tab'][] = ['简介', '设定', '大纲', '正文']
+const tabs: WorkspaceReadingPosition['tab'][] = ['简介', '精髓', '设定', '大纲', '正文']
+const essenceKeys = new Set(['overview', 'source', 'skeleton', 'link', 'fresh', 'longline', 'setting', 'shuang', 'scene', 'hero', 'cast', 'rhythm', 'opening'])
 
 /** 书架进简介、导入后进正文首页；仅覆盖这次进入，不改变阅读记忆。 */
 export function teardownEntryTab(source: unknown, state: unknown): WorkspaceReadingPosition['tab'] | undefined {
@@ -44,12 +48,16 @@ export function resolveWorkspaceReadingPosition(book: ReadingBook, value: unknow
   if (book.source === 'teardown') nodes.add('waits')
   const entries = new Set(['overview', 'world', ...book.categories.flatMap(category => [`cat:${category.name}`, ...category.entries.map(entry => entry.id)])])
   const tab = tabs.includes(saved.tab as WorkspaceReadingPosition['tab']) ? saved.tab as WorkspaceReadingPosition['tab'] : fallback.tab
+  const essence = book.source === 'teardown' && typeof saved.essence === 'string' && essenceKeys.has(saved.essence) ? saved.essence as EssenceKey : fallback.essence
+  const expandables = new Set([...nodes, 'world', ...book.categories.map(category => `cat:${category.name}`)])
   return {
-    tab: tab === '正文' && !manuscript ? '设定' : tab,
+    tab: tab === '精髓' && book.source !== 'teardown' ? fallback.tab === '精髓' ? '设定' : fallback.tab : tab === '正文' && !manuscript ? '设定' : tab,
+    ...(essence === undefined ? {} : { essence }),
+    ...(saved.directoryVersion === 1 ? { directoryVersion: 1 as const } : {}),
     entry: typeof saved.entry === 'string' && !saved.entry.startsWith('draft-') && entries.has(saved.entry) ? saved.entry : fallback.entry,
     node: typeof saved.node === 'string' && nodes.has(saved.node) ? saved.node : fallback.node,
     chapter: typeof saved.chapter === 'string' && (saved.chapter === 'home' || chapters.has(saved.chapter)) ? saved.chapter : fallback.chapter,
-    open: Array.isArray(saved.open) ? [...new Set(saved.open.filter((id): id is string => typeof id === 'string' && nodes.has(id)))] : [...fallback.open],
+    open: Array.isArray(saved.open) ? [...new Set(saved.open.filter((id): id is string => typeof id === 'string' && expandables.has(id)))] : [...fallback.open],
   }
 }
 

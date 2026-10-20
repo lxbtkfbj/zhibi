@@ -68,7 +68,7 @@ function characterEntry(item: LibraryItem, relations: Relationship[], names: Map
   return {
     id: item.id, kind: 'character', category: '角色列表', name: item.name, oneLine: text(item.one_line), tags: item.tags ?? [], locked: item.locked, role,
     dead: item.is_alive === false,
-    pinnedAt: item.pinned_at ?? undefined, firstAppearanceChapter: item.first_appearance_chapter, createdChapter: item.created_chapter,
+    pinnedAt: item.pinned_at ?? undefined, position: item.position, firstAppearanceChapter: item.first_appearance_chapter, createdChapter: item.created_chapter,
     facts: [['所属', text(extra['所属']), '哪个宗门、家族、势力'], ['性别', column('性别')], ['年龄', column('年龄')], ['别名', column('别名')]],
     sections,
     now: now.some(([, value]) => value) ? now : undefined,

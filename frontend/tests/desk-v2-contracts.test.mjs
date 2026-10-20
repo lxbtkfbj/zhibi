@@ -5,10 +5,31 @@ import postcss from 'postcss'
 
 const read = file => fs.readFileSync(new URL(file, import.meta.url), 'utf8')
 test('样张整段CSS只机械添加作用域，变量、声明顺序、数值与媒体规则全部相同', () => {
-  const html = read('../../docs/界面原型/装修样张.html')
-  const original = postcss.parse(html.match(/<style>([\s\S]*?)<\/style>/)[1])
+  const html = read('../../docs/界面原型/精髓样张.html')
+  const source = html.match(/<style>([\s\S]*?)<\/style>/)[1]
+  const decoration = read('../../docs/界面原型/装修样张.html').match(/<style>([\s\S]*?)<\/style>/)[1]
+  assert.ok(source.startsWith(decoration), '精髓样张以装修样张第一段 CSS 原样开头')
+  const original = postcss.parse(source)
   original.walkRules(rule => { rule.selector = rule.selectors.map(s => [':root', 'body', 'html'].includes(s) ? '.desk-v2' : '.desk-v2 ' + s).join(', ') })
   assert.equal(read('../src/styles/desk-v2.css').trim(), original.toString().trim())
+})
+test('只恢复两个新编号伪元素的UA盒模型，不改样张字号、尺寸或机械CSS', () => {
+  const selectors = ['.desk-v2 .kp .steps li::before', '.desk-v2 .intro2 .learn li::before']
+  const host = postcss.parse(read('../src/styles/desk-v2-host.css'))
+  const resets = []
+  host.walkRules(rule => {
+    if (rule.selectors.some(selector => selectors.includes(selector))) {
+      resets.push(...rule.selectors)
+      assert.deepEqual(rule.nodes.map(node => [node.prop, node.value]), [['box-sizing', 'content-box']])
+    }
+  })
+  assert.deepEqual(resets, selectors)
+  const sample = postcss.parse(read('../../docs/界面原型/精髓样张.html').match(/<style>([\s\S]*?)<\/style>/)[1])
+  const global = sample.nodes.find(node => node.type === 'rule' && node.selector === '*')
+  assert.ok(global.nodes.some(node => node.prop === 'box-sizing' && node.value === 'border-box'))
+  sample.walkRules(rule => {
+    if (rule.selector.includes('::before')) assert.ok(!rule.nodes.some(node => node.prop === 'box-sizing'))
+  })
 })
 test('缩放使用宽高共同限制的1700/800算法，页面与弹窗复用同一倍数', () => {
   const appearance = read('../src/lib/appearance.tsx')
@@ -27,7 +48,7 @@ test('新目录的搜索、置顶、折叠和全书导出保留真实入口，�
   assert.match(chrome, /searchResult\.isPending/)
   assert.match(chrome, /searchResult\.error/)
   assert.match(chrome, /onSearchSelect\(`c\$\{hit\.index\}`, q\)/)
-  assert.match(chrome, /pinnedFirst\(category\.entries\)/)
+  assert.match(chrome, /orderedCharacters\(category\.entries, teardown\)/)
   assert.match(chrome, /e\.stopPropagation\(\); onToggle\(unit\.id\)/)
   assert.match(chrome, /export\.txt/)
 })

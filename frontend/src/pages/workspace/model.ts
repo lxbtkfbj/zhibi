@@ -27,6 +27,7 @@ export interface VEntry {
   role?: string
   /** 角色置顶的时间：排在目录最上面（后置顶的在上），编辑部每写一章都带上他 */
   pinnedAt?: string
+  position?: number
   /** 角色已经死了：名字旁边标一下，不用「此刻」里写「活着」 */
   dead?: boolean
   /** 名字下面的短字段：显示名、内容、空着时的提示、存内容时认的名字（不写就是显示名） */

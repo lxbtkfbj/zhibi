@@ -103,3 +103,23 @@ test('session storage only receives whitelisted UI fields, and damaged records d
     else delete globalThis.sessionStorage
   }
 })
+
+test('拆书精髓记住节，作者书忽略精髓标签，损坏节键回到核心要点', () => {
+  const teardown = { ...book('essence-reading'), source: 'teardown' }
+  const core = { ...fallback, essence: 'overview' }
+  for (const essence of ['overview', 'source', 'cast', 'opening']) {
+    const selected = { ...position, tab: '精髓', essence }
+    writeWorkspaceReadingPosition(teardown, selected, core, live)
+    assert.deepEqual(readWorkspaceReadingPosition(teardown, core, live), selected)
+  }
+  assert.equal(resolveWorkspaceReadingPosition(teardown, { tab: '精髓', essence: '坏键' }, core, true).essence, 'overview')
+  assert.equal(resolveWorkspaceReadingPosition(book('author-no-essence'), { tab: '精髓', essence: 'cast' }, fallback, true).tab, '设定')
+})
+
+test('目录保存明确收起状态和分类展开，不把条目 id 当可展开节点', () => {
+  const current = book('category-fold')
+  const folded = { ...position, tab: '设定', directoryVersion: 1, open: [] }
+  writeWorkspaceReadingPosition(current, folded, fallback, live)
+  assert.deepEqual(readWorkspaceReadingPosition(current, fallback, live), folded)
+  assert.deepEqual(resolveWorkspaceReadingPosition(current, { ...folded, open: ['cat:角色列表', 'world', 'cat:已删', 'friend'] }, fallback, true).open, ['cat:角色列表', 'world'])
+})
