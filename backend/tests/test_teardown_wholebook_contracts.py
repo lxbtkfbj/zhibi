@@ -39,12 +39,18 @@ async def client(monkeypatch):
         ({"settings": {"upto": 2}, "waits": {"upto": 2}, "stage": "stopped"}, 2, 2, True),
         ({"settings": {"upto": 2}, "waits": {"upto": 2}, "stage": "done"}, 2, 2, True),
         (
-            {"settings": {"upto": 2}, "waits": {"upto": 2}, "stage": "done", "ending": {"upto": 2}},
+            {
+                "settings": {"upto": 2},
+                "waits": {"upto": 2},
+                "stage": "done",
+                "ending": {"upto": 2},
+                "essence": {"upto": 2},
+            },
             2,
             2,
             False,
         ),
-        ({"settings": {"upto": 2}, "waits": {"upto": 2}, "stage": "stopped"}, 2, 5, False),
+        ({"settings": {"upto": 2}, "waits": {"upto": 2}, "stage": "stopped", "essence": {"upto": 2}}, 2, 5, False),
         (
             {
                 "settings": {"upto": 2},
@@ -90,7 +96,12 @@ async def test_done_can_only_close_missing_steps_and_then_no_longer_start(client
         job = await session.get(Job, uuid.UUID(response.json()["id"]))
         assert job.params["settings_only"] is True
         book = await session.get(Book, bid)
-        book.teardown = {**book.teardown, "stage": "done", "ending": {"upto": 5, "ended": False}}
+        book.teardown = {
+            **book.teardown,
+            "stage": "done",
+            "ending": {"upto": 5, "ended": False},
+            "essence": {"upto": 5},
+        }
         if only_arc_failed:
             book.teardown["arcs"] = {}
         job.status = "succeeded"
@@ -122,6 +133,7 @@ async def test_summary_read_and_last_are_same_grouped_query_and_internal_state_h
             "ending": {"upto": 5, "ended": False, "hint": "private"},
             "waits": {"upto": 5, "total": 7, "open": 2, "at": "private"},
             "settings": {"upto": 5},
+            "essence": {"upto": 5, "inputs": {"secret": "private"}},
         }
         await session.commit()
         engine = session.bind.sync_engine

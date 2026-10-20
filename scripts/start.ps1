@@ -101,6 +101,9 @@ $procs = @{
     teardown = Start-Process uv -WorkingDirectory $backend -WindowStyle Hidden -PassThru `
         -ArgumentList 'run', 'celery', '-A', 'app.worker.celery_app', 'worker', '-P', 'solo', '-Q', 'teardown', '-n', 'teardown@%h', '-l', 'info' `
         -RedirectStandardOutput "$logDir\teardown.log" -RedirectStandardError "$logDir\teardown.err.log"
+    teardown2 = Start-Process uv -WorkingDirectory $backend -WindowStyle Hidden -PassThru `
+        -ArgumentList 'run', 'celery', '-A', 'app.worker.celery_app', 'worker', '-P', 'solo', '-Q', 'teardown', '-n', 'teardown2@%h', '-l', 'info' `
+        -RedirectStandardOutput "$logDir\teardown2.log" -RedirectStandardError "$logDir\teardown2.err.log"
     web    = Start-Process npm.cmd -WorkingDirectory (Join-Path $root 'frontend') -WindowStyle Hidden -PassThru `
         -ArgumentList 'run', 'dev', '--', '--port', "$WebPort" `
         -RedirectStandardOutput "$logDir\web.log" -RedirectStandardError "$logDir\web.err.log"

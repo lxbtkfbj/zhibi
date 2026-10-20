@@ -51,8 +51,11 @@ async def _rows(session: AsyncSession, model: Any, book_id: uuid.UUID) -> list:
 
 @router.get("/books/{book_id}/bible", response_model=BibleOut)
 async def get_bible(book: Book = Depends(get_book), session: AsyncSession = SessionDep) -> BibleOut:
+    characters = await _rows(session, Character, book.id)
+    if book.source == "teardown":
+        characters.sort(key=lambda row: row.position)
     return BibleOut(
-        characters=[CharacterOut.model_validate(r) for r in await _rows(session, Character, book.id)],
+        characters=[CharacterOut.model_validate(r) for r in characters],
         relationships=[RelationshipOut.model_validate(r) for r in await _rows(session, Relationship, book.id)],
         world_entries=[WorldEntryOut.model_validate(r) for r in await _rows(session, WorldEntry, book.id)],
         foreshadowings=[

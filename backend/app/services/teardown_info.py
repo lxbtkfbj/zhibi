@@ -14,7 +14,21 @@ def needs_closing(meta, last, total) -> bool:
         return True
     if meta.get("stage") == "done" and (meta.get("ending") or {}).get("upto") != total:
         return True
-    return bool((meta.get("arcs") or {}).get("failed"))
+    if (meta.get("arcs") or {}).get("failed"):
+        return True
+    essence = meta.get("essence") or {}
+    return not essence or (essence.get("upto") or 0) < last or bool(essence.get("failed"))
+
+
+def essence_counts(essence):
+    sections = [
+        section
+        for section in (essence.get("sections") or {}).values()
+        if section.get("points") or section.get("figures")
+    ]
+    return len(sections), sum(
+        len(section.get("points") or []) + len(section.get("figures") or []) for section in sections
+    )
 
 
 def teardown_summary(book, preview: dict | None = None, *, read: int = 0, last_read: int = 0) -> TeardownSummary | None:
@@ -25,7 +39,7 @@ def teardown_summary(book, preview: dict | None = None, *, read: int = 0, last_r
     split = data.get("split") or {}
     preview = preview or {}
     settings = data.get("settings") or {}
-    merits = data.get("merits") or {}
+    essence = data.get("essence") or {}
     ending = data.get("ending") or {}
     waits = data.get("waits") or {}
     return TeardownSummary.model_validate(
@@ -56,13 +70,7 @@ def teardown_summary(book, preview: dict | None = None, *, read: int = 0, last_r
             "stop_note": data.get("stop_note"),
             "names": data.get("names") or {},
             "settings": {"upto": settings.get("upto")} if settings else None,
-            "merits": {
-                "upto": merits.get("upto"),
-                "points": merits.get("points") or [],
-                "missing": merits.get("missing") or [],
-            }
-            if merits
-            else None,
+            "essence": {"upto": essence.get("upto"), "points": essence_counts(essence)[1]} if essence else None,
             "added": data.get("added") or [],
             "adding": {"file": preview["file"]["name"], "chapters": preview.get("chapter_count", 0)}
             if not confirming and preview.get("mode") == "append"

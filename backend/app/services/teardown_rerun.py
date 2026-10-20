@@ -12,8 +12,25 @@ from app.services import book_saves, jobs
 from app.services.library import lock_book
 from app.services.meeting import job_dict, publish
 
+ESSENCE_KEYS = (
+    "source",
+    "skeleton",
+    "link",
+    "fresh",
+    "longline",
+    "setting",
+    "shuang",
+    "scene",
+    "hero",
+    "cast",
+    "rhythm",
+    "opening",
+)
+STEPS = ("read", "units", "volumes", "settings", "merge", "tags", "unitplot", "essence", "arcs", "ending", "waits")
+STEP_CHOICES = (*STEPS, *(f"essence:{key}" for key in ESSENCE_KEYS))
 
-async def plan(session, book_id: uuid.UUID, step: str, first: int | None, last: int | None) -> dict:
+
+async def plan(session, book_id: uuid.UUID, step: str, first: int | None, last: int | None, *, force=False) -> dict:
     """只查询，不改书；调用次数是首轮预计值，修复和悬挂尾部可能增加。"""
     from app.services.teardown_runner import make_batches
 
@@ -28,14 +45,19 @@ async def plan(session, book_id: uuid.UUID, step: str, first: int | None, last: 
     if busy:
         raise HTTPException(409, "正在拆，点「停下」才能改")
     total = await session.scalar(select(func.max(Chapter.index)).where(Chapter.book_id == book_id)) or 0
-    if step not in ("read", "units", "volumes", "settings", "merits", "arcs", "ending", "waits"):
-        raise HTTPException(422, "步骤只能是 read、units、volumes、settings、merits、arcs、ending 或 waits")
+    if step not in STEP_CHOICES:
+        raise HTTPException(
+            422,
+            "步骤只能是 read、units、volumes、settings、merge、tags、unitplot、essence、essence:{键}、arcs、ending 或 waits",
+        )
     if step == "read" and (first is None or last is None):
         raise HTTPException(422, "重读要同时给 --from 和 --to")
     if step == "volumes" and (first is not None or last is not None):
         raise HTTPException(422, "归卷不接受 --from 或 --to")
-    if step in ("settings", "merits") and (first is not None or last is not None):
-        raise HTTPException(422, "整理设定和好在哪不接受 --from 或 --to")
+    if (step in ("settings", "merge", "tags", "unitplot", "essence") or step.startswith("essence:")) and (
+        first is not None or last is not None
+    ):
+        raise HTTPException(422, "整理设定、合并同一个人、爽点分类、逐单元拆剧情和整理精髓不接受 --from 或 --to")
     if step in ("arcs", "ending", "waits") and (first is not None or last is not None):
         raise HTTPException(422, "归篇、全书结局和读者在等的事不接受 --from 或 --to")
     if step == "units" and last is not None:
@@ -63,10 +85,18 @@ async def plan(session, book_id: uuid.UUID, step: str, first: int | None, last: 
         ):
             raise HTTPException(422, "还没拆到最后一章，写不了结局")
         calls = len(wait_batches(chapters)) if step == "waits" else 1
-    elif step in ("settings", "merits"):
+    elif step == "settings":
         from app.services.teardown_settings import estimate_calls
 
-        calls = await estimate_calls(session, book, merits_only=step == "merits")
+        calls = await estimate_calls(session, book)
+    elif step == "merge":
+        from app.services.teardown_merge import estimate_calls
+
+        calls = await estimate_calls(session, book, force=force)
+    elif step in ("tags", "unitplot", "essence") or step.startswith("essence:"):
+        from app.services.teardown_essence import estimate_calls
+
+        calls = await estimate_calls(session, book, step=step, force=force)
     elif step == "read":
         rows = list(
             await session.scalars(
@@ -102,7 +132,7 @@ async def plan(session, book_id: uuid.UUID, step: str, first: int | None, last: 
 
 async def prepare(session, book_id, step, first, last, *, force=False) -> Job:
     await lock_book(session, book_id)
-    await plan(session, book_id, step, first, last)
+    await plan(session, book_id, step, first, last, force=force)
     book = await session.get(Book, book_id, populate_existing=True)
     previous = dict(book.teardown or {})
     job = Job(
@@ -160,10 +190,24 @@ async def run_rerun(job_id, sm, redis, router):
                 await collect_ending(runner, force=params.get("force", False))
             else:
                 await collect_waits(runner, force=True)
+        elif step == "merge":
+            from app.services.teardown_merge import collect_merge
+
+            await collect_merge(runner, force=params.get("force", False))
+        elif step in ("tags", "unitplot", "essence") or step.startswith("essence:"):
+            from app.services.teardown_essence import collect_essence, collect_tags, collect_unitplot
+
+            force = params.get("force", False)
+            if step == "tags":
+                await collect_tags(runner, force=force)
+            elif step == "unitplot":
+                await collect_unitplot(runner, force=force)
+            else:
+                await collect_essence(runner, force=force, only=step.partition(":")[2] or None)
         else:
             from app.services.teardown_settings import collect_settings
 
-            await collect_settings(runner, force=True, merits_only=step == "merits")
+            await collect_settings(runner, force=params.get("force", False))
         async with sm() as session:
             await book_saves.checkpoint(session, book_id, "system", f"重跑：{step}", force=True)
         status, error = "succeeded", ""

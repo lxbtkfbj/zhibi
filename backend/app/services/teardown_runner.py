@@ -112,6 +112,7 @@ class Runner:
         self.last_refresh: float | None = None
         self.tried_units: set[tuple[int, int]] = set()
         self.tried_volumes: set[tuple[int, int]] = set()
+        self.tried_waits: set[tuple[int, int]] = set()
         self.calls: list[dict] = []
         self.retry_failed_only = False
         self.retry_previous: dict | None = None
@@ -215,8 +216,8 @@ class Runner:
         user = render(template, **values)
         return await self.call_user(schema, user, purpose)
 
-    async def call_user(self, schema, user: str, purpose: str):
-        system = render("persona_teardown", rules=render("rules"))
+    async def call_user(self, schema, user: str, purpose: str, *, system: str | None = None):
+        system = system if system is not None else render("persona_teardown", rules=render("rules"))
         started = time.monotonic()
         try:
             result = await self.router.structured(
@@ -661,6 +662,16 @@ class Runner:
                     if await self.group_once(final=self.reading_done):
                         continue
                     break
+                if not self.reading_done and not await self.should_stop():
+                    from app.services.teardown_closing import collect_waits
+
+                    try:
+                        await collect_waits(self, full_only=True, attempted=self.tried_waits)
+                    except JobCancelled:
+                        return
+                    except Exception:
+                        # 这段本轮不再试；不妨碍读原文，收尾从已落盘的 upto 接着记。
+                        log.exception("拆书 %s 边读边记读者在等的事未完成", self.book_id)
                 if self.reading_done:
                     return
         except TeardownStopped as exc:
@@ -754,11 +765,13 @@ class Runner:
             note = self.retry_previous.get("stop_note") or note
         settings_result = None
         settings_error = ""
-        arcs_result = ending_result = waits_result = None
+        arcs_result = ending_result = waits_result = essence_result = None
         arcs_failed = False
+        essence_failed = False
         closing_errors = []
         if not author_stop and reason in (None, "upto"):
             from app.services.teardown_closing import collect_arcs, collect_ending, collect_waits
+            from app.services.teardown_essence import collect_essence
             from app.services.teardown_settings import collect_settings
 
             for name, collect in (
@@ -766,6 +779,7 @@ class Runner:
                 ("写全书结局", lambda: collect_ending(self)),
                 ("整理设定", lambda: collect_settings(self)),
                 ("整理读者在等的事", lambda: collect_waits(self)),
+                ("整理精髓", lambda: collect_essence(self)),
             ):
                 if author_stop or (name == "写全书结局" and reason is not None):
                     continue
@@ -777,8 +791,10 @@ class Runner:
                         ending_result = result
                     elif name == "整理设定":
                         settings_result = result
-                    else:
+                    elif name == "整理读者在等的事":
                         waits_result = result
+                    else:
+                        essence_result = result
                 except JobCancelled:
                     author_stop = True
                 except Exception as exc:
@@ -788,6 +804,8 @@ class Runner:
                     if name == "整理设定":
                         settings_result = getattr(exc, "result", None)
                         settings_error = closing_errors[-1]
+                    if name == "整理精髓":
+                        essence_failed = True
                     log.exception("拆书 %s %s未完成", self.book_id, name)
             if await self.cancelled():
                 author_stop = True
@@ -811,6 +829,7 @@ class Runner:
                 "stop_reason": reason,
                 "stop_note": note,
                 **({"arcs": {**(book.teardown.get("arcs") or {}), "failed": True}} if arcs_failed else {}),
+                **({"essence": {**(book.teardown.get("essence") or {}), "failed": True}} if essence_failed else {}),
             }
             await session.commit()
             await book_saves.checkpoint(
@@ -826,8 +845,7 @@ class Runner:
         if settings_result is not None and not author_stop:
             if not settings_error:
                 message += (
-                    f"设定也整理好了：{settings_result['characters']} 张角色卡、"
-                    f"{settings_result['entries']} 条设定，简介页有「这本书好在哪」。"
+                    f"设定也整理好了：{settings_result['characters']} 张角色卡、{settings_result['entries']} 条设定。"
                 )
             skipped = settings_result.get("skipped", [])
             if skipped:
@@ -848,6 +866,11 @@ class Runner:
                 message += (
                     f"读者在等的事整理到第 {waits_result['upto']} 章：一共 {waits_result['total']} 件，"
                     f"还吊着 {waits_result['open']} 件。"
+                )
+            if essence_result is not None:
+                message += (
+                    f"整理了精髓：{essence_result['sections']} 节、{essence_result['points']} 条知识点，"
+                    "在「精髓」那一页。"
                 )
         if closing_error and stage == "done":
             message += closing_error

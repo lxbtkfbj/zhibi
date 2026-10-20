@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import app  # noqa: E402,F401 Windows psycopg 事件循环策略
 from app.db import make_engine, make_sessionmaker  # noqa: E402
 from app.services.job_runner import execute_job  # noqa: E402
-from app.services.teardown_rerun import plan, prepare  # noqa: E402
+from app.services.teardown_rerun import STEP_CHOICES, plan, prepare  # noqa: E402
 
 
 async def main(args):
@@ -19,7 +19,7 @@ async def main(args):
     sm = make_sessionmaker(engine)
     try:
         async with sm() as session:
-            info = await plan(session, args.book, args.step, args.first, args.last)
+            info = await plan(session, args.book, args.step, args.first, args.last, force=args.force)
         print(f"《{info['title']}》重跑 {args.step}，预计首轮调用 {info['calls']} 次模型。")
         print("格式修复、限流重试、未收尾的单元或卷会增加实际次数；只运行所选步骤。")
         if await asyncio.to_thread(input, "继续吗（输入「继续」）：") != "继续":
@@ -42,11 +42,11 @@ async def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="单独重跑拆书的一步（使用当前环境的数据库和拆书模型）")
-    parser.add_argument("step", choices=("read", "units", "volumes", "settings", "merits", "arcs", "ending", "waits"))
+    parser.add_argument("step", choices=STEP_CHOICES)
     parser.add_argument("--book", type=uuid.UUID, required=True)
     parser.add_argument("--from", dest="first", type=int)
     parser.add_argument("--to", dest="last", type=int)
-    parser.add_argument("--force", action="store_true", help="输入没变也重新调用模型（篇、全书结局）")
+    parser.add_argument("--force", action="store_true", help="输入没变也重新调用模型")
     try:
         asyncio.run(main(parser.parse_args()))
     except Exception as exc:  # noqa: BLE001 命令行只给出一句原因，不吐连接参数或密钥

@@ -174,8 +174,8 @@ class StubRunner:
     async def progress(self, doing, **kwargs):
         self.progresses.append({"doing": doing, **deepcopy(kwargs)})
 
-    async def call_user(self, schema, user, purpose):
-        self.calls.append({"schema": schema, "user": user, "purpose": purpose})
+    async def call_user(self, schema, user, purpose, *, system=None):
+        self.calls.append({"schema": schema, "user": user, "purpose": purpose, "system": system})
         self.active += 1
         self.maximum = max(self.maximum, self.active)
         try:
@@ -190,8 +190,6 @@ class StubRunner:
             if schema == s.TeardownCard:
                 name = user.split("【这个人】")[1].split("（也叫")[0]
                 return card(name)
-            if schema == s.TeardownMerits:
-                return s.TeardownMerits(points=[s.TeardownPoint(topic="开头", text="第 1 章立住主角。")])
             return schema()
         finally:
             self.active -= 1
@@ -244,7 +242,7 @@ async def test_collect_names_collision_relationships_layout_and_incremental(sess
     runner = StubRunner(sessionmaker, book_id, {s.TeardownCard: cards})
     result = await collect_settings(runner)
     assert result["characters"] == 2
-    assert len(runner.calls) == 3 and runner.maximum <= 4
+    assert len(runner.calls) == 3 and runner.maximum <= 8
     async with sessionmaker() as session:
         book = await session.get(Book, book_id)
         rows = list(await session.scalars(select(Character).where(Character.book_id == book_id)))
@@ -263,15 +261,14 @@ async def test_collect_names_collision_relationships_layout_and_incremental(sess
         versions = list(await session.scalars(select(SettingVersion).where(SettingVersion.book_id == book_id)))
         assert len(versions) == 2 and all(v.source == "teardown" and v.note == "拆书整理设定" for v in versions)
         for call in runner.calls:
-            key = (
-                "merits"
-                if call["schema"] == s.TeardownMerits
-                else "card:" + ("红发少女" if "【这个人】红发少女" in call["user"] else "朋友")
-            )
+            if call["schema"] == s.TeardownMerge:
+                assert book.teardown["merges"]["inputs"]
+                continue
+            key = "card:" + ("红发少女" if "【这个人】红发少女" in call["user"] else "朋友")
             assert book.teardown["settings"]["inputs"][key] == text_hash(call["user"])
     runner.calls.clear()
     await collect_settings(runner)
-    assert runner.calls == []
+    assert [call["schema"] for call in runner.calls] == [s.TeardownMerge]
 
 
 async def test_author_changed_rows_simple_upgrade_and_partial_failures(sessionmaker):
@@ -308,15 +305,15 @@ async def test_author_changed_rows_simple_upgrade_and_partial_failures(sessionma
         rows = list(await session.scalars(select(Character).where(Character.book_id == book_id)))
         assert {row.name: row.id for row in rows} == first_ids
         assert next(row for row in rows if row.name == "乙").one_line == "作者手改"
-    runner.responses[s.TeardownMerits] = ValueError("模型失败")
+    runner.responses[s.TeardownCard] = ValueError("模型失败")
     with pytest.raises(SettingsIncomplete) as failed:
         await collect_settings(runner, force=True)
     assert failed.value.result["characters"] == 2
-    assert "这本书好在哪" in str(failed.value)
-    runner.responses.pop(s.TeardownMerits)
+    assert "角色卡" in str(failed.value)
+    runner.responses.pop(s.TeardownCard)
     runner.calls.clear()
     await collect_settings(runner)
-    assert [call["schema"] for call in runner.calls] == [s.TeardownMerits]
+    assert [call["schema"] for call in runner.calls] == [s.TeardownCard, s.TeardownCard]
 
 
 async def test_world_writing_tree_protection_factions_after_cards_and_estimate(sessionmaker):
@@ -392,8 +389,8 @@ async def test_world_writing_tree_protection_factions_after_cards_and_estimate(s
     result = await collect_settings(runner, force=True)
     assert "城外" in result["skipped"]
     runner.calls.clear()
-    await collect_settings(runner, merits_only=True)
-    assert [call["schema"] for call in runner.calls] == [s.TeardownMerits]
+    await collect_settings(runner)
+    assert runner.calls == []
     runner.cancel = True
     with pytest.raises(JobCancelled):
         await collect_settings(runner)
@@ -531,7 +528,7 @@ async def test_card_renamed_person_new_read_without_was_updates_original_key_and
         assert last.teardown["read"]["people"][0]["name"] == "茉莉"
 
 
-async def test_conflicting_card_name_missing_is_persisted_across_skipped_calls_and_merits_only(sessionmaker):
+async def test_conflicting_card_name_missing_is_persisted_across_skipped_calls(sessionmaker):
     book_id = await setup_book(sessionmaker, [read(i, [person("甲"), person("乙")]) for i in range(1, 6)])
 
     def cards(user):
@@ -546,7 +543,7 @@ async def test_conflicting_card_name_missing_is_persisted_across_skipped_calls_a
     runner.calls.clear()
     await collect_settings(runner)
     assert runner.calls == []
-    await collect_settings(runner, merits_only=True)
+    await collect_settings(runner)
     async with sessionmaker() as session:
         book = await session.get(Book, book_id)
         state = book.teardown["settings"]
@@ -562,20 +559,22 @@ async def test_collect_cancel_joins_all_siblings_before_cancel_flag_can_be_clear
     class CancellingRunner(StubRunner):
         def __init__(self):
             super().__init__(sessionmaker, book_id)
-            self.four_started = asyncio.Event()
+            self.eight_started = asyncio.Event()
             self.late_release = asyncio.Event()
             self.children = []
             self.finished = set()
 
-        async def call_user(self, schema, user, purpose):
-            call_index = len(self.calls)
-            self.calls.append({"schema": schema, "user": user, "purpose": purpose})
+        async def call_user(self, schema, user, purpose, *, system=None):
+            if schema == s.TeardownMerge:
+                return await super().call_user(schema, user, purpose, system=system)
+            call_index = len(self.calls) - 1
+            self.calls.append({"schema": schema, "user": user, "purpose": purpose, "system": system})
             self.children.append(asyncio.current_task())
-            if len(self.calls) == 4:
-                self.four_started.set()
+            if len(self.calls) == 9:
+                self.eight_started.set()
             try:
                 if call_index == 0:
-                    await self.four_started.wait()
+                    await self.eight_started.wait()
                     self.cancel = True
                 else:
                     await self.late_release.wait()
@@ -587,13 +586,13 @@ async def test_collect_cancel_joins_all_siblings_before_cancel_flag_can_be_clear
     with pytest.raises(JobCancelled):
         await asyncio.wait_for(collect_settings(runner), timeout=5)
     # 模拟 Runner.finish 清 Redis cancel_key：collect 返回之前必须已回收所有调用。
-    assert len(runner.calls) == 4
-    assert len(runner.finished) == 4
+    assert len(runner.calls) == 9
+    assert len(runner.finished) == 8
     assert all(task.done() for task in runner.children)
     runner.cancel = False
     runner.late_release.set()
     await asyncio.sleep(0.02)
-    assert len(runner.calls) == 4
+    assert len(runner.calls) == 9
     assert all(task.done() for task in runner.children)
     async with sessionmaker() as session:
         assert await session.scalar(select(Character.id).where(Character.book_id == book_id)) is None

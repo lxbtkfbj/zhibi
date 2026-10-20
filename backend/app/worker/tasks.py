@@ -10,7 +10,7 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.db import make_engine, make_sessionmaker
 from app.models import Job
-from app.services.job_runner import GRAPHS, execute_job, lock_key
+from app.services.job_runner import GRAPHS, LOCK_TIMEOUT_S, execute_job, lock_key
 from app.worker.celery_app import celery_app
 
 log = logging.getLogger(__name__)
@@ -80,10 +80,72 @@ async def _orphaned_jobs(kinds: tuple[str, ...] | None = None) -> list[str]:
                     select(Job.id).where(Job.status == "running", Job.kind.in_(kinds or tuple(GRAPHS)))
                 )
             ).all()
-        return [str(job_id) for job_id in rows if not await redis.exists(lock_key(job_id))]
+        orphaned = RecoveryJobs()
+        for job_id in rows:
+            if await redis.exists(lock_key(job_id)):
+                continue
+            if kinds != ("teardown",):
+                orphaned.append(str(job_id))
+                continue
+            # 同时启动的两个 worker 不能各自投递同一个断活；执行仍由带心跳的任务锁互斥。
+            # claim 有界过期，投递前崩溃不会留下永久不能恢复的标记。
+            token = uuid.uuid4().hex
+            if await redis.set(f"zhibi:recover:{job_id}", token, nx=True, ex=LOCK_TIMEOUT_S):
+                orphaned.append(str(job_id))
+                orphaned.claims[str(job_id)] = token
+            else:
+                orphaned.retry = True
+        return orphaned
     finally:
         await redis.aclose()
         await engine.dispose()
+
+
+class RecoveryJobs(list):
+    """保持列表接口，同时带回本进程的恢复租约及需要延后重扫的标记。"""
+
+    def __init__(self):
+        super().__init__()
+        self.claims: dict[str, str] = {}
+        self.retry = False
+
+
+async def _release_recovery_claim(job_id: str, token: str) -> None:
+    redis = Redis.from_url(get_settings().redis_url, decode_responses=True)
+    try:
+        await redis.eval(
+            "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+            1,
+            f"zhibi:recover:{job_id}",
+            token,
+        )
+    finally:
+        await redis.aclose()
+
+
+async def _dispatch_orphaned_teardowns() -> bool:
+    jobs = await _orphaned_jobs(("teardown",))
+    retry = getattr(jobs, "retry", False)
+    for job_id in jobs:
+        try:
+            log.info("恢复中断的拆书任务 %s（按章记录继续）", job_id)
+            run_teardown.apply_async(args=[job_id], queue="teardown")
+        except Exception:
+            token = getattr(jobs, "claims", {}).get(job_id)
+            if token:
+                await _release_recovery_claim(job_id, token)
+            retry = True
+            log.exception("投递恢复的拆书任务 %s 失败，稍后再试", job_id)
+    return retry
+
+
+def _recover_teardown_jobs(sender) -> None:
+    # Consumer timer 可能在自己的线程回调；不能跨线程借正在跑任务的 worker loop。
+    retry = asyncio.run(_dispatch_orphaned_teardowns())
+    timer = getattr(sender, "timer", None)
+    if retry and timer is not None:
+        # A 进程领取后、投递前崩溃，B 会在租约过期后重扫，而非等作者重启。
+        timer.call_after(LOCK_TIMEOUT_S + 1, _recover_teardown_jobs, args=(sender,))
 
 
 @worker_ready.connect
@@ -99,6 +161,4 @@ def recover_orphaned_jobs(sender=None, **_: object) -> None:
             log.info("恢复中断的写作任务 %s（从检查点继续）", job_id)
             run_job.delay(job_id, None)
     if "teardown" in queues:
-        for job_id in _get_worker_loop().run_until_complete(_orphaned_jobs(("teardown",))):
-            log.info("恢复中断的拆书任务 %s（按章记录继续）", job_id)
-            run_teardown.apply_async(args=[job_id], queue="teardown")
+        _recover_teardown_jobs(sender)

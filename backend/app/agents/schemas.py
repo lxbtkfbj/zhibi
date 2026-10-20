@@ -1310,3 +1310,73 @@ class TeardownWaitLedger(BaseModel):
     hinted: list[TeardownWaitHint] = Field(default_factory=list, description="又提起、还没了结的")
     resolved: list[TeardownWaitDone] = Field(default_factory=list, description="了结了的")
 # fmt: on
+
+
+# fmt: off
+class TeardownMergeGroup(BaseModel):
+    names: list[str]
+    keep: str
+    why: str = Field(description="第几章怎么看出来是同一个人，40 字以内")
+
+class TeardownMerge(BaseModel):
+    groups: list[TeardownMergeGroup] = Field(default_factory=list)
+
+class TeardownTag(BaseModel):
+    index: int
+    tags: list[str] = Field(description="1-3 个爽点类别，最主要的在前")
+    crowd: str = Field("", description="被谁的反应放大，没有空着")
+
+class TeardownTags(BaseModel):
+    chapters: list[TeardownTag]
+
+class TeardownUnitPlot(BaseModel):
+    n: int
+    trigger_type: Literal["前事的后果", "早先埋下的事发作", "换了新地方新局面", "有人找上门", "主角自己要做", "意外撞上"]
+    trigger: str = Field(description="具体是哪件事引出来的，40 字以内")
+    shape: list[str] = Field(description="起承转合 4-6 步，每步 20 字以内")
+    payoff: str = Field(description="「哪一种：哪一下」，40 字以内")
+    new: list[str] = Field(default_factory=list)
+    changed: list[str] = Field(default_factory=list)
+    stakes: Literal["更大", "差不多", "更小"]
+    stakes_note: str = ""
+    hook_out: str = ""
+    seeds: str = ""
+
+class TeardownUnitPlots(BaseModel):
+    units: list[TeardownUnitPlot]
+
+class EssencePoint(BaseModel):
+    title: str = Field(description="「招式名：一句话说清这一招」，30 字以内，不写人名事件")
+    steps: list[str] = Field(description="怎么用，2-5 步，每步 25 字以内，能照着做的动作")
+    evidence: str = Field(description="这本书里的证据：用了几次＋两三个例子，80 字以内")
+    note: str = Field("", description="什么时候用、要注意什么，40 字以内，没有空着")
+    chapters: list[int] = Field(description="证据章号，从小到大，3-8 个")
+
+class EssenceSection(BaseModel):
+    points: list[EssencePoint]
+    missing: list[str] = Field(default_factory=list, description="想写却缺记录、看不出来的")
+
+class EssenceFigure(BaseModel):
+    name: str
+    archetype: str = Field(description="人设模板，网文读者常说的叫法，2-8 个字")
+    build: str = Field(description="作者用哪几招把这个人设立起来，80 字以内")
+    role: str = Field(description="在剧情里起什么作用，60 字以内")
+    arc: str = Field("", description="自己或者和主角的关系怎么变，没变写空")
+    chapters: list[int]
+
+class EssenceCast(BaseModel):
+    figures: list[EssenceFigure]
+    points: list[EssencePoint]
+    missing: list[str] = Field(default_factory=list)
+
+class EssenceSectionChecked(EssenceSection):
+    fixes: list[str] = Field(default_factory=list, description="改了什么，一句一条；没改空着")
+
+class EssenceCastChecked(EssenceCast):
+    fixes: list[str] = Field(default_factory=list, description="改了什么，一句一条；没改空着")
+
+class EssenceOverview(BaseModel):
+    genre: str = Field(description="一句话：这是一本什么书、读者追它主要图什么，40 字以内")
+    engine: str = Field(description="一句话：这本书靠什么让人一直追下去，60 字以内")
+    points: list[EssencePoint]
+# fmt: on

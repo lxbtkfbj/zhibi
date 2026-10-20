@@ -155,6 +155,7 @@ class PlotUnit(UUIDPk, Timestamps, Base):
     status: Mapped[str] = mapped_column(String(20), default="planned")
     # 单元写完后设定师写的单元回顾
     recap: Mapped[str] = mapped_column(Text, default="")
+    teardown: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
 
     volume: Mapped[Volume] = relationship(back_populates="units")
     chapters: Mapped[list["Chapter"]] = relationship(order_by="Chapter.index", viewonly=True)

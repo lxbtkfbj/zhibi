@@ -1306,7 +1306,7 @@ async def respond(schema: type[BaseModel], system: str, user: str) -> BaseModel:
     from app.llm import demo_setup, demo_teardown
 
     if schema in demo_teardown.SCHEMAS:
-        return demo_teardown.respond(schema, user)
+        return demo_teardown.respond(schema, user, system)
 
     handlers = {
         s.TeardownRead: lambda: _teardown_read(user),

@@ -83,11 +83,8 @@ async def test_settings_only_does_not_read_and_groups_before_collecting(sessionm
         book = await session.get(Book, bid)
         assert job.status == "succeeded" and book.teardown["stop_reason"] == "upto"
         messages = list(await session.scalars(select(MeetingMessage).where(MeetingMessage.job_id == jid)))
-        assert (
-            "设定也整理好了：2 张角色卡、3 条设定，简介页有「这本书好在哪」。小甲 有新内容，你改过的没动。"
-            in messages[-1].content
-        )
-        assert messages[-1].content.endswith("读者在等的事整理到第 5 章：一共 0 件，还吊着 0 件。")
+        assert "设定也整理好了：2 张角色卡、3 条设定。小甲 有新内容，你改过的没动。" in messages[-1].content
+        assert "读者在等的事整理到第 5 章：一共 0 件，还吊着 0 件。整理了精髓：" in messages[-1].content
         chapters = list(await session.scalars(select(Chapter).where(Chapter.book_id == bid, Chapter.index > 5)))
         assert all("read_version" not in chapter.teardown for chapter in chapters)
 
@@ -134,7 +131,7 @@ async def test_author_stop_during_settings_uses_formal_stop_note(sessionmaker, r
         assert book.teardown["stop_note"] == "已手动停下，停在第 8 章。"
 
 
-@pytest.mark.parametrize("step", ["settings", "merits"])
+@pytest.mark.parametrize("step", ["settings"])
 async def test_rerun_new_steps_estimate_force_checkpoint(sessionmaker, redis, monkeypatch, step):
     bid = await seed(sessionmaker, stage="stopped", read=3)
     estimate = AsyncMock(return_value=7 if step == "settings" else 1)
@@ -144,10 +141,10 @@ async def test_rerun_new_steps_estimate_force_checkpoint(sessionmaker, redis, mo
     async with sessionmaker() as session:
         info = await plan(session, bid, step, None, None)
         assert info["calls"] == (7 if step == "settings" else 1)
-        job = await prepare(session, bid, step, None, None)
+        job = await prepare(session, bid, step, None, None, force=True)
         jid = job.id
     await run_rerun(jid, sessionmaker, redis, DemoRouter())
-    assert collect.await_args.kwargs == {"force": True, "merits_only": step == "merits"}
+    assert collect.await_args.kwargs == {"force": True}
     async with sessionmaker() as session:
         assert (await session.get(Job, jid)).status == "succeeded"
         with pytest.raises(Exception) as exc:
@@ -155,7 +152,7 @@ async def test_rerun_new_steps_estimate_force_checkpoint(sessionmaker, redis, mo
         assert getattr(exc.value, "status_code", None) == 422
 
 
-@pytest.mark.parametrize("step", ["settings", "merits"])
+@pytest.mark.parametrize("step", ["settings"])
 @pytest.mark.parametrize("stage", ["stopped", "done"])
 async def test_cancelled_settings_rerun_keeps_committed_metadata_and_original_stage(
     sessionmaker, redis, monkeypatch, step, stage
@@ -166,7 +163,7 @@ async def test_cancelled_settings_rerun_keeps_committed_metadata_and_original_st
         book = await session.get(Book, bid)
         book.teardown = {**book.teardown, "stop_note": "原有说明"}
         await session.commit()
-        job = await prepare(session, bid, step, None, None)
+        job = await prepare(session, bid, step, None, None, force=True)
         jid = job.id
     marker = {
         "settings": {
@@ -179,8 +176,8 @@ async def test_cancelled_settings_rerun_keeps_committed_metadata_and_original_st
         "merits": {"upto": 3, "points": [{"topic": "开头", "text": "第 1 章的已落盘结果"}], "missing": []},
     }
 
-    async def partial_collect(runner, *, force, merits_only):
-        assert force is True and merits_only is (step == "merits")
+    async def partial_collect(runner, *, force):
+        assert force is True
         async with sessionmaker() as session:
             book = await session.get(Book, bid)
             book.teardown = {**book.teardown, **marker}

@@ -1,4 +1,4 @@
-"""七类设定的选材、逐字材料、章号和栏目，以及程序计算的 merits 事实。"""
+"""七类设定的选材、逐字材料、章号和栏目。"""
 
 import re
 from pathlib import Path
@@ -9,8 +9,6 @@ from sqlalchemy import event, select
 from app.agents import schemas as s
 from app.models import Book, Chapter, WorldEntry
 from app.prompts import default_content
-from app.services.teardown_facts import build_facts
-from app.services.teardown_roster import Roster
 from app.services.teardown_settings import SettingsWriter
 from app.services.teardown_world import (
     KIND_RULES,
@@ -368,125 +366,5 @@ def test_place_tree_alias_unknown_and_cycles():
     assert parents["entry:地点列表:甲"] is None or parents["entry:地点列表:乙"] is None
 
 
-def test_merits_facts_exact_format_program_counts_names_and_no_out_of_scope():
-    reads = [
-        read(
-            1,
-            summary="主角被逐",
-            hook="悬念：出路",
-            feel="憋屈",
-            people=[{"name": "旧名", "shown": "少年", "change": "失势"}],
-            waits=[{"action": "立下", "what": "复仇"}],
-            tropes=["退婚", "退婚"],
-            moments=[{"who": "旧名", "what": "立誓", "shows": "不服"}],
-        ),
-        read(
-            2,
-            hook="期待：反击",
-            feel="憋屈",
-            people=[{"name": "旧名", "shown": "少年", "change": "获珠"}],
-            things=[{"kind": "金手指", "name": "天毒珠"}],
-            tropes=["退婚"],
-        ),
-        read(
-            3,
-            hook="平收",
-            feel="大爽",
-            cool_point="打脸：反击",
-            people=[{"name": "旧名", "shown": "少年", "change": "扬眉"}],
-            waits=[{"action": "兑现", "what": "反击"}],
-            moments=[{"who": "旧名", "what": "反击", "shows": "勇气"}],
-        ),
-        read(4, feel="平", things=[{"kind": "金手指", "name": "范围外"}]),
-    ]
-    roster = Roster()
-    roster.add(reads)
-    facts = build_facts(
-        reads,
-        [{"first": 1, "last": 3, "title": "退婚"}],
-        [{"index": 1, "first": 1, "last": 4, "title": "还没收尾"}],
-        roster,
-        "旧名",
-        {"旧名": "正式名"},
-        3,
-    )
-    assert facts == (
-        "读到第 3 章，共 3 章。\n主角：正式名。\n第 1 章摘要：主角被逐\n"
-        "前三章的结尾钩子：第 1 章「悬念：出路」；第 2 章「期待：反击」；第 3 章「平收」\n"
-        "金手指第一次出现：第 2 章「天毒珠」。\n第一次爽：第 3 章，看点「打脸：反击」。\n"
-        "读者感觉（模型判的）：憋屈 2 章，平 0 章，爽 0 章，大爽 1 章。\n大爽在第 3 章。\n"
-        "最长连着憋屈：第 1–2 章，2 章。\n单元：1 个，平均 3.0 章，最短 3 章，最长 3 章。\n"
-        "各单元：第 1–3 章「退婚」\n卷：第 1 卷「还没收尾」第 1–3 章\n"
-        "主角各章的变化：\n- 第 1 章：失势\n- 第 2 章：获珠\n- 第 3 章：扬眉\n"
-        "读者在等的事（各章立下、提起、兑现的）：\n- 第 1 章立下：复仇\n- 第 3 章兑现：反击\n"
-        "用过的桥段（用了几章、第一次在第几章）：退婚 2 章（第 1 章起）\n"
-        "名场面最多的人：\n- 正式名（2 场）：第 1 章 立誓——不服；第 3 章 反击——勇气"
-    )
-
-
-def test_facts_even_limits_empty_and_gaps_do_not_invent_continuous_chapters():
-    reads = [
-        read(
-            i,
-            feel="憋屈",
-            people=[{"name": "主角", "shown": "人", "change": f"变{i}"}],
-            waits=[{"action": "提起", "what": f"等{i}"}],
-        )
-        for i in range(1, 201)
-    ]
-    roster = Roster()
-    roster.add(reads)
-    facts = build_facts(reads, [], [], roster, "主角", {}, 200)
-    changes, waits = facts.split("主角各章的变化：\n")[1].split("读者在等的事（各章立下、提起、兑现的）：\n")
-    assert len(changes.strip().splitlines()) == 80
-    assert len(waits.split("用过的桥段")[0].strip().splitlines()) == 80
-    assert "- 第 1 章：变1\n" in changes and changes.rstrip().endswith("- 第 200 章：变200")
+def test_evenly_keeps_last_item():
     assert evenly(list(range(200)), 80)[-1] == 199
-    gaps = build_facts([read(1, feel="憋屈"), read(3, feel="憋屈")], [], [], Roster(), "", {}, 3)
-    assert "最长连着憋屈：第 1–1 章，1 章。" in gaps
-    empty = build_facts([read(1, feel="平")], [], [], Roster(), "", {}, 1)
-    assert "记录里没有金手指。" in empty and "没有憋屈的章。" in empty
-    assert "主角各章的变化：\n（没有）" in empty and "第一次爽：" not in empty
-
-
-def test_facts_aliases_chronology_trope_chapter_count_and_unknown_moment():
-    reads = [
-        read(
-            1,
-            summary="相见",
-            feel="平",
-            people=[{"name": "少女", "shown": "相识", "also_called": ["茉莉"], "change": "恢复"}],
-            tropes=["相遇", "相遇"],
-            moments=[
-                {"who": "茉莉", "what": "现身", "shows": "神秘"},
-                {"who": "不存在的人", "what": "凭空", "shows": "不该记"},
-            ],
-        ),
-        read(2, feel="爽", people=[{"name": "茉莉", "shown": "少女", "change": "授功"}], tropes=["相遇"]),
-        read(3, feel="大爽", tropes=["未读桥段"]),
-    ]
-    roster = Roster()
-    roster.add(reads)
-    facts = build_facts(
-        reads,
-        [
-            {"first": 2, "last": 2, "title": "后"},
-            {"first": 1, "last": 1, "title": "前"},
-            {"first": 3, "last": 3, "title": "范围外"},
-        ],
-        [
-            {"index": 2, "first": 2, "last": 3, "title": "还没收尾"},
-            {"index": 1, "first": 1, "last": 1, "title": "卷首"},
-        ],
-        roster,
-        "少女",
-        {"少女": "茉莉"},
-        2,
-    )
-    assert "主角：茉莉。" in facts
-    assert "主角各章的变化：\n- 第 1 章：恢复\n- 第 2 章：授功" in facts
-    assert "各单元：第 1–1 章「前」；第 2–2 章「后」" in facts
-    assert "卷：第 1 卷「卷首」第 1–1 章；第 2 卷「还没收尾」第 2–2 章" in facts
-    assert "相遇 2 章（第 1 章起）" in facts
-    assert "- 茉莉（1 场）：第 1 章 现身——神秘" in facts
-    assert "不存在的人" not in facts and "凭空" not in facts and "未读桥段" not in facts and "范围外" not in facts

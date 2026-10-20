@@ -68,7 +68,15 @@ def book_info(book, chapters, volumes, units=(), nodes=()) -> str:
             f"读者在等的事整理到第 {waits['upto']} 章：一共 {waits['total']} 件，"
             f"还吊着 {waits['open']} 件（编号 E 是期待、F 是伏笔，要细节用查伏笔的工具）。"
         )
-    return f"书名：《{book.title}》{author}\n导入了 {len(chapters)} 章，{words}；{volume_text}。\n{progress}"
+    text = f"书名：《{book.title}》{author}\n导入了 {len(chapters)} 章，{words}；{volume_text}。\n{progress}"
+    if essence := info.get("essence"):
+        overview = essence.get("overview") or {}
+        points = "；".join(f"{i}. {p['title']}" for i, p in enumerate(overview.get("points") or [], 1))
+        text += (
+            f"\n精髓（基于前 {essence.get('upto', 0)} 章）：{overview.get('genre', '')}"
+            f"\n一句话：{overview.get('engine', '')}\n核心要点：{points}"
+        )
+    return text
 
 
 def outline_of(ctx, chapters, *, full: bool, open_volume_id) -> str:

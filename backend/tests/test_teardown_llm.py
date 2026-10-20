@@ -176,7 +176,7 @@ def test_teardown_schema_ast_is_verbatim_from_task():
 
 PROMPT_HASHES = {
     "persona_teardown": "94275d6a51f329a8294995c7a0e25a720739c041d2396e8faa725c7a12105db3",
-    "teardown_read": "6cc7f969f82143e05b4ade4c698f06a7fc56f113711a61e7cbf0b135652c5376",
+    "teardown_read": "c1183b1fcc4892842c79d2f510778ae1c86c7d38cafcff75eea252910b5acf79",
     "teardown_units": "c01abb24b399d420f3c40da4b26d248753da65bffed086a3ecd97a095462a3ac",
     "teardown_volumes": "7c0e4199493703b8ddd3e1bc3179d62f33848abd35cf69a1953205544fd356f1",
     "teardown_volume_text": "592f1542a49ae3876f2478d0a8766f6bc414dff3d780ef95fda4ad529bb05c6d",

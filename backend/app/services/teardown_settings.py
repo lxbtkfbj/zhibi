@@ -334,11 +334,26 @@ class SettingsWriter:
             aliases = list(card.aliases) if card else list(person["aliases"])
             canonical_name = accept_card_name(person, card, roster, []) if card else person["name"]
             if canonical_name != person["name"]:
-                names[person["key_name"]] = canonical_name
+                # 写卡又选了同一人的另一个正式叫法时，整条旧身份链一起迁移，
+                # 不能把「乙→甲」改成「乙→乙」后重新拆成两个人。
+                def target(name):
+                    seen = set()
+                    while name in names and name not in seen:
+                        seen.add(name)
+                        name = names[name]
+                    return name
+
+                previous_aliases = [alias for alias in names if target(alias) == person["name"]]
+                for alias in [*previous_aliases, person["name"], person["key_name"]]:
+                    if alias != canonical_name:
+                        names[alias] = canonical_name
+                names.pop(canonical_name, None)
             elif person["key_name"] != canonical_name and person["key_name"] in person["aliases"]:
                 # 逐章 was 已把旧称和真名合为一人；把同一行的新名字登记下来，
                 # 后续按新名单直接返回真名时，调用键仍不会漂移。
                 names[person["key_name"]] = canonical_name
+            # 合并步骤已经确认的旧名不能因角色卡漏写 aliases 而从卡上丢失。
+            aliases.extend(alias for alias in person["aliases"] if names.get(alias) == canonical_name)
             row.aliases = list(dict.fromkeys(a.strip() for a in aliases if a.strip() and a.strip() != name))
             row.one_line = card.one_line if card else person["note"]
             row.first_appearance_chapter = person["first"]
@@ -384,7 +399,7 @@ class SettingsWriter:
                 state["pending_ties"][str(row.id)] = [tie.model_dump() for tie in card.ties]
                 self.save_state(book, state)
             await session.commit()
-            # 供势力及好在哪使用的名字是卡上认定的，不是重名时为了唯一性加的显示后缀。
+            # 供势力使用的名字是卡上认定的，不是重名时为了唯一性加的显示后缀。
             if canonical_name != person["name"]:
                 person["aliases"] = list(dict.fromkeys([*person["aliases"], person["name"]]))
                 person["name"] = canonical_name
@@ -620,12 +635,42 @@ async def run_parallel(coroutines) -> None:
         raise
 
 
-async def collect_settings(runner, *, force=False, merits_only=False) -> dict:
-    """最多四个模型调用并行；单项失败不撤销已落库的结果，末尾给出可重试摘要。"""
-    from app.services.teardown_facts import build_facts
+async def write_positions(session, book, reads: list[dict]) -> None:
+    """拆书的全部角色统一排序；位置不是作者内容 hash 的一部分。"""
+    if book.source != "teardown":
+        return
+    roster, _, protagonist = people_of(reads, (book.teardown or {}).get("names"))
+    rows = list(await session.scalars(select(Character).where(Character.book_id == book.id)))
+    owned = {
+        info["id"]: key.removeprefix("character:")
+        for key, info in SettingsWriter.state(book)["rows"].items()
+        if key.startswith("character:")
+    }
+
+    def key(row):
+        person = roster.find(row.name) or next(
+            (p for p in roster.people if p["key_name"] == owned.get(str(row.id))), None
+        )
+        return (
+            0 if person and person["name"] == protagonist and not owned.get(str(row.id), "").startswith("kept:") else 1,
+            -len(person["chapters"]) if person else 0,
+            person["first"] if person else (row.first_appearance_chapter or 10**9),
+            person["order"] if person else 10**9,
+            row.created_at,
+            str(row.id),
+        )
+
+    for position, row in enumerate(sorted(rows, key=key)):
+        row.position = position
+
+
+async def collect_settings(runner, *, force=False) -> dict:
+    """最多八个模型调用并行；单项失败不撤销已落库的结果，末尾给出可重试摘要。"""
+    from app.services.teardown_merge import collect_merge
     from app.services.teardown_world import prepare_world_jobs
 
-    book, chapters, units, volumes = await runner.snapshot()
+    await collect_merge(runner, force=force)
+    book, chapters, _, _ = await runner.snapshot()
     if book is None or book.source != "teardown":
         raise JobCancelled()
     upto = max((c.index for c in chapters if (c.teardown or {}).get("read_version") is not None), default=0)
@@ -635,7 +680,7 @@ async def collect_settings(runner, *, force=False, merits_only=False) -> dict:
     roster, selected, protagonist = people_of(reads, (book.teardown or {}).get("names"))
     state = writer.state(book)
     reuse_character_keys(roster, state)
-    semaphore = asyncio.Semaphore(4)
+    semaphore = asyncio.Semaphore(8)
     progress_lock = asyncio.Lock()
     card_write_lock = asyncio.Lock()
     errors = []
@@ -670,156 +715,123 @@ async def collect_settings(runner, *, force=False, merits_only=False) -> dict:
                     done += 1
                     await progress(now)
 
-    if not merits_only:
-        async with runner.sm() as session:
-            current = await writer.book(session)
-            layouts = deepcopy(current.card_layouts or {})
-            if "角色列表" not in layouts:
-                facts, sections = DEFAULT_FIELDS["角色列表"]
-                layouts["角色列表"] = {
-                    "facts": [{"key": name, "label": name} for name in facts],
-                    "sections": [{"key": name, "label": name} for name in [*sections, "名场面"]],
-                }
-                current.card_layouts = layouts
-            world_jobs = await prepare_world_jobs(
-                session,
-                current,
-                upto,
-                reads,
-                protagonist,
-                [],
-                only_kinds={"金手指", "等级", "地方", "物品功法", "秘密", "规矩"},
-            )
-            saved = writer.state(current)
-            place_keys = {job.key for job in world_jobs if job.kind == "地方"}
-            saved["overviews"] = {key: value for key, value in saved["overviews"].items() if key in place_keys}
-            writer.save_state(current, saved)
-            await session.commit()
-        card_jobs = []
+    async with runner.sm() as session:
+        current = await writer.book(session)
+        layouts = deepcopy(current.card_layouts or {})
+        if "角色列表" not in layouts:
+            facts, sections = DEFAULT_FIELDS["角色列表"]
+            layouts["角色列表"] = {
+                "facts": [{"key": name, "label": name} for name in facts],
+                "sections": [{"key": name, "label": name} for name in [*sections, "名场面"]],
+            }
+            current.card_layouts = layouts
+        world_jobs = await prepare_world_jobs(
+            session,
+            current,
+            upto,
+            reads,
+            protagonist,
+            [],
+            only_kinds={"金手指", "等级", "地方", "物品功法", "秘密", "规矩"},
+        )
+        saved = writer.state(current)
+        place_keys = {job.key for job in world_jobs if job.kind == "地方"}
+        saved["overviews"] = {key: value for key, value in saved["overviews"].items() if key in place_keys}
+        writer.save_state(current, saved)
+        await session.commit()
+    card_jobs = []
+    for person in selected:
+        if person["full"]:
+            values = card_values(book.title, upto, person, protagonist)
+            key = f"card:{person['key_name']}"
+            if not input_unchanged(state, key, "teardown_card", values, force=force):
+                card_jobs.append((person, values, render("teardown_card", **values)))
+        else:
+            info = state["rows"].get(f"character:{person['key_name']}")
+            # 不经模型的一句话角色也只在自身证据变化时更新，不给同一结果重复记版本。
+            signature = data_hash([person["name"], person["aliases"], person["note"], person["first"]])
+            if force or not info or info.get("evidence") != signature:
+                await writer.character(person)
+                async with runner.sm() as session:
+                    current = await writer.book(session)
+                    saved = writer.state(current)
+                    info = saved["rows"].get(f"character:{person['key_name']}")
+                    if info:
+                        info["evidence"] = signature
+                    writer.save_state(current, saved)
+                    await session.commit()
+    world_jobs = [
+        job for job in world_jobs if not input_unchanged(state, job.key, "teardown_world", job.values, force=force)
+    ]
+    # 势力先预留一个，拿到角色卡后再把准确的分批数量补进总数。
+    total = len(card_jobs) + len(world_jobs) + 1
+    await progress("角色卡")
+
+    async def write_card(person, values, user, result):
+        async with card_write_lock:
+            await writer.character(person, result, user=user, values=values, roster=roster)
+
+    async def write_world(job, result):
+        await writer.world(job, result)
+
+    tasks = [
+        call(
+            s.TeardownCard,
+            user,
+            "拆书：写角色卡",
+            "角色卡",
+            lambda result, p=person, v=values, u=user: write_card(p, v, u, result),
+            key=f"card:{person['key_name']}",
+        )
+        for person, values, user in card_jobs
+    ]
+    tasks.extend(
+        call(
+            job.schema,
+            job.user,
+            f"拆书：整理{job.kind}",
+            job.kind,
+            lambda result, j=job: write_world(j, result),
+            key=job.key,
+        )
+        for job in world_jobs
+    )
+    await run_parallel(tasks)
+    await writer.check()
+    # 卡上所属包括增量跳过的旧全卡；作者改过的所属也是当前库里的真值。
+    async with runner.sm() as session:
+        current = await session.get(Book, runner.book_id)
+        state = writer.state(current)
+        full_cards = []
         for person in selected:
             if person["full"]:
-                values = card_values(book.title, upto, person, protagonist)
-                key = f"card:{person['key_name']}"
-                if not input_unchanged(state, key, "teardown_card", values, force=force):
-                    card_jobs.append((person, values, render("teardown_card", **values)))
-            else:
                 info = state["rows"].get(f"character:{person['key_name']}")
-                # 不经模型的一句话角色也只在自身证据变化时更新，不给同一结果重复记版本。
-                signature = data_hash([person["name"], person["aliases"], person["note"], person["first"]])
-                if force or not info or info.get("evidence") != signature:
-                    await writer.character(person)
-                    async with runner.sm() as session:
-                        current = await writer.book(session)
-                        saved = writer.state(current)
-                        info = saved["rows"].get(f"character:{person['key_name']}")
-                        if info:
-                            info["evidence"] = signature
-                        writer.save_state(current, saved)
-                        await session.commit()
-        world_jobs = [
-            job for job in world_jobs if not input_unchanged(state, job.key, "teardown_world", job.values, force=force)
-        ]
-        # 势力及好在哪各先预留一个，拿到角色卡后再把准确的分批数量补进总数。
-        total = len(card_jobs) + len(world_jobs) + 2
-        await progress("角色卡")
-
-        async def write_card(person, values, user, result):
-            async with card_write_lock:
-                await writer.character(person, result, user=user, values=values, roster=roster)
-
-        async def write_world(job, result):
-            await writer.world(job, result)
-
-        tasks = [
-            call(
-                s.TeardownCard,
-                user,
-                "拆书：写角色卡",
-                "角色卡",
-                lambda result, p=person, v=values, u=user: write_card(p, v, u, result),
-                key=f"card:{person['key_name']}",
-            )
-            for person, values, user in card_jobs
-        ]
-        tasks.extend(
-            call(
-                job.schema,
-                job.user,
-                f"拆书：整理{job.kind}",
-                job.kind,
-                lambda result, j=job: write_world(j, result),
-                key=job.key,
-            )
-            for job in world_jobs
+                row = await session.get(Character, uuid.UUID(info["id"])) if info else None
+                if row is not None:
+                    full_cards.append({"name": person["name"], "belongs": value_of(row, "所属")})
+        faction_jobs = await prepare_world_jobs(
+            session, current, upto, reads, protagonist, full_cards, only_kinds={"势力"}
         )
-        await run_parallel(tasks)
-        await writer.check()
-        # 卡上所属包括增量跳过的旧全卡；作者改过的所属也是当前库里的真值。
-        async with runner.sm() as session:
-            current = await session.get(Book, runner.book_id)
-            state = writer.state(current)
-            full_cards = []
-            for person in selected:
-                if person["full"]:
-                    info = state["rows"].get(f"character:{person['key_name']}")
-                    row = await session.get(Character, uuid.UUID(info["id"])) if info else None
-                    if row is not None:
-                        full_cards.append({"name": person["name"], "belongs": value_of(row, "所属")})
-            faction_jobs = await prepare_world_jobs(
-                session, current, upto, reads, protagonist, full_cards, only_kinds={"势力"}
-            )
-        faction_jobs = [
-            job
-            for job in faction_jobs
-            if not input_unchanged(state, job.key, "teardown_world", job.values, force=force)
-        ]
-        total += len(faction_jobs) - 1
-        await run_parallel(
-            call(
-                job.schema,
-                job.user,
-                "拆书：整理势力",
-                "势力",
-                lambda result, j=job: write_world(j, result),
-                key=job.key,
-            )
-            for job in faction_jobs
+    faction_jobs = [
+        job for job in faction_jobs if not input_unchanged(state, job.key, "teardown_world", job.values, force=force)
+    ]
+    total += len(faction_jobs) - 1
+    await run_parallel(
+        call(
+            job.schema,
+            job.user,
+            "拆书：整理势力",
+            "势力",
+            lambda result, j=job: write_world(j, result),
+            key=job.key,
         )
-        await writer.link_parents()
-        await writer.link_relationships()
+        for job in faction_jobs
+    )
+    await writer.link_parents()
+    await writer.link_relationships()
 
-    current, chapters, units, volumes = await runner.snapshot()
-    state = writer.state(current)
-    names = (current.teardown or {}).get("names") or {}
-    roster, _, protagonist = people_of(reads, names)
-    unit_rows = []
-    for unit in units:
-        indices = [c.index for c in chapters if c.unit_id == unit.id and c.index <= upto]
-        if indices:
-            unit_rows.append({"index": unit.index, "first": min(indices), "last": max(indices), "title": unit.title})
-    volume_rows = []
-    for volume in volumes:
-        indices = [c.index for c in chapters if c.volume_id == volume.id and c.index <= upto]
-        if indices:
-            volume_rows.append(
-                {"index": volume.index, "first": min(indices), "last": max(indices), "title": volume.title}
-            )
-    facts = build_facts(reads, unit_rows, volume_rows, roster, protagonist, names, upto)
-    values = {"title": current.title, "last": str(upto), "facts": facts}
-    user = render("teardown_merits", **values)
-    should_call = force or merits_only or text_hash(user) != state["inputs"].get("merits")
-    if merits_only:
-        total = int(should_call)
-    elif not should_call:
-        total -= 1
-    if should_call:
-
-        async def store_merits(result):
-            await writer.merits(result, user=user, values=values)
-
-        await call(s.TeardownMerits, user, "拆书：这本书好在哪", "这本书好在哪", store_merits, key="merits")
     await writer.check()
-    await progress("这本书好在哪")
+    await progress("整理设定")
     async with runner.sm() as session:
         current = await writer.book(session)
         saved = writer.state(current)
@@ -832,9 +844,10 @@ async def collect_settings(runner, *, force=False, merits_only=False) -> dict:
                 ]
             )
         )
-        if not errors and not merits_only:
+        if not errors:
             saved.update(upto=upto, at=datetime.now(UTC).isoformat())
         writer.save_state(current, saved)
+        await write_positions(session, current, reads)
         # 数的是当前实际还存在的拆书条目，不把作者条目或已删除行算进去。
         character_ids = {
             str(row) for row in await session.scalars(select(Character.id).where(Character.book_id == runner.book_id))
@@ -857,15 +870,13 @@ async def collect_settings(runner, *, force=False, merits_only=False) -> dict:
     return result
 
 
-async def estimate_calls(session, book, *, merits_only=False) -> int:
+async def estimate_calls(session, book) -> int:
     """重跑确认前显示的首轮调用数；这里不调用模型，也不修改任何数据。"""
     from sqlalchemy.orm import defer
 
     from app.models import Chapter
     from app.services.teardown_world import prepare_world_jobs
 
-    if merits_only:
-        return 1
     chapters = list(
         await session.scalars(
             select(Chapter).where(Chapter.book_id == book.id).options(defer(Chapter.content)).order_by(Chapter.index)
@@ -875,4 +886,7 @@ async def estimate_calls(session, book, *, merits_only=False) -> int:
     reads = reads_of(chapters, upto)
     _, selected, protagonist = people_of(reads, (book.teardown or {}).get("names"))
     jobs = await prepare_world_jobs(session, book, upto, reads, protagonist, [])
-    return sum(person["full"] for person in selected) + len(jobs) + 1
+    from app.services.teardown_merge import merge_batches
+
+    roster, _, _ = people_of(reads, (book.teardown or {}).get("names"))
+    return sum(person["full"] for person in selected) + len(jobs) + len(merge_batches(roster.people))

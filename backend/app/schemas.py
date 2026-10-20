@@ -233,7 +233,7 @@ class TeardownSummary(BaseModel):
     stop_note: str | None = None
     names: dict = Field(default_factory=dict)
     settings: dict | None = None
-    merits: dict | None = None
+    essence: dict | None = None
     added: list[dict] = Field(default_factory=list)
     adding: dict | None = None
 

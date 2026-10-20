@@ -1,5 +1,6 @@
 """拆书整理演示：只搬传入的记录，不补小说事实；章号限于已读范围。"""
 
+import ast
 import re
 
 from app.agents import schemas as s
@@ -29,6 +30,19 @@ SCHEMAS = {
     s.TeardownRules,
     s.TeardownPoint,
     s.TeardownMerits,
+    s.TeardownMergeGroup,
+    s.TeardownMerge,
+    s.TeardownTag,
+    s.TeardownTags,
+    s.TeardownUnitPlot,
+    s.TeardownUnitPlots,
+    s.EssencePoint,
+    s.EssenceSection,
+    s.EssenceFigure,
+    s.EssenceCast,
+    s.EssenceSectionChecked,
+    s.EssenceCastChecked,
+    s.EssenceOverview,
 }
 
 
@@ -226,7 +240,149 @@ def _merits(user):
     return s.TeardownMerits(points=points, missing=missing)
 
 
-def respond(schema, user):
+def _essence_chapters(user, system=""):
+    """只引用材料里出现过的章号；系统边界防止把未来章节带进演示结果。"""
+    limit = re.search(r"已经拆到第 (\d+) 章", system)
+    chapters = set()
+    for match in re.finditer(r"第\s*(\d+)(?:[–-]\s*(\d+))?\s*章", user):
+        chapters.add(int(match[1]))
+        if match[2]:
+            chapters.add(int(match[2]))
+    if limit:
+        chapters = {index for index in chapters if 1 <= index <= int(limit[1])}
+    return sorted(chapters)[:8] or [1]
+
+
+def _essence_point(user, system=""):
+    chapters = _essence_chapters(user, system)
+    evidence = next((line.strip() for line in user.splitlines() if re.search(r"第\s*\d+.*章", line)), "")
+    tag = re.search(r"里「([^」]+)」这一类爽点", user)
+    return s.EssencePoint(
+        title=f"{tag[1]}戏：按记录安排起落" if tag else "记录驱动：用已有事件带出下一步",
+        steps=["先交代人物要做的事", "再用已有阻碍推动人物应对"],
+        evidence=evidence[:80] or "记录不足，仅演示结构。",
+        note="演示模式只复用附带记录，不作质量判断。",
+        chapters=chapters,
+    )
+
+
+def _essence_checked(schema, user):
+    """核对演示原样搬回输入的节，不另外编一版例子。"""
+    section = user.split("【这一节写好的内容】", 1)[-1].split("【引到的那几章的记录】", 1)[0]
+    points = []
+    for match in re.finditer(r"^【第 \d+ 条】([^\n]+)\n(.*?)(?=^【第 \d+ 条】|\Z)", section, re.M | re.S):
+        title, text = match[1], match[2]
+        evidence = re.search(r"^  evidence：(.*)$", text, re.M)
+        note = re.search(r"^  note：(.*)$", text, re.M)
+        chapters = re.search(r"^  chapters：(\[[^\n]*\])$", text, re.M)
+        points.append(
+            s.EssencePoint(
+                title=title,
+                steps=re.findall(r"^  steps \d+：(.*)$", text, re.M),
+                evidence=evidence[1] if evidence else "",
+                note=note[1] if note else "",
+                chapters=ast.literal_eval(chapters[1]) if chapters else _essence_chapters(user),
+            )
+        )
+    values = {"points": points or [_essence_point(user)]}
+    if schema is s.EssenceCastChecked:
+        values["figures"] = [
+            s.EssenceFigure(
+                name=match[1],
+                archetype=match[2],
+                build=match[3],
+                role=match[4],
+                arc="" if match[5] == "（空）" else match[5],
+                chapters=ast.literal_eval(match[6]),
+            )
+            for match in re.finditer(
+                r"^【人物】(.*?)（(.*?)）｜怎么立：(.*?)｜作用：(.*?)｜变化：(.*?)｜章：(\[[^\n]*\])$",
+                section,
+                re.M,
+            )
+        ]
+    return schema(**values)
+
+
+def _unitplots(user):
+    plots = []
+    for match in re.finditer(r"^【单元 (\d+)】[^\n]*\n(.*?)(?=^【单元 \d+】|\Z)", user, re.M | re.S):
+        text = match[2]
+        summary = re.search(r"^那段话：(.*)$", text, re.M)
+        goals = re.findall(r"^第 \d+ 章：([^｜\n]*)", text, re.M)
+        plots.append(
+            s.TeardownUnitPlot(
+                n=int(match[1]),
+                trigger_type="前事的后果",
+                trigger=(summary[1] if summary else "记录里的前事")[:40],
+                shape=[goal[:20] for goal in goals[:6]] or ["照已有记录推进"],
+                payoff="记录：" + (goals[-1][:35] if goals else "本单元的结果"),
+                stakes="差不多",
+            )
+        )
+    return s.TeardownUnitPlots(units=plots)
+
+
+def _essence(schema, user, system):
+    if schema in {s.EssenceSectionChecked, s.EssenceCastChecked}:
+        return _essence_checked(schema, user)
+    point = _essence_point(user, system)
+    if schema is s.EssencePoint:
+        return point
+    if schema is s.EssenceOverview:
+        return s.EssenceOverview(genre="按已读记录整理的故事", engine="人物应对已有事件带出后续发展", points=[point])
+    if schema is s.EssenceSection:
+        return s.EssenceSection(points=[point])
+    names = re.findall(r"^【([^】]+)】出场 \d+ 章", user, re.M)
+    figure = s.EssenceFigure(
+        name=names[0] if names else "记录中的人物",
+        archetype="事件参与者",
+        build="通过记录里的行动呈现人物。",
+        role="参与记录中的事件，推动人物应对。",
+        chapters=point.chapters,
+    )
+    return figure if schema is s.EssenceFigure else s.EssenceCast(figures=[figure] if names else [], points=[point])
+
+
+def respond(schema, user, system=""):
+    if schema is s.TeardownMerge:
+        return s.TeardownMerge()
+    if schema is s.TeardownMergeGroup:
+        return s.TeardownMergeGroup(names=[], keep="", why="记录不足，不合并。")
+    if schema in {s.TeardownTags, s.TeardownTag}:
+        rows = re.findall(r"^第 (\d+) 章（(?:大爽|爽)）看点：([^｜\n]*)", user, re.M)
+        tags = [
+            s.TeardownTag(index=int(index), tags=[cool.split("：", 1)[0].strip() or "收获"]) for index, cool in rows
+        ]
+        return (
+            s.TeardownTags(chapters=tags)
+            if schema is s.TeardownTags
+            else (tags or [s.TeardownTag(index=1, tags=["收获"])])[0]
+        )
+    if schema in {s.TeardownUnitPlots, s.TeardownUnitPlot}:
+        result = _unitplots(user)
+        return (
+            result
+            if schema is s.TeardownUnitPlots
+            else (
+                result.units
+                or [
+                    s.TeardownUnitPlot(
+                        n=1, trigger_type="前事的后果", trigger="记录里的前事", shape=[], payoff="", stakes="差不多"
+                    )
+                ]
+            )[0]
+        )
+    if schema in {
+        s.EssencePoint,
+        s.EssenceSection,
+        s.EssenceFigure,
+        s.EssenceCast,
+        s.EssenceSectionChecked,
+        s.EssenceCastChecked,
+        s.EssenceOverview,
+    }:
+        return _essence(schema, user, system)
     if schema is s.TeardownArcs:
         return _arcs(user)
     if schema is s.TeardownEnding:

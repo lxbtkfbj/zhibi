@@ -314,7 +314,7 @@ def wait_open_text(rows):
     )
 
 
-async def collect_waits(runner, *, force=False):
+async def collect_waits(runner, *, force=False, full_only=False, attempted=None):
     book, chapters, _, volumes = await runner.snapshot()
     await check(runner)
     if book is None:
@@ -333,7 +333,18 @@ async def collect_waits(runner, *, force=False):
     by_chapter = {c.index: c for c in chapters}
     volume_index = {v.id: v.index for v in volumes}
     state = previous
-    for batch in wait_batches(chapters, after=previous.get("upto", 0)):
+    batches = wait_batches(chapters, after=previous.get("upto", 0))
+    if full_only:
+        batches = batches[:-1]
+    for batch in batches:
+        if full_only:
+            if any((c.teardown or {}).get("read_version") is None for c in chapters if c.index <= batch[-1].index):
+                break
+            identity = (batch[0].index, batch[-1].index)
+            if attempted is not None:
+                if identity in attempted:
+                    break
+                attempted.add(identity)
         await check(runner)
         async with runner.sm() as session:
             rows = list(await session.scalars(select(Foreshadowing).where(Foreshadowing.book_id == book.id)))

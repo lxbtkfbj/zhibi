@@ -392,7 +392,7 @@ async def test_existing_book_library_bible_readonly_projections(client, sessionm
         await session.commit()
     book = (await client.get(f"/api/books/{bid}")).json()["teardown"]
     assert book["settings"] == {"upto": 50}
-    assert book["merits"] == {"upto": 50, "points": [{"topic": "开头", "text": "第1章抓人"}], "missing": ["缺数字"]}
+    assert "merits" not in book and book["essence"] is None
     assert book["names"] == {"旧名": "主角"}
     assert not {"inputs", "rows", "pending_ties"}.intersection(book)
     library = (await client.get(f"/api/books/{bid}/library")).json()

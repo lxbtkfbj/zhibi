@@ -225,7 +225,7 @@ async def test_failed_retry_does_not_bypass_target_rules(
     client, sessionmaker, redis, monkeypatch, upto, read, failed, requested, status, retry, closing_only
 ):
     bid = await seed(sessionmaker, upto=upto, read=read, failed=failed)
-    # 部分范围的设定和读者账都已整理时，仍遵守原目标约束；但全书已读、
+    # 部分范围的设定、读者账和精髓都已整理时，仍遵守原目标约束；但全书已读、
     # stage 仍 stopped 时，第五批 §6 要允许只整理，补上未归完的单元和卷。
     async with sessionmaker() as session:
         book = await session.get(Book, bid)
@@ -233,6 +233,7 @@ async def test_failed_retry_does_not_bypass_target_rules(
             **book.teardown,
             "settings": {"upto": read},
             "waits": {"upto": read, "total": 0, "open": 0},
+            "essence": {"upto": read},
         }
         before = {
             c.index: (c.content, c.teardown, c.outline, c.summary)
