@@ -1,4 +1,5 @@
 from celery import Celery
+from kombu import Queue
 
 import app  # noqa: F401  Windows 事件循环设置
 from app.config import get_settings
@@ -15,4 +16,6 @@ celery_app.conf.update(
     # 长篇任务可能跑很久；任务锁保证同一任务不会被两个 worker 同时执行
     broker_transport_options={"visibility_timeout": 6 * 3600},
     task_default_queue="zhibi",
+    task_queues=(Queue("zhibi"), Queue("teardown")),
+    task_routes={"zhibi.run_job": {"queue": "zhibi"}, "zhibi.run_teardown": {"queue": "teardown"}},
 )

@@ -51,7 +51,7 @@ async def seed(sessionmaker, *, source="teardown", settings=True):
             title="原书",
             source=source,
             status="ready",
-            teardown={"stage": "imported", "author": "原作者", "split": {"chars": 15000}}
+            teardown={"stage": "imported", "author": "原作者", "original_volumes": True, "split": {"chars": 15000}}
             if source == "teardown"
             else {},
         )
@@ -312,7 +312,7 @@ async def test_context_defers_whole_book_but_explicit_chapter_reads_work(session
 def test_prompt_bytes_catalog_and_program_text_match_task():
     assert (
         hashlib.sha256(default_content("chat_teardown").encode()).hexdigest()
-        == "205daeaf5bb0b97d17c2a3394f4dce5b8f761aa3619ae7b9e6a0743107c0c143"
+        == "86df934f16471a942aaf2d6270d65a72aeab678e3560dd0cdbf9f020411a4ce5"
     )
     assert catalog.entry("chat_teardown")[-1] == "拆的书里群聊回答用"
     assert [item["name"] for item in catalog.variables("chat_teardown")] == [
@@ -349,3 +349,72 @@ async def test_shared_search_preserves_author_book_no_hit_wording(sessionmaker):
     async with sessionmaker() as session:
         book = await session.get(Book, bid)
         assert await chat_tools.search_text(session, book, "没有的词") == "写出来的正文里没有「没有的词」。"
+
+
+@pytest.mark.parametrize(
+    ("stage", "expected"),
+    [
+        ("imported", "还没开拆：只有原文，章纲、单元、设定都还没有。"),
+        ("queued", "正在拆：前 2 章有章纲，归成了 1 个单元、1 卷；后面的还没拆，设定还没整理。"),
+        ("running", "正在拆：前 2 章有章纲，归成了 1 个单元、1 卷；后面的还没拆，设定还没整理。"),
+        ("stopped", "拆到第 3 章停下了：前 2 章有章纲，归成了 1 个单元、1 卷；后面的还没拆，设定还没整理。"),
+        ("done", "拆完了：每章都有章纲，归成了 1 个单元、1 卷；设定还没整理。"),
+    ],
+)
+def test_second_batch_book_info_exact_progress(stage, expected):
+    book = SimpleNamespace(title="原书", teardown={"stage": stage, "original_volumes": False, "open_volume_id": "v2"})
+    chapters = [
+        SimpleNamespace(index=i, word_count=10, teardown={"read_version": 1} if i in (1, 3) else {})
+        for i in range(1, 4)
+    ]
+    volumes = [
+        SimpleNamespace(id="v1", title="已经收尾"),
+        SimpleNamespace(id="v2", title="旧占位名"),
+        SimpleNamespace(id="v3", title=""),
+    ]
+    text = teardown_chat.book_info(book, chapters, volumes, [object()])
+    assert text.splitlines()[-1] == expected
+    assert "原书没有分卷" in text
+    book.teardown.update(original_volumes=True, open_volume_id=None)
+    assert "原书分了 3 卷" in teardown_chat.book_info(book, chapters, volumes)
+
+
+def test_second_batch_outline_adds_ungrouped_range_in_each_volume():
+    ctx = SimpleNamespace(
+        volumes=[
+            SimpleNamespace(id="v1", index=1, title="第一卷", summary="已经完成。"),
+            SimpleNamespace(id="v2", index=2, title="旧占位名", summary=""),
+        ],
+        units=[SimpleNamespace(volume_id="v1", index=1, title="初来乍到", summary="原文事件。")],
+    )
+    chapters = [
+        SimpleNamespace(volume_id="v1", index=1, unit_id="u1"),
+        SimpleNamespace(volume_id="v1", index=2, unit_id=None),
+        SimpleNamespace(volume_id="v2", index=3, unit_id=None),
+        SimpleNamespace(volume_id="v2", index=4, unit_id=None),
+    ]
+    text = teardown_chat.outline_of(ctx, chapters, full=True, open_volume_id="v2")
+    assert (
+        text
+        == "第 1 卷「第一卷」：已经完成。\n  单元 1「初来乍到」：原文事件。\n第 2 到 2 章还没归单元。\n第 2 卷「还没收尾」：\n第 3 到 4 章还没归单元。"
+    )
+
+
+async def test_read_chapter_tool_includes_teardown_outline_and_summary(sessionmaker):
+    bid = await seed(sessionmaker)
+    async with sessionmaker() as session:
+        book = await session.get(Book, bid)
+        chapter = await session.scalar(select(Chapter).where(Chapter.book_id == bid, Chapter.index == 1))
+        chapter.outline = {
+            "goal": "茉莉出现",
+            "scenes": ["天毒珠闪光"],
+            "cool_point": "揭秘：人物出现",
+            "hook": "期待：茉莉是谁",
+        }
+        chapter.summary = "茉莉在这里第一次出现，天毒珠闪光。"
+        await session.flush()
+        text = await chat_tools.chapter_text(session, book, chat_tools.ReadChapter(index=1, original=True))
+        assert "发生什么：茉莉出现\n天毒珠闪光" in text
+        assert "看点：揭秘：人物出现" in text and "结尾钩子：期待：茉莉是谁" in text
+        assert "摘要：茉莉在这里第一次出现，天毒珠闪光。" in text
+        assert "原文（" in text

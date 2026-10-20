@@ -109,3 +109,10 @@ def enqueue(job_id: uuid.UUID, resume: dict | None = None) -> None:
     from app.worker.tasks import run_job
 
     run_job.delay(str(job_id), resume)
+
+
+def enqueue_teardown(job_id: uuid.UUID) -> None:
+    """拆书只投到拆书队列，不占用开书、写作的 worker。"""
+    from app.worker.tasks import run_teardown
+
+    run_teardown.apply_async(args=[str(job_id)], queue="teardown")

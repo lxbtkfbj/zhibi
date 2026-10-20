@@ -294,6 +294,8 @@ async def revert_version(
     version = await _editable_row(session, SettingVersion, version_id, allow_busy=True)
     target = await load_target(session, version.book_id, version.target_type, version.target_id, for_update=True)
     book = await session.get(Book, version.book_id)
+    if book.source == "teardown":
+        await ensure_idle(session, version.book_id)
     current = snapshot_of(target)
     changed = {key for key, value in version.snapshot.items() if current.get(key) != value}
     if isinstance(target, Chapter) and "content" in changed:

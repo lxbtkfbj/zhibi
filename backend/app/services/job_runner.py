@@ -184,6 +184,19 @@ async def _run(
             return
         kind, book_id, thread_id, params = job.kind, job.book_id, job.thread_id, dict(job.params or {})
 
+    if kind == "teardown":
+        # 拆书没有 LangGraph 检查点，按章上的 read_version 从数据库恢复。
+        router.book_id = book_id
+        if params.get("rerun"):
+            from app.services.teardown_rerun import run_rerun
+
+            await run_rerun(job_id, sm, redis, router)
+        else:
+            from app.services.teardown_runner import run_teardown
+
+            await run_teardown(job_id, sm, redis, router)
+        return
+
     emitter = Emitter(sm, redis, book_id, job_id)
     if kind == "book_setup" and params.get("flow") != 3:
         await emitter.say("system", LEGACY_SETUP_MESSAGE, kind="error")

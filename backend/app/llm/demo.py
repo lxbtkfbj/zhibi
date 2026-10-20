@@ -1216,11 +1216,100 @@ def _requirements_tidy(user):
     return s.RequirementsTidy(items=items)
 
 
+def _teardown_read(user: str) -> s.TeardownRead:
+    chapters = []
+    original = _section(user, "原文").split("\n\n要求：", 1)[0]
+    for match in re.finditer(r"^「第 (\d+) 章(?: ([^」\n]*))?」\n(.*?)(?=^「第 \d+ 章|\Z)", original, re.M | re.S):
+        index, title, content = int(match[1]), match[2] or "", match[3].strip()
+        paragraphs = [line.strip() for line in content.splitlines() if line.strip()]
+        first = (paragraphs[0] if paragraphs else title)[:35] or "原文交代本章发生的事"
+        chapters.append(
+            s.TeardownChapter(
+                index=index,
+                goal=first,
+                scenes=[first[:25], (paragraphs[-1] if paragraphs else first)[:25]],
+                cool_point="铺垫：按原文交代人物处境与本章事件",
+                hook="平收",
+                summary=content[:180] or title,
+                feel="平",
+            )
+        )
+    return s.TeardownRead(chapters=chapters)
+
+
+def _teardown_units(user: str) -> s.TeardownUnits:
+    section = _match(r"【还没归单元的章】[^\n]*\n(.*)", user)
+    indices = [int(n) for n in re.findall(r"^第 (\d+) 章：", section, re.M)]
+    if not indices:
+        return s.TeardownUnits(units=[])
+    close_all = "全部归完，不留 open_from。" in user
+    groups = [indices[i : i + 10] for i in range(0, len(indices), 10)]
+    open_from = None
+    if not close_all and len(groups[-1]) < 5:
+        open_from = groups.pop()[0]
+    return s.TeardownUnits(
+        units=[
+            s.TeardownUnit(
+                first=g[0],
+                last=g[-1],
+                title=f"原文事件{g[0]}",
+                text="原文中的事件找上门；人物按原文应对；事件取得阶段结果；继续面对后面的事。",
+            )
+            for g in groups
+        ],
+        open_from=open_from,
+    )
+
+
+def _teardown_volumes(user: str) -> s.TeardownVolumes:
+    section = _match(r"【还没归卷的单元】[^\n]*\n(.*)", user)
+    bounds = [(int(a), int(b)) for a, b in re.findall(r"^第 (\d+)–(\d+) 章「", section, re.M)]
+    if not bounds:
+        return s.TeardownVolumes(volumes=[])
+    groups, current = [], []
+    for pair in bounds:
+        current.append(pair)
+        if current[-1][1] - current[0][0] + 1 >= 100:
+            groups.append(current)
+            current = []
+    close_all = "这是全书最后几个单元：全部归完，不留 open_from。" in user
+    open_from = None
+    if current:
+        if close_all:
+            groups.append(current)
+        else:
+            open_from = current[0][0]
+    return s.TeardownVolumes(
+        volumes=[
+            s.TeardownVolume(
+                first=g[0][0],
+                last=g[-1][1],
+                title=f"原文阶段{g[0][0]}",
+                text="人物想完成原文中的目标；遭遇这一阶段的阻碍；在原文的阶段高潮中应对；处境发生变化。",
+            )
+            for g in groups
+        ],
+        open_from=open_from,
+    )
+
+
+def _teardown_volume_text(user: str) -> s.TeardownVolumeText:
+    tail = re.search(r"最后一句写「(到第 \d+ 章还没收住)」。", user)
+    return s.TeardownVolumeText(
+        text="人物想完成原文中的目标；遇到这一卷的阻碍；按原文迎来卷末事件；"
+        + (tail[1] + "。" if tail else "处境发生变化。")
+    )
+
+
 async def respond(schema: type[BaseModel], system: str, user: str) -> BaseModel:
     await asyncio.sleep(DELAY_S)
     from app.llm import demo_setup
 
     handlers = {
+        s.TeardownRead: lambda: _teardown_read(user),
+        s.TeardownUnits: lambda: _teardown_units(user),
+        s.TeardownVolumes: lambda: _teardown_volumes(user),
+        s.TeardownVolumeText: lambda: _teardown_volume_text(user),
         s.BookDraft: lambda: _book_draft(user),
         s.PitchSet: lambda: demo_setup.pitches(user),
         s.StoryConcept: lambda: demo_setup.concept(user),

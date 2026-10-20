@@ -6,7 +6,7 @@ import logging
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from urllib.parse import urlparse
 
@@ -35,6 +35,47 @@ class LLMError(RuntimeError):
 
 class ToolsUnsupported(LLMError):
     """接口不认工具调用：记在模型配置上，以后走老路。"""
+
+
+class _TeardownCallError(LLMError):
+    """拆书的逐次失败已经记过，不再重复记一条。"""
+
+
+@dataclass
+class TeardownPolicy:
+    """一次拆书共享的临时策略；不写模型配置，也不影响写书调用。"""
+
+    parallel: int = 4
+    ignore_reasoning: bool = False
+    rate_limits: list[float] = field(default_factory=list)
+
+    def rate_limited(self) -> None:
+        now = time.monotonic()
+        self.rate_limits[:] = [at for at in self.rate_limits if now - at < 60]
+        self.rate_limits.append(now)
+        if len(self.rate_limits) >= 2:
+            self.parallel = max(1, self.parallel - 1)
+
+
+def _unsupported_reasoning(exc: openai.APIStatusError) -> bool:
+    message = f"{exc} {json.dumps(exc.body, ensure_ascii=False, default=str)}".lower()
+    return (
+        exc.status_code in (400, 422)
+        and any(term in message for term in ("reasoning_effort", "reasoning effort", "reasoning", "推理强度"))
+        and any(
+            term in message
+            for term in (
+                "unsupported",
+                "not support",
+                "doesn't support",
+                "unrecognized",
+                "unknown",
+                "not allowed",
+                "不支持",
+                "不认",
+            )
+        )
+    )
 
 
 @dataclass
@@ -292,6 +333,7 @@ class LLMRouter:
         *,
         purpose: str,
         max_attempts: int = MAX_PARSE_ATTEMPTS,
+        teardown_policy: TeardownPolicy | None = None,
     ) -> T:
         profile = await self.resolve(role)
         if profile.provider == "demo":
@@ -306,7 +348,59 @@ class LLMRouter:
                 role, profile, purpose, started, 0, 0, ok=True, request=request, response=result.model_dump_json()
             )
             return result
-        return await self._structured_remote(role, profile, schema, system, user, purpose, max_attempts=max_attempts)
+        return await self._structured_remote(
+            role,
+            profile,
+            schema,
+            system,
+            user,
+            purpose,
+            max_attempts=max_attempts,
+            teardown_policy=teardown_policy,
+        )
+
+    async def _invoke_teardown[T: BaseModel](
+        self,
+        role: str,
+        profile: ResolvedProfile,
+        method: str,
+        schema: type[T],
+        system: str,
+        user: str,
+        purpose: str,
+        policy: TeardownPolicy,
+    ) -> "tuple[Outcome[T], float]":
+        limited = 0
+        while True:
+            temporary = replace(profile, reasoning_effort=None if policy.ignore_reasoning else "low")
+            started = time.monotonic()
+            try:
+                return await self._invoke_structured(temporary, method, schema, system, user), started
+            except openai.APIStatusError as exc:
+                # 别的一批可能已在本请求飞行中更新共享策略；按这次实际发出的参数判断。
+                reasoning = temporary.reasoning_effort is not None and _unsupported_reasoning(exc)
+                if not reasoning and exc.status_code != 429:
+                    raise
+                await self._record(
+                    role,
+                    profile,
+                    purpose,
+                    started,
+                    None,
+                    None,
+                    ok=False,
+                    error=str(exc),
+                    request=_request(system, user, schema, method),
+                    response=_error_response(exc),
+                )
+                if reasoning:
+                    policy.ignore_reasoning = True
+                    continue
+                limited += 1
+                policy.rate_limited()
+                if limited >= 6:
+                    raise _TeardownCallError(f"调用模型失败（{profile.name}）：{exc}") from exc
+                await asyncio.sleep(min(5 * 2 ** (limited - 1), 40))
 
     async def _structured_remote[T: BaseModel](
         self,
@@ -318,6 +412,7 @@ class LLMRouter:
         purpose: str,
         *,
         max_attempts: int = MAX_PARSE_ATTEMPTS,
+        teardown_policy: TeardownPolicy | None = None,
     ) -> T:
         method = profile.structured_method
         last_error = ""
@@ -331,7 +426,12 @@ class LLMRouter:
             started = time.monotonic()
             request = _request(system, prompt_user, schema, method)
             try:
-                outcome = await self._invoke_structured(profile, method, schema, system, prompt_user)
+                if teardown_policy is not None:
+                    outcome, started = await self._invoke_teardown(
+                        role, profile, method, schema, system, prompt_user, purpose, teardown_policy
+                    )
+                else:
+                    outcome = await self._invoke_structured(profile, method, schema, system, prompt_user)
             except openai.BadRequestError as exc:
                 # 部分接口不支持工具调用或 JSON Schema，自动降级为 JSON 模式
                 await self._record(
@@ -371,6 +471,8 @@ class LLMRouter:
                 if retryable and attempt < max_attempts:
                     continue
                 raise LLMError(f"调用模型失败（{profile.name}）：{exc}") from exc
+            except _TeardownCallError:
+                raise
             except Exception as exc:
                 await self._record(
                     role,

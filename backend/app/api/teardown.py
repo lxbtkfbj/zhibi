@@ -5,13 +5,15 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from pydantic import BaseModel, Field
+from redis.asyncio import Redis
 from sqlalchemy import insert, select
 from starlette.concurrency import run_in_threadpool
 
 from app.api.books import detail
-from app.api.deps import SessionDep, get_book
+from app.api.deps import SessionDep, get_book, get_redis
 from app.models import Book, Chapter, TeardownSource, Volume
-from app.services import book_saves, teardown_split
+from app.schemas import JobOut
+from app.services import book_saves, teardown_jobs, teardown_split
 from app.services.library import lock_book
 
 router = APIRouter(tags=["teardown"])
@@ -23,10 +25,15 @@ class EncodingIn(BaseModel):
     encoding: str
 
 
+class StartIn(BaseModel):
+    upto: int | None = Field(None, ge=1)
+
+
 class ImportIn(BaseModel):
     title: str | None = Field(None, max_length=200)
     author: str | None = Field(None, max_length=200)
     include: list[int] = Field(default_factory=list)
+    start: StartIn | None = None
 
 
 def check_confirming(book):
@@ -129,7 +136,9 @@ async def encoding(body: EncodingIn, book: Book = Depends(get_book), session=Ses
 
 
 @router.post("/teardown/{book_id}/import")
-async def import_book(body: ImportIn, book: Book = Depends(get_book), session=SessionDep):
+async def import_book(
+    body: ImportIn, book: Book = Depends(get_book), session=SessionDep, redis: Redis = Depends(get_redis)
+):
     source = await locked_source(session, book)
     result = await split_file(source.data, source.encoding)
     excluded_orders = {i for i, piece in enumerate(result["chapters"]) if set(piece.flags) & {"不像正文", "空的"}}
@@ -181,6 +190,7 @@ async def import_book(body: ImportIn, book: Book = Depends(get_book), session=Se
     meta.update(
         stage="imported",
         imported_at=datetime.now(UTC).isoformat(),
+        original_volumes=bool(result["volumes"]),
         open_volume_id=None if result["volumes"] else str(volumes[0].id),
         split={
             "chapters": len(rows),
@@ -206,5 +216,17 @@ async def import_book(body: ImportIn, book: Book = Depends(get_book), session=Se
     await session.delete(source)
     await session.commit()
     await book_saves.safe_checkpoint(session, book.id, title="导入原文")
+    if body.start is not None:
+        await teardown_jobs.start(session, redis, book, body.start.upto)
     await session.refresh(book)
     return await detail(session, book)
+
+
+@router.post("/teardown/{book_id}/start", response_model=JobOut)
+async def start(body: StartIn, book: Book = Depends(get_book), session=SessionDep, redis: Redis = Depends(get_redis)):
+    return JobOut.model_validate(await teardown_jobs.start(session, redis, book, body.upto))
+
+
+@router.post("/teardown/{book_id}/stop", response_model=JobOut)
+async def stop(book: Book = Depends(get_book), session=SessionDep, redis: Redis = Depends(get_redis)):
+    return JobOut.model_validate(await teardown_jobs.stop(session, redis, book))

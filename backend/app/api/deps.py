@@ -2,10 +2,11 @@ import uuid
 
 from fastapi import Depends, HTTPException, Request
 from redis.asyncio import Redis
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
-from app.models import Book
+from app.models import Book, Job
 from app.services import jobs
 
 SessionDep = Depends(get_session)
@@ -35,4 +36,9 @@ async def ensure_book_not_teardown(session: AsyncSession, book_id: uuid.UUID, ac
 async def ensure_idle(session: AsyncSession, book_id: uuid.UUID) -> None:
     """编辑部工作时不允许手动改设定和大纲，避免和 AI 的修改互相覆盖。"""
     if await jobs.is_busy(session, book_id):
+        teardown = await session.scalar(
+            select(Job.id).where(Job.book_id == book_id, Job.kind == "teardown", Job.status.in_(jobs.BUSY_STATUSES))
+        )
+        if teardown is not None:
+            raise HTTPException(409, "正在拆，点「停下」才能改")
         raise HTTPException(409, "编辑部正在工作，请等这一轮结束再修改")

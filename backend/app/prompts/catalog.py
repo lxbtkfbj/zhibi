@@ -33,7 +33,12 @@ CATALOG = [
     ),
     ("library_review", "查一遍", "设定库", "reviewer", "查设定库的矛盾、同根、好看、题材"),
     ("chat_reply", "聊天回答", "聊天", "chief", "作者在群聊提问或私聊时，角色回答；实际用聊天对象的角色"),
-    ("chat_teardown", "拆书群聊回答", "聊天", "chief,lorekeeper,writer,reviewer", "拆的书里群聊回答用"),
+    ("chat_teardown", "拆书群聊回答", "拆书", "teardown", "拆的书里群聊回答用"),
+    ("persona_teardown", "拆书人设", "拆书", "teardown", "拆书调用的系统提示"),
+    ("teardown_read", "拆书：读原文", "拆书", "teardown", "逐章记下章纲和人物设定的原始记录"),
+    ("teardown_units", "拆书：归单元", "拆书", "teardown", "把读好的章归成单元"),
+    ("teardown_volumes", "拆书：归卷", "拆书", "teardown", "原书没分卷时把单元归成卷"),
+    ("teardown_volume_text", "拆书：写卷", "拆书", "teardown", "原书分了卷时写这一卷的那段话"),
     (
         "chat_agent",
         "聊天：自己查、自己动手",
@@ -72,6 +77,13 @@ CATALOG = [
 BY_NAME = {row[0]: row for row in CATALOG}
 
 VARIABLE_LABELS = {
+    "title": "书名",
+    "first": "起始章号",
+    "last": "结束章号",
+    "index": "卷序号",
+    "done_units": "前面已经归好的单元",
+    "done_volumes": "前面已经归好的卷",
+    "tail_rule": "最后几章怎么收尾",
     "book_info": "原书信息与拆书进度",
     "lookup": "怎么查资料",
     "progress": "写到哪了",

@@ -10,7 +10,7 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.db import make_engine, make_sessionmaker
 from app.models import Job
-from app.services.job_runner import execute_job, lock_key
+from app.services.job_runner import GRAPHS, execute_job, lock_key
 from app.worker.celery_app import celery_app
 
 log = logging.getLogger(__name__)
@@ -63,14 +63,23 @@ def run_job(job_id: str, resume: dict | None = None) -> None:
     _get_worker_loop().run_until_complete(execute_job(uuid.UUID(job_id), resume))
 
 
-async def _orphaned_jobs() -> list[str]:
+@celery_app.task(name="zhibi.run_teardown", queue="teardown")
+def run_teardown(job_id: str) -> None:
+    _get_worker_loop().run_until_complete(execute_job(uuid.UUID(job_id)))
+
+
+async def _orphaned_jobs(kinds: tuple[str, ...] | None = None) -> list[str]:
     """找出状态是「运行中」但任务锁已过期的任务（上次 worker 崩溃或被强制关闭）。"""
     settings = get_settings()
     engine = make_engine()
     redis = Redis.from_url(settings.redis_url, decode_responses=True)
     try:
         async with make_sessionmaker(engine)() as session:
-            rows = (await session.execute(select(Job.id).where(Job.status == "running"))).scalars().all()
+            rows = (
+                await session.scalars(
+                    select(Job.id).where(Job.status == "running", Job.kind.in_(kinds or tuple(GRAPHS)))
+                )
+            ).all()
         return [str(job_id) for job_id in rows if not await redis.exists(lock_key(job_id))]
     finally:
         await redis.aclose()
@@ -78,7 +87,18 @@ async def _orphaned_jobs() -> list[str]:
 
 
 @worker_ready.connect
-def recover_orphaned_jobs(**_: object) -> None:
-    for job_id in _get_worker_loop().run_until_complete(_orphaned_jobs()):
-        log.info("恢复中断的任务 %s（从检查点继续）", job_id)
-        run_job.delay(job_id, None)
+def recover_orphaned_jobs(sender=None, **_: object) -> None:
+    # worker_ready 的 sender 是 Consumer；按它实际订阅的队列恢复，不能把网页
+    # 后端独自运行、没有任务锁的 outline_expand 捡给 LangGraph worker。
+    consumer = getattr(sender, "task_consumer", None)
+    queues = {queue.name for queue in getattr(consumer, "queues", ())}
+    if not queues:
+        queues = {"zhibi"}
+    if "zhibi" in queues:
+        for job_id in _get_worker_loop().run_until_complete(_orphaned_jobs()):
+            log.info("恢复中断的写作任务 %s（从检查点继续）", job_id)
+            run_job.delay(job_id, None)
+    if "teardown" in queues:
+        for job_id in _get_worker_loop().run_until_complete(_orphaned_jobs(("teardown",))):
+            log.info("恢复中断的拆书任务 %s（按章记录继续）", job_id)
+            run_teardown.apply_async(args=[job_id], queue="teardown")

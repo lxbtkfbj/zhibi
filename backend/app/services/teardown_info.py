@@ -9,7 +9,7 @@ def teardown_summary(book, preview: dict | None = None) -> dict | None:
     split = data.get("split") or {}
     preview = preview or {}
     return {
-        "stage": "confirming" if confirming else "imported",
+        "stage": data.get("stage", "imported"),
         "author": data.get("author", ""),
         "intro": data.get("intro", ""),
         "chars": preview.get("chars", 0) if confirming else split.get("chars", 0),
@@ -21,4 +21,8 @@ def teardown_summary(book, preview: dict | None = None) -> dict | None:
         "excluded_count": len(preview.get("excluded", [])) if confirming else len(data.get("excluded", [])),
         "open_volume_id": data.get("open_volume_id"),
         "imported_at": data.get("imported_at"),
+        "original_volumes": data.get("original_volumes", False),
+        "upto": data.get("upto"),
+        "stop_reason": data.get("stop_reason"),
+        "stop_note": data.get("stop_note"),
     }

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, String, Text, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, Index, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -9,12 +9,20 @@ from app.models.base import Base, Timestamps, UUIDPk
 
 
 class Job(UUIDPk, Timestamps, Base):
-    """后台任务。一个任务对应一条 LangGraph 线程（thread_id）。"""
+    """后台任务。写作使用 LangGraph 线程，拆书按章上的记录恢复。"""
 
     __tablename__ = "jobs"
+    __table_args__ = (
+        Index(
+            "ix_jobs_one_active_teardown",
+            "book_id",
+            unique=True,
+            postgresql_where=text("kind = 'teardown' AND status IN ('queued', 'running')"),
+        ),
+    )
 
     book_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("books.id", ondelete="CASCADE"), index=True)
-    # book_setup / write_chapters / import_book
+    # book_setup / write_book / rewrite_chapter / outline_expand / teardown
     kind: Mapped[str] = mapped_column(String(30))
     # queued / running / waiting_author / succeeded / failed / cancelled
     status: Mapped[str] = mapped_column(String(20), default="queued", index=True)

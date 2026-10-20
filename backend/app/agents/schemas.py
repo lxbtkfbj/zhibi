@@ -1023,3 +1023,92 @@ class ChapterOutlineWrite(Lenient):
     cool_point: str = Field(default="", description="这一章的爽点或情绪高点")
     hook: str = Field(default="", description="结尾停在什么悬念上")
     note: str = Field(default="", description="给作者的一句话：这次的思路")
+
+
+class TeardownPerson(BaseModel):
+    name: str = Field(description="认得的人写名单上的名字；新人写原文里最正式的叫法")
+    also_called: list[str] = Field(
+        default_factory=list,
+        description="这一章原文里专指这个人的别的叫法：外号、昵称、网名、姓加职务；几个人共用的叫法不写",
+    )
+    was: str = Field("", description="以前在名单里用别的名字记过、这一章才认出是同一个，写那个旧名字；没有留空")
+    shown: str = Field(description="这一章写出了这个人什么：身份、性格、本事、说话的样子、和谁什么关系，一两句")
+    change: str = Field("", description="这一章里这个人变了什么：实力与地位、在哪、处境、死了；没变留空")
+
+
+class TeardownThing(BaseModel):
+    kind: Literal["地方", "势力", "物品功法", "金手指", "等级", "规矩", "秘密"]
+    name: str = Field(description="照原文的叫法")
+    note: str = Field(description="原文说了它什么，一句；人物嘴里说的写明「某某说」")
+    belongs: str = Field(
+        "", description="属于哪里：地方写在哪座城、哪个国、哪个门派里，势力写归谁管、谁领头；别的留空，原文没说也留空"
+    )
+    secret: Literal["", "埋下", "揭开"] = Field("", description="秘密写埋下还是揭开，别的留空")
+
+
+class TeardownMoment(BaseModel):
+    who: str = Field(description="谁")
+    what: str = Field(description="做了什么")
+    shows: str = Field(description="立住了这个人的什么")
+
+
+class TeardownWait(BaseModel):
+    what: str = Field(description="读者在等的那件事")
+    action: Literal["立下", "提起", "兑现"]
+
+
+class TeardownChapter(BaseModel):
+    index: int = Field(description="原文标的第几章")
+    goal: str = Field(description="一句话，40 字以内：这一章要发生的事")
+    scenes: list[str] = Field(description="两到四个场景，按先后，每个 25 字以内")
+    cool_point: str = Field(
+        description="看点，40 字以内，写成「哪一种：怎么做出来的」；没有爽点写「铺垫：……」或「情感：……」"
+    )
+    hook: str = Field(description="结尾钩子，30 字以内，写成「哪一种：读者带着什么问题点下一章」；收得干净写「平收」")
+    summary: str = Field(description="100-200 字：这一章发生了什么、结果如何、留下什么悬念")
+    feel: Literal["憋屈", "平", "爽", "大爽"] = Field(description="读者读完这一章的感觉")
+    people: list[TeardownPerson] = Field(
+        default_factory=list, description="出场的、有名有姓或者以后还会出现的人；路人不记"
+    )
+    things: list[TeardownThing] = Field(default_factory=list, description="这一章新冒出来、或者头一回说清楚的东西")
+    moments: list[TeardownMoment] = Field(default_factory=list, description="名场面：立住某个人的那场戏；没有就空着")
+    waits: list[TeardownWait] = Field(
+        default_factory=list, description="读者在等的事：这一章立下、提起还是兑现了哪件；没有就空着"
+    )
+    tropes: list[str] = Field(default_factory=list, description="用了哪些熟悉的桥段，几个字一个；没有就空着")
+
+
+class TeardownRead(BaseModel):
+    chapters: list[TeardownChapter] = Field(description="每章一条，不漏、不合并、不跳")
+
+
+class TeardownUnit(BaseModel):
+    first: int = Field(description="第几章起")
+    last: int = Field(description="到第几章")
+    title: str = Field(description="4-8 个字")
+    text: str = Field(description="一段话，100 字以内：什么事找上门；主角怎么应对；读者叫好的那一下；做完拿到什么")
+
+
+class TeardownUnits(BaseModel):
+    units: list[TeardownUnit]
+    open_from: int | None = Field(None, description="从第几章起还没收尾；都收完了就不填")
+
+
+class TeardownVolumeText(BaseModel):
+    text: str = Field(
+        description="一段话，120 字以内：这一卷主角想做成什么；被什么挡着；卷末的大高潮；卷末变成什么、留下什么钩子"
+    )
+
+
+class TeardownVolume(BaseModel):
+    first: int = Field(description="第几章起")
+    last: int = Field(description="到第几章")
+    title: str = Field(description="4-8 个字")
+    text: str = Field(
+        description="一段话，120 字以内：这一卷主角想做成什么；被什么挡着；卷末的大高潮；卷末变成什么、留下什么钩子"
+    )
+
+
+class TeardownVolumes(BaseModel):
+    volumes: list[TeardownVolume]
+    open_from: int | None = Field(None, description="从第几章起还没收尾；都收完了就不填")

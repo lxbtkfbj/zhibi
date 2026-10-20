@@ -445,6 +445,13 @@ async def resume(job_id: uuid.UUID, session: AsyncSession = SessionDep, redis: R
 @router.post("/jobs/{job_id}/cancel", response_model=JobOut)
 async def cancel(job_id: uuid.UUID, session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)) -> JobOut:
     job = await _job(session, job_id)
+    if job.kind == "teardown":
+        from app.services import teardown_jobs
+
+        if job.status not in jobs.BUSY_STATUSES:
+            raise HTTPException(409, "任务已结束")
+        book = await session.get(Book, job.book_id)
+        return JobOut.model_validate(await teardown_jobs.stop(session, redis, book))
     if job.status == "running":
         # 正在执行：通知 worker 在下一个节点开始前停下
         await redis.set(cancel_key(job.id), "1", ex=24 * 3600)

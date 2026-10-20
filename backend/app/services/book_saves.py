@@ -748,10 +748,11 @@ async def safe_checkpoint(
     title: str | None = None,
     *,
     lead: str | None = None,
+    force: bool = False,
 ):
     """各处自动存：存不成只记日志，不耽误作者手上的事。"""
     try:
-        return await checkpoint(session, book_id, actor, title, lead=lead)
+        return await checkpoint(session, book_id, actor, title, lead=lead, force=force)
     except Exception:  # noqa: BLE001
         log.exception("书 %s 自动存档没存成", book_id)
         await session.rollback()

@@ -32,19 +32,53 @@ def quoted_words(text: str) -> list[str]:
     return words
 
 
-def book_info(book, chapters, volumes) -> str:
+def book_info(book, chapters, volumes, units=()) -> str:
     info = book.teardown or {}
     author = f"（原作者：{info['author']}）" if info.get("author") else "（原作者没写）"
     chars = int((info.get("split") or {}).get("chars", sum(c.word_count or 0 for c in chapters)))
     words = f"共 {(chars + 5000) // 10000} 万字" if chars >= 10000 else f"共 {chars} 字"
-    divided = not info.get("open_volume_id") and bool(volumes)
+    divided = bool(info.get("original_volumes"))
     volume_text = f"原书分了 {len(volumes)} 卷" if divided else "原书没有分卷"
-    return f"书名：《{book.title}》{author}\n导入了 {len(chapters)} 章，{words}；{volume_text}。\n{PROGRESS}"
+    read = [c.index for c in chapters if (c.teardown or {}).get("read_version") is not None]
+    volume_count = sum(
+        1
+        for volume in volumes
+        if volume.title and str(volume.id) != str(info.get("open_volume_id")) and volume.title != "还没收尾"
+    )
+    stage = info.get("stage")
+    progress = PROGRESS
+    if stage in ("queued", "running"):
+        progress = f"正在拆：前 {len(read)} 章有章纲，归成了 {len(units)} 个单元、{volume_count} 卷；后面的还没拆，设定还没整理。"
+    elif stage == "stopped":
+        progress = f"拆到第 {max(read, default=0)} 章停下了：前 {len(read)} 章有章纲，归成了 {len(units)} 个单元、{volume_count} 卷；后面的还没拆，设定还没整理。"
+    elif stage == "done":
+        progress = f"拆完了：每章都有章纲，归成了 {len(units)} 个单元、{volume_count} 卷；设定还没整理。"
+    return f"书名：《{book.title}》{author}\n导入了 {len(chapters)} 章，{words}；{volume_text}。\n{progress}"
+
+
+def outline_of(ctx, chapters, *, full: bool, open_volume_id) -> str:
+    """沿用聊天大纲的卷／单元取法，每卷补上尚未归单元的章。"""
+    from app.services.chat_agent import first_line
+
+    cut = (lambda text: (text or "").strip()) if full else first_line
+    lines = []
+    for volume in ctx.volumes:
+        title = "还没收尾" if str(volume.id) == str(open_volume_id) else volume.title
+        lines.append(f"第 {volume.index} 卷「{title}」：{cut(volume.summary)}")
+        lines.extend(
+            f"  单元 {unit.index}「{unit.title}」：{cut(unit.summary)}"
+            for unit in ctx.units
+            if unit.volume_id == volume.id
+        )
+        loose = [c.index for c in chapters if c.volume_id == volume.id and c.unit_id is None]
+        if loose:
+            lines.append(f"第 {min(loose)} 到 {max(loose)} 章还没归单元。")
+    return "\n".join(lines)
 
 
 async def values(session, book, role, message, rows, summary, *, tools: bool, retry: bool = False) -> dict:
     # 与 agent 共用小书全文／大书目录、当前页、重试和对话的取法，不能带写书进度或写作要求。
-    from app.services.chat_agent import SMALL_BOOK, outline_of, retry_note, viewing_full
+    from app.services.chat_agent import SMALL_BOOK, retry_note, viewing_full
     from app.services.chat_tools import search_text
 
     ctx = await load_context(session, book)
@@ -54,7 +88,7 @@ async def values(session, book, role, message, rows, summary, *, tools: bool, re
         )
     )
     if ctx.units:
-        full_outline = outline_of(ctx, full=True)
+        full_outline = outline_of(ctx, chapters, full=True, open_volume_id=(book.teardown or {}).get("open_volume_id"))
     else:
         ranges = {}
         for chapter in chapters:
@@ -77,11 +111,13 @@ async def values(session, book, role, message, rows, summary, *, tools: bool, re
         related = "【和这次的话有关的资料】\n" + ("\n\n".join(blocks) or "（没找到）")
     return dict(
         material_note="" if small else "（书比较大：设定和大纲只列了目录，要细节用工具查）",
-        book_info=book_info(book, chapters, ctx.volumes),
+        book_info=book_info(book, chapters, ctx.volumes, ctx.units),
         library=(full_library if small else "这里只列名字和一句话，要细节用 look_up_settings 查：\n" + ctx.library)
         if full_library
         else "（还没拆出设定）",
-        outline=full_outline if small or not ctx.units else outline_of(ctx, full=False),
+        outline=full_outline
+        if small or not ctx.units
+        else outline_of(ctx, chapters, full=False, open_volume_id=(book.teardown or {}).get("open_volume_id")),
         viewing=await viewing_full(session, book, ctx, payload.get("viewing")),
         related=related,
         summary=summary or "（没有）",

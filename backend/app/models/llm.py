@@ -8,7 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, Timestamps, UUIDPk
 
-ROLES = ("default", "chief", "lorekeeper", "writer", "reviewer", "router")
+ROLES = ("default", "chief", "lorekeeper", "writer", "reviewer", "router", "teardown")
 
 
 class LlmProfile(UUIDPk, Timestamps, Base):

@@ -37,7 +37,7 @@ from app.schemas import (
     VolumePatch,
     WriteRequest,
 )
-from app.services import jobs, outline_structure, writing_store
+from app.services import jobs, outline_structure, teardown_jobs, writing_store
 from app.services.library import lock_book
 from app.services.meeting import post_message
 from app.services.requirements import absorb_other_rules
@@ -180,7 +180,7 @@ async def update_book(
     await lock_book(session, book.id)
     await session.refresh(book, with_for_update=True)
     # 文风参考只给写手看、编辑部不会去改它：只改它时编辑部干活也能改，从下一章起照新的写
-    if body.model_fields_set - {"style_reference"}:
+    if book.source == "teardown" or body.model_fields_set - {"style_reference"}:
         await ensure_idle(session, book.id)
     before = snapshot_of(book)
     if (body.author is not None or body.intro is not None) and book.source != "teardown":
@@ -227,9 +227,16 @@ async def update_book(
 
 
 @router.delete("/books/{book_id}", status_code=204)
-async def delete_book(book: Book = Depends(get_book), session: AsyncSession = SessionDep) -> None:
+async def delete_book(
+    book: Book = Depends(get_book), session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)
+) -> None:
+    await lock_book(session, book.id)
     if await jobs.is_busy(session, book.id):
-        raise HTTPException(409, "编辑部正在工作，请先停止任务再删除")
+        if book.source != "teardown" or await teardown_jobs.active(session, book.id) is None:
+            raise HTTPException(409, "编辑部正在工作，请先停止任务再删除")
+        await teardown_jobs.stop(session, redis, book)
+        await lock_book(session, book.id)
+        await session.refresh(book, with_for_update=True)
     await session.delete(book)
     await session.commit()
 
