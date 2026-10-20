@@ -1,13 +1,16 @@
 import clsx from 'clsx'
 import { ArrowLeft, BookOpen, ChevronDown, ChevronRight, ChevronUp, Globe, Inbox, Lock, Minus, PanelRight, PictureInPicture2, Pin, Plus, X } from 'lucide-react'
-import { type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Link, useLocation } from 'react-router-dom'
 import type { ChatViewing } from '../../api/types'
 import { useBookMeta } from '../../api/newBook'
 import { CategoryPicker, LengthInput, Row, TagPicker } from '../../components/BookFields'
 import { BookCover } from '../../components/BookCover'
 import { readEditorialDock, writeEditorialDock, type EditorialDock as Dock } from '../../lib/editorialDock'
+import { teardownWords } from '../../lib/teardownPreview'
+import { teardownImportedDate, teardownWorkspaceActions } from '../../lib/teardownWorkspace'
 import { readWorkspaceReadingPosition, writeWorkspaceReadingPosition, type WorkspaceReadingPosition } from '../../lib/workspaceReadingPosition'
+import { BookContext } from '../book/context'
 import {
   ActionsContext, type CategoryStyle, type DraftItem, type EntryChange, type RewriteMode, type RewriteOutcome, type WorkspaceActions,
   blankEntry, childKind, draftToEntry, entryIn, useSave, useWorkspace, withFields,
@@ -339,6 +342,11 @@ function shownTitle(node: VNode): string {
   return node.title.includes('　') && !name.trim() ? `${prefix}　未命名` : node.title
 }
 
+function teardownTitle(node: VNode): string {
+  const [prefix, name] = splitTitle(node.title)
+  return node.kind === '章' && !name.trim() ? prefix.replace(/^第(\d+)章$/, '第 $1 章') : shownTitle(node)
+}
+
 /** 找大纲：名字对得上的节点，连同它上面的几层。 */
 function matchingIds(node: VNode, q: string, out = new Set<string>()): boolean {
   let hit = node.kind !== '全书' && node.title.includes(q)
@@ -348,8 +356,8 @@ function matchingIds(node: VNode, q: string, out = new Set<string>()): boolean {
 }
 
 /** 大纲树的一行：鼠标移上去出现「+」，在这一层下面加一个。 */
-function OutlineTreeView({ node, depth, selected, onSelect, open, toggle, onAdd, only }: {
-  node: VNode; depth: number; selected: string; onSelect: (id: string) => void; open: string[]; toggle: (id: string) => void; onAdd: (id: string) => void; only?: Set<string>
+function OutlineTreeView({ node, depth, selected, onSelect, open, toggle, onAdd, only, teardown }: {
+  node: VNode; depth: number; selected: string; onSelect: (id: string) => void; open: string[]; toggle: (id: string) => void; onAdd: (id: string) => void; only?: Set<string>; teardown?: boolean
 }) {
   const { actions } = useWorkspace()
   const children = (node.children ?? []).filter((c) => !only || only.has(c.id))
@@ -369,7 +377,8 @@ function OutlineTreeView({ node, depth, selected, onSelect, open, toggle, onAdd,
           className={clsx('min-w-0 flex-1 truncate py-[7px] pr-2 text-left',
             node.kind === '章' ? 'text-sm' : 'font-serif text-[15px] 2xl:text-base',
             node.later ? 'text-ink-3' : selected === node.id ? 'font-bold text-ink' : 'text-ink-2 group-hover:text-ink')}>
-          {shownTitle(node)}
+          {teardown ? teardownTitle(node) : shownTitle(node)}
+          {teardown && node.open && <span className="ml-1.5 text-xs font-normal text-ink-3">还没收尾</span>}
           {node.later && <span className="ml-1.5 text-xs font-normal">· 写到再定</span>}
         </button>
         {node.locked && <Lock className={clsx('mr-1.5 size-3 shrink-0 text-ink-3', child && 'group-hover:hidden')} />}
@@ -382,7 +391,7 @@ function OutlineTreeView({ node, depth, selected, onSelect, open, toggle, onAdd,
         )}
       </div>
       {expandable && expanded && children.map((c) => (
-        <OutlineTreeView key={c.id} node={c} depth={depth + 1} selected={selected} onSelect={onSelect} open={open} toggle={toggle} onAdd={onAdd} only={only} />
+        <OutlineTreeView key={c.id} node={c} depth={depth + 1} selected={selected} onSelect={onSelect} open={open} toggle={toggle} onAdd={onAdd} only={only} teardown={teardown} />
       ))}
     </div>
   )
@@ -639,7 +648,7 @@ function WorldPage({ book }: { book: VBook }) {
       <h1 className="font-serif text-[34px] font-bold 2xl:text-[38px]">世界概况</h1>
       <p className="mt-3 text-[15px] leading-relaxed text-ink-3">整个世界一段话说清：什么时代、超凡的力量公开还是藏着、钱用什么、普通人过得怎么样。一本书只有这一篇。</p>
       <div className="mt-8 border-t border-line pt-8">
-        <Prose value={book.world} onSave={(text) => save(actions.saveWorld(text))} spot="w" placeholder={'比如：\n九天大陆，以武为尊，宗门、世家、王朝并立。钱用灵石，灵石也是修炼资源。凡人活不过百岁，武者靠境界续命。'} />
+        <Prose value={book.world} onSave={(text) => save(actions.saveWorld(text))} spot="w" placeholder={book.source === 'teardown' ? '还没拆出设定。' : '比如：\n九天大陆，以武为尊，宗门、世家、王朝并立。钱用灵石，灵石也是修炼资源。凡人活不过百岁，武者靠境界续命。'} />
       </div>
     </Sheet>
   )
@@ -979,21 +988,22 @@ function CategoryStream({ book, category, next, nav, fresh, scrollReq, onSpy, on
                 调整栏目
               </button>
             )}
-            <AskButton onClick={() => setAsking(!asking)}>编辑部帮写</AskButton>
+            {book.source !== 'teardown' && <AskButton onClick={() => setAsking(!asking)}>编辑部帮写</AskButton>}
             <button type="button" onClick={onNewEntry} className="h-9 rounded-lg bg-ink px-4 text-sm text-paper-2 transition-colors hover:bg-ink-2">
               新增{nounOf(category.name)}
             </button>
           </div>
         </div>
         {!ladder && editing && <div className="mt-5"><CardTemplateEditor category={category} template={templateOf(book, category)} counts={counts} onClose={() => setEditing(false)} /></div>}
-        {asking && <div className="mt-5"><AskPanel book={book} category={category} onAccept={onAccept} onClose={() => setAsking(false)} /></div>}
+        {book.source !== 'teardown' && asking && <div className="mt-5"><AskPanel book={book} category={category} onAccept={onAccept} onClose={() => setAsking(false)} /></div>}
       </header>
 
       <div className="space-y-6">
         {orderEntries(category).map((entry) => (entry.kind === 'character' || entry.kind === 'goldfinger'
           ? <CharacterCard key={cardKey(entry.id)} book={book} entry={entry} nav={nav} fresh={fresh === entry.id} />
           : <PlainCard key={cardKey(entry.id)} book={book} entry={entry} category={category} nav={nav} fresh={fresh === entry.id} />))}
-        {!category.entries.length && category.example && (
+        {book.source === 'teardown' && !category.entries.length && <p className="py-6 font-serif text-lg text-ink-3">还没拆出设定。</p>}
+        {book.source !== 'teardown' && !category.entries.length && category.example && (
           <div className="rounded-xl border border-dashed border-line-2 px-12 py-10">
             <p className="mb-3 text-xs tracking-wider text-ink-3">比如这样写一条</p>
             <p className="font-serif text-[26px] font-bold text-ink-3">{category.example.name}</p>
@@ -1024,9 +1034,9 @@ function SettingsOverview({ book, nav, onSelect }: { book: VBook; nav: Nav; onSe
       <p className="mt-3 max-w-2xl font-serif text-lg leading-relaxed text-ink-2">
         {total
           ? `已经写了 ${total} 条。点一类进去看，或者在左边目录里直接挑。`
-          : '这本书的设定还空着。不用一次写全，先写最要紧的两样：主角和金手指；其余的写到哪补到哪。'}
+          : book.source === 'teardown' ? '还没拆出设定。' : '这本书的设定还空着。不用一次写全，先写最要紧的两样：主角和金手指；其余的写到哪补到哪。'}
       </p>
-      {!total && !actions.live && (
+      {book.source !== 'teardown' && !total && !actions.live && (
         <div className="mt-8 flex flex-wrap items-center gap-5 rounded-2xl bg-subtle px-6 py-5">
           <div className="min-w-0 flex-1">
             <p className="text-[15px] text-ink">想省事，可以让编辑部按简介先补一版。</p>
@@ -1042,7 +1052,7 @@ function SettingsOverview({ book, nav, onSelect }: { book: VBook; nav: Nav; onSe
             <span className="flex items-center gap-2">
               <span className="font-serif text-lg font-bold text-ink">{cat.name}</span>
               {cat.entries.length > 0 && <span className="text-xs text-ink-3 tabular-nums">{cat.entries.length} 条</span>}
-              {!total && first.includes(cat.name) && <span className="rounded-full bg-seal-soft px-2 py-px text-[11px] text-seal">先写</span>}
+              {book.source !== 'teardown' && !total && first.includes(cat.name) && <span className="rounded-full bg-seal-soft px-2 py-px text-[11px] text-seal">先写</span>}
             </span>
             <span className="mt-1 line-clamp-1 block text-[13px] text-ink-3">
               {cat.entries.length ? cat.entries.slice(0, 4).map((e) => e.name).join('、') : cat.about}
@@ -1176,10 +1186,11 @@ function OutlinePage({ book, outline, id, nav, onAdd, onInsert, onMove, fresh, w
   const save = useSave()
   const path = findNode(outline, id) ?? [outline]
   const node = path[path.length - 1]
+  const teardown = book.source === 'teardown'
   const child = childKind(node)
   const canAdd = actions.canAdd(node)
   const meta: { label: string; value: ReactNode }[] = []
-  const editableCount = node.count !== undefined && actions.canEdit(node, 'name') && (node.kind === '单元' || node.kind === '卷')
+  const editableCount = !teardown && node.count !== undefined && actions.canEdit(node, 'name') && (node.kind === '单元' || node.kind === '卷')
   // 章号已经在章的标题里，不再列章数
   if (editableCount) meta.push({ label: '章数', value: <CountField node={node} /> })
   else if (node.kind !== '章') {
@@ -1190,8 +1201,8 @@ function OutlinePage({ book, outline, id, nav, onAdd, onInsert, onMove, fresh, w
     if (have || later) meta.push({ label: '章数', value: [open.length ? have : have.replace('已有 ', ''), later].filter(Boolean).join('；') })
     else if (node.kind === '卷' || node.kind === '单元') meta.push({ label: '章数', value: '还没定' })
   }
-  if (node.progress && node.progress !== '已规划') meta.push({ label: '写到', value: node.progress })
-  if (writing && node.kind === '章' && node.body && node.body.status !== 'planned') {
+  if (!teardown && node.progress && node.progress !== '已规划') meta.push({ label: '写到', value: node.progress })
+  if (!teardown && writing && node.kind === '章' && node.body && node.body.status !== 'planned') {
     meta.push({
       label: '正文',
       value: <button type="button" onClick={() => nav.openChapter(node.id)} className="text-chief hover:underline">{node.body.status === 'done' ? `${node.body.words.toLocaleString()} 字 · 去读` : '写手在写 · 去看'}</button>,
@@ -1199,7 +1210,7 @@ function OutlinePage({ book, outline, id, nav, onAdd, onInsert, onMove, fresh, w
   }
   const split = useSplit(node)
   const status = writing?.status
-  const gate = status?.state === 'waiting' && status.gate && gateTarget(status.gate).node === node.id ? status.gate : undefined
+  const gate = !teardown && status?.state === 'waiting' && status.gate && gateTarget(status.gate).node === node.id ? status.gate : undefined
   const one = ONE[node.kind]
   const arrange = actions.canArrange(node) ? [
     { label: `在前面插${one}`, onClick: () => onInsert(node, 'before') },
@@ -1219,8 +1230,9 @@ function OutlinePage({ book, outline, id, nav, onAdd, onInsert, onMove, fresh, w
       <Crumb items={['大纲', ...path.slice(0, -1).map(shownTitle)]} />
       <div className="flex flex-wrap items-center gap-3 pr-8">
         <NodeTitle node={node} fresh={fresh} />
+        {teardown && node.open && <span className="rounded-full bg-line/70 px-2.5 py-0.5 text-xs text-ink-2">还没收尾</span>}
         {node.later && <span className="rounded-full bg-line/70 px-2.5 py-0.5 text-xs text-ink-2">写到再定</span>}
-        {node.locked && <span className="flex items-center gap-1 rounded-full bg-line/70 px-2.5 py-0.5 text-xs text-ink-2"><Lock className="size-3" />锁住，AI 规划时不改</span>}
+        {!teardown && node.locked && <span className="flex items-center gap-1 rounded-full bg-line/70 px-2.5 py-0.5 text-xs text-ink-2"><Lock className="size-3" />锁住，AI 规划时不改</span>}
       </div>
       {meta.length > 0 && (
         <div className="mt-4 flex flex-wrap gap-x-7 gap-y-2">
@@ -1229,24 +1241,26 @@ function OutlinePage({ book, outline, id, nav, onAdd, onInsert, onMove, fresh, w
       )}
       <div className="mt-8 space-y-8 border-t border-line pt-8">
         {gate && writing && <GateCard gate={gate} writing={writing} nav={nav} />}
-        {node.sections
+        {teardown && node.kind === '章' && !node.sections?.some(field => field.text.trim()) && <p className="font-serif text-lg text-ink-3">还没拆出章纲</p>}
+        {node.virtual ? <p className="font-serif text-lg leading-relaxed text-ink-2">这些章还没拆，拆的时候会归进单元。</p> : node.sections
           ? node.sections.map((field) => (
             <Section key={field.label} field={field} readOnly={!actions.canEdit(node, 'text')}
               onSave={(text) => save(actions.saveNode(node, { sections: { [field.label]: text } }))} />
           ))
           : <Prose value={node.text} readOnly={!actions.canEdit(node, 'text')} spot={`n|${node.id}`} placeholder={NODE_PLACEHOLDER[node.kind]}
             onSave={(text) => save(actions.saveNode(node, { text }))} />}
+        {teardown && node.kind === '章' && <p className="text-sm text-ink-3">正文 · {(node.body?.words ?? 0).toLocaleString('zh-CN')} 字 · <button type="button" onClick={() => nav.openChapter(node.id)} className="text-chief hover:underline">去读</button></p>}
         <WriteHelp node={node} />
         {child && (canAdd || !!node.children?.length) && (
           <section>
             <h3 className="mb-1 text-[13px] tracking-[0.15em] text-ink-3">下面的{child}{node.children?.length ? ` · ${node.children.length} 个` : ''}</h3>
-            {KIND_NOTE[child] && <p className="mb-2 text-xs text-ink-3">{KIND_NOTE[child]}</p>}
+            {!teardown && KIND_NOTE[child] && <p className="mb-2 text-xs text-ink-3">{KIND_NOTE[child]}</p>}
             {!!node.children?.length && (
               <div className="divide-y divide-line border-y border-line">
                 {node.children.map((c) => (
                   <button key={c.id} type="button" onClick={() => nav.openNode(c.id)} className="group flex w-full items-baseline gap-5 py-3.5 text-left">
-                    <span className={clsx('w-44 shrink-0 truncate font-serif text-[16px] font-bold group-hover:text-seal', c.later ? 'text-ink-3' : 'text-ink')}>{shownTitle(c)}</span>
-                    <span className="line-clamp-1 flex-1 text-[14px] text-ink-3">{(c.text || c.sections?.[0]?.text || '').split('\n')[0] || '还没写'}</span>
+                    <span className={clsx('w-44 shrink-0 truncate font-serif text-[16px] font-bold group-hover:text-seal', c.later ? 'text-ink-3' : 'text-ink')}>{teardown ? teardownTitle(c) : shownTitle(c)}</span>
+                    <span className="line-clamp-1 flex-1 text-[14px] text-ink-3">{(c.text || c.sections?.[0]?.text || '').split('\n')[0] || (teardown ? c.kind === '章' ? '还没拆出章纲' : c.virtual ? '这些章还没拆，拆的时候会归进单元。' : '' : '还没写')}</span>
                     {c.range && c.kind !== '章' && <span className="text-xs text-ink-3 tabular-nums">{c.range[1] - c.range[0] + 1} 章</span>}
                   </button>
                 ))}
@@ -1321,6 +1335,39 @@ function BlurbPage({ book }: { book: VBook }) {
   )
 }
 
+/** 拆书不复用作者开书的定调表单：这里只呈现已导入的原书资料。 */
+function TeardownBlurbPage({ book }: { book: VBook }) {
+  const { actions } = useWorkspace()
+  const save = useSave()
+  const info = book.teardown
+  const date = teardownImportedDate(info?.imported_at)
+  return (
+    <Sheet narrow>
+      <div className="flex items-start gap-7">
+        <BookCover title={book.title} seed={book.id} size="md" />
+        <div className="min-w-0 flex-1">
+          <Editable value={book.title} placeholder="书名" className={titleClass}
+            onSave={title => save(actions.saveBook({ title: title.trim() }))} />
+          {info?.author && <p className="mt-3 text-[15px] text-ink-2">原书作者：{info.author}</p>}
+          <p className="mt-3 text-sm text-ink-3">{teardownWords(info?.chars ?? 0)} · {info?.chapters ?? 0} 章 · {info?.volumes && !info.open_volume_id ? `原书分了 ${info.volumes} 卷` : '原书没有分卷'}</p>
+          {date && <p className="mt-1 text-sm text-ink-3">{date} 导入</p>}
+        </div>
+      </div>
+      <section className="mt-8 border-t border-line pt-7">
+        <h2 className="text-sm tracking-[0.15em] text-ink-3">原书简介</h2>
+        <p className="mt-3 font-serif text-lg leading-[1.95] whitespace-pre-line text-ink-2">{info?.intro || '文件里没有简介'}</p>
+      </section>
+      <section className="mt-8 border-t border-line pt-7">
+        <h2 className="text-sm tracking-[0.15em] text-ink-3">拆书</h2>
+        <p className="mt-3 font-serif text-xl text-ink">还没开拆。</p>
+        <p className="mt-2 text-[14px] leading-relaxed text-ink-3">以后在这里开始拆：拆出每章章纲、单元和卷，再整理出人物和设定、这本书好在哪。</p>
+      </section>
+      {!!info?.number_issue_total && <p className="mt-6 text-sm text-ink-3">原书章号对不上 {info.number_issue_total} 处</p>}
+      {!!info?.excluded_count && <p className="mt-2 text-sm text-ink-3">{info.excluded_count} 章不像正文，没导入</p>}
+    </Sheet>
+  )
+}
+
 function countKinds(node: VNode, counts: Record<string, number> = {}): Record<string, number> {
   counts[node.kind] = (counts[node.kind] ?? 0) + 1
   if (node.kind === '章' && node.body?.status === 'done') {
@@ -1338,7 +1385,7 @@ function BookColumn({ book, outline, onTab, manuscript }: { book: VBook; outline
   const entries = book.categories.reduce((n, c) => n + c.entries.length, (book.world ? 1 : 0))
   const counts = countKinds(outline)
   const plan = [counts['篇'] && `${counts['篇']} 篇`, counts['卷'] && `${counts['卷']} 卷`, counts['章'] && `${counts['章']} 章`].filter(Boolean).join(' · ')
-  const written = counts.written ? `已写 ${counts.written} 章 · ${counts.words >= 10000 ? `${(counts.words / 10000).toFixed(1)} 万字` : `${counts.words.toLocaleString()} 字`}` : '还没开写'
+  const written = book.source === 'teardown' ? `已导入 ${book.teardown?.chapters ?? counts['章'] ?? 0} 章` : counts.written ? `已写 ${counts.written} 章 · ${counts.words >= 10000 ? `${(counts.words / 10000).toFixed(1)} 万字` : `${counts.words.toLocaleString()} 字`}` : '还没开写'
   const rows: [Tab, string, boolean][] = [['设定', entries ? `${entries} 条` : '还空着', true], ['大纲', plan || '还空着', true], ['正文', written, manuscript]]
   return (
     <SideColumn>
@@ -1349,7 +1396,7 @@ function BookColumn({ book, outline, onTab, manuscript }: { book: VBook; outline
         <div className="flex flex-col items-center px-4 pt-5 pb-7 text-center">
           <BookCover title={book.title} seed={book.id === 'sample' ? '开新书' : book.id} size="md" className="shadow-[0_18px_28px_-16px_rgb(40_25_10/0.55)]" />
           <p className="mt-5 max-w-full truncate font-serif text-lg font-bold">{book.title || '未命名'}</p>
-          <p className="mt-1 text-[13px] text-ink-3">{facts || '还没分类'}</p>
+          <p className="mt-1 text-[13px] text-ink-3">{book.source === 'teardown' ? book.teardown?.author : facts || '还没分类'}</p>
           {chapters && <p className="mt-0.5 text-[13px] text-ink-3">{book.length} 万字 · 约 {chapters} 章</p>}
         </div>
         <div className="border-t border-line pt-2">
@@ -1511,10 +1558,11 @@ function locate(host: HTMLElement, range: Range, picked: string): [number, numbe
 }
 
 /** 选中一栏里的几个字，旁边冒出三个按钮：改这一句（先说怎么改）、给我几个写法（挑一个换上）、写细一点。改好可以撤销。 */
-function SelectionActions({ pageRef, onToast, onUndo }: {
-  pageRef: React.RefObject<HTMLElement | null>; onToast: (text: string) => void; onUndo: (text: string, versionId?: string | null) => void
+function SelectionActions({ pageRef, onToast, onUndo, teardown }: {
+  pageRef: React.RefObject<HTMLElement | null>; onToast: (text: string) => void; onUndo: (text: string, versionId?: string | null) => void; teardown?: boolean
 }) {
   const { actions } = useWorkspace()
+  const bookContext = useContext(BookContext)
   const live = !!actions.rewrite
   const [at, setAt] = useState<Picked | null>(null)
   const [step, setStep] = useState<'menu' | 'ask' | 'busy' | 'options'>('menu')
@@ -1605,12 +1653,18 @@ function SelectionActions({ pageRef, onToast, onUndo }: {
   const left = Math.min(Math.max(at.x, 240), window.innerWidth / at.z - 240)
   return (
     <div ref={boxRef} className="fixed z-50 -translate-x-1/2"
-      style={step === 'menu' ? { left: at.x, top: at.top - 46 } : { left, top: Math.min(at.bottom + 10, window.innerHeight / at.z - 120) }}
+      style={step === 'menu' ? { left: teardown ? Math.min(Math.max(at.x, 80), window.innerWidth / at.z - 80) : at.x, top: teardown ? Math.max(70, Math.min(at.top - 46, window.innerHeight / at.z - 52)) : at.top - 46 } : { left, top: Math.min(at.bottom + 10, window.innerHeight / at.z - 120) }}
       onMouseDown={(e) => { if (step === 'menu') e.preventDefault() }}>
       {step === 'menu' && (
         <div className={clsx(panel, 'flex items-center gap-0.5 p-1')}>
-          <span className="ml-1 flex size-6 items-center justify-center rounded-full bg-lore font-serif text-[11px] text-on-role">设</span>
-          {labels.map((label, i) => (
+          <span className="ml-1 flex size-6 items-center justify-center rounded-full bg-lore font-serif text-[11px] text-on-role">{teardown ? '编' : '设'}</span>
+          {teardown && bookContext && <button type="button" className={menuButton} onClick={() => {
+            bookContext.askChief({ text: at.text, where: bookContext.viewing?.()?.label ?? '原文里选中的一句' })
+            bookContext.showChat?.()
+            close()
+            window.getSelection()?.removeAllRanges()
+          }}>问问主编</button>}
+          {!teardown && labels.map((label, i) => (
             <button key={label} type="button" className={menuButton} onClick={() => {
               if (!live) {
                 setAt(null)
@@ -1710,7 +1764,11 @@ export interface WorkspaceProps {
   start?: { tab?: Tab; node?: string; chapter?: string }
 }
 
-export function Workspace({ book: base, actions, right, sideFooter, chat, chatTools, chatBadge, chatBallNote, openChat, notice, manuscriptHref, openRef, viewingRef, writing, start }: WorkspaceProps) {
+export function Workspace({ book: base, actions: rawActions, right, sideFooter, chat, chatTools, chatBadge, chatBallNote, openChat, notice, manuscriptHref, openRef, viewingRef, writing, start }: WorkspaceProps) {
+  const teardown = base.source === 'teardown'
+  const actions = useMemo(() => teardownWorkspaceActions(base.source, rawActions), [base.source, rawActions])
+  const location = useLocation()
+  const openTeardownHome = teardown && location.state?.teardownHome === true
   // 新增了还没起名字的条目：只在这一页，起了名字才存
   const [drafts, setDrafts] = useState<VEntry[]>([])
   const draftsRef = useRef(drafts)
@@ -1730,13 +1788,13 @@ export function Workspace({ book: base, actions, right, sideFooter, chat, chatTo
   const firstChild = base.outline.children?.[0]
   const firstNode = start?.node && findNode(base.outline, start.node) ? start.node : firstChild?.children?.[0]?.id ?? firstChild?.id ?? 'book'
   const defaultPosition = useMemo<WorkspaceReadingPosition>(() => ({
-    tab: start?.tab === '正文' && !writing ? '设定' : start?.tab ?? '设定',
+    tab: start?.tab === '正文' && !writing ? '设定' : start?.tab ?? (teardown ? '正文' : '设定'),
     entry: firstSelection(base),
     node: firstNode,
     chapter: start?.chapter && findNode(base.outline, start.chapter) ? start.chapter : 'home',
     open: ['book', ...(findNode(base.outline, firstNode) ?? []).map(item => item.id)],
-  }), [base, firstNode, start, writing])
-  const [initialPosition] = useState(() => readWorkspaceReadingPosition(base, defaultPosition, { live: actions.live, manuscript: !!writing, explicitStart: !!start }))
+  }), [base, firstNode, start, writing, teardown])
+  const [initialPosition] = useState(() => readWorkspaceReadingPosition(base, defaultPosition, { live: actions.live, manuscript: !!writing, explicitStart: !!start || openTeardownHome }))
   const [tab, setTab] = useState<Tab>(initialPosition.tab)
   const [entry, setEntry] = useState(initialPosition.entry)
   const [fresh, setFresh] = useState('')
@@ -1748,6 +1806,8 @@ export function Workspace({ book: base, actions, right, sideFooter, chat, chatTo
   const [outlineQuery, setOutlineQuery] = useState('')
   // 正文里看的是哪一章；home 是正文首页（开写）
   const [chapter, setChapter] = useState(initialPosition.chapter)
+  const [searchWord, setSearchWord] = useState('')
+  const [searchToken, setSearchToken] = useState(0)
   const [dock, setDock] = useState<Dock>(() => readEditorialDock(actions.live))
   // 贴边时编辑部多宽：记住上次拖的宽度；顶栏的四个入口要让开它
   const [sideWidth, setSideWidth] = useState(() => savedSideWidth(actions.live ? 520 : 460))
@@ -1859,6 +1919,7 @@ export function Workspace({ book: base, actions, right, sideFooter, chat, chatTo
     },
     openChapter: (id) => {
       if (!writing) return
+      setSearchWord('')
       setTab('正文')
       setChapter(id)
       pageRef.current?.scrollTo({ top: 0 })
@@ -1973,7 +2034,7 @@ export function Workspace({ book: base, actions, right, sideFooter, chat, chatTo
         <TopBar book={book} tab={tab} onTab={setTab} right={right} manuscriptHref={manuscriptHref} manuscript={!!writing}
           leftOffset={columnWidth} rightOffset={dock === 'side' ? sideWidth : 0} />
         {notice}
-        {writing && <WritingStrip writing={writing} nav={nav} />}
+        {!teardown && writing && <WritingStrip writing={writing} nav={nav} />}
         <div className="flex min-h-0 flex-1">
           {tab === '简介' && <BookColumn book={book} outline={base.outline} onTab={setTab} manuscript={!!writing} />}
           {tab === '设定' && (
@@ -1984,17 +2045,18 @@ export function Workspace({ book: base, actions, right, sideFooter, chat, chatTo
           )}
           {tab === '大纲' && (
             <DirectoryShell title="大纲" search="找篇、卷、单元、章……" query={outlineQuery} onQuery={setOutlineQuery} addMenu={outlineAdd}>
-              <OutlineTreeView node={base.outline} depth={0} selected={node} onSelect={nav.openNode} open={open} onAdd={addNode} only={outlineOnly}
+              <OutlineTreeView node={base.outline} depth={0} selected={node} onSelect={nav.openNode} open={open} onAdd={addNode} only={outlineOnly} teardown={teardown}
                 toggle={(id) => setOpen(open.includes(id) ? open.filter((x) => x !== id) : [...open, id])} />
               {outlineOnly && outlineOnly.size === 0 && <p className="px-2.5 py-2 text-[13px] text-ink-3">没找到「{outlineQuery.trim()}」</p>}
             </DirectoryShell>
           )}
           {tab === '正文' && writing && (
             <ManuscriptDirectory book={book} selected={chapter} onSelect={nav.openChapter} writing={writing}
+              onSearchSelect={(id, word) => { nav.openChapter(id); setSearchWord(word); setSearchToken(n => n + 1) }}
               onExport={() => (live ? window.open(`/api/books/${base.id}/export.txt`, '_blank') : setToast('原型：会把写好的章按卷、按章导出成一个 TXT 文件'))} />
           )}
           <main ref={pageRef} className="scroll-thin min-w-0 flex-1 overflow-y-auto">
-            {tab === '简介' && <BlurbPage book={book} />}
+            {tab === '简介' && (teardown ? <TeardownBlurbPage book={book} /> : <BlurbPage book={book} />)}
             {tab === '设定' && (
               entry === 'world' ? <WorldPage book={book} />
                 : category ? (
@@ -2008,7 +2070,7 @@ export function Workspace({ book: base, actions, right, sideFooter, chat, chatTo
             {tab === '大纲' && <OutlinePage key={`${node}:${nodeNonce}`} book={book} outline={base.outline} id={node} nav={nav} onAdd={addNode} onInsert={insertNode} onMove={moveNode} fresh={freshNode === node} writing={writing} />}
             {tab === '正文' && writing && (chapter === 'home'
               ? <ManuscriptHome book={book} writing={writing} nav={nav} />
-              : <ChapterPage key={chapter} book={book} id={chapter} writing={writing} nav={nav} />)}
+              : <ChapterPage key={chapter} book={book} id={chapter} writing={writing} nav={nav} searchWord={searchWord} searchToken={searchToken} />)}
           </main>
           {dock === 'side' && <DockedEditorial setDock={setDock} width={sideWidth} setWidth={setSideWidth} tools={chatTools}>{chat}</DockedEditorial>}
         </div>
@@ -2019,14 +2081,14 @@ export function Workspace({ book: base, actions, right, sideFooter, chat, chatTo
           <button type="button" onClick={() => setDock('float')} title="编辑部"
             className="press fixed right-6 bottom-6 z-40 flex size-14 items-center justify-center rounded-full bg-chief font-serif text-xl text-on-role shadow-[0_14px_30px_-10px_rgb(40_50_90/0.6)] transition-transform hover:-translate-y-0.5">
             编
-            {writing?.status.state === 'working' && <span aria-hidden className="absolute -inset-1 rounded-full border-2 border-chief/25 border-t-chief motion-safe:animate-spin" />}
+            {!teardown && writing?.status.state === 'working' && <span aria-hidden className="absolute -inset-1 rounded-full border-2 border-chief/25 border-t-chief motion-safe:animate-spin" />}
             {chatBadge === undefined
               ? <span className="absolute top-1 right-1 size-3 rounded-full bg-seal ring-2 ring-paper" />
               : chatBadge > 0 && <span className="absolute -top-0.5 -right-0.5 flex min-w-5 items-center justify-center rounded-full bg-seal px-1 text-[11px] leading-5 text-on-role ring-2 ring-paper">{chatBadge > 99 ? '99+' : chatBadge}</span>}
           </button>
         )}
 
-        <SelectionActions pageRef={pageRef} onToast={setToast} onUndo={onUndo} />
+        <SelectionActions pageRef={pageRef} onToast={setToast} onUndo={onUndo} teardown={teardown} />
         {undo && (
           <div className="fixed bottom-8 left-1/2 z-50 flex max-w-[min(640px,90vw)] -translate-x-1/2 items-center gap-3 rounded-full bg-ink px-5 py-2.5 text-[13px] text-paper-2 shadow-[var(--shadow-lift)]">
             <span className="line-clamp-2">{undo.text}</span>

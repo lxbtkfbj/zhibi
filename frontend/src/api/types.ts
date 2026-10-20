@@ -275,10 +275,25 @@ export interface SetupProgress {
   pieces?: Partial<Record<SetupPiece, PieceStatus>>
 }
 
+/** 拆书列表与详情的只读摘要；原文件、分章长列表只在确认页接口里返回。 */
+export interface TeardownSummary {
+  stage: string
+  author: string
+  intro: string
+  chars: number
+  chapters: number
+  volumes: number
+  number_issue_total: number
+  excluded_count: number
+  open_volume_id: string | null
+  imported_at: string | null
+}
+
 export interface BookSummary {
   id: string
   title: string
-  source: 'new' | 'imported'
+  source: 'new' | 'imported' | 'teardown'
+  teardown?: TeardownSummary | null
   genre: string
   status: BookStatus
   idea: string

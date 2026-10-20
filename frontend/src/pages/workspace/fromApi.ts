@@ -1,15 +1,15 @@
 /** 把真书（书架上读的，或旧书快照）转成工作台的数据形状。每一栏记着存回去时认的名字。 */
 
 import type { LibraryItem, LibrarySnapshot } from '../../api/library'
-import type { ChapterBrief, Relationship } from '../../api/types'
-import { arcText, isLaterEnding, outlineStatusText, unitStatus, type OutlineTree } from '../../lib/outlineTree'
+import type { BookSummary, ChapterBrief, Relationship, TeardownSummary } from '../../api/types'
+import { arcText, isLaterEnding, outlineStatusText, unitStatus, type OutlineTree } from '../../lib/outlineTree.ts'
 import {
   CATEGORY_DEFS, CHARACTER_FIELDS, CHARACTER_PLACEHOLDERS, LEGACY_ROLES, cn, emptyCategory, linkMentions, numberChapters,
   type CardTemplate, type VBook, type VCategory, type VChapterBody, type VEntry, type VField, type VNode,
-} from './model'
+} from './model.ts'
 
 export interface ApiParts {
-  book: { id: string; title: string; genre: string; concept: Record<string, unknown>; card_layouts?: Record<string, CardTemplate>; chapter_words?: number }
+  book: { id: string; title: string; genre: string; concept: Record<string, unknown>; source?: BookSummary['source']; teardown?: TeardownSummary | null; card_layouts?: Record<string, CardTemplate>; chapter_words?: number }
   library: LibrarySnapshot
   outline: OutlineTree
   relationships: Relationship[]
@@ -101,14 +101,14 @@ function settingEntry(item: LibraryItem, category: string): VEntry {
 /** 原型快照里一章多存的几样（真书的章节列表里没有） */
 interface SnapshotChapter { content?: string; changes?: string[]; review_view?: { good: string[]; issues: string[] } }
 
-function outlineNodes(tree: OutlineTree, chapters: ChapterBrief[], ending?: string): VNode {
+function outlineNodes(tree: OutlineTree, chapters: ChapterBrief[], ending?: string, teardown = false): VNode {
   const byIndex = new Map(chapters.map((c) => [c.index, c]))
-  const chapterNode = (index: number, title: string, status: string): VNode => {
+  const chapterNode = (index: number, title: string, status: string, wordCount?: number): VNode => {
     const brief = byIndex.get(index)
     const o = brief?.outline
     const happen = [text(o?.goal), ...(o?.scenes ?? []).map(text)].filter(Boolean).join('\n')
     // 还没开写的章：章纲三栏一直摆着，能改；写过的有章纲就看章纲，没有就看写了什么
-    const outline = status === 'planned' || (o && (happen || o.cool_point || o.hook))
+    const outline = teardown || status === 'planned' || (o && (happen || o.cool_point || o.hook))
     const sections: VField[] = outline
       ? [['发生什么', happen], ['看点', text(o?.cool_point)], ['结尾钩子', text(o?.hook)]].map(([label, value]) => ({ label, text: value, placeholder: CHAPTER_HINTS[label] }))
       : [{ label: '这一章写了什么', text: text(brief?.summary) }]
@@ -116,7 +116,7 @@ function outlineNodes(tree: OutlineTree, chapters: ChapterBrief[], ending?: stri
     const extra = brief as (ChapterBrief & SnapshotChapter) | undefined
     const body: VChapterBody = {
       status: status === 'final' ? 'done' : status === 'drafting' ? 'writing' : 'planned',
-      words: brief?.word_count ?? 0,
+      words: brief?.word_count ?? wordCount ?? 0,
       attempts: brief?.attempts || undefined,
       ...(extra?.content !== undefined ? { text: extra.content } : {}),
       ...(extra?.changes ? { changes: extra.changes } : {}),
@@ -133,11 +133,12 @@ function outlineNodes(tree: OutlineTree, chapters: ChapterBrief[], ending?: stri
       // 章数：拆了单元的按单元加起来；单元章数没定的按已有的章算
       chapters: (v.units.length ? v.units.reduce((sum, u) => sum + Math.max(u.chapter_count, u.chapters.length), 0) : v.chapter_count) || undefined,
       count: v.units.length ? undefined : v.chapter_count,
-      later: v.status === 'later', progress: outlineStatusText(v.status),
+      later: v.status === 'later', progress: outlineStatusText(v.status), open: v.open,
       children: v.units.map((u): VNode => ({
-        id: `u:${u.id}`, kind: '单元', title: `单元${cn(u.index)}　${u.title}`, text: text(u.summary), locked: u.locked, uses: [], ref: { type: 'unit', id: u.id },
+        id: `u:${u.id}`, kind: '单元', title: u.virtual ? u.title : `单元${cn(u.index ?? 0)}　${u.title}`, text: text(u.summary), locked: u.locked, uses: [], virtual: u.virtual,
+        ...(!u.virtual ? { ref: { type: 'unit' as const, id: u.id } } : {}),
         chapters: Math.max(u.chapter_count, u.chapters.length) || undefined, count: u.chapter_count, progress: outlineStatusText(unitStatus(u)),
-        children: u.chapters.map((c) => chapterNode(c.index, c.title, c.status)),
+        children: u.chapters.map((c) => chapterNode(c.index, c.title, c.status, c.word_count)),
       })),
     }))
   // 写到再定的篇里，排在最前面的那一篇可以直接加卷
@@ -213,7 +214,9 @@ export function bookFromApi(parts: ApiParts): VBook {
   const length = typeof concept.target_length === 'number' ? concept.target_length : undefined
   const book: VBook = {
     id: parts.book.id,
-    title: text(concept.title) || parts.book.title || '未命名',
+    source: parts.book.source,
+    teardown: parts.book.teardown,
+    title: (parts.book.source === 'teardown' ? parts.book.title : text(concept.title) || parts.book.title) || '未命名',
     channel: text(concept.channel),
     genre: text(concept.genre) || parts.book.genre || '',
     tags: Array.isArray(concept.tags) ? (concept.tags as string[]) : [],
@@ -223,7 +226,7 @@ export function bookFromApi(parts: ApiParts): VBook {
     blurb: text(concept.story) || text(concept.logline),
     world,
     categories,
-    outline: outlineNodes(parts.outline, parts.chapters, text(concept.ending)),
+    outline: outlineNodes(parts.outline, parts.chapters, text(concept.ending), parts.book.source === 'teardown'),
     pending: library.suggestions_pending ?? 0,
     layouts: parts.book.card_layouts ?? {},
   }

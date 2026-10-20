@@ -8,6 +8,7 @@ import { BookCover } from '../components/BookCover'
 import { Cloud, Diamond, FretDivider, InkMountains } from '../components/decor'
 import { Badge, Button, ErrorText, Reveal, Skeleton, Spinner } from '../components/ui'
 import { cleanTitle, displayStatus, greeting } from '../lib/status'
+import { teardownWords } from '../lib/teardownPreview'
 
 const IDEAS = [
   '一个能看见别人剩余寿命的杂役弟子，在吃人的宗门里步步为营',
@@ -50,6 +51,7 @@ function Composer() {
           给我一个灵感
         </button>
         <span className="ml-auto hidden text-xs text-ink-3 sm:inline">Ctrl + Enter</span>
+        <Button variant="ghost" size="lg" onClick={() => navigate('/teardown/new')}>拆一本书</Button>
         <Button variant="seal" size="lg" onClick={submit}>
           开新书
           <ArrowRight className="size-4" />
@@ -93,6 +95,8 @@ function ContinueCard({ book }: { book: BookSummary }) {
 
 function ShelfBook({ book, index }: { book: BookSummary; index: number }) {
   const status = displayStatus(book.status, book.job_status)
+  const teardown = book.source === 'teardown'
+  const confirming = teardown && book.teardown?.stage === 'confirming'
   const remove = useDeleteBook()
   const reduce = useReducedMotion()
   return (
@@ -102,7 +106,7 @@ function ShelfBook({ book, index }: { book: BookSummary; index: number }) {
       transition={{ duration: 0.5, delay: 0.05 * index, ease: [0.22, 1, 0.36, 1] }}
       className="group relative"
     >
-      <Link to={`/desk/${book.id}`} className="block">
+      <Link to={confirming ? `/teardown/${book.id}` : `/desk/${book.id}`} state={teardown && !confirming ? { teardownHome: true } : undefined} className="block">
         <div className="flex justify-center rounded-2xl px-4 pt-6 pb-4 transition-colors duration-300 group-hover:bg-card/70">
           <div className="transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:-translate-y-2 group-hover:-rotate-2">
             <BookCover title={book.title} seed={book.id} size="md" className="shadow-[0_14px_24px_-14px_rgb(40_25_10/0.6)]" />
@@ -110,12 +114,15 @@ function ShelfBook({ book, index }: { book: BookSummary; index: number }) {
         </div>
         <div className="px-3 pt-1 text-center">
           <p className="truncate font-serif text-[15px] font-bold">{cleanTitle(book.title)}</p>
-          <div className="mt-1.5 flex justify-center">
+          {teardown ? <>
+            <p className="mt-1.5 truncate text-xs text-ink-3">{book.teardown?.author ? `${book.teardown.author} · ` : ''}{teardownWords(book.teardown?.chars ?? 0)}</p>
+            <p className="mt-1.5 text-xs text-ink-2">{confirming ? '还没确认分章' : `已导入 ${book.teardown?.chapters ?? 0} 章 · 还没开拆`}</p>
+          </> : <div className="mt-1.5 flex justify-center">
             <Badge tone={status.tone}>
               {status.tone === 'busy' && <Spinner className="size-3" />}
               {status.label}
             </Badge>
-          </div>
+          </div>}
         </div>
       </Link>
       <button
@@ -131,7 +138,10 @@ function ShelfBook({ book, index }: { book: BookSummary; index: number }) {
 
 export function Home() {
   const { data: books, isLoading, error } = useBooks()
-  const latest = books?.[0]
+  const ownBooks = books?.filter(book => book.source !== 'teardown')
+  const teardownBooks = books?.filter(book => book.source === 'teardown')
+  const latest = ownBooks?.[0]
+  const navigate = useNavigate()
 
   return (
     <div className="pb-20">
@@ -171,16 +181,20 @@ export function Home() {
           </Reveal>
         )}
 
-        {books && books.length > 0 && (
+        {books && (
           <section>
             <div className="mb-2 flex items-end justify-between gap-4">
               <h2 className="font-serif text-2xl font-bold">
-                书架 <span className="ml-1 text-base font-normal text-ink-3">{books.length} 本</span>
+                书架 <span className="ml-1 text-base font-normal text-ink-3">{ownBooks?.length ?? 0} 本</span>
               </h2>
+              <div className="flex shrink-0 gap-1.5">
+                <Button variant="ghost" size="sm" onClick={() => navigate('/teardown/new')}>拆一本书</Button>
+                <Button variant="seal" size="sm" onClick={() => navigate('/new')}>开新书<Plus className="size-3.5" /></Button>
+              </div>
             </div>
             <FretDivider className="mb-4" />
             <div className="grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 lg:grid-cols-5">
-              {books.map((book, i) => (
+              {ownBooks?.map((book, i) => (
                 <ShelfBook key={book.id} book={book} index={i} />
               ))}
               <Link to="/new" className="group flex flex-col items-center">
@@ -195,11 +209,21 @@ export function Home() {
           </section>
         )}
 
-        {books && books.length === 0 && (
+        {ownBooks && ownBooks.length === 0 && (
           <div className="flex flex-col items-center gap-3 py-6 text-center text-ink-3">
             <Feather className="size-8" />
             <p className="text-sm">书架还空着。写下第一个点子，编辑部会把它变成一本书的完整方案。</p>
           </div>
+        )}
+
+        {teardownBooks && teardownBooks.length > 0 && (
+          <section className="mt-12" aria-label="拆的书">
+            <h2 className="mb-2 font-serif text-2xl font-bold">拆的书 <span className="ml-1 text-base font-normal text-ink-3">{teardownBooks.length} 本</span></h2>
+            <FretDivider className="mb-4" />
+            <div className="grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 lg:grid-cols-5">
+              {teardownBooks.map((book, index) => <ShelfBook key={book.id} book={book} index={index} />)}
+            </div>
+          </section>
         )}
       </div>
     </div>

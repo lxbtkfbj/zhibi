@@ -20,4 +20,5 @@ def teardown_summary(book, preview: dict | None = None) -> dict | None:
         else split.get("number_issue_total", 0),
         "excluded_count": len(preview.get("excluded", [])) if confirming else len(data.get("excluded", [])),
         "open_volume_id": data.get("open_volume_id"),
+        "imported_at": data.get("imported_at"),
     }

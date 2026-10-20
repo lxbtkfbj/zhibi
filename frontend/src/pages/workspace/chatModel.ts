@@ -1,6 +1,7 @@
 /** 编辑部聊天：只有一个聊天，想找谁就打 @ 点名；回答边写边显示，能停、能重新回答。原型和真书共用一套界面，回答从哪来由外面给。 */
 
 import type { ReactNode } from 'react'
+import type { ChatQuote } from '../../lib/chat'
 
 export type ChatRole = '主编' | '设定师' | '写手' | '审稿'
 
@@ -60,6 +61,9 @@ export interface ChatControl {
   sendError?: ReactNode
   /** 外面要把光标放进输入框：每次加一 */
   focusKey?: number
+  /** 拆书里选中的原文；只随这次提问发送。 */
+  quote?: ChatQuote
+  clearQuote?: () => void
   /** 聊天最上面一行（在看以前的对话……） */
   banner?: ReactNode
   /** 聊天最底下、所有消息后面（编辑部正在干活的那一行、等你看的那一行） */
@@ -67,6 +71,16 @@ export interface ChatControl {
 }
 
 const ROLE_NAMES = CHAT_ROLES.map((r) => r.role)
+
+/** 显式点名优先；「问问主编」带来的引用默认交给主编，不改变普通群聊。 */
+export function chatRecipient(to?: ChatRole, mentioned?: ChatRole, quote?: ChatQuote): ChatRole | undefined {
+  return to ?? mentioned ?? (quote ? '主编' : undefined)
+}
+
+/** 引用在发话途中换过时，不清掉作者新选的那一句。 */
+export function clearSentQuote(quotes: Record<string, ChatQuote | null>, sent: ChatQuote | undefined): Record<string, ChatQuote | null> {
+  return sent && quotes.chief === sent ? { ...quotes, chief: null } : quotes
+}
 
 /** 话里直接写了「@设定师」（没从列表里点）：认出来，从话里拿掉。只认第一个。 */
 export function takeMention(text: string): { text: string; to?: ChatRole } {

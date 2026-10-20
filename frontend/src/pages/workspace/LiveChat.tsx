@@ -16,7 +16,7 @@ import { PlanCard } from '../book/PlanCard'
 import { useGroupFeedback } from '../book/useGroupFeedback'
 import { EditorialChat, RoleRow } from './Chat'
 import { convOf, dayLabel, useCurrentConv } from './convs'
-import type { ChatControl, ChatMessage, ChatRole } from './chatModel'
+import { chatRecipient, clearSentQuote, type ChatControl, type ChatMessage, type ChatRole } from './chatModel'
 import { gateTarget, type WritingControl } from './writing'
 
 const NAME: Record<TeamRole, ChatRole> = { chief: '主编', lorekeeper: '设定师', writer: '写手', reviewer: '审稿' }
@@ -232,7 +232,10 @@ function WorkNow({ job, messages, writing, go, bookId }: {
 }
 
 export function LiveChat({ writing }: { writing?: WritingControl }) {
-  const { bookId, messages, job, waiting, working, viewing, focusComposer, openTarget, outline, setChatConv } = useBookContext()
+  const { bookId, book, messages, job, waiting, working, viewing, focusComposer, openTarget, outline, setChatConv, chatQuotes, setChatQuotes } = useBookContext()
+  const quote = book.source === 'teardown' ? chatQuotes.chief ?? undefined : undefined
+  // 只清掉这次发送的引用；请求在途时新选的一句留给下一问。
+  const clearQuote = () => setChatQuotes(current => clearSentQuote(current, quote))
   const feedback = useGroupFeedback()
   const { conv, latest, convs } = useCurrentConv()
   const [sending, setSending] = useState(false)
@@ -258,19 +261,24 @@ export function LiveChat({ writing }: { writing?: WritingControl }) {
     messages: chatMessages,
     answering: !!current,
     sending,
+    quote,
+    clearQuote: quote ? clearQuote : undefined,
     send: async (content, to, rewindFrom) => {
       setSending(true)
       try {
-        return await run(() => sendChatFirst(
+        const recipient = chatRecipient(to, undefined, quote)
+        const sent = await run(() => sendChatFirst(
           () => {
             // 带上作者正在看的那一页：说「帮我写这一篇」就写这一页
             const seeing = viewing?.() ?? null
             return post<MeetingMessage>(`/books/${bookId}/notes`, {
-              content, ...(to ? { ask: CODE[to] } : {}), ...(seeing ? { viewing: seeing } : {}),
+              content, ...(recipient ? { ask: CODE[recipient] } : {}), ...(quote ? { quote } : {}), ...(seeing ? { viewing: seeing } : {}),
               ...(conv ? { conv } : {}), ...(rewindFrom ? { rewind_from: Number(rewindFrom) } : {}),
             })
           },
           () => feedback(content), false))
+        if (sent && quote) clearQuote()
+        return sent
       } finally {
         setSending(false)
       }

@@ -5,7 +5,7 @@
 import { useIsMutating } from '@tanstack/react-query'
 import { Settings } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { useBook, useJobActions, useOutline } from '../../api/hooks'
 import { useLibrarySuggestions } from '../../api/library'
 import type { BookDetail, ChatViewing, Conversation, LiveDraft, MeetingMessage } from '../../api/types'
@@ -112,6 +112,7 @@ function JobNotice({ book }: { book: BookDetail }) {
 }
 
 function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
+  const teardown = detail.source === 'teardown'
   const { book, actions, loading, error, raw } = useLiveBook(bookId)
   const [openChat, setOpenChat] = useState(0)
   const onOpen = useCallback(() => setOpenChat((n) => n + 1), [])
@@ -134,19 +135,20 @@ function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
   const { openSettings: openSystemSettings } = useSettingsModal()
   const notes = useMemo(() => {
     const counts = new Map<string, number>()
+    if (teardown) return { count: () => 0, open: () => undefined }
     for (const s of suggestions.data ?? []) {
       const at = pendingTarget(s)?.id
       if (at) counts.set(at, (counts.get(at) ?? 0) + 1)
     }
     return { count: (id: string) => counts.get(id) ?? 0, open: (id?: string) => openInbox(id ?? null) }
-  }, [suggestions.data, openInbox])
+  }, [suggestions.data, openInbox, teardown])
   const context = useMemo(() => ({
     ...ctx,
     openTarget: (type: string, id: string) => openRef.current?.(type, id),
     viewing: () => viewingRef.current?.() ?? null,
     openSaves: (id?: number) => setSaves({ open: true, id: id ?? null }),
-    openPending: () => openInbox(null),
-  }), [ctx, openInbox])
+    openPending: () => { if (!teardown) openInbox(null) },
+  }), [ctx, openInbox, teardown])
   // 关页面、切到别的页面时：手改了还没存的，存一档
   useEffect(() => {
     const leave = () => flushAutoSave(bookId, true)
@@ -169,35 +171,35 @@ function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
   const pendingCount = suggestions.data?.length ?? book.pending
   const chatTools = (
     <>
-      <PendingButton count={pendingCount} open={inbox.open} onClick={() => (inbox.open ? closeInbox() : setInbox({ open: true, focus: null }))} />
-      {!inbox.open && <ChatConvs />}
+      {!teardown && <PendingButton count={pendingCount} open={inbox.open} onClick={() => (inbox.open ? closeInbox() : setInbox({ open: true, focus: null }))} />}
+      {(teardown || !inbox.open) && <ChatConvs />}
     </>
   )
   // 换成待处理时聊天不卸掉：回到聊天还是原来翻到的地方
   const chat = (
     <>
-      {inbox.open && <PendingList key={inbox.focus ?? ''} focus={inbox.focus} onBack={closeInbox} />}
-      <div className={inbox.open ? 'hidden' : 'contents'}><LiveChat writing={writing} /></div>
+      {!teardown && inbox.open && <PendingList key={inbox.focus ?? ''} focus={inbox.focus} onBack={closeInbox} />}
+      <div className={!teardown && inbox.open ? 'hidden' : 'contents'}><LiveChat writing={writing} /></div>
     </>
   )
   const row = 'flex h-9 w-full items-center gap-2 rounded-md px-2.5 text-sm text-ink-2 transition-colors hover:bg-line/50 hover:text-ink'
   const sideFooter = (
     <>
       <SavesRow className={row} open={saves.open} onClick={() => setSaves(saves.open ? { open: false, id: null } : { open: true, id: null })} />
-      <button type="button" onClick={() => setSettings(true)} aria-pressed={settings} title="这本书怎么写：人称、每章字数、写作要求……"
+      {!teardown && <button type="button" onClick={() => setSettings(true)} aria-pressed={settings} title="这本书怎么写：人称、每章字数、写作要求……"
         className={`${row} ${settings ? 'bg-line/50 text-ink' : ''}`}>
         <Settings className="size-4 shrink-0" />本书设置
-      </button>
+      </button>}
     </>
   )
   return (
     <BookContext.Provider value={context}>
       <PendingContext.Provider value={notes}>
-      <Workspace book={book} actions={actions} right={right} sideFooter={sideFooter} notice={<JobNotice book={detail} />} openRef={openRef} viewingRef={viewingRef}
-        chat={chat} chatTools={chatTools} chatBallNote={<PendingBallTag count={pendingCount} onClick={() => openInbox(null)} />}
+      <Workspace book={book} actions={actions} right={right} sideFooter={sideFooter} notice={!teardown ? <JobNotice book={detail} /> : undefined} openRef={openRef} viewingRef={viewingRef}
+        chat={chat} chatTools={chatTools} chatBallNote={!teardown ? <PendingBallTag count={pendingCount} onClick={() => openInbox(null)} /> : undefined}
         chatBadge={unread} openChat={openChat} writing={writing} />
       <SavesPanel open={saves.open} saveId={saves.id} onClose={closeSaves} onOpenSave={(id) => setSaves({ open: true, id })} />
-      <BookSettingsDialog open={settings} onClose={closeSettings} />
+      {!teardown && <BookSettingsDialog open={settings} onClose={closeSettings} />}
       </PendingContext.Provider>
     </BookContext.Provider>
   )
@@ -208,5 +210,6 @@ export function BookDesk() {
   const detail = useBook(bookId)
   if (detail.isPending) return <div className="flex h-dvh items-center justify-center bg-paper text-[15px] text-ink-3">正在读这本书…</div>
   if (detail.error || !detail.data) return <EmptyState title="找不到这本书"><Link to="/" className="text-seal underline">回到书房</Link></EmptyState>
+  if (detail.data.source === 'teardown' && detail.data.teardown?.stage === 'confirming') return <Navigate to={`/teardown/${bookId}`} replace />
   return <Desk key={bookId} bookId={bookId} detail={detail.data} />
 }

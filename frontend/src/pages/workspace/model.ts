@@ -1,5 +1,7 @@
 /** 书工作台的数据形状：书架上的真书、示例书、空书、旧书快照，都先转成这个样子再画。 */
 
+import type { BookSummary, TeardownSummary } from '../../api/types'
+
 export interface VField {
   /** 原来的栏目名：作者改了名，程序还按它认（比如身世后面挂「另有秘密」） */
   key?: string
@@ -93,6 +95,10 @@ export interface VNode {
   /** 写到哪了：没写 / 正在写 / 写完 */
   progress?: string
   later?: boolean
+  /** 后台只为显示未归单元的章生成的容器，不对应可编辑的真实单元。 */
+  virtual?: boolean
+  /** 原书没分卷、或最后一卷还没收尾。 */
+  open?: boolean
   /** 写到再定的篇里排在最前面的那一篇：可以直接在它下面加卷，加了它就定下来 */
   next?: boolean
   locked?: boolean
@@ -106,6 +112,9 @@ export interface VNode {
 
 export interface VBook {
   id: string
+  /** 原型和旧快照没有来源；拆书界面的所有分支只认 teardown。 */
+  source?: BookSummary['source']
+  teardown?: TeardownSummary | null
   title: string
   channel: string
   genre: string

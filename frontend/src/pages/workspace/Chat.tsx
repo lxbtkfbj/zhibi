@@ -4,7 +4,7 @@ import clsx from 'clsx'
 import { AlertTriangle, ArrowUp, AtSign, ChevronDown, PencilLine, RotateCcw, Search, Square, X } from 'lucide-react'
 import { type ReactNode, useLayoutEffect, useRef, useState } from 'react'
 import { Spinner, TypingDots } from '../../components/ui'
-import { CHAT_ROLES, type ChatControl, type ChatMessage, type ChatRole, latestReply, mentionAt, takeMention } from './chatModel'
+import { CHAT_ROLES, type ChatControl, type ChatMessage, type ChatRole, chatRecipient, latestReply, mentionAt, takeMention } from './chatModel'
 
 const ROLE_COLOR: Record<ChatRole, { dot: string; text: string; soft: string }> = {
   主编: { dot: 'bg-chief', text: 'text-chief', soft: 'bg-chief-soft' },
@@ -178,6 +178,7 @@ function Composer({ chat, to, setTo, focusKey, rewinding, endRewind }: { chat: C
   const [mention, setMention] = useState<Mention | null>(null)
   const ref = useRef<HTMLTextAreaElement>(null)
   const caretAt = useRef<number | null>(null)
+  const recipient = chatRecipient(to, undefined, chat.quote)
 
   useLayoutEffect(() => {
     if (focusKey || chat.focusKey || rewinding) ref.current?.focus()
@@ -209,7 +210,7 @@ function Composer({ chat, to, setTo, focusKey, rewinding, endRewind }: { chat: C
     if (!content) return
     setMention(null)
     // 没发出去（返回 false）就留着原话
-    if ((await chat.send(content, to ?? taken.to, rewinding?.id)) === false) return
+    if ((await chat.send(content, chatRecipient(to, taken.to, chat.quote), rewinding?.id)) === false) return
     setText((now) => (now === text ? '' : now))
     setTo(undefined)
     if (rewinding) endRewind()
@@ -233,6 +234,15 @@ function Composer({ chat, to, setTo, focusKey, rewinding, endRewind }: { chat: C
         </div>
       )}
       {chat.notice}
+      {chat.quote && (
+        <div className="mb-2 rounded-lg border border-line bg-subtle px-3 py-2 text-[13px] leading-relaxed" aria-label="引用原文">
+          <div className="flex items-start justify-between gap-3 text-ink-3">
+            <span className="min-w-0 truncate">引用 · {chat.quote.where}</span>
+            <button type="button" onClick={chat.clearQuote} aria-label="取消引用" title="取消引用" className="shrink-0 rounded p-0.5 hover:bg-line/70 hover:text-ink"><X className="size-3.5" /></button>
+          </div>
+          <p className="mt-1 line-clamp-3 whitespace-pre-wrap break-words font-serif text-ink-2">{chat.quote.text}</p>
+        </div>
+      )}
       {rewinding && (
         <div className="mb-2 flex items-center gap-2 rounded-lg bg-chief-soft/70 px-3 py-2 text-[13px] leading-relaxed text-chief">
           <PencilLine className="size-4 shrink-0" />
@@ -241,13 +251,13 @@ function Composer({ chat, to, setTo, focusKey, rewinding, endRewind }: { chat: C
         </div>
       )}
       <div className="rounded-[14px] border border-line-2 bg-card transition-[border-color,box-shadow] focus-within:border-ink-3/70 focus-within:shadow-[var(--shadow-paper)]">
-        {to && (
+        {recipient && (
           <div className="px-3 pt-2.5">
-            <span className={clsx('inline-flex items-center gap-1.5 rounded-full py-0.5 pr-1 pl-1 text-[13px]', ROLE_COLOR[to].soft, ROLE_COLOR[to].text)}>
-              <Avatar role={to} small />
-              问{to}
-              <button type="button" onClick={() => { setTo(undefined); ref.current?.focus() }} aria-label="不点名了" title="不点名，让编辑部自己挑人答"
-                className="rounded-full p-0.5 opacity-70 hover:bg-card/70 hover:opacity-100"><X className="size-3.5" /></button>
+            <span className={clsx('inline-flex items-center gap-1.5 rounded-full py-0.5 pr-1 pl-1 text-[13px]', ROLE_COLOR[recipient].soft, ROLE_COLOR[recipient].text)}>
+              <Avatar role={recipient} small />
+              问{recipient}
+              {to && <button type="button" onClick={() => { setTo(undefined); ref.current?.focus() }} aria-label="不点名了" title="不点名，让编辑部自己挑人答"
+                className="rounded-full p-0.5 opacity-70 hover:bg-card/70 hover:opacity-100"><X className="size-3.5" /></button>}
             </span>
           </div>
         )}
@@ -288,7 +298,7 @@ function Composer({ chat, to, setTo, focusKey, rewinding, endRewind }: { chat: C
               void send()
             }
           }}
-          placeholder={to ? `想问${to}什么` : chat.placeholder ?? '想改哪儿、想问什么直接说；打 @ 点名找谁'}
+          placeholder={recipient ? `想问${recipient}什么` : chat.placeholder ?? '想改哪儿、想问什么直接说；打 @ 点名找谁'}
           aria-label="给编辑部发消息"
           className="block max-h-52 min-h-[60px] w-full resize-none bg-transparent px-4 pt-3 pb-1 chat-text leading-[1.75] text-ink [field-sizing:content] placeholder:text-ink-3 focus:outline-none"
         />

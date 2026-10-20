@@ -50,6 +50,7 @@ async def test_upload_preview_encoding_import_and_archive(client, sessionmaker):
     listing = (await client.get("/api/books")).json()[0]
     assert listing["source"] == "teardown" and listing["teardown"]["chapters"] == 4
     assert listing["teardown"]["chars"] == preview["chars"]
+    assert listing["teardown"]["imported_at"] is None
     changed = await client.patch(
         f"/api/books/{bid}", json={"title": "我改的书名", "author": "我填的作者", "intro": "我填的简介"}
     )
@@ -66,6 +67,13 @@ async def test_upload_preview_encoding_import_and_archive(client, sessionmaker):
     assert imported.status_code == 200, imported.text
     assert imported.json()["teardown"]["chapters"] == 5
     assert imported.json()["teardown"]["author"] == "导入作者"
+    imported_at = imported.json()["teardown"]["imported_at"]
+    assert imported_at
+    assert (await client.get(f"/api/books/{bid}")).json()["teardown"]["imported_at"] == imported_at
+    assert (
+        next(book for book in (await client.get("/api/books")).json() if book["id"] == bid)["teardown"]["imported_at"]
+        == imported_at
+    )
     changed = await client.patch(f"/api/books/{bid}", json={"concept": {"genre": "玄幻"}, "review_changes": False})
     assert changed.json()["title"] == "最终书名"
     async with sessionmaker() as session:
@@ -82,6 +90,7 @@ async def test_upload_preview_encoding_import_and_archive(client, sessionmaker):
         assert [v.chapter_count for v in volumes] == [4, 1]
         assert all(v.status == "done" for v in volumes)
         book = await session.get(Book, uuid.UUID(bid))
+        assert book.teardown["imported_at"] == imported_at
         assert book.teardown["open_volume_id"] is None and book.teardown["split"]["number_issue_total"] == 1
         save = await session.scalar(select(BookSave))
         assert save.title == "导入原文" and "teardown_sources" not in save.tree

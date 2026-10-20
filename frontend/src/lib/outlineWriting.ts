@@ -36,7 +36,7 @@ export function writingOutline(root: OutlineItem, pending: Pending | null, nodes
 
 export function nextOutlineUnit(tree: OutlineTree): string | null {
   const volumes = tree.arcs.flatMap(arc => arc.volumes).sort((a, b) => a.index - b.index)
-  return volumes.flatMap(volume => [...volume.units].sort((a, b) => a.index - b.index)).find(unit => !unit.chapters.length)?.id ?? null
+  return volumes.flatMap(volume => [...volume.units].sort((a, b) => (a.index ?? 0) - (b.index ?? 0))).find(unit => !unit.chapters.length)?.id ?? null
 }
 
 export function outlineReviewMatches(item: OutlineItem, pending: Pending | null) {

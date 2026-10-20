@@ -3,6 +3,8 @@
 import clsx from 'clsx'
 import { ChevronDown, ChevronLeft, ChevronRight, PenLine } from 'lucide-react'
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { searchBookText, type TextSearchResult } from '../../api/textSearch'
+import { readTeardownReading, readingArrow, readingChapterNumber, teardownDefaultVolume, textMatches, writeTeardownReading } from '../../lib/teardownReading'
 import { useSave, useWorkspace } from './actions'
 import { chapterNodes, cn, countWords, findEntry, findNode, splitTitle, type VBook, type VGate, type VNode, type WritePlan, type WritingGates } from './model'
 import { CardMenu, DirectoryShell, Editable, LinkChip, Sheet } from './widgets'
@@ -194,8 +196,13 @@ function ChapterRow({ node, selected, mark, onSelect }: { node: VNode; selected:
   )
 }
 
-export function ManuscriptDirectory({ book, selected, onSelect, onExport, writing }: { book: VBook; selected: string; onSelect: (id: string) => void; onExport: () => void; writing: WritingControl }) {
+export function ManuscriptDirectory({ book, selected, onSelect, onSearchSelect, onExport, writing }: { book: VBook; selected: string; onSelect: (id: string) => void; onSearchSelect?: (id: string, word: string) => void; onExport: () => void; writing: WritingControl }) {
+  const { actions } = useWorkspace()
   const [query, setQuery] = useState('')
+  const [searchRun, setSearchRun] = useState(0)
+  const [search, setSearch] = useState<{ query: string; data?: TextSearchResult; error?: string }>()
+  const immediateSearch = useRef(false)
+  const teardown = book.source === 'teardown'
   const groups = groupsOf(book.outline)
   const chapters = chapterNodes(book.outline)
   const done = chapters.filter((c) => c.body?.status === 'done')
@@ -204,30 +211,66 @@ export function ManuscriptDirectory({ book, selected, onSelect, onExport, writin
   // 默认只展开眼下在写的那一卷，和选中的那一章所在的卷
   const current = chapters.find((c) => c.body?.status !== 'done') ?? chapters.at(-1)
   const here = (id?: string) => (id ? placeOf(book.outline, id).volume?.id : undefined)
-  const [open, setOpen] = useState<string[]>(() => [here(selected), here(current?.id)].filter((v): v is string => !!v))
-  const markOf = (id: string): 'writing' | 'gate' | undefined => (status.chapter === id ? 'writing' : gateOn(gate, id, book.outline) ? 'gate' : undefined)
+  const [open, setOpen] = useState<string[]>(() => (teardown ? [teardownDefaultVolume(book)] : [here(selected), here(current?.id)]).filter((v): v is string => !!v))
+  const markOf = (id: string): 'writing' | 'gate' | undefined => teardown ? undefined : (status.chapter === id ? 'writing' : gateOn(gate, id, book.outline) ? 'gate' : undefined)
   const q = query.trim()
+  useEffect(() => {
+    if (!q || !actions.live) return
+    const controller = new AbortController()
+    const delay = immediateSearch.current ? 0 : 400
+    immediateSearch.current = false
+    const timer = setTimeout(() => {
+      searchBookText(book.id, q, controller.signal)
+        .then(data => { if (!controller.signal.aborted) setSearch({ query: q, data }) })
+        .catch((error: unknown) => { if (!controller.signal.aborted) setSearch({ query: q, error: errorText(error) }) })
+    }, delay)
+    return () => { clearTimeout(timer); controller.abort() }
+  }, [actions.live, book.id, q, searchRun])
+  const found = search?.query === q ? search : undefined
   return (
-    <DirectoryShell title="正文" search="找章节……" query={query} onQuery={setQuery} onTitle={() => onSelect('home')}
+    <div className="contents" onKeyDownCapture={(event) => {
+      if (event.key === 'Enter' && !event.nativeEvent.isComposing && event.target instanceof HTMLInputElement) {
+        event.preventDefault()
+        immediateSearch.current = true
+        setSearchRun(run => run + 1)
+      }
+    }}>
+    <DirectoryShell title="正文" search="找章节、搜原文……" query={query} onQuery={setQuery} onTitle={() => onSelect('home')}
       footer={!q && done.length > 0 && (
         <button type="button" onClick={onExport} className={clsx(smallButton, 'mt-4 w-full bg-card/70')}>导出全书 TXT</button>
       )}>
       {q ? (
-        (() => {
+        <>{(() => {
           const hits = chapters.filter((c) => c.title.includes(q))
           return hits.length
             ? hits.map((c) => <ChapterRow key={c.id} node={c} selected={selected === c.id} mark={markOf(c.id)} onSelect={() => onSelect(c.id)} />)
             : <p className="px-2.5 py-2 text-[13px] text-ink-3">没找到「{q}」</p>
-        })()
+        })()}
+          {actions.live && <section className="mt-4 border-t border-line pt-3" aria-label="原文搜索结果">
+            {found?.error ? <p role="alert" className="px-2.5 py-2 text-[13px] text-seal-dark">{found.error}</p>
+              : found?.data ? <>
+                <p className="px-2.5 py-2 text-[13px] leading-relaxed text-ink-3">{found.data.chapters ? `原文里有「${q}」的章（${found.data.chapters} 章）` : `${teardown ? '原文' : '正文'}里没有「${q}」`}</p>
+                {found.data.results.map(hit => {
+                  const chapter = chapters.find(c => readingChapterNumber(c) === hit.index)
+                  if (!chapter) return null
+                  return <button key={hit.index} type="button" onClick={() => onSearchSelect ? onSearchSelect(chapter.id, q) : onSelect(chapter.id)}
+                    className={clsx('mb-1 block w-full rounded-md px-2.5 py-2 text-left hover:bg-line/40', selected === chapter.id && rowSelected)}>
+                    <span className="block text-[14px] text-ink-2">第 {hit.index} 章{hit.title && ` ${hit.title}`} · {hit.times} 次</span>
+                    <span className="mt-1 line-clamp-2 block text-[12px] leading-relaxed text-ink-3">{textMatches(hit.near, q).map((part, i) => part.match ? <mark key={i} className="rounded-sm bg-seal/15 text-seal-dark">{part.text}</mark> : part.text)}</span>
+                  </button>
+                })}
+              </> : <p className="px-2.5 py-2 text-[13px] text-ink-3">正在搜原文……</p>}
+          </section>}
+        </>
       ) : (
         <>
           <button type="button" onClick={() => onSelect('home')}
             className={clsx('mb-1 flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors', selected === 'home' ? `${rowSelected} font-medium text-ink` : 'text-ink-2 hover:bg-line/50')}>
             <PenLine className="size-3.5 text-ink-3" />
-            {done.length ? '接着写' : '开写'}
-            <span className="ml-auto pr-0.5 text-xs text-ink-3 tabular-nums">{done.length ? `已写 ${done.length} 章` : '还没写'}</span>
+            {teardown ? '正文首页' : done.length ? '接着写' : '开写'}
+            <span className="ml-auto pr-0.5 text-xs text-ink-3 tabular-nums">{teardown ? `已导入 ${chapters.length} 章` : done.length ? `已写 ${done.length} 章` : '还没写'}</span>
           </button>
-          {!groups.length && <p className="px-2.5 py-3 text-[13px] leading-relaxed text-ink-3">还没有章。开写以后，章纲和写好的章按卷排在这里。</p>}
+          {!groups.length && !teardown && <p className="px-2.5 py-3 text-[13px] leading-relaxed text-ink-3">还没有章。开写以后，章纲和写好的章按卷排在这里。</p>}
           {groups.map(({ volume, units }) => {
             const all = units.flatMap((u) => u.chapters)
             const expanded = open.includes(volume.id) || all.some((c) => c.id === selected)
@@ -256,6 +299,7 @@ export function ManuscriptDirectory({ book, selected, onSelect, onExport, writin
         </>
       )}
     </DirectoryShell>
+    </div>
   )
 }
 
@@ -297,6 +341,18 @@ export function ManuscriptHome({ book, writing, nav }: { book: VBook; writing: W
   const missing = readyToWrite(book.outline)
   const s = writing.status
   const busy = s.state === 'working' || s.state === 'waiting'
+  if (book.source === 'teardown') {
+    const saved = readTeardownReading(book.id)
+    const resume = saved ? chapters.find(chapter => readingChapterNumber(chapter) === saved.chapter) : undefined
+    const first = chapters[0]
+    return <Sheet narrow>
+      <h1 className={titleClass}>正文</h1>
+      <p className="mt-4 text-[15px] text-ink-2">已导入 {book.teardown?.chapters ?? chapters.length} 章 · 还没开拆</p>
+      {first && <button type="button" className={clsx(primaryButton, 'mt-8 h-auto min-h-11 px-7 py-3 text-left text-base')} onClick={() => nav.openChapter((resume ?? first).id)}>
+        {resume ? `接着读第 ${readingChapterNumber(resume)} 章《${splitTitle(resume.title)[1] || `第 ${readingChapterNumber(resume)} 章`}》` : '从第 1 章读起'}
+      </button>}
+    </Sheet>
+  }
   return (
     <Sheet narrow>
       <h1 className={titleClass}>{done.length ? '接着写' : '开写'}</h1>
@@ -359,43 +415,50 @@ export function ManuscriptHome({ book, writing, nav }: { book: VBook; writing: W
 /* ---------------- 一章 ---------------- */
 
 /** 「第3章」写成「第三章」，放在标题上面 */
-function chapterNumber(prefix: string): string {
+function chapterNumberLabel(prefix: string): string {
   const n = Number(/第(\d+)章/.exec(prefix)?.[1])
   return n ? `第${cn(n)}章` : prefix
 }
 
 const paragraphsOf = (text: string) => text.split('\n').map((p) => p.replace(/^[\s　]+/, '').trim()).filter(Boolean)
 const escapeHtml = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-const toHtml = (text: string) => paragraphsOf(text).map((p) => `<p>${escapeHtml(p)}</p>`).join('')
+const toHtml = (text: string, word = '') => paragraphsOf(text).map((p) => `<p>${textMatches(p, word).map(part => part.match ? `<mark data-text-match class="rounded-sm bg-seal/15 text-seal-dark">${escapeHtml(part.text)}</mark>` : escapeHtml(part.text)).join('')}</p>`).join('')
 
 /** 正文：点哪改哪，离开就存，Esc 撤回这次改的。页面上一段一个块，存的时候一段一行。 */
-function ChapterText({ text, onSave, readOnly, spot }: { text: string; onSave?: (text: string) => void; readOnly?: boolean; spot?: string }) {
+function ChapterText({ text, onSave, readOnly, spot, searchWord = '', searchToken }: { text: string; onSave?: (text: string) => void; readOnly?: boolean; spot?: string; searchWord?: string; searchToken?: number }) {
   const ref = useRef<HTMLDivElement>(null)
   const saved = useRef(text)
+  const highlight = useRef('')
   // 外面的字变了：不在改的时候才换上
   useLayoutEffect(() => {
     const el = ref.current
     saved.current = text
-    if (el && document.activeElement !== el && paragraphsOf(el.innerText).join('\n') !== paragraphsOf(text).join('\n')) el.innerHTML = toHtml(text)
-  }, [text])
+    if (el && (highlight.current !== searchWord || (document.activeElement !== el && paragraphsOf(el.innerText).join('\n') !== paragraphsOf(text).join('\n')))) el.innerHTML = toHtml(text, searchWord)
+    highlight.current = searchWord
+    if (searchWord) {
+      const frame = requestAnimationFrame(() => el?.querySelector('[data-text-match]')?.scrollIntoView({ block: 'center' }))
+      return () => cancelAnimationFrame(frame)
+    }
+  }, [text, searchWord, searchToken])
   const editable = !!onSave && !readOnly
   return (
     <div ref={ref} contentEditable={editable} suppressContentEditableWarning spellCheck={false}
       role={editable ? 'textbox' : undefined} aria-multiline={editable || undefined} aria-label={editable ? '正文' : undefined} data-spot={spot}
       // 回车另起一段，粘贴只要字
-      onFocus={() => document.execCommand('defaultParagraphSeparator', false, 'p')}
+      onFocus={() => { if (editable) document.execCommand('defaultParagraphSeparator', false, 'p') }}
       onPaste={(e) => {
+        if (!editable) return
         e.preventDefault()
         document.execCommand('insertText', false, e.clipboardData.getData('text/plain'))
       }}
       onKeyDown={(e) => {
-        if (e.key !== 'Escape') return
+        if (!editable || e.key !== 'Escape') return
         e.currentTarget.innerHTML = toHtml(saved.current)
         e.currentTarget.blur()
       }}
       onBlur={(e) => {
         const value = paragraphsOf(e.currentTarget.innerText).join('\n')
-        if (onSave && value !== paragraphsOf(saved.current).join('\n')) {
+        if (editable && onSave && value !== paragraphsOf(saved.current).join('\n')) {
           saved.current = value
           onSave(value)
         }
@@ -455,33 +518,56 @@ function RewritePanel({ node, later, onCancel, onGo }: { node: VNode; later: num
   )
 }
 
-export function ChapterPage({ book, id, writing, nav }: { book: VBook; id: string; writing: WritingControl; nav: ManuscriptNav }) {
+export function ChapterPage({ book, id, writing, nav, searchWord, searchToken }: { book: VBook; id: string; writing: WritingControl; nav: ManuscriptNav; searchWord?: string; searchToken?: number }) {
   const { actions } = useWorkspace()
   const save = useSave()
   const path = findNode(book.outline, id) ?? []
   const node = path.at(-1)
-  const [loaded, setLoaded] = useState<ChapterDetail>()
+  const [loadResult, setLoadResult] = useState<{ node: VNode; attempt: number; detail?: ChapterDetail; error?: string }>()
+  const [loadAttempt, setLoadAttempt] = useState(0)
+  const result = loadResult?.node === node && loadResult?.attempt === loadAttempt ? loadResult : undefined
+  const loaded = result?.detail
+  const loadError = result?.error
   const [rewriting, setRewriting] = useState(false)
   const [previous, setPrevious] = useState<string>()
+  const teardown = book.source === 'teardown'
+  const chapters = chapterNodes(book.outline)
+  const at = chapters.findIndex((c) => c.id === id)
+  const prev = chapters[at - 1]
+  const next = chapters[at + 1]
+  const chapterNumber = node ? readingChapterNumber(node) : 0
+  useEffect(() => {
+    if (teardown && chapterNumber > 0) writeTeardownReading(book.id, chapterNumber)
+  }, [book.id, chapterNumber, teardown])
+  useEffect(() => {
+    if (!teardown) return
+    const turn = (event: KeyboardEvent) => {
+      const direction = readingArrow(event)
+      const target = direction === -1 ? prev : direction === 1 ? next : undefined
+      if (!target) return
+      event.preventDefault()
+      nav.openChapter(target.id)
+    }
+    window.addEventListener('keydown', turn)
+    return () => window.removeEventListener('keydown', turn)
+  }, [nav, next, prev, teardown])
   const body = node?.body
   // 真书点开才去读正文、审稿、设定的变化；写完、改完以后再读一遍
   const loadChapter = writing.loadChapter
   useEffect(() => {
     if (!node || body?.text !== undefined || (body?.status ?? 'planned') === 'planned' || !loadChapter) return
     let alive = true
-    loadChapter(node).then((detail) => { if (alive) setLoaded(detail) }).catch(() => { if (alive) setLoaded({ text: '' }) })
+    loadChapter(node)
+      .then((detail) => { if (alive) setLoadResult({ node, attempt: loadAttempt, detail }) })
+      .catch((error: unknown) => { if (alive) setLoadResult({ node, attempt: loadAttempt, error: errorText(error) }) })
     return () => { alive = false }
-  }, [node, body?.text, body?.status, body?.words, loadChapter])
+  }, [node, body?.text, body?.status, body?.words, loadChapter, loadAttempt])
   if (!node || node.kind !== '章') return <Sheet narrow><p className="text-ink-3">这一章找不到了。</p></Sheet>
 
-  const chapters = chapterNodes(book.outline)
-  const at = chapters.findIndex((c) => c.id === id)
-  const prev = chapters[at - 1]
-  const next = chapters[at + 1]
   const { volume, unit } = placeOf(book.outline, id)
   const s = writing.status
-  const live = s.chapter === id ? s.live : undefined
-  const gate = s.state === 'waiting' && gateOn(s.gate, id, book.outline) ? s.gate : undefined
+  const live = !teardown && s.chapter === id ? s.live : undefined
+  const gate = !teardown && s.state === 'waiting' && gateOn(s.gate, id, book.outline) ? s.gate : undefined
   const status = body?.status ?? 'planned'
   const text = body?.text ?? loaded?.text
   const busy = s.state === 'working' || s.state === 'waiting'
@@ -495,8 +581,8 @@ export function ChapterPage({ book, id, writing, nav }: { book: VBook; id: strin
   const review = body?.review ?? loaded?.review
   const changes = body?.changes ?? loaded?.changes
   const menu = status === 'done' && text ? [
-    { label: '按意见重写这一章', onClick: () => (busy ? nav.toast('编辑部手上还有活，停下或写完以后再重写') : writing.blocked ? nav.toast(writing.blocked) : setRewriting(true)) },
-    ...(writing.redigest ? [{ label: '让设定师照改过的重看一遍', onClick: () => say(nav, writing.redigest!(node)) }] : []),
+    ...(!teardown ? [{ label: '按意见重写这一章', onClick: () => (busy ? nav.toast('编辑部手上还有活，停下或写完以后再重写') : writing.blocked ? nav.toast(writing.blocked) : setRewriting(true)) }] : []),
+    ...(!teardown && writing.redigest ? [{ label: '让设定师照改过的重看一遍', onClick: () => say(nav, writing.redigest!(node)) }] : []),
     { label: '导出这一章 TXT', onClick: () => download(`${node.title.replace('　', ' ')}.txt`, `${node.title.replace('　', ' ')}\n\n${text}\n`) },
   ] : []
   const cast = node.uses.map((entryId) => findEntry(book, entryId)).filter((e) => !!e)
@@ -507,15 +593,15 @@ export function ChapterPage({ book, id, writing, nav }: { book: VBook; id: strin
       {menu.length > 0 && <CardMenu items={menu} />}
       <header className="text-center">
         {(volume || unit) && <p className="text-[13px] tracking-[0.2em] text-ink-3">{[volume, unit].filter(Boolean).map((n) => n!.title.replace('　', ' ')).join(' · ')}</p>}
-        <p className="mt-[1.6em] font-serif text-[0.85em] tracking-[0.5em] text-ink-3">{chapterNumber(prefix)}</p>
-        <Editable value={name} placeholder="给这一章起个名字" className="mx-auto mt-[0.3em] w-fit min-w-40 font-serif text-[1.75em] leading-snug font-bold text-ink"
+        <p className="mt-[1.6em] font-serif text-[0.85em] tracking-[0.5em] text-ink-3">{teardown ? `第 ${chapterNumber} 章` : chapterNumberLabel(prefix)}</p>
+        <Editable value={name} placeholder={teardown ? `第 ${chapterNumber} 章` : '给这一章起个名字'} className="mx-auto mt-[0.3em] w-fit min-w-40 font-serif text-[1.75em] leading-snug font-bold text-ink"
           onSave={(value) => { if (value.trim()) save(actions.saveNode(node, { name: value.trim() })) }} />
         <div className="mt-[0.9em] flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-[13px] text-ink-3">
           <span className={clsx(live !== undefined && 'text-writer')}>{meta}</span>
-          {!!body?.attempts && <span>审稿退回重写过 {body.attempts} 次</span>}
+          {!teardown && !!body?.attempts && <span>审稿退回重写过 {body.attempts} 次</span>}
           <button type="button" onClick={() => nav.openNode(id)} className="text-chief hover:underline">去大纲看章纲</button>
         </div>
-        {previous !== undefined && status === 'done' && s.state !== 'working' && (
+        {!teardown && previous !== undefined && status === 'done' && s.state !== 'working' && (
           <p className="mt-2 text-[13px] text-ink-3">
             这是照你的意见重写的一版。
             <button type="button" className="ml-2 text-chief hover:underline" onClick={() => { say(nav, writing.setText(node, previous).then(() => '换回了原来的')); setPrevious(undefined) }}>换回原来的</button>
@@ -525,7 +611,7 @@ export function ChapterPage({ book, id, writing, nav }: { book: VBook; id: strin
 
       <div className="mt-[2.2em]">
         {gate && <GateCard gate={gate} writing={writing} nav={nav} where={gate.kind === 'trial' ? `这是第 ${at + 1} 章` : undefined} />}
-        {rewriting && (
+        {!teardown && rewriting && (
           <RewritePanel node={node} later={later} onCancel={() => setRewriting(false)}
             onGo={(request) => {
               setRewriting(false)
@@ -540,7 +626,12 @@ export function ChapterPage({ book, id, writing, nav }: { book: VBook; id: strin
             <LiveText text={live} />
           </>
         ) : text !== undefined && status !== 'planned' ? (
-          <ChapterText text={text} spot={`t|${id}`} onSave={(value) => say(nav, writing.setText(node, value).then(() => '存好了'))} />
+          <ChapterText text={text} spot={`t|${id}`} readOnly={teardown} searchWord={searchWord} searchToken={searchToken} onSave={teardown ? undefined : (value) => say(nav, writing.setText(node, value).then(() => '存好了'))} />
+        ) : loadError ? (
+          <div className="rounded-xl border border-line px-6 py-5">
+            <p role="alert" className="text-[14px] text-seal-dark">{loadError}</p>
+            <button type="button" className={clsx(smallButton, 'mt-3')} onClick={() => setLoadAttempt(attempt => attempt + 1)}>重新加载</button>
+          </div>
         ) : status !== 'planned' ? (
           <p className="text-ink-3">正在读这一章…</p>
         ) : (
@@ -549,12 +640,12 @@ export function ChapterPage({ book, id, writing, nav }: { book: VBook; id: strin
             <p className="mt-2 text-[14px] leading-relaxed text-ink-3">
               {nextToWrite?.id === id ? '接着写就从这一章开始。' : '写到这里时，正文会在这里一句句出来。'}章纲在大纲里，想改去那里改。
             </p>
-            {nextToWrite?.id === id && !busy && <button type="button" className={clsx(primaryButton, 'mt-4')} onClick={() => nav.openChapter('home')}>去开写</button>}
+            {!teardown && nextToWrite?.id === id && !busy && <button type="button" className={clsx(primaryButton, 'mt-4')} onClick={() => nav.openChapter('home')}>去开写</button>}
           </div>
         )}
       </div>
 
-      {(!!changes?.length || !!review?.good.length || !!review?.issues.length || cast.length > 0) && (
+      {!teardown && (!!changes?.length || !!review?.good.length || !!review?.issues.length || cast.length > 0) && (
       <div className="mt-10 border-t border-line pt-3">
         {!!changes?.length && (
           <Fold title="设定师记下的变化" count={`${changes.length} 处`}>
@@ -579,8 +670,8 @@ export function ChapterPage({ book, id, writing, nav }: { book: VBook; id: strin
       )}
 
       <nav className="mt-6 flex items-center justify-between border-t border-line pt-5 text-[14px] text-ink-2" aria-label="翻章">
-        {prev ? <button type="button" onClick={() => nav.openChapter(prev.id)} className="flex items-center gap-1 hover:text-seal"><ChevronLeft className="size-4" />{prev.title.replace('　', ' ')}</button> : <span />}
-        {next ? <button type="button" onClick={() => nav.openChapter(next.id)} className="flex items-center gap-1 hover:text-seal">{next.title.replace('　', ' ')}<ChevronRight className="size-4" /></button> : <span />}
+        {prev ? <button type="button" onClick={() => nav.openChapter(prev.id)} className="flex items-center gap-1 hover:text-seal"><ChevronLeft className="size-4" />{teardown ? '上一章' : prev.title.replace('　', ' ')}</button> : <span />}
+        {next ? <button type="button" onClick={() => nav.openChapter(next.id)} className="flex items-center gap-1 hover:text-seal">{teardown ? '下一章' : next.title.replace('　', ' ')}<ChevronRight className="size-4" /></button> : <span />}
       </nav>
       </article>
     </div>
