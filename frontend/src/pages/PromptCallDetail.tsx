@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { promptApi } from '../api/prompts'
 import { ErrorText } from '../components/ui'
-import { ROLE_META } from '../lib/roles'
+import { roleName } from '../lib/callRoles'
 
 /** 调用原文只读查看；与提示词工作台共用宣纸、字号及界面缩放。 */
 export function PromptCallDetail({ id, onClose }: { id: number; onClose: () => void }) {
@@ -41,7 +41,7 @@ export function PromptCallDetail({ id, onClose }: { id: number; onClose: () => v
           <section className="call-summary">
             <div className="call-summary-title"><h3>{call.purpose}</h3><span className={`call-status ${call.ok ? 'is-ok' : 'is-failed'}`}>{call.ok ? <CheckCircle2 className="size-3.5" /> : <XCircle className="size-3.5" />}{call.ok ? '成功' : '失败'}</span></div>
             <p>{call.book_title || '未关联书籍'} · {new Date(call.created_at).toLocaleString('zh-CN', { hour12: false })}</p>
-            <dl className="call-facts"><div><dt>角色</dt><dd>{ROLE_META[call.role as keyof typeof ROLE_META]?.name ?? call.role}</dd></div><div><dt>模型</dt><dd>{call.model}<small>{call.profile_name || '未记录配置名称'}</small></dd></div><div><dt>输入 / 输出 Token</dt><dd>{call.prompt_tokens?.toLocaleString('zh-CN') ?? '—'} / {call.completion_tokens?.toLocaleString('zh-CN') ?? '—'}</dd></div><div><dt>耗时</dt><dd>{call.latency_ms == null ? '—' : `${(call.latency_ms / 1000).toFixed(2)} 秒`}</dd></div></dl>
+            <dl className="call-facts"><div><dt>角色</dt><dd>{roleName(call.role)}</dd></div><div><dt>模型</dt><dd>{call.model}<small>{call.profile_name || '未记录配置名称'}</small></dd></div><div><dt>输入 / 输出 Token</dt><dd>{call.prompt_tokens?.toLocaleString('zh-CN') ?? '—'} / {call.completion_tokens?.toLocaleString('zh-CN') ?? '—'}</dd></div><div><dt>耗时</dt><dd>{call.latency_ms == null ? '—' : `${(call.latency_ms / 1000).toFixed(2)} 秒`}</dd></div></dl>
           </section>
           {!call.request && <p className="call-retention-note">这次调用的完整请求未留存。每本书只保留最近 2000 次调用的完整内容，较早记录的统计信息仍然保留。</p>}
           <section><h3>系统提示</h3><pre tabIndex={0}>{call.request?.system ?? '未留存'}</pre></section>

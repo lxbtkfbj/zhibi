@@ -11,10 +11,10 @@
 .prompt-icon-button:hover { background: var(--color-line); color: var(--color-ink); }
 .prompts-main { display: flex; flex: 1; min-height: 0; flex-direction: column; width: 100%; max-width: 1720px; margin: 0 auto; padding: 28px 36px 28px; }
 .prompts-page-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 22px; flex-shrink: 0; }
+.prompts-page-heading > div:first-child { min-width: 0; }
 .prompts-page-heading h1 { font-family: var(--font-serif); font-weight: 700; font-size: 28px; line-height: 1.4; }
 .prompts-page-heading p { margin-top: 8px; font-size: 14px; line-height: 1.7; color: var(--color-ink-3); }
-.prompts-scope { border: 1px solid var(--color-line-2); border-radius: 7px; padding: 4px 9px; color: var(--color-ink-3); white-space: nowrap; font-size: 12px; }
-.prompts-tabs { display: flex; gap: 6px; width: fit-content; padding: 4px; margin-bottom: 18px; border: 1px solid var(--color-line); border-radius: 11px; background: var(--color-paper-2); flex-shrink: 0; }
+.prompts-tabs { display: flex; gap: 6px; width: fit-content; padding: 4px; border: 1px solid var(--color-line); border-radius: 11px; background: var(--color-paper-2); flex-shrink: 0; }
 .prompts-tabs button { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 18px; border-radius: 8px; font-size: 14px; color: var(--color-ink-3); cursor: pointer; white-space: nowrap; }
 .prompts-tabs button:hover { color: var(--color-ink); }
 .prompts-tabs button[aria-selected=true] { background: var(--color-card); color: var(--color-ink); box-shadow: 0 1px 3px rgb(40 25 10 / .07); }
@@ -90,7 +90,8 @@ button.prompt-variable:not(:disabled) { cursor: pointer; }
 .calls-table th:last-child, .calls-table td:last-child { padding-right: 24px; }
 .calls-table tbody tr:hover { background: color-mix(in srgb, var(--color-paper-2) 60%, transparent); }
 .calls-table small { display: block; font-size: 12px; color: var(--color-ink-3); line-height: 1.6; margin-top: 4px; }
-.calls-table .number { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.calls-table .call-metric { text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.call-metric-value { display: inline-block; }
 .call-time { white-space: nowrap; font-variant-numeric: tabular-nums; font-size: 13px; }
 .call-role { white-space: nowrap; }
 .call-model { max-width: 270px; overflow-wrap: anywhere; }
@@ -98,6 +99,7 @@ button.prompt-variable:not(:disabled) { cursor: pointer; }
 .call-status { display: inline-flex; align-items: center; gap: 5px; border-radius: 6px; padding: 3px 7px; font-size: 12px; white-space: nowrap; }
 .call-status.is-ok { color: var(--color-lore); background: var(--color-lore-soft); }
 .call-status.is-failed { color: var(--color-seal-dark); background: var(--color-seal-soft); }
+.calls-table .call-view { text-align: right; }
 .calls-load-more { padding: 20px; text-align: center; }
 .calls-footer { border-top: 1px solid var(--color-line); flex-shrink: 0; color: var(--color-ink-3); padding: 12px 24px; font-size: 12px; line-height: 1.7; }
 .prompt-call-dialog { position: fixed; inset: 0; margin: auto; width: 940px; height: 780px; max-width: calc((100vw - 32px) / var(--desk-zoom) / var(--desk-scale)); max-height: calc(88dvh / var(--desk-zoom) / var(--desk-scale)); zoom: calc(var(--desk-zoom) * var(--desk-scale)); padding: 0; border: 1px solid var(--color-line); border-radius: 16px; overflow: hidden; color: var(--color-ink); background: var(--color-paper); box-shadow: var(--shadow-lift); }
@@ -133,7 +135,6 @@ button.prompt-variable:not(:disabled) { cursor: pointer; }
   .prompts-main { padding: 20px 16px; }
   .prompts-page-heading { margin-bottom: 14px; }
   .prompts-page-heading h1 { font-size: 25px; }
-  .prompts-scope { display: none; }
   .prompt-directory { width: 190px; }
   .template-toolbar { padding: 18px; }
   .template-meta, .template-variables { padding: 10px 18px; }
@@ -145,14 +146,15 @@ button.prompt-variable:not(:disabled) { cursor: pointer; }
   .calls-table td::before { display: block; content: attr(data-label); font-size: 12px; color: var(--color-ink-3); margin-bottom: 4px; }
   .calls-table td.call-purpose { grid-column: 1 / -1; grid-row: 1; }
   .calls-table td.call-view { align-self: end; justify-self: end; }
-  .calls-table .number { white-space: normal; }
+  .calls-table .call-metric { text-align: left; white-space: normal; }
   .calls-toolbar { padding: 16px 20px; }
 }
 @container prompts-shell (max-width: 600px) {
   .prompts-main { padding: 16px 12px 12px; }
+  .prompts-page-heading { flex-wrap: wrap; gap: 12px; }
   .prompts-page-heading h1 { font-size: 23px; }
   .prompts-page-heading p { font-size: 13px; margin-top: 5px; }
-  .prompts-tabs { margin-bottom: 12px; }
+  .prompts-tabs { margin-left: auto; }
   .prompt-directory { display: none; }
   .prompt-mobile-picker { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--color-line); font-size: 12px; color: var(--color-ink-3); flex-shrink: 0; background: var(--color-paper-2); }
   .prompt-mobile-picker select { flex: 1; min-width: 0; max-width: none; }
@@ -161,7 +163,8 @@ button.prompt-variable:not(:disabled) { cursor: pointer; }
   .template-meta, .template-variables { padding-inline: 14px; }
   .template-notice, .template-draft-note, .template-reading-label { padding-inline: 14px; }
   .prompt-editor { padding-inline: 8px; }
-  .calls-filter-fields { flex: 1; }
+  .calls-filter-fields { flex: 1 1 100%; }
+  .calls-toolbar > button { margin-left: auto; }
   .calls-filter-fields label { flex: 1; }
   .calls-filter-fields select { min-width: 0; width: 100%; max-width: 100%; }
   .calls-footer { padding-inline: 16px; }
@@ -177,5 +180,4 @@ button.prompt-variable:not(:disabled) { cursor: pointer; }
   .prompts-main { padding-top: 14px; }
   .prompts-page-heading { margin-bottom: 10px; }
   .prompts-page-heading p { display: none; }
-  .prompts-tabs { margin-bottom: 10px; }
 }

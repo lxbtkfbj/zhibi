@@ -17,7 +17,7 @@ const root = fileURLToPath(new URL('../../', import.meta.url))
 const output = path.join(root, 'data/prompts-workspace')
 const base = `http://127.0.0.1:${Number(process.env.PROMPTS_TEST_PORT || 4377)}`
 await fs.mkdir(output, { recursive: true })
-const fingerprint = async () => Object.fromEntries(await Promise.all(['frontend/src/pages/PromptsPage.tsx', 'frontend/src/pages/PromptCallDetail.tsx', 'frontend/src/pages/prompts.css', 'frontend/src/pages/SettingsPage.tsx', 'frontend/src/lib/promptNavigation.ts', 'frontend/src/pages/workspace/Workspace.tsx', 'frontend/src/main.tsx'].map(async (file) => [file, createHash('sha256').update(await fs.readFile(path.join(root, file))).digest('hex')])))
+const fingerprint = async () => Object.fromEntries(await Promise.all(['frontend/src/pages/PromptsPage.tsx', 'frontend/src/pages/PromptCallDetail.tsx', 'frontend/src/pages/prompts.css', 'frontend/src/pages/SettingsPage.tsx', 'frontend/src/lib/promptNavigation.ts', 'frontend/src/lib/callRoles.ts', 'frontend/src/lib/roles.ts', 'frontend/src/pages/workspace/Workspace.tsx', 'frontend/src/main.tsx'].map(async (file) => [file, createHash('sha256').update(await fs.readFile(path.join(root, file))).digest('hex')])))
 const evidence = { base, startedAt: new Date().toISOString(), sourceSha256: await fingerprint(), isolation: 'Real index/main router; Vite proxy disabled, private cache, server API fail-closed; every API endpoint mocked in Playwright.', checks: [], screenshots: [], requests: [], unexpectedRequests: [], pageErrors: [] }
 const check = (name, extra = {}) => { evidence.checks.push({ name, ...extra }); console.log(`PASS ${name}`) }
 const server = await createServer({
@@ -50,8 +50,13 @@ const initialCalls = [
   { id: 299, book_id: 'mockbook', book_title: '雾港来信', role: 'writer', purpose: '写第四章 · 灯下的回信', model: 'demo-writer', profile_name: '写手测试模型', prompt_tokens: 5000, completion_tokens: 2800, latency_ms: 12600, ok: true, error: null, created_at: '2026-10-19T09:10:00Z' },
   { id: 298, book_id: 'otherbook', book_title: '山海旧闻', role: 'reviewer', purpose: '检查人物状态与叙事视角', model: 'a-long-provider-model-identifier-for-overflow-acceptance-test', profile_name: '审稿测试模型', prompt_tokens: null, completion_tokens: null, latency_ms: 890, ok: false, error: '模拟请求失败', created_at: '2026-10-19T09:00:00Z' },
 ]
+const teardownCall = { ...initialCalls[0], id: 297, role: 'teardown', purpose: '拆书：整理人物与势力', model: 'demo-teardown', prompt_tokens: 5416, completion_tokens: 917, latency_ms: 9920 }
+const allRoleCalls = [...initialCalls, teardownCall,
+  { ...initialCalls[0], id: 296, role: 'lorekeeper', purpose: '整理世界设定', model: 'demo-lorekeeper' },
+  { ...initialCalls[0], id: 295, role: 'router', purpose: '群聊：判断接话成员', model: 'demo-router' },
+]
 let fixture
-const reset = (options = {}) => { fixture = { prompts: structuredClone(initialPrompts), promptsMode: 'ready', promptsDelay: 0, callsMode: 'ready', callsDelay: 0, saveDelay: false, releases: [], saves: [], callFilters: [], ...options } }
+const reset = (options = {}) => { fixture = { prompts: structuredClone(initialPrompts), promptsMode: 'ready', promptsDelay: 0, calls: structuredClone(initialCalls), callsMode: 'ready', callsDelay: 0, saveDelay: false, releases: [], saves: [], callFilters: [], ...options } }
 reset()
 const browser = await chromium.launch({ headless: true, executablePath: process.env.ZHIBI_CHROMIUM || process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined }).catch(async (error) => { await server.close(); throw error })
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, locale: 'zh-CN', timezoneId: 'Asia/Taipei', reducedMotion: 'reduce' })
@@ -84,12 +89,14 @@ await context.route((url) => url.pathname.startsWith('/api/'), async (route) => 
     if (fixture.callsDelay) await new Promise((resolve) => setTimeout(resolve, fixture.callsDelay))
     fixture.callFilters.push(Object.fromEntries(url.searchParams))
     if (fixture.callsMode === 'error') return reply({ detail: '模拟调用记录读取失败' }, 503)
-    const items = fixture.callsMode === 'empty' ? [] : initialCalls.filter((value) => (!url.searchParams.get('book_id') || value.book_id === url.searchParams.get('book_id')) && (!url.searchParams.get('role') || value.role === url.searchParams.get('role')))
-    if (url.searchParams.has('before')) return reply({ items: [{ ...initialCalls[0], id: 280, purpose: '更早的主编讨论' }], next_before: null })
-    return reply({ items, next_before: items.length ? 298 : null })
+    const items = fixture.callsMode === 'empty' ? [] : fixture.calls.filter((value) => (!url.searchParams.get('book_id') || value.book_id === url.searchParams.get('book_id')) && (!url.searchParams.get('role') || value.role === url.searchParams.get('role')))
+    // Older pages obey the same book/role contract rather than fabricating an
+    // unrelated chief row that would hide a dropped pagination filter.
+    if (url.searchParams.has('before')) return reply({ items: items.length ? [{ ...items[0], id: 280, purpose: items[0].role === 'teardown' ? '更早的拆书记录' : '更早的主编讨论' }] : [], next_before: null })
+    return reply({ items, next_before: items.at(-1)?.id ?? null })
   }
   if (/^\/llm-calls\/\d+$/.test(p)) {
-    const call = initialCalls.find((value) => value.id === Number(p.split('/').at(-1))) || initialCalls[0]
+    const call = fixture.calls.find((value) => value.id === Number(p.split('/').at(-1))) || initialCalls[0]
     return reply({ ...call, request: { system: '这是本次真正发出的系统提示。\n先保护作者的原稿。', user: '请讨论雾港的第一封信。', schema_name: 'ChiefChat', schema: { type: 'object', properties: { reply: { type: 'string' } } }, method: 'json_mode' }, response: '{"reply":"可以先讨论线索，不自动修改书稿。"}' })
   }
   if (method === 'GET') {
@@ -117,6 +124,7 @@ await context.route((url) => url.pathname.startsWith('/api/'), async (route) => 
 const editor = () => page.getByTestId('prompt-editor').locator('.cm-content')
 const sourceUrl = '/desk/mockbook?tab=%E5%A4%A7%E7%BA%B2&node=book#outline'
 const pageTitle = () => page.getByRole('heading', { name: '提示词与调用记录', exact: true })
+const outlineTab = () => page.locator('header.top nav.tabs a').filter({ hasText: /^大纲$/ })
 const returnLink = () => page.getByRole('link', { name: /返回当前书|返回书页|返回书房|回到书房|回到书页/ }).first()
 const tab = (name) => page.getByRole('tab', { name, exact: true })
 const shot = async (name) => {
@@ -127,10 +135,57 @@ const shot = async (name) => {
   evidence.screenshots.push(`${name}.png`)
 }
 const noOverflow = async () => assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false, 'the document must not overflow horizontally')
+const compactCallHeading = async (desktop = true) => {
+  await expect(page.getByText('看看编辑部实际用了什么模型、发送了什么，以及模型如何回复。', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('调用追溯', { exact: true })).toHaveCount(0)
+  const heading = page.locator('.prompts-page-heading')
+  const tabs = heading.getByRole('tablist', { name: '提示词与调用记录', exact: true })
+  await expect(tabs).toBeVisible()
+  const titleBox = await pageTitle().boundingBox(), tabsBox = await tabs.boundingBox(), panelBox = await page.getByRole('tabpanel').boundingBox()
+  assert(titleBox && tabsBox && panelBox, 'heading and tabs must have measurable geometry')
+  if (desktop) {
+    assert(tabsBox.x >= titleBox.x + titleBox.width, 'desktop tabs must sit to the right of the title')
+    assert(tabsBox.y < titleBox.y + titleBox.height && tabsBox.y + tabsBox.height > titleBox.y, 'desktop tabs share the title row instead of consuming a second row')
+    assert(Math.abs(tabsBox.x + tabsBox.width - panelBox.x - panelBox.width) <= 2, 'desktop tabs align with the workspace right edge')
+  }
+  return { title: titleBox, tabs: tabsBox, panel: panelBox }
+}
+const metricAlignment = async () => {
+  const metrics = await page.locator('.calls-table').evaluate((table) => {
+    const contentBox = (element) => {
+      const range = document.createRange()
+      range.selectNodeContents(element)
+      const rect = range.getBoundingClientRect()
+      return { center: rect.x + rect.width / 2, width: rect.width }
+    }
+    return [4, 5, 6].map((index) => {
+      const header = table.tHead.rows[0].cells[index]
+      return { label: header.textContent.trim(), header: contentBox(header), headerAlign: getComputedStyle(header).textAlign,
+        rows: Array.from(table.tBodies[0].rows, (row) => ({ content: contentBox(row.cells[index]), align: getComputedStyle(row.cells[index]).textAlign })) }
+    })
+  })
+  for (const metric of metrics) {
+    assert.equal(metric.headerAlign, 'center', `${metric.label} header must use the shared centered column alignment`)
+    for (const row of metric.rows) {
+      assert.equal(row.align, 'center', `${metric.label} body must use the same alignment as its header`)
+      assert(Math.abs(row.content.center - metric.header.center) <= 2, `${metric.label} header/body content axes must align within 2px`)
+    }
+  }
+  return metrics
+}
+const readableCallFilters = async () => {
+  const widths = {}
+  for (const name of ['按书筛选', '按角色筛选']) {
+    const box = await page.getByRole('combobox', { name, exact: true }).boundingBox()
+    assert(box && box.width >= 100, `${name} must retain at least 100px so its selected text remains readable on a narrow screen`)
+    widths[name] = box.width
+  }
+  return widths
+}
 const enterFromBook = async () => {
   await page.goto(base + sourceUrl)
-  await page.getByRole('navigation').getByRole('button', { name: '大纲', exact: true }).click()
-  await expect(page.getByRole('navigation').getByRole('button', { name: '大纲', exact: true })).toHaveAttribute('aria-current', 'page')
+  await outlineTab().click()
+  await expect(outlineTab()).toHaveClass(/\bon\b/)
   await page.getByRole('button', { name: '系统设置', exact: true }).click()
   const settingsDialog = page.getByRole('dialog', { name: '系统设置', exact: true })
   await expect(settingsDialog).toBeVisible()
@@ -218,8 +273,10 @@ try {
   await expect(page.getByRole('combobox', { name: '按角色筛选' })).toHaveValue('writer')
   await page.getByRole('combobox', { name: '按角色筛选' }).selectOption('')
   await expect(page.getByText('检查人物状态与叙事视角', { exact: true })).toBeVisible()
+  const headingGeometry = await compactCallHeading()
+  const columnGeometry = await metricAlignment()
   await noOverflow(); await shot('03-calls-table')
-  check('Calls book/role filtering and explicit All-books choice survive tab switching and reload')
+  check('Calls book/role filtering and explicit All-books choice survive tab switching and reload; compact right-side tabs and Token/latency/status columns align', { headingGeometry, columnGeometry })
 
   const view = page.getByRole('button', { name: /^查看(?:详情)?$/ }).first()
   await expect(page.getByText(/每.*书.*2000.*调用/).first()).toBeVisible()
@@ -239,12 +296,78 @@ try {
   await expect(page.getByText('更早的主编讨论', { exact: true })).toBeVisible()
   check('Call detail has real request/response fields, retention scope, focus containment/Escape restoration; pagination works')
 
+  reset({ calls: structuredClone(allRoleCalls) })
+  const callsUrl = (role, bookId = '') => {
+    const url = new URL('/prompts', base)
+    url.searchParams.set('tab', 'calls'); url.searchParams.set('returnTo', sourceUrl)
+    url.searchParams.set('callBook', bookId); url.searchParams.set('callRole', role)
+    return url.href
+  }
+  await page.goto(callsUrl('teardown'))
+  const roleFilter = page.getByRole('combobox', { name: '按角色筛选' })
+  const expectedRoles = { chief: '主编', lorekeeper: '设定师', writer: '写手', reviewer: '审稿', teardown: '拆书', router: '群聊分流' }
+  for (const [value, label] of Object.entries(expectedRoles)) {
+    await expect(roleFilter.locator(`option[value="${value}"]`)).toHaveText(label)
+  }
+  await expect(roleFilter).toHaveValue('teardown')
+  await expect(page.locator('.call-role')).toHaveText(['拆书'])
+  await page.getByRole('button', { name: /^查看(?:详情)?$/ }).click()
+  await expect(detail).toBeVisible()
+  await expect(detail.locator('.call-facts > div').filter({ has: page.locator('dt', { hasText: /^角色$/ }) }).locator('dd')).toHaveText('拆书')
+  await expect(detail.getByText('teardown', { exact: true })).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  for (const [value, label] of Object.entries(expectedRoles)) {
+    await roleFilter.selectOption(value)
+    await expect(page.locator('.call-role')).toHaveText([label])
+    await expect.poll(() => fixture.callFilters.some(filter => filter.role === value), { message: `${value} selection must reach the API unchanged (or reuse its correctly keyed cache)` }).toBe(true)
+    assert.equal(new URL(page.url()).searchParams.get('callRole'), value)
+    await expect(page.getByText('还没有符合条件的调用记录', { exact: true })).toHaveCount(0)
+  }
+  await roleFilter.selectOption('teardown')
+  await tab('提示词').click(); await tab('调用记录').click()
+  await expect(roleFilter).toHaveValue('teardown')
+  await page.reload()
+  await expect(roleFilter).toHaveValue('teardown')
+  await expect(page.locator('.call-role')).toHaveText(['拆书'])
+  assert.equal(new URL(page.url()).searchParams.get('callRole'), 'teardown')
+  const refreshBefore = fixture.callFilters.length
+  await page.getByRole('button', { name: '刷新记录', exact: true }).click()
+  await expect.poll(() => fixture.callFilters.length).toBeGreaterThan(refreshBefore)
+  assert.equal(fixture.callFilters.at(-1).role, 'teardown')
+  await page.getByRole('button', { name: /加载更早的记录/ }).click()
+  await expect(page.getByText('更早的拆书记录', { exact: true })).toBeVisible()
+  await expect(page.locator('.call-role')).toHaveText(['拆书', '拆书'])
+  assert.equal(fixture.callFilters.at(-1).role, 'teardown')
+  assert.equal(fixture.callFilters.at(-1).before, String(teardownCall.id))
+  await compactCallHeading(); await metricAlignment(); await noOverflow(); await shot('14-teardown-filter')
+  check('Every supported call role is selectable and sent exactly to API; teardown is Chinese in table/details and survives direct URL, tabs, reload, refresh, and filtered pagination')
+
+  reset({ calls: [structuredClone(teardownCall)] })
+  await page.goto(callsUrl('chief', 'mockbook'))
+  await expect(roleFilter).toHaveValue('chief')
+  await expect(page.getByText('还没有符合条件的调用记录', { exact: true })).toBeVisible()
+  await expect(page.locator('.calls-table')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /加载更早的记录/ })).toHaveCount(0)
+  assert.deepEqual(fixture.callFilters.at(-1), { book_id: 'mockbook', role: 'chief', limit: '50' })
+  await roleFilter.selectOption('teardown')
+  await expect(page.locator('.call-role')).toHaveText(['拆书'])
+  await page.getByRole('combobox', { name: '按书筛选' }).selectOption('otherbook')
+  await expect(page.getByText('还没有符合条件的调用记录', { exact: true })).toBeVisible()
+  await expect(roleFilter).toHaveValue('teardown')
+  assert.deepEqual(fixture.callFilters.at(-1), { book_id: 'otherbook', role: 'teardown', limit: '50' })
+  await page.goto(callsUrl('not-a-real-role'))
+  await expect(roleFilter).toHaveValue('')
+  await expect(page.locator('.call-role')).toHaveText(['拆书'])
+  assert.equal('role' in fixture.callFilters.at(-1), false, 'unknown URL role must not be sent to the API')
+  check('True empty role/book intersections remain empty without stale rows or pagination; unknown URL roles safely fall back to all roles')
+  reset()
+
   await page.reload()
   await expect(returnLink()).toHaveAttribute('href', sourceUrl)
   await returnLink().click()
   await expect(page).toHaveURL(base + sourceUrl)
   await expect(page.getByRole('button', { name: '系统设置', exact: true })).toBeVisible()
-  await expect(page.getByRole('navigation').getByRole('button', { name: '大纲', exact: true })).toHaveAttribute('aria-current', 'page')
+  await expect(outlineTab()).toHaveClass(/\bon\b/)
   check('Return link survives reload and restores original book pathname, query, hash, and actual Outline page selection')
 
   await page.goto(`${base}/prompts`)
@@ -311,6 +434,16 @@ try {
   await shot('09-wide-2560-scale120-prompts')
   const editorFont = await editor().evaluate((el) => getComputedStyle(el).fontSize)
   check('2560px workspace honors desk scale and readable prompt typography without horizontal overflow', { editorFont })
+  await tab('调用记录').click()
+  await expect(page.getByText('主编群聊：讨论第一章线索', { exact: true })).toBeVisible()
+  const scaledHeading = await compactCallHeading()
+  const scaledMetrics = await metricAlignment()
+  await noOverflow(); await shot('15-wide-2560-scale120-calls')
+  await tab('调用记录').press('ArrowLeft')
+  await expect(tab('提示词')).toBeFocused()
+  await expect(tab('提示词')).toHaveAttribute('aria-selected', 'true')
+  await expect(editor()).toBeVisible()
+  check('2560px scale120 calls retain compact heading and aligned metrics; moved tabs preserve keyboard navigation', { scaledHeading, scaledMetrics })
 
   await page.setViewportSize({ width: 390, height: 844 })
   await page.evaluate(() => localStorage.setItem('zhibi:appearance', JSON.stringify({ deskScale: 100, theme: 'paper' })))
@@ -319,8 +452,20 @@ try {
   await noOverflow(); await shot('10-mobile-prompts')
   await tab('调用记录').click()
   await expect(page.getByText('主编群聊：讨论第一章线索', { exact: true })).toBeVisible()
+  const mobileFilterWidths = await readableCallFilters()
   await noOverflow(); await shot('11-mobile-calls')
-  check('390px prompt and call views remain readable and avoid document-level overflow')
+  check('390px prompt and call views remain readable and avoid document-level overflow', { mobileFilterWidths })
+  const narrowHeadings = []
+  for (const width of [760, 600, 320]) {
+    await page.setViewportSize({ width, height: 844 })
+    await expect(tab('提示词')).toBeVisible()
+    await expect(tab('调用记录')).toBeVisible()
+    narrowHeadings.push({ width, ...await compactCallHeading(false), filterWidths: width <= 390 ? await readableCallFilters() : undefined })
+    await expect(page.locator('.call-role').first()).toBeVisible()
+    await noOverflow()
+  }
+  await shot('16-narrow-320-calls')
+  check('760px, 600px, and 320px calls keep wrapped header tabs and readable role cards without horizontal document overflow', { narrowHeadings })
 
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.evaluate(() => localStorage.setItem('zhibi:appearance', JSON.stringify({ deskScale: 100, theme: 'ink' })))
@@ -329,11 +474,13 @@ try {
   await expect(tab('调用记录')).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByText('主编群聊：讨论第一章线索', { exact: true })).toBeVisible()
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'ink')
-  await noOverflow(); await shot('12-dark-calls')
+  const inkPaletteObservation = await page.locator('.prompts-page').evaluate((element) => ({ background: getComputedStyle(element).backgroundColor, foreground: getComputedStyle(element).color, colorScheme: getComputedStyle(document.documentElement).colorScheme }))
+  evidence.knownLimitations = ['The existing shared theme CSS uses a descendant selector for desk-v2-theme while AppearanceProvider applies it to the same html element as data-theme. Ink preference metadata and layout are covered here, but the current light token override is not claimed as successful dark-color coverage.']
+  await noOverflow(); await shot('12-ink-preference-calls')
   await tab('提示词').click()
   await expect(editor()).toBeVisible()
-  await noOverflow(); await shot('13-dark-prompts')
-  check('Ink theme applies consistently to prompts and call records')
+  await noOverflow(); await shot('13-ink-preference-prompts')
+  check('Ink preference metadata/layout regression (global palette limitation)', { inkPaletteObservation })
 
   assert.deepEqual(evidence.pageErrors, [])
   assert.deepEqual(evidence.unexpectedRequests, [])
