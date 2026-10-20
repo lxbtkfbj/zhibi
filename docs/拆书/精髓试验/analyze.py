@@ -31,8 +31,9 @@ class Section(BaseModel):
 
 class Figure(BaseModel):
     name: str
-    charm: str = Field(description="让人记得住的地方，靠哪场戏立住，60 字以内")
-    role: str = Field(description="在剧情里干什么用，60 字以内")
+    archetype: str = Field(description="人设模板，网文读者常说的叫法，2-8 个字")
+    build: str = Field(description="作者用哪几招把这个人设立起来，80 字以内")
+    role: str = Field(description="在剧情里起什么作用，60 字以内")
     arc: str = Field("", description="自己或者和主角的关系怎么变，没变写空")
     chapters: list[int]
 
@@ -46,6 +47,26 @@ class CastSection(BaseModel):
 class Overview(BaseModel):
     engine: str = Field(description="一句话：这本书靠什么让人一直追下去，60 字以内")
     points: list[Point]
+
+
+class ShuangTag(BaseModel):
+    index: int
+    tags: list[str] = Field(description="1-3 个爽点类别，最主要的在前")
+    crowd: str = Field("", description="被谁的反应放大，没有空着")
+
+
+class ShuangTags(BaseModel):
+    chapters: list[ShuangTag]
+
+
+class MergeGroup(BaseModel):
+    names: list[str]
+    keep: str
+    why: str = Field(description="第几章怎么看出来是同一个人，40 字以内")
+
+
+class Merges(BaseModel):
+    groups: list[MergeGroup] = Field(default_factory=list)
 
 
 class UnitPlot(BaseModel):
@@ -68,10 +89,10 @@ class UnitPlots(BaseModel):
 
 SECTIONS = {
     # 键：（标题，提示词，格式）
-    "shuang": ("爽点设计", "essence_shuang", Section),
+    "shuang": ("爽点类型", "essence_shuang", Section),
     "rhythm": ("节奏与钩子", "essence_rhythm", Section),
     "hero": ("主角塑造", "essence_hero", Section),
-    "cast": ("配角与对手", "essence_cast", CastSection),
+    "cast": ("人物与人设", "essence_cast", CastSection),
     "skeleton": ("剧情骨架", "essence_skeleton", Section),
     "source": ("情节来源", "essence_source", Section),
     "link": ("剧情衔接", "essence_link", Section),
@@ -122,10 +143,11 @@ class Book:
         self.by_index = {c["index"]: c for c in self.chapters}
         self.last = max(self.by_index)
         self.plots: dict[int, dict] = {}
+        self.tags: dict[int, dict] = {}
         self._people()
 
-    # 人：was 把旧名字并到新名字上，出场按章数
-    def _people(self):
+    # 人：was 和「合并同一个人」把旧名字并到留下的名字上，出场按章数
+    def _people(self, merges=()):
         parent: dict[str, str] = {}
 
         def find(x):
@@ -133,6 +155,11 @@ class Book:
                 x = parent[x]
             return x
 
+        for group in merges:
+            for name in group["names"]:
+                a, b = find(name), find(group["keep"])
+                if a != b:
+                    parent[a] = b
         for c in self.chapters:
             for p in c.get("people", []):
                 if p.get("was") and p["was"] != p["name"]:
@@ -257,6 +284,67 @@ class Book:
 # ---------- 每节的材料 ----------
 
 
+def merge_material(book: Book) -> str:
+    called = defaultdict(set)
+    for c in book.chapters:
+        for p in c.get("people", []):
+            called[book.find(p["name"])].update(p.get("also_called") or [])
+    lines = []
+    for name, chs in sorted(book.appear.items(), key=lambda x: x[1][0]):
+        shown = book.shown[name]
+        notes = [f"第 {i} 章：{s[:60]}" for i, s in ([shown[0]] + ([shown[-1]] if len(shown) > 1 else []))] if shown else []
+        others = (called[name] | book.aliases[name]) - {name}
+        lines.append(
+            f"【{name}】出场 {len(chs)} 章（第 {chs[0]}–{chs[-1]} 章）；别的叫法：{'、'.join(sorted(others)) or '没有'}；"
+            + "；".join(notes)
+        )
+    return "\n".join(lines)
+
+
+def tag_facts(book: Book) -> list[str]:
+    good = [c for c in book.chapters if c["feel"] in ("爽", "大爽")]
+    by_tag, primary, pairs, crowd = defaultdict(list), Counter(), Counter(), 0
+    for c in good:
+        tags = book.tags.get(c["index"], {}).get("tags") or [ctype(c["cool_point"])]
+        primary[tags[0]] += 1
+        for tag in dict.fromkeys(tags):
+            by_tag[tag].append(c["index"])
+        for a in range(len(tags)):
+            for b in range(a + 1, len(tags)):
+                pairs[tuple(sorted((tags[a], tags[b])))] += 1
+        crowd += bool(book.tags.get(c["index"], {}).get("crowd"))
+    lines = [
+        f"- 过瘾的章一共 {len(good)} 章（爽 {sum(c['feel'] == '爽' for c in good)}、大爽 {sum(c['feel'] == '大爽' for c in good)}），每章标了 1–3 类。",
+        f"- 有人在旁边看着、靠旁观者反应放大的：{crowd} 章。",
+        "各类爽点（按出现章数）：",
+    ]
+    for tag, chs in sorted(by_tag.items(), key=lambda x: -len(x[1])):
+        big = [i for i in chs if book.by_index[i]["feel"] == "大爽"]
+        gap = f"，平均隔 {(chs[-1] - chs[0]) / (len(chs) - 1):.1f} 章来一次" if len(chs) > 1 else ""
+        lines.append(f"- {tag}：{len(chs)} 章（其中排第一位的 {primary[tag]} 章），大爽 {len(big)} 章{gap}；第 {spans(chs)} 章")
+    lines.append("经常一起出现的类：" + "；".join(f"{a}+{b} {n} 章" for (a, b), n in pairs.most_common(6)))
+    return lines
+
+
+def tag_examples(book: Book, limit=6) -> list[str]:
+    by_tag = defaultdict(list)
+    for c in book.chapters:
+        if c["feel"] in ("爽", "大爽"):
+            for tag in (book.tags.get(c["index"], {}).get("tags") or [ctype(c["cool_point"])])[:2]:
+                by_tag[tag].append(c)
+    out = []
+    for tag, chs in sorted(by_tag.items(), key=lambda x: -len(x[1])):
+        big = [c for c in chs if c["feel"] == "大爽"][:3]
+        rest = [c for c in chs if c["feel"] != "大爽"]
+        step = max(1, len(rest) // max(1, limit - len(big)))
+        pick = sorted(big + rest[::step][: limit - len(big)], key=lambda c: c["index"])
+        out.append(f"【{tag}】")
+        for c in pick:
+            crowd = book.tags.get(c["index"], {}).get("crowd")
+            out.append(f"第 {c['index']} 章（{c['feel']}）{c['cool_point']}" + (f"｜旁观：{crowd}" if crowd else ""))
+    return out
+
+
 def unit_block(book: Book, u: dict) -> str:
     chs = [book.by_index[i] for i in range(u["first"], u["last"] + 1) if i in book.by_index]
     seen = book.first_seen()
@@ -284,19 +372,17 @@ def materials(book: Book, key: str) -> str:
     ch, units, plots = book.chapters, book.units, book.plots
     out: list[str] = []
     if key == "shuang":
-        out += ["数字：", *book.feel_facts(), "", "过瘾的章（爽、大爽）每章的看点："]
-        out += [f"第 {c['index']} 章（{c['feel']}）{c['cool_point']}" for c in ch if c["feel"] in ("爽", "大爽")]
-        out += ["", "憋屈的章："]
-        out += [f"第 {c['index']} 章：{c['goal']}｜{c['summary'][:80]}" for c in ch if c["feel"] == "憋屈"] or ["（没有）"]
+        out += ["数字：", *tag_facts(book), "", "每一类挑几章的看点（大爽优先，其余隔开挑）：", *tag_examples(book)]
         out += ["", "各单元最过瘾的一下（逐单元拆的结果）："]
         out += [f"单元 {u['n']}（第 {u['first']}–{u['last']} 章「{u['title']}」）：{plots.get(u['n'], {}).get('payoff', '')}" for u in units]
     elif key == "rhythm":
         hooks = Counter(ctype(c["hook"]) for c in ch)
+        bad = [f"第 {c['index']} 章：{c['goal']}｜{c['summary'][:80]}" for c in ch if c["feel"] == "憋屈"]
         out += ["数字：", book.unit_facts(), *book.feel_facts(),
                 "- 章末钩子的种类：" + "，".join(f"{k} {v} 章" for k, v in hooks.most_common()), *book.wait_facts(), "",
                 "逐章的感觉和结尾钩子："]
         out += [f"第 {c['index']} 章［{c['feel']}］{c['hook']}" for c in ch]
-        out += ["", "各单元："]
+        out += ["", "憋屈的章：", *(bad or ["（没有）"]), "", "各单元："]
         for u in units:
             f = Counter(book.by_index[i]["feel"] for i in range(u["first"], u["last"] + 1) if i in book.by_index)
             out.append(f"单元 {u['n']} 第 {u['first']}–{u['last']} 章（{u['last'] - u['first'] + 1} 章）：大爽 {f['大爽']}、爽 {f['爽']}、平 {f['平']}、憋屈 {f['憋屈']}")
@@ -473,6 +559,38 @@ async def run(slug: str, only: set[str] | None) -> None:
     result_path = book.folder / "essence.json"
     result = load(result_path) if result_path.exists() else {"sections": {}}
     try:
+        if "merges" not in result or (only and "merges" in only):
+            parsed = await caller.call(
+                Merges, render("essence_merge", title=title, people=merge_material(book)), "合并同一个人", system=system
+            )
+            result["merges"] = [g.model_dump() for g in parsed.groups]
+            save(result_path, result)
+        book._people(result["merges"])
+        print("  合并：", "；".join(f"{'、'.join(g['names'])}→{g['keep']}（{g['why']}）" for g in result["merges"]) or "没有")
+        if "tags" not in result or (only and "tags" in only):
+            good = [c for c in book.chapters if c["feel"] in ("爽", "大爽")]
+            tags = {}
+            for start in range(0, len(good), 80):
+                group = good[start : start + 80]
+                want = {c["index"] for c in group}
+
+                def check_tags(parsed, want=want):
+                    got = {c.index for c in parsed.chapters}
+                    return None if want <= got else f"漏了第 {sorted(want - got)} 章，每章都要写一条"
+
+                lines = "\n".join(
+                    f"第 {c['index']} 章（{c['feel']}）看点：{c['cool_point']}｜{c['summary'][:110]}" for c in group
+                )
+                parsed = await caller.call(
+                    ShuangTags, render("essence_shuang_tags", title=title, chapters=lines),
+                    f"爽点分类 {group[0]['index']}-{group[-1]['index']}", system=system, check=check_tags,
+                )
+                for item in parsed.chapters:
+                    if item.index in want:
+                        tags[item.index] = item.model_dump()
+            result["tags"] = tags
+            save(result_path, result)
+        book.tags = {int(k): v for k, v in result["tags"].items()}
         if "plots" in result and not (only and "plots" in only):
             book.plots = {int(k): v for k, v in result["plots"].items()}
         else:

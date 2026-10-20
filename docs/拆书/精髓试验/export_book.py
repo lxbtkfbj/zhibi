@@ -14,7 +14,7 @@ def main() -> None:
     folder = OUT / slug
     with db() as conn:
         book_id, author, meta = conn.execute(
-            "select id, coalesce(teardown->'info'->>'author', ''), teardown from books where title = %s and source = 'teardown'",
+            "select b.id, coalesce(b.teardown->>'author', s.preview->>'author', ''), b.teardown from books b left join teardown_sources s on s.book_id = b.id where b.title = %s and b.source = 'teardown'",
             (title,),
         ).fetchone()
         rows = conn.execute(
