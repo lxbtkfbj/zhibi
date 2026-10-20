@@ -116,7 +116,7 @@ function ShelfBook({ book, index }: { book: BookSummary; index: number }) {
           <p className="truncate font-serif text-[15px] font-bold">{cleanTitle(book.title)}</p>
           {teardown ? <>
             <p className="mt-1.5 truncate text-xs text-ink-3">{book.teardown?.author ? `${book.teardown.author} · ` : ''}{teardownWords(book.teardown?.chars ?? 0)}</p>
-            <p className="mt-1.5 text-xs text-ink-2">{confirming ? '还没确认分章' : `已导入 ${book.teardown?.chapters ?? 0} 章 · 还没开拆`}</p>
+            <p className="mt-1.5 text-xs text-ink-2">{confirming ? '还没确认分章' : book.teardown?.stage === 'queued' ? '排队中：前面还有书在拆' : book.teardown?.stage === 'running' ? '正在拆' : book.teardown?.stage === 'stopped' ? book.teardown.stop_note || '停了' : book.teardown?.stage === 'done' ? `拆完了 · ${book.teardown.chapters} 章` : `已导入 ${book.teardown?.chapters ?? 0} 章 · 还没开拆`}</p>
           </> : <div className="mt-1.5 flex justify-center">
             <Badge tone={status.tone}>
               {status.tone === 'busy' && <Spinner className="size-3" />}

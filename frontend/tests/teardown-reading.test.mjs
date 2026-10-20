@@ -112,7 +112,7 @@ test('搜索高亮是纯文字子串匹配，多个命中、标点、HTML 和中
 
 test('正文组件按 source 分流只读，原作者编辑路径和导出保留，首页与翻章文案照任务', () => {
   const source = readFileSync(new URL('../src/pages/workspace/Manuscript.tsx', import.meta.url), 'utf8')
-  for (const wording of ['找章节、搜原文……', '从第 1 章读起', '接着读第 ', '章 · 还没开拆', "teardown ? '上一章'", "teardown ? '下一章'", '导出这一章 TXT']) assert.ok(source.includes(wording), wording)
+  for (const wording of ['找章节、搜原文……', '从第 1 章读起', '接着读第 ', '<TeardownProgress book={book} embedded', "teardown ? '上一章'", "teardown ? '下一章'", '导出这一章 TXT']) assert.ok(source.includes(wording), wording)
   assert.match(source, /book\.source === 'teardown'/)
   assert.match(source, /readOnly=\{teardown\} searchWord=\{searchWord\} searchToken=\{searchToken\} onSave=\{teardown \? undefined/)
   assert.match(source, /if \(!target\) return\s+event\.preventDefault\(\)\s+nav\.openChapter\(target\.id\)/)

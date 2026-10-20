@@ -124,6 +124,7 @@ function outlineNodes(tree: OutlineTree, chapters: ChapterBrief[], ending?: stri
     }
     return {
       id: `c${index}`, kind: '章', title: `第${index}章　${title}`, text: '', sections, progress: outlineStatusText(status), uses: [], body,
+      ...(teardown ? { teardown: brief?.teardown } : {}),
       ...(brief ? { ref: { type: 'chapter' as const, id: String(index) } } : {}),
     }
   }

@@ -1,8 +1,21 @@
 import { ApiError, get, post } from './client'
-import type { BookDetail } from './types'
+import { useProfiles, useRoles } from './hooks'
+import type { BookDetail, Job } from './types'
 import type { TeardownFields, TeardownPreview } from '../lib/teardownPreview'
+import { teardownModelName } from '../lib/teardownStart'
 
 export type TeardownEncoding = 'auto' | 'utf-8' | 'gb18030' | 'utf-16' | 'big5'
+
+export function useTeardownModel() {
+  const profiles = useProfiles()
+  const roles = useRoles()
+  const ready = !!profiles.data && !!roles.data && !profiles.error && !roles.error
+  return {
+    ready,
+    name: ready ? teardownModelName(profiles.data!, roles.data!) : '正在读取…',
+    error: profiles.error || roles.error,
+  }
+}
 
 /** fetch 没有上传进度；这里用同源 XHR，后台的 detail 保持原样显示。 */
 export function uploadTeardown(file: File, onProgress: (percent: number) => void, signal?: AbortSignal): Promise<TeardownPreview> {
@@ -46,4 +59,6 @@ export function uploadTeardown(file: File, onProgress: (percent: number) => void
 
 export const getTeardownPreview = (bookId: string) => get<TeardownPreview>(`/teardown/${bookId}/preview`)
 export const changeTeardownEncoding = (bookId: string, encoding: TeardownEncoding) => post<TeardownPreview>(`/teardown/${bookId}/encoding`, { encoding })
-export const importTeardown = (bookId: string, fields: TeardownFields, include: number[]) => post<BookDetail>(`/teardown/${bookId}/import`, { ...fields, include })
+export const importTeardown = (bookId: string, fields: TeardownFields, include: number[], start?: { upto: number | null }) => post<BookDetail>(`/teardown/${bookId}/import`, { ...fields, include, ...(start ? { start } : {}) })
+export const startTeardown = (bookId: string, upto: number | null) => post<Job>(`/teardown/${bookId}/start`, { upto })
+export const stopTeardown = (bookId: string) => post<Job>(`/teardown/${bookId}/stop`)

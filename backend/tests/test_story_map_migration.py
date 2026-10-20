@@ -28,11 +28,10 @@ def _insert(connection, table, **values):
     connection.execute(table.insert().values(**values))
 
 
-def test_story_map_upgrade_and_downgrade():
+def test_story_map_upgrade_and_downgrade(migration_database_urls):
     name = f"zhibi_story_map_test_{uuid.uuid4().hex}"
     assert name.startswith("zhibi_story_map_test_") and name.replace("_", "").isalnum()
-    admin_url = "postgresql://zhibi:zhibi@127.0.0.1:5433/zhibi"
-    url = f"postgresql+psycopg://zhibi:zhibi@127.0.0.1:5433/{name}"
+    admin_url, url = migration_database_urls(name)
     config = Config("alembic.ini")
     config.set_main_option("sqlalchemy.url", url)
     with psycopg.connect(admin_url, autocommit=True) as admin:

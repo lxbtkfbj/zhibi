@@ -32,9 +32,9 @@ test('原书章号四种不对的说明逐字使用任务措辞，单章和多�
   assert.equal(teardownNumberIssueText({ ...issue, expected: 364, number: 36, kind: '打错了' }), '第 10 章：原书把第 364 章写成了「第36章」')
 })
 
-test('无重复章时不显示半句话，不添加第二批的模型费用提醒', () => {
-  assert.equal(teardownCleaningText({ ads_removed: 3, duplicates_removed: 0 }), '去掉了 3 行广告和网址。导入只是分章，不用模型、不花钱。')
-  assert.equal(teardownCleaningText({ ads_removed: 4, duplicates_removed: 2 }), '去掉了 4 行广告和网址，重复的章 2 个。导入只是分章，不用模型、不花钱。')
+test('无重复章时不显示半句话，第二批移除导入不花钱的旧小字', () => {
+  assert.equal(teardownCleaningText({ ads_removed: 3, duplicates_removed: 0 }), '去掉了 3 行广告和网址。')
+  assert.equal(teardownCleaningText({ ads_removed: 4, duplicates_removed: 2 }), '去掉了 4 行广告和网址，重复的章 2 个。')
 })
 
 test('离焦保存排队、只存变化的字段；换编码等待最新手改，旧请求不能覆盖它', async () => {
@@ -90,7 +90,7 @@ test('上传和确认页只接 TXT、提供上传进度、编码失败保留预�
   assert.match(page, /reason\.status === 409.*\/desk\//)
   assert.match(page, /replace: true, state: \{ teardownHome: true \}/)
   assert.match(page, /navigate\(`\/desk\/\$\{bookId\}`, \{ state: \{ teardownHome: true \} \}\)/)
-  assert.match(page, /importTeardown\(bookId, fieldsRef\.current, include\)/)
+  assert.match(page, /importTeardown\(bookId, fieldsRef\.current, include, start \? \{ upto \} : undefined\)/)
   assert.match(page, /if \(operating\.current \|\| !preview\) return/)
 })
 

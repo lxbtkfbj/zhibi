@@ -67,7 +67,7 @@ export const JOB_STATUS: Record<string, string> = {
   cancelled: '已停止',
 }
 
-export const ROLE_KEYS = ['default', 'chief', 'lorekeeper', 'writer', 'reviewer', 'router'] as const
+export const ROLE_KEYS = ['default', 'chief', 'lorekeeper', 'writer', 'reviewer', 'teardown', 'router'] as const
 export const ROLE_KEY_LABEL: Record<(typeof ROLE_KEYS)[number], string> = {
   router: '群聊分流',
   default: '默认（未单独指定的角色都用它）',
@@ -75,4 +75,5 @@ export const ROLE_KEY_LABEL: Record<(typeof ROLE_KEYS)[number], string> = {
   lorekeeper: '设定师',
   writer: '写手',
   reviewer: '审稿',
+  teardown: '拆书',
 }

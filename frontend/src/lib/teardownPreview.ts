@@ -66,7 +66,7 @@ export function teardownNumberIssueText(issue: TeardownNumberIssue): string {
 }
 
 export function teardownCleaningText(preview: Pick<TeardownPreview, 'ads_removed' | 'duplicates_removed'>): string {
-  return `去掉了 ${preview.ads_removed} 行广告和网址${preview.duplicates_removed ? `，重复的章 ${preview.duplicates_removed} 个` : ''}。导入只是分章，不用模型、不花钱。`
+  return `去掉了 ${preview.ads_removed} 行广告和网址${preview.duplicates_removed ? `，重复的章 ${preview.duplicates_removed} 个` : ''}。`
 }
 
 /** 离焦保存逐次排队；换编码/导入先等待它，不能让旧 PATCH 晚于换编码覆盖手改。 */

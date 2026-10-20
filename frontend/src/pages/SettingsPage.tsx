@@ -29,6 +29,7 @@ const ROLE_HINTS: Partial<Record<RoleKey, string>> = {
   lorekeeper: '建设定、每章写完记下变化：便宜快的也够用',
   writer: '写正文：挑文笔好的',
   reviewer: '每章写完挑毛病：便宜快的也够用',
+  teardown: '拆书时读原文、归单元归卷都用它：一本书要调几百次，挑便宜快、格式稳的',
   router: '以前用来判断群聊里的话要做什么，现在编辑部自己判断，用不上了；选回「跟随默认」这一行就不再显示',
 }
 

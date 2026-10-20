@@ -59,11 +59,10 @@ def assert_new_columns(engine, before):
         assert connection.scalar(sa.text("SELECT segment IS NULL FROM story_nodes")) is True
 
 
-def test_segment_planning_upgrade_downgrade_reupgrade_preserves_legacy_rows():
+def test_segment_planning_upgrade_downgrade_reupgrade_preserves_legacy_rows(migration_database_urls):
     name = f"zhibi_segment_test_{uuid.uuid4().hex}"
     assert name.startswith("zhibi_segment_test_") and name.replace("_", "").isalnum()
-    admin_url = "postgresql://zhibi:zhibi@127.0.0.1:5433/postgres"
-    url = f"postgresql+psycopg://zhibi:zhibi@127.0.0.1:5433/{name}"
+    admin_url, url = migration_database_urls(name)
     config = Config("alembic.ini")
     config.set_main_option("sqlalchemy.url", url)
     with psycopg.connect(admin_url, autocommit=True) as admin:

@@ -3,7 +3,7 @@
 import { chapterNodes, findNode, splitTitle, type VChapterBody, type VGate, type VNode, type VWriting, type WritePlan, type WritingGates } from './model'
 
 /** 读一章：正文、审稿、设定师记下的变化 */
-export interface ChapterDetail { text: string; review?: VChapterBody['review']; changes?: string[] }
+export interface ChapterDetail { text: string; review?: VChapterBody['review']; changes?: string[]; teardown?: VChapterBody['teardown'] }
 
 /** 写作的这几个动作都要等后台：做完带回一句话（页面底下说一声），出错就报错 */
 export interface WritingControl {

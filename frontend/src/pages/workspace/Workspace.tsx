@@ -9,6 +9,7 @@ import { BookCover } from '../../components/BookCover'
 import { readEditorialDock, writeEditorialDock, type EditorialDock as Dock } from '../../lib/editorialDock'
 import { teardownWords } from '../../lib/teardownPreview'
 import { teardownImportedDate, teardownWorkspaceActions } from '../../lib/teardownWorkspace'
+import { TeardownProgress } from './TeardownProgress'
 import { readWorkspaceReadingPosition, writeWorkspaceReadingPosition, type WorkspaceReadingPosition } from '../../lib/workspaceReadingPosition'
 import { BookContext } from '../book/context'
 import {
@@ -1241,7 +1242,8 @@ function OutlinePage({ book, outline, id, nav, onAdd, onInsert, onMove, fresh, w
       )}
       <div className="mt-8 space-y-8 border-t border-line pt-8">
         {gate && writing && <GateCard gate={gate} writing={writing} nav={nav} />}
-        {teardown && node.kind === '章' && !node.sections?.some(field => field.text.trim()) && <p className="font-serif text-lg text-ink-3">还没拆出章纲</p>}
+        {teardown && node.kind === '章' && node.teardown?.failed && <p className="font-serif text-lg text-ink-3">这一章没读成，点上面的「再试一次」重读</p>}
+        {teardown && node.kind === '章' && !node.teardown?.failed && !node.sections?.some(field => field.text.trim()) && <p className="font-serif text-lg text-ink-3">还没拆出章纲</p>}
         {node.virtual ? <p className="font-serif text-lg leading-relaxed text-ink-2">这些章还没拆，拆的时候会归进单元。</p> : node.sections
           ? node.sections.map((field) => (
             <Section key={field.label} field={field} readOnly={!actions.canEdit(node, 'text')}
@@ -1349,7 +1351,7 @@ function TeardownBlurbPage({ book }: { book: VBook }) {
           <Editable value={book.title} placeholder="书名" className={titleClass}
             onSave={title => save(actions.saveBook({ title: title.trim() }))} />
           {info?.author && <p className="mt-3 text-[15px] text-ink-2">原书作者：{info.author}</p>}
-          <p className="mt-3 text-sm text-ink-3">{teardownWords(info?.chars ?? 0)} · {info?.chapters ?? 0} 章 · {info?.volumes && !info.open_volume_id ? `原书分了 ${info.volumes} 卷` : '原书没有分卷'}</p>
+          <p className="mt-3 text-sm text-ink-3">{teardownWords(info?.chars ?? 0)} · {info?.chapters ?? 0} 章 · {info?.original_volumes ? `原书分了 ${info.volumes} 卷` : '原书没有分卷'}</p>
           {date && <p className="mt-1 text-sm text-ink-3">{date} 导入</p>}
         </div>
       </div>
@@ -1359,8 +1361,7 @@ function TeardownBlurbPage({ book }: { book: VBook }) {
       </section>
       <section className="mt-8 border-t border-line pt-7">
         <h2 className="text-sm tracking-[0.15em] text-ink-3">拆书</h2>
-        <p className="mt-3 font-serif text-xl text-ink">还没开拆。</p>
-        <p className="mt-2 text-[14px] leading-relaxed text-ink-3">以后在这里开始拆：拆出每章章纲、单元和卷，再整理出人物和设定、这本书好在哪。</p>
+        <TeardownProgress book={book} embedded />
       </section>
       {!!info?.number_issue_total && <p className="mt-6 text-sm text-ink-3">原书章号对不上 {info.number_issue_total} 处</p>}
       {!!info?.excluded_count && <p className="mt-2 text-sm text-ink-3">{info.excluded_count} 章不像正文，没导入</p>}
@@ -2035,6 +2036,7 @@ export function Workspace({ book: base, actions: rawActions, right, sideFooter, 
           leftOffset={columnWidth} rightOffset={dock === 'side' ? sideWidth : 0} />
         {notice}
         {!teardown && writing && <WritingStrip writing={writing} nav={nav} />}
+        {teardown && <TeardownProgress book={book} />}
         <div className="flex min-h-0 flex-1">
           {tab === '简介' && <BookColumn book={book} outline={base.outline} onTab={setTab} manuscript={!!writing} />}
           {tab === '设定' && (

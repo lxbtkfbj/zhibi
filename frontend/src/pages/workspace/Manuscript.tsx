@@ -5,6 +5,9 @@ import { ChevronDown, ChevronLeft, ChevronRight, PenLine } from 'lucide-react'
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { searchBookText, type TextSearchResult } from '../../api/textSearch'
 import { readTeardownReading, readingArrow, readingChapterNumber, teardownDefaultVolume, textMatches, writeTeardownReading } from '../../lib/teardownReading'
+import { chapterSearchDisplay } from '../../lib/teardownProgress'
+import { teardownRecordSections } from '../../lib/teardownRecords'
+import { TeardownProgress } from './TeardownProgress'
 import { useSave, useWorkspace } from './actions'
 import { chapterNodes, cn, countWords, findEntry, findNode, splitTitle, type VBook, type VGate, type VNode, type WritePlan, type WritingGates } from './model'
 import { CardMenu, DirectoryShell, Editable, LinkChip, Sheet } from './widgets'
@@ -227,6 +230,8 @@ export function ManuscriptDirectory({ book, selected, onSelect, onSearchSelect, 
     return () => { clearTimeout(timer); controller.abort() }
   }, [actions.live, book.id, q, searchRun])
   const found = search?.query === q ? search : undefined
+  const titleHits = chapters.filter(chapter => chapter.title.includes(q))
+  const searchDisplay = chapterSearchDisplay(titleHits.length, found?.data?.chapters, !!actions.live)
   return (
     <div className="contents" onKeyDownCapture={(event) => {
       if (event.key === 'Enter' && !event.nativeEvent.isComposing && event.target instanceof HTMLInputElement) {
@@ -240,16 +245,12 @@ export function ManuscriptDirectory({ book, selected, onSelect, onSearchSelect, 
         <button type="button" onClick={onExport} className={clsx(smallButton, 'mt-4 w-full bg-card/70')}>导出全书 TXT</button>
       )}>
       {q ? (
-        <>{(() => {
-          const hits = chapters.filter((c) => c.title.includes(q))
-          return hits.length
-            ? hits.map((c) => <ChapterRow key={c.id} node={c} selected={selected === c.id} mark={markOf(c.id)} onSelect={() => onSelect(c.id)} />)
-            : <p className="px-2.5 py-2 text-[13px] text-ink-3">没找到「{q}」</p>
-        })()}
-          {actions.live && <section className="mt-4 border-t border-line pt-3" aria-label="原文搜索结果">
+        <>{titleHits.map((c) => <ChapterRow key={c.id} node={c} selected={selected === c.id} mark={markOf(c.id)} onSelect={() => onSelect(c.id)} />)}
+          {searchDisplay.empty && <p className="px-2.5 py-2 text-[13px] text-ink-3">没找到「{q}」</p>}
+          {searchDisplay.body && <section className={clsx(titleHits.length > 0 && 'mt-4 border-t border-line pt-3')} aria-label="原文搜索结果">
             {found?.error ? <p role="alert" className="px-2.5 py-2 text-[13px] text-seal-dark">{found.error}</p>
               : found?.data ? <>
-                <p className="px-2.5 py-2 text-[13px] leading-relaxed text-ink-3">{found.data.chapters ? `原文里有「${q}」的章（${found.data.chapters} 章）` : `${teardown ? '原文' : '正文'}里没有「${q}」`}</p>
+                <p className="px-2.5 py-2 text-[13px] leading-relaxed text-ink-3">原文里有「{q}」的章（{found.data.chapters} 章）</p>
                 {found.data.results.map(hit => {
                   const chapter = chapters.find(c => readingChapterNumber(c) === hit.index)
                   if (!chapter) return null
@@ -347,7 +348,11 @@ export function ManuscriptHome({ book, writing, nav }: { book: VBook; writing: W
     const first = chapters[0]
     return <Sheet narrow>
       <h1 className={titleClass}>正文</h1>
-      <p className="mt-4 text-[15px] text-ink-2">已导入 {book.teardown?.chapters ?? chapters.length} 章 · 还没开拆</p>
+      <p className="mt-4 text-[15px] text-ink-2">已导入 {book.teardown?.chapters ?? chapters.length} 章</p>
+      <section className="mt-8 border-t border-line pt-7">
+        <h2 className="text-sm tracking-[0.15em] text-ink-3">拆书</h2>
+        <TeardownProgress book={book} embedded />
+      </section>
       {first && <button type="button" className={clsx(primaryButton, 'mt-8 h-auto min-h-11 px-7 py-3 text-left text-base')} onClick={() => nav.openChapter((resume ?? first).id)}>
         {resume ? `接着读第 ${readingChapterNumber(resume)} 章《${splitTitle(resume.title)[1] || `第 ${readingChapterNumber(resume)} 章`}》` : '从第 1 章读起'}
       </button>}
@@ -484,7 +489,7 @@ function Fold({ title, count, defaultOpen = false, children }: { title: string; 
   const [open, setOpen] = useState(defaultOpen)
   return (
     <section>
-      <button type="button" onClick={() => setOpen(!open)} className="flex w-full items-center gap-2 py-2.5 text-left text-[13px] tracking-[0.15em] text-ink-3 hover:text-ink">
+      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="flex w-full items-center gap-2 py-2.5 text-left text-[13px] tracking-[0.15em] text-ink-3 hover:text-ink">
         {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
         {title}
         {count && <span className="tracking-normal">· {count}</span>}
@@ -586,6 +591,8 @@ export function ChapterPage({ book, id, writing, nav, searchWord, searchToken }:
     { label: '导出这一章 TXT', onClick: () => download(`${node.title.replace('　', ' ')}.txt`, `${node.title.replace('　', ' ')}\n\n${text}\n`) },
   ] : []
   const cast = node.uses.map((entryId) => findEntry(book, entryId)).filter((e) => !!e)
+  const teardownData = loaded?.teardown ?? body?.teardown
+  const recordSections = teardownRecordSections(teardownData)
 
   return (
     <div className="mx-auto w-full px-8 py-10 2xl:py-14">
@@ -644,6 +651,21 @@ export function ChapterPage({ book, id, writing, nav, searchWord, searchToken }:
           </div>
         )}
       </div>
+
+      {teardown && teardownData?.read_version != null && teardownData.read && (
+        <div className="mt-10 border-t border-line pt-3">
+          <Fold key={`teardown-records-${id}`} title="这一章记下的">
+            <div className="space-y-5">
+              {recordSections.map(section => <section key={section.title}>
+                <h3 className="mb-2 text-[13px] tracking-[0.15em] text-ink-3">{section.title}</h3>
+                <ul className="space-y-1.5 text-[14px] leading-relaxed text-ink-2">
+                  {section.lines.map((line, index) => <li key={index}>{line.name}{line.aliases && <span className="ml-2 text-xs text-ink-3">也叫 {line.aliases}</span>}{line.text}</li>)}
+                </ul>
+              </section>)}
+            </div>
+          </Fold>
+        </div>
+      )}
 
       {!teardown && (!!changes?.length || !!review?.good.length || !!review?.issues.length || cast.length > 0) && (
       <div className="mt-10 border-t border-line pt-3">

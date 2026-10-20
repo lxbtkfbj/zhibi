@@ -5,10 +5,12 @@ import { type DragEvent, type ReactNode, useEffect, useRef, useState } from 'rea
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ApiError, del, patch } from '../api/client'
 import { keys } from '../api/hooks'
-import { changeTeardownEncoding, getTeardownPreview, importTeardown, type TeardownEncoding, uploadTeardown } from '../api/teardown'
+import { changeTeardownEncoding, getTeardownPreview, importTeardown, type TeardownEncoding, uploadTeardown, useTeardownModel } from '../api/teardown'
 import { BookCover } from '../components/BookCover'
+import { TeardownOptions } from '../components/TeardownStart'
 import { Button, ErrorText, Spinner, inputClass } from '../components/ui'
-import { createTeardownFieldSaver, teardownCleaningText, teardownNumberIssueText, teardownSplitText, type TeardownFields, type TeardownPreview } from '../lib/teardownPreview'
+import { createTeardownFieldSaver, teardownCleaningText, teardownNumberIssueText, teardownPreviewTotals, teardownSplitText, type TeardownFields, type TeardownPreview } from '../lib/teardownPreview'
+import { parseTeardownUpto } from '../lib/teardownStart'
 
 const ENCODINGS: readonly (readonly [TeardownEncoding, string])[] = [['auto', '自动'], ['utf-8', 'UTF-8'], ['gb18030', 'GB18030'], ['utf-16', 'UTF-16'], ['big5', 'BIG5']]
 
@@ -114,7 +116,7 @@ function TeardownConfirmBook({ bookId }: { bookId: string }) {
   const fieldsRef = useRef(fields)
   const saver = useRef<ReturnType<typeof createTeardownFieldSaver> | null>(null)
   const operating = useRef(false)
-  const [busy, setBusy] = useState<'encoding' | 'import' | 'delete' | null>(null)
+  const [busy, setBusy] = useState<'encoding' | 'import' | 'start' | 'delete' | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<unknown>(null)
   const [encodingError, setEncodingError] = useState<unknown>(null)
@@ -123,6 +125,10 @@ function TeardownConfirmBook({ bookId }: { bookId: string }) {
   const [include, setInclude] = useState<number[]>([])
   const [expandedVolumes, setExpandedVolumes] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [uptoInput, setUptoInput] = useState('')
+  const model = useTeardownModel()
+  const total = preview ? teardownPreviewTotals(preview, include).chapters : 0
+  const upto = parseTeardownUpto(uptoInput, total)
 
   useEffect(() => {
     let active = true
@@ -190,17 +196,17 @@ function TeardownConfirmBook({ bookId }: { bookId: string }) {
     finally { operating.current = false; setBusy(null) }
   }
 
-  const importBook = async () => {
-    if (operating.current || !preview) return
+  const importBook = async (start: boolean) => {
+    if (operating.current || !preview || upto === undefined || (start && !model.ready)) return
     operating.current = true
-    setBusy('import')
+    setBusy(start ? 'start' : 'import')
     setError(null)
     setConfirmDelete(false)
     let fieldsSaved = false
     try {
       await saveFields()
       fieldsSaved = true
-      const result = await importTeardown(bookId, fieldsRef.current, include)
+      const result = await importTeardown(bookId, fieldsRef.current, include, start ? { upto } : undefined)
       queryClient.setQueryData(keys.book(bookId), result)
       void queryClient.invalidateQueries({ queryKey: keys.books })
       navigate(`/desk/${bookId}`, { state: { teardownHome: true } })
@@ -230,7 +236,7 @@ function TeardownConfirmBook({ bookId }: { bookId: string }) {
       {loading && <div className="flex items-center justify-center gap-2 py-24 text-sm text-ink-3"><Spinner />正在分章……</div>}
       {!loading && !preview && <ErrorText error={error} />}
       {preview && (
-        <form onSubmit={event => { event.preventDefault(); void importBook() }} className="space-y-7">
+        <form onSubmit={event => { event.preventDefault(); void importBook(true) }} className="space-y-7">
           <div>
             <label htmlFor="teardown-title" className="text-[13px] tracking-[0.3em] text-ink-3">书名</label>
             <input id="teardown-title" value={fields.title} maxLength={200} disabled={busy !== null} onChange={event => updateField('title', event.target.value)} onBlur={() => { void saveFields().catch(() => {}) }} className="mt-3 w-full border-b border-line bg-transparent pb-3 font-serif text-3xl leading-tight font-bold focus:border-ink-3 focus:outline-none" />
@@ -291,9 +297,11 @@ function TeardownConfirmBook({ bookId }: { bookId: string }) {
           )}
 
           <p className="text-xs leading-relaxed text-ink-3">{teardownCleaningText(preview)}</p>
+          <TeardownOptions total={total} value={uptoInput} onChange={setUptoInput} disabled={busy !== null} />
           <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line pt-5">
             <Button type="button" variant="ghost" size="lg" disabled={busy !== null} loading={busy === 'delete'} onClick={() => { void cancel() }}>{confirmDelete ? '确定不导入？再点一次' : '不导入了'}</Button>
-            <Button type="submit" variant="primary" size="lg" disabled={busy !== null} loading={busy === 'import'}>{busy === 'import' ? '正在导入……' : '导入'}</Button>
+            <Button type="button" variant="outline" size="lg" disabled={busy !== null || upto === undefined} loading={busy === 'import'} onClick={() => { void importBook(false) }}>先只导入，不拆</Button>
+            <Button type="submit" variant="primary" size="lg" disabled={busy !== null || upto === undefined || !model.ready} loading={busy === 'start'}>开始拆</Button>
           </div>
           <div role="alert"><ErrorText error={error} /></div>
         </form>

@@ -113,6 +113,7 @@ export interface NextSegmentSplit {
  * segment_review 下一段确认；volume_review 某一卷的卷纲拍板；trial_read 前几章试读；chapter_stuck 某章重写两次仍未通过。
  */
 export type Pending =
+  | { kind?: never; teardown: TeardownProgressData }
   | { kind: 'setup_prefill'; flow: 3 }
   | { kind: 'setup_questions'; flow?: number; questions: InterviewQuestion[] }
   | { kind: 'setup_review'; flow?: number; round: number; title?: string }
@@ -287,6 +288,45 @@ export interface TeardownSummary {
   excluded_count: number
   open_volume_id: string | null
   imported_at: string | null
+  original_volumes?: boolean
+  upto?: number | null
+  stop_reason?: 'author' | 'upto' | 'model' | 'error' | null
+  stop_note?: string | null
+}
+
+export interface TeardownProgressData {
+  doing: 'queued' | 'read' | 'units' | 'volumes' | 'closing'
+  reading?: [number, number] | number[] | null
+  range?: [number, number] | number[]
+  read: number
+  target: number
+  total: number
+  units_upto: number
+  parallel: number
+  eta_seconds: number | null
+  failed: number[]
+}
+
+/** 目录只带标记；整本书的原始拆书记录不进目录。 */
+export interface TeardownChapterFlags { read: boolean; failed: boolean }
+
+export interface TeardownRead {
+  feel?: string
+  people?: { name: string; shown: string; also_called?: string[]; was?: string; change?: string }[]
+  things?: { kind: string; name: string; note: string; belongs?: string; secret?: '' | '埋下' | '揭开' }[]
+  moments?: { who: string; what: string; shows: string }[]
+  waits?: { action: string; what: string }[]
+  tropes?: string[]
+}
+
+export interface TeardownChapterData {
+  read?: TeardownRead
+  read_version?: number | null
+  read_at?: string
+  read_failed?: { at?: string; error?: string }
+  raw_title?: string
+  number?: number | null
+  flags?: string[]
 }
 
 export interface BookSummary {
@@ -426,6 +466,7 @@ export interface ChapterBrief {
   summary: string
   attempts: number
   outline: ChapterOutline | null
+  teardown?: TeardownChapterFlags | null
 }
 
 export interface ReviewIssue {
@@ -442,7 +483,8 @@ export interface ChapterMaterials {
   notes?: string[]
 }
 
-export interface Chapter extends ChapterBrief {
+export interface Chapter extends Omit<ChapterBrief, 'teardown'> {
+  teardown?: TeardownChapterData | null
   content: string
   materials: ChapterMaterials
   review: {
@@ -598,7 +640,7 @@ export interface LlmProfileInput {
   reasoning_effort: string
 }
 
-export type RoleKey = 'default' | 'chief' | 'lorekeeper' | 'writer' | 'reviewer' | 'router'
+export type RoleKey = 'default' | 'chief' | 'lorekeeper' | 'writer' | 'reviewer' | 'teardown' | 'router'
 export type RoleAssignments = Record<RoleKey, string | null>
 
 export interface Health {

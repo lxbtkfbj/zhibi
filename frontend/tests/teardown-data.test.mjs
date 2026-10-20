@@ -81,3 +81,14 @@ test('作者自己的书与没有来源的旧快照仍沿用原来的书名和�
     assert.deepEqual(mapped.children[0].sections, [{ label: '这一章写了什么', text: '这一章写了什么' }])
   }
 })
+
+test('拆书目录状态随章节点传递；自己的书没有拆书字段，目录不冒充单章全文记录', () => {
+  const input = parts()
+  input.chapters[0].teardown = { read: true, failed: false }
+  const mapped = bookFromApi(input).outline.children[0].children[0].children[0]
+  assert.deepEqual(mapped.teardown, { read: true, failed: false })
+  assert.equal(mapped.body.teardown, undefined)
+  input.book.source = 'new'
+  const own = bookFromApi(input).outline.children[0].children[0].children[0]
+  assert.equal(Object.hasOwn(own, 'teardown'), false)
+})

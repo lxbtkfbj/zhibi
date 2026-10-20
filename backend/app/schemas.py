@@ -437,9 +437,11 @@ class ChapterBrief(ORM):
     summary: str
     attempts: int
     outline: dict | None = None
+    teardown: dict[str, bool] | None = None
 
 
 class ChapterOut(ChapterBrief):
+    teardown: dict | None = Field(default=None, exclude_if=lambda value: value is None)
     content: str
     review: dict
     materials: dict = {}

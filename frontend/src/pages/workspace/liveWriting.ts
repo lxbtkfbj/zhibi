@@ -137,7 +137,7 @@ export function useLiveWriting({ bookId, detail, parts, messages, draft }: {
     const chapter = await get<Chapter & { changes?: string[] }>(`/books/${bookId}/chapters/${node.ref.id}`)
     const review = chapter.review?.review
     const issues = [...(review?.issues ?? []), ...(chapter.review?.consistency?.issues ?? [])].map((i) => i.problem)
-    return { text: chapter.content, changes: chapter.changes ?? [], review: review || issues.length ? { good: review?.highlights ?? [], issues } : undefined }
+    return { text: chapter.content, changes: chapter.changes ?? [], teardown: chapter.teardown, review: review || issues.length ? { good: review?.highlights ?? [], issues } : undefined }
   }, [bookId])
 
   // 写着的时候，每写完一章、换到下一步，目录和字数跟着刷新

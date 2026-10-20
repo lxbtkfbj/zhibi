@@ -527,17 +527,26 @@ async def list_chapters(
     """全书章节目录；指定 volume 时只列这一卷，并带上章纲；with_outline 时全书都带章纲（新书页用）。"""
     stmt = (
         select(Chapter)
-        .options(defer(Chapter.content, raiseload=True))
+        .options(defer(Chapter.content, raiseload=True), defer(Chapter.teardown, raiseload=True))
         .where(Chapter.book_id == book.id)
         .order_by(Chapter.index)
     )
+    if book.source == "teardown":
+        stmt = stmt.add_columns(
+            Chapter.teardown["read_version"].astext.is_not(None), Chapter.teardown.has_key("read_failed")
+        )
     if volume is not None:
         stmt = stmt.join(Volume, Chapter.volume_id == Volume.id).where(Volume.index == volume)
-    rows = (await session.execute(stmt)).scalars().all()
+    rows = (await session.execute(stmt)).all()
     out = []
-    for c in rows:
-        brief = ChapterBrief.model_validate(c)
+    for row in rows:
+        c = row[0]
+        brief = ChapterBrief.model_validate(
+            {name: getattr(c, name) for name in ChapterBrief.model_fields if name != "teardown"}
+        )
         brief.outline = c.outline if volume is not None or with_outline else None
+        if book.source == "teardown":
+            brief.teardown = {"read": row[1], "failed": row[2]}
         out.append(brief)
     return out
 
@@ -553,7 +562,10 @@ async def _chapter(session: AsyncSession, book_id: uuid.UUID, index: int) -> Cha
 
 @router.get("/books/{book_id}/chapters/{index}", response_model=ChapterOut)
 async def get_chapter(index: int, book: Book = Depends(get_book), session: AsyncSession = SessionDep) -> ChapterOut:
-    return ChapterOut.model_validate(await _chapter(session, book.id, index))
+    out = ChapterOut.model_validate(await _chapter(session, book.id, index))
+    if book.source != "teardown":
+        out.teardown = None
+    return out
 
 
 @router.patch("/books/{book_id}/chapters/{index}", response_model=ChapterOut)
@@ -581,7 +593,10 @@ async def update_chapter(
         chapter.word_count = len("".join(body.content.split()))
     await session.commit()
     await session.refresh(chapter)
-    return ChapterOut.model_validate(chapter)
+    out = ChapterOut.model_validate(chapter)
+    if book.source != "teardown":
+        out.teardown = None
+    return out
 
 
 @router.post("/books/{book_id}/chapters/{index}/rewrite", response_model=JobOut, status_code=201)

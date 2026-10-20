@@ -1,6 +1,6 @@
 /** 书工作台的数据形状：书架上的真书、示例书、空书、旧书快照，都先转成这个样子再画。 */
 
-import type { BookSummary, TeardownSummary } from '../../api/types'
+import type { BookSummary, TeardownChapterData, TeardownChapterFlags, TeardownSummary } from '../../api/types'
 
 export interface VField {
   /** 原来的栏目名：作者改了名，程序还按它认（比如身世后面挂「另有秘密」） */
@@ -76,6 +76,8 @@ export interface VChapterBody {
   changes?: string[]
   /** 审稿：说好的、还可以更好的 */
   review?: { good: string[]; issues: string[] }
+  /** 拆的书单章详情返回的完整原始记录。 */
+  teardown?: TeardownChapterData | null
 }
 
 export interface VNode {
@@ -85,6 +87,8 @@ export interface VNode {
   text: string
   /** 章才有：正文 */
   body?: VChapterBody
+  /** 目录只带两个布尔状态，不加载全书逐章记录。 */
+  teardown?: TeardownChapterFlags | null
   /** 章纲：发生什么、看点、结尾钩子 */
   sections?: VField[]
   chapters?: number

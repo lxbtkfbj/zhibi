@@ -1,10 +1,11 @@
 /** 真书：读出来转成工作台的样子，改了就存回服务器。 */
 
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useRef } from 'react'
 import { del, get, patch, post, put } from '../../api/client'
 import type { LibraryItem, LibrarySnapshot } from '../../api/library'
 import type { ChapterBrief } from '../../api/types'
+import { keys } from '../../api/hooks'
 import type { OutlineTree } from '../../lib/outlineTree'
 import type { NodeChange, RewriteOutcome, SplitResult, WorkspaceActions } from './actions'
 import { type ApiParts, CHARACTER_COLUMNS, ENTRY_CATEGORY, WORLD_OVERVIEW, bookFromApi, contentKey } from './fromApi'
@@ -32,9 +33,9 @@ export function flushAutoSave(bookId: string, leaving = false) {
   else void post(url, { auto: true }).catch(() => undefined)
 }
 
-async function loadParts(bookId: string): Promise<ApiParts> {
+async function loadParts(bookId: string, qc: QueryClient): Promise<ApiParts> {
   const [book, library, outline, bible, chapters] = await Promise.all([
-    get<ApiParts['book']>(`/books/${bookId}`),
+    qc.fetchQuery({ queryKey: keys.book(bookId), queryFn: () => get<ApiParts['book']>(`/books/${bookId}`), staleTime: 0 }),
     get<LibrarySnapshot>(`/books/${bookId}/library`),
     get<OutlineTree>(`/books/${bookId}/outline-tree`),
     get<{ relationships: ApiParts['relationships'] }>(`/books/${bookId}/bible`),
@@ -101,7 +102,7 @@ function fieldsOf(entry: VEntry): Record<string, string> {
 
 export function useLiveBook(bookId: string) {
   const qc = useQueryClient()
-  const query = useQuery({ queryKey: workspaceKey(bookId), queryFn: () => loadParts(bookId) })
+  const query = useQuery({ queryKey: workspaceKey(bookId), queryFn: () => loadParts(bookId, qc) })
   const book = useMemo(() => (query.data ? bookFromApi(query.data) : undefined), [query.data])
   const parts = useRef<ApiParts | undefined>(undefined)
   useEffect(() => { parts.current = query.data }, [query.data])
@@ -307,7 +308,7 @@ export function useLiveBook(bookId: string) {
         if (!node.ref) return false
         if (node.kind === '全书') return part === 'text'
         // 章纲只有还没开写的能改
-        if (node.kind === '章') return part === 'name' || node.progress === '已规划'
+        if (node.kind === '章') return parts.current?.book.source === 'teardown' || part === 'name' || node.progress === '已规划'
         return true
       },
       draft: (category, template, request) => post(`/books/${bookId}/drafts`, {

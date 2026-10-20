@@ -63,11 +63,10 @@ def test_library_category_configuration():
     assert category_style("custom:ligui", {"custom:ligui": "card"}) == "card"
 
 
-def test_settings_library_upgrade_downgrade_reupgrade():
+def test_settings_library_upgrade_downgrade_reupgrade(migration_database_urls):
     name = f"zhibi_library_test_{uuid.uuid4().hex}"
     assert name.startswith("zhibi_library_test_") and name.replace("_", "").isalnum()
-    admin_url = "postgresql://zhibi:zhibi@127.0.0.1:5433/postgres"
-    url = f"postgresql+psycopg://zhibi:zhibi@127.0.0.1:5433/{name}"
+    admin_url, url = migration_database_urls(name)
     config = Config("alembic.ini")
     config.set_main_option("sqlalchemy.url", url)
     with psycopg.connect(admin_url, autocommit=True) as admin:

@@ -28,18 +28,27 @@ async def _validate_start(session, book, upto):
         raise HTTPException(404, "这本书不是拆的书")
     chapters = (await session.execute(select(Chapter.index, Chapter.teardown).where(Chapter.book_id == book.id))).all()
     meta = book.teardown or {}
-    retry = meta.get("stage") == "done" and any(record.get("read_failed") for _, record in chapters)
-    if meta.get("stage") not in {"imported", "stopped"} and not retry:
+    retry_done = meta.get("stage") == "done" and any("read_failed" in (record or {}) for _, record in chapters)
+    if meta.get("stage") not in {"imported", "stopped"} and not retry_done:
         raise HTTPException(409, "这本书现在不能开始拆")
     if await active(session, book.id):
         raise HTTPException(409, "这本书正在拆，请先停下")
     total = len(chapters)
     if not total:
         raise HTTPException(422, "这本书还没有原文")
+    upto = upto if not retry_done and upto is not None and upto < total else None
+    target = upto or total
+    previous_target = min(meta.get("upto") or total, total)
+    retry_stopped = (
+        meta.get("stage") == "stopped"
+        and target == previous_target
+        and any(index <= target and "read_failed" in (record or {}) for index, record in chapters)
+    )
+    retry = retry_done or retry_stopped
     last = max((index for index, record in chapters if record.get("read_version") is not None), default=0)
-    if upto is not None and upto <= last and not retry:
+    if target <= last and not retry:
         raise HTTPException(422, f"已经拆到第 {last} 章了，要拆得更多才能接着拆")
-    return total, upto if not retry and upto is not None and upto < total else None
+    return total, upto, retry
 
 
 async def start(session, redis, book: Book, upto: int | None = None):
@@ -51,7 +60,7 @@ async def start(session, redis, book: Book, upto: int | None = None):
     # 存档会提交；重新持书锁并校验，不能让双击开始造出两个任务。
     await lock_book(session, book.id)
     await session.refresh(book, with_for_update=True)
-    total, upto = await _validate_start(session, book, upto)
+    total, upto, retry = await _validate_start(session, book, upto)
     before = dict(book.teardown or {})
     target = upto or total
     chapters = (
@@ -66,7 +75,12 @@ async def start(session, redis, book: Book, upto: int | None = None):
         book_id=book.id,
         kind="teardown",
         thread_id=f"teardown-{book.id}-{uuid.uuid4().hex[:8]}",
-        params={"upto": upto, "previous_stage": before["stage"], "previous_teardown": before},
+        params={
+            "upto": upto,
+            "previous_stage": before["stage"],
+            "previous_teardown": before,
+            "retry_failed_only": retry,
+        },
         pending={
             "teardown": {
                 "doing": "queued",
@@ -77,7 +91,7 @@ async def start(session, redis, book: Book, upto: int | None = None):
                 "units_upto": max((index for index, _, unit_id in chapters if unit_id), default=0),
                 "parallel": 4,
                 "eta_seconds": None,
-                "failed": sorted(index for index, meta, _ in chapters if meta.get("read_failed")),
+                "failed": sorted(index for index, meta, _ in chapters if "read_failed" in meta),
             }
         },
     )

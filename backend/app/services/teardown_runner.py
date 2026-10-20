@@ -114,6 +114,8 @@ class Runner:
         self.tried_units: set[tuple[int, int]] = set()
         self.tried_volumes: set[tuple[int, int]] = set()
         self.calls: list[dict] = []
+        self.retry_failed_only = False
+        self.retry_previous: dict | None = None
 
     async def initialize(self, book_id: uuid.UUID | None = None) -> None:
         async with self.sm() as session:
@@ -132,6 +134,10 @@ class Runner:
             self.total = max((c.index for c in chapters), default=0)
             self.target = min(int((book.teardown or {}).get("upto") or self.total), self.total)
             self.original = bool((book.teardown or {}).get("original_volumes"))
+            self.retry_failed_only = bool(job and (job.params or {}).get("retry_failed_only"))
+            previous = (job.params or {}).get("previous_teardown", {}) if job else {}
+            if self.retry_failed_only and previous.get("stage") == "stopped":
+                self.retry_previous = previous
             self.router.book_id = book_id
 
     async def snapshot(self):
@@ -160,7 +166,7 @@ class Runner:
         async with self.progress_lock:
             _, chapters, _, _ = await self.snapshot()
             read = sum(bool((c.teardown or {}).get("read_version")) for c in chapters if c.index <= self.target)
-            failed = [c.index for c in chapters if c.index <= self.target and (c.teardown or {}).get("read_failed")]
+            failed = [c.index for c in chapters if c.index <= self.target and "read_failed" in (c.teardown or {})]
             units_upto = max((c.index for c in chapters if c.unit_id), default=0)
             eta = None
             if self.batches_done >= 2 and self.history:
@@ -369,7 +375,7 @@ class Runner:
                 break
             data = chapter.teardown or {}
             valid = bool(data.get("read_version"))
-            if not valid and data.get("read_failed"):
+            if not valid and "read_failed" in data:
                 before = by_index.get(chapter.index - 1)
                 after = by_index.get(chapter.index + 1)
                 # 已经完成本轮重试的缺章，收尾时也要能列出并归入结构。
@@ -667,7 +673,10 @@ class Runner:
                 c
                 for c in chapters
                 if c.index <= self.target
-                and (not (c.teardown or {}).get("read_version") or (c.teardown or {}).get("read_failed"))
+                and (
+                    "read_failed" in (c.teardown or {})
+                    or (not self.retry_failed_only and (c.teardown or {}).get("read_version") is None)
+                )
             ]
             first_alone = not any((c.teardown or {}).get("read_version") for c in chapters)
             self.changed.set()
@@ -693,7 +702,7 @@ class Runner:
         if current_book is None:
             return
         read = [c.index for c in chapters if (c.teardown or {}).get("read_version")]
-        failed = [c.index for c in chapters if (c.teardown or {}).get("read_failed")]
+        failed = [c.index for c in chapters if "read_failed" in (c.teardown or {})]
         volume_count = sum(v.title not in ("还没收尾", "还没分卷", "") for v in volumes)
         author_stop = await self.cancelled()
         if author_stop:
@@ -705,7 +714,7 @@ class Runner:
         elif (
             any(
                 not c.unit_id
-                or (not (c.teardown or {}).get("read_version") and not (c.teardown or {}).get("read_failed"))
+                or ((c.teardown or {}).get("read_version") is None and "read_failed" not in (c.teardown or {}))
                 for c in chapters
             )
             or (current_book.teardown or {}).get("open_volume_id")
@@ -717,6 +726,9 @@ class Runner:
             )
         else:
             reason, note = None, ""
+        if reason is not None and self.retry_previous is not None and not author_stop:
+            reason = self.retry_previous.get("stop_reason") or reason
+            note = self.retry_previous.get("stop_note") or note
         stage = "done" if reason is None else "stopped"
         async with self.sm() as session:
             book = await session.get(Book, self.book_id)

@@ -2,13 +2,16 @@
  *  左边一栏最下面固定两行：「存档」和「本书设置」都是居中弹窗；右上角齿轮是系统设置。
  *  「待处理」是编辑部等你定的建议（第四步第二批）：在编辑部窗口里，顶上点了整个窗口换成待处理；收成小球时小球旁边说一声。 */
 
-import { useIsMutating } from '@tanstack/react-query'
+import { useIsMutating, useQueryClient } from '@tanstack/react-query'
 import { Settings } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
-import { useBook, useJobActions, useOutline } from '../../api/hooks'
+import { keys, useBook, useJobActions, useOutline } from '../../api/hooks'
+import { startTeardown, stopTeardown } from '../../api/teardown'
+import { TeardownStartDialog } from '../../components/TeardownStart'
+import { TeardownControlProvider } from './TeardownProgress'
 import { useLibrarySuggestions } from '../../api/library'
-import type { BookDetail, ChatViewing, Conversation, LiveDraft, MeetingMessage } from '../../api/types'
+import type { BookDetail, ChatViewing, Conversation, Job, LiveDraft, MeetingMessage } from '../../api/types'
 import { EmptyState } from '../../components/ui'
 import type { ChatQuote } from '../../lib/chat'
 import { useMeeting } from '../../lib/useMeeting'
@@ -112,6 +115,7 @@ function JobNotice({ book }: { book: BookDetail }) {
 }
 
 function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
+  const qc = useQueryClient()
   const teardown = detail.source === 'teardown'
   const { book, actions, loading, error, raw } = useLiveBook(bookId)
   const [openChat, setOpenChat] = useState(0)
@@ -126,6 +130,37 @@ function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
   const [inbox, setInbox] = useState<{ open: boolean; focus: string | null }>({ open: false, focus: null })
   // 本书设置：居中的弹窗，背景糊掉
   const [settings, setSettings] = useState(false)
+  const [startOpen, setStartOpen] = useState(false)
+  const [starting, setStarting] = useState(false)
+  const [stoppingId, setStoppingId] = useState<string | null>(null)
+  const [teardownError, setTeardownError] = useState<unknown>()
+  const teardownJob = detail.active_job?.kind === 'teardown' ? detail.active_job : null
+  const stopping = stoppingId === teardownJob?.id && ['queued', 'running'].includes(teardownJob?.status ?? '')
+  const start = async (upto: number | null) => {
+    if (starting) return
+    setStarting(true)
+    setTeardownError(undefined)
+    try {
+      const job = await startTeardown(bookId, upto)
+      const event = qc.getQueryData<Job>(['teardown-job-event', bookId])
+      const latest = event?.id === job.id ? event : job
+      const active = latest.status === 'queued' || latest.status === 'running'
+      setStoppingId(null)
+      qc.setQueryData<BookDetail>(keys.book(bookId), old => old ? {
+        ...old, active_job: latest, teardown: active ? { ...old.teardown!, stage: latest.status, upto } : old.teardown,
+      } : old)
+      void qc.invalidateQueries({ queryKey: keys.books })
+    } finally { setStarting(false) }
+  }
+  const stop = async () => {
+    if (!teardownJob || stopping) return
+    setStoppingId(teardownJob.id)
+    setTeardownError(undefined)
+    try {
+      // 不拿 HTTP 回包覆盖较新的 SSE：按钮一直锁到最终任务事件（或重连后的书状态）。
+      await stopTeardown(bookId)
+    } catch (error) { setStoppingId(null); throw error }
+  }
   const closeSettings = useCallback(() => setSettings(false), [])
   const closeSaves = useCallback(() => setSaves({ open: false, id: null }), [])
   const closeInbox = useCallback(() => setInbox({ open: false, focus: null }), [])
@@ -195,11 +230,14 @@ function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
   return (
     <BookContext.Provider value={context}>
       <PendingContext.Provider value={notes}>
-      <Workspace book={book} actions={actions} right={right} sideFooter={sideFooter} notice={!teardown ? <JobNotice book={detail} /> : undefined} openRef={openRef} viewingRef={viewingRef}
+      <TeardownControlProvider value={teardown ? { job: teardownJob, stopping, starting, start, stop, retry: () => start(detail.teardown?.upto ?? null), openStart: () => setStartOpen(true), error: teardownError } : null}>
+      <Workspace book={teardown ? { ...book, teardown: detail.teardown } : book} actions={actions} right={right} sideFooter={sideFooter} notice={!teardown ? <JobNotice book={detail} /> : undefined} openRef={openRef} viewingRef={viewingRef}
         chat={chat} chatTools={chatTools} chatBallNote={!teardown ? <PendingBallTag count={pendingCount} onClick={() => openInbox(null)} /> : undefined}
         chatBadge={unread} openChat={openChat} writing={writing} />
       <SavesPanel open={saves.open} saveId={saves.id} onClose={closeSaves} onOpenSave={(id) => setSaves({ open: true, id })} />
       {!teardown && <BookSettingsDialog open={settings} onClose={closeSettings} />}
+      {teardown && <TeardownStartDialog open={startOpen} title={book.title} total={raw?.chapters.length ?? detail.teardown?.chapters ?? 0} initialUpto={detail.teardown?.upto ?? null} onClose={() => setStartOpen(false)} onStart={start} />}
+      </TeardownControlProvider>
       </PendingContext.Provider>
     </BookContext.Provider>
   )
