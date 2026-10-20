@@ -1,7 +1,7 @@
 import clsx from 'clsx'
 import { ChevronDown, ChevronUp, Inbox, Minus, PanelRight, PictureInPicture2 } from 'lucide-react'
 import { type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import type { ChatViewing } from '../../api/types'
 import { readEditorialDock, writeEditorialDock, type EditorialDock as Dock } from '../../lib/editorialDock'
 import { teardownWorkspaceActions } from '../../lib/teardownWorkspace'
@@ -9,7 +9,7 @@ import { DeskTop, DeskDirectory } from './desk-v2/Chrome'
 import { DeskIntro, DeskSettings } from './desk-v2/SettingsPages'
 import { DeskOutline } from './desk-v2/OutlinePages'
 import { DeskManuscript } from './desk-v2/ManuscriptPages'
-import { readWorkspaceReadingPosition, writeWorkspaceReadingPosition, type WorkspaceReadingPosition } from '../../lib/workspaceReadingPosition'
+import { clearTeardownEntry, readWorkspaceReadingPosition, teardownEntryTab, writeWorkspaceReadingPosition, type WorkspaceReadingPosition } from '../../lib/workspaceReadingPosition'
 import { BookContext } from '../book/context'
 import { ActionsContext, type DraftItem, type EntryChange, type RewriteMode, type RewriteOutcome, type WorkspaceActions, blankEntry, childKind, draftToEntry, useSave, useWorkspace, withFields } from './actions'
 import { applyTemplate, cn, emptyCategory, findEntry, findNode, splitTitle, templateOf, type CardTemplate, type FieldItem, type VBook, type VCategory, type VEntry, type VNode } from './model'
@@ -760,7 +760,8 @@ export function Workspace({ book: base, actions: rawActions, right, sideFooter, 
   const teardown = base.source === 'teardown'
   const actions = useMemo(() => teardownWorkspaceActions(base.source, rawActions), [base.source, rawActions])
   const location = useLocation()
-  const openTeardownHome = teardown && location.state?.teardownHome === true
+  const navigate = useNavigate()
+  const entryTab = teardownEntryTab(base.source, location.state)
   // 新增了还没起名字的条目：只在这一页，起了名字才存
   const [drafts, setDrafts] = useState<VEntry[]>([])
   const draftsRef = useRef(drafts)
@@ -786,7 +787,7 @@ export function Workspace({ book: base, actions: rawActions, right, sideFooter, 
     chapter: start?.chapter && findNode(base.outline, start.chapter) ? start.chapter : 'home',
     open: ['book', ...(findNode(base.outline, firstNode) ?? []).map(item => item.id)],
   }), [base, firstNode, start, writing, teardown])
-  const [initialPosition] = useState(() => readWorkspaceReadingPosition(base, defaultPosition, { live: actions.live, manuscript: !!writing, explicitStart: !!start || openTeardownHome }))
+  const [initialPosition] = useState(() => readWorkspaceReadingPosition(base, entryTab && !start ? { ...defaultPosition, tab: entryTab } : defaultPosition, { live: actions.live, manuscript: !!writing, explicitStart: !!start || entryTab !== undefined }))
   const [tab, setTab] = useState<Tab>(initialPosition.tab)
   const [entry, setEntry] = useState(initialPosition.entry)
   const [fresh, setFresh] = useState('')
@@ -810,6 +811,12 @@ export function Workspace({ book: base, actions: rawActions, right, sideFooter, 
   useEffect(() => {
     writeWorkspaceReadingPosition(base, { tab, entry, node, chapter, open }, defaultPosition, { live: actions.live, manuscript: !!writing })
   }, [actions.live, base, chapter, defaultPosition, entry, node, open, tab, writing])
+
+  useEffect(() => {
+    if (entryTab === undefined) return
+    // 消费入口标记，不多加一条历史；之后刷新、返回按当前页签和章节恢复。
+    void navigate({ pathname: location.pathname, search: location.search, hash: location.hash }, { replace: true, state: clearTeardownEntry(location.state) })
+  }, [entryTab, location.hash, location.pathname, location.search, location.state, navigate])
 
   useEffect(() => { writeEditorialDock(dock, actions.live) }, [dock, actions.live])
 

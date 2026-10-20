@@ -15,6 +15,23 @@ const memory = new Map<string, unknown>()
 const key = (bookId: string) => `zhibi:workspace-reading:${bookId}`
 const tabs: WorkspaceReadingPosition['tab'][] = ['简介', '设定', '大纲', '正文']
 
+/** 书架进简介、导入后进正文首页；仅覆盖这次进入，不改变阅读记忆。 */
+export function teardownEntryTab(source: unknown, state: unknown): WorkspaceReadingPosition['tab'] | undefined {
+  if (source !== 'teardown' || !state || typeof state !== 'object' || Array.isArray(state)) return undefined
+  const entry = state as Record<string, unknown>
+  if (entry.teardownIntro === true) return '简介'
+  if (entry.teardownHome === true) return '正文'
+  return undefined
+}
+
+export function clearTeardownEntry(state: unknown): Record<string, unknown> | null {
+  if (!state || typeof state !== 'object' || Array.isArray(state)) return null
+  const next = { ...state } as Record<string, unknown>
+  delete next.teardownIntro
+  delete next.teardownHome
+  return Object.keys(next).length ? next : null
+}
+
 export function resolveWorkspaceReadingPosition(book: ReadingBook, value: unknown, fallback: WorkspaceReadingPosition, manuscript: boolean): WorkspaceReadingPosition {
   const saved = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
   const nodes = new Set<string>(), chapters = new Set<string>()

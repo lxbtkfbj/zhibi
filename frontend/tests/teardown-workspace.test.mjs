@@ -58,5 +58,5 @@ test('工作台只读外壳明确隐藏写作、待处理、本书设置；保�
   assert.match(desk, /<SavesRow/)
   assert.match(desk, /aria-label="系统设置"/)
   assert.match(desk, /<ChatConvs/)
-  assert.match(workspace, /explicitStart: !!start \|\| openTeardownHome/)
+  assert.match(workspace, /explicitStart: !!start \|\| entryTab !== undefined/)
 })

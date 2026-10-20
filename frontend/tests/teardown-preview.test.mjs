@@ -112,7 +112,7 @@ test('书房继续写作和自己的书架不混入拆书；拆书卡片用确�
   assert.match(home, /confirming \? `\/teardown\/\$\{book\.id\}` : `\/desk\/\$\{book\.id\}`/)
   assert.match(home, /已导入 \$\{book\.teardown\?\.chapters \?\? 0\} 章 · 还没开拆/)
   assert.match(home, /teardownBooks\.length > 0/)
-  assert.match(home, /state=\{teardown && !confirming \? \{ teardownHome: true \} : undefined\}/)
+  assert.match(home, /state=\{teardown && !confirming \? \{ teardownIntro: true \} : undefined\}/)
   assert.match(home, /aria-label="删除"/)
   assert.equal((home.match(/>拆一本书<\/Button>/g) ?? []).length, 2)
 })

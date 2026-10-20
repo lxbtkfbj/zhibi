@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { readWorkspaceReadingPosition, resolveWorkspaceReadingPosition, writeWorkspaceReadingPosition } from '../src/lib/workspaceReadingPosition.ts'
+import { clearTeardownEntry, readWorkspaceReadingPosition, resolveWorkspaceReadingPosition, teardownEntryTab, writeWorkspaceReadingPosition } from '../src/lib/workspaceReadingPosition.ts'
 
 const node = (id, kind, children = []) => ({ id, kind, children })
 const book = id => ({
@@ -11,6 +11,36 @@ const book = id => ({
 const fallback = { tab: '设定', entry: 'hero', node: 'unit', chapter: 'home', open: ['book', 'volume', 'unit'] }
 const live = { live: true, manuscript: true }
 const position = { tab: '正文', entry: 'town', node: 'c1', chapter: 'c2', open: ['book', 'volume'] }
+
+test('书架拆书入口进简介，导入入口仍进正文，不改作者书与普通返回', () => {
+  assert.equal(teardownEntryTab('teardown', { teardownIntro: true }), '简介')
+  assert.equal(teardownEntryTab('teardown', { teardownHome: true }), '正文')
+  assert.equal(teardownEntryTab('teardown', { teardownIntro: true, teardownHome: true }), '简介')
+  for (const source of ['new', 'imported', undefined]) assert.equal(teardownEntryTab(source, { teardownIntro: true }), undefined)
+  for (const state of [null, undefined, [], 'intro', {}, { teardownIntro: false }, { teardownIntro: 'true' }]) assert.equal(teardownEntryTab('teardown', state), undefined)
+})
+
+test('一次性入口消费只去掉两个入口标记，不改其他路由状态或原对象', () => {
+  const state = { teardownIntro: true, teardownHome: true, other: { keep: '不动其他状态' } }
+  assert.deepEqual(clearTeardownEntry(state), { other: state.other })
+  assert.equal(state.teardownIntro, true)
+  assert.equal(state.teardownHome, true)
+  assert.equal(teardownEntryTab('teardown', clearTeardownEntry(state)), undefined)
+  assert.equal(clearTeardownEntry({ teardownIntro: true }), null)
+  assert.equal(clearTeardownEntry({ teardownHome: true }), null)
+})
+
+test('简介入口只覆盖本次进入，之后阅读、刷新和提示词返回仍保留当前章节', () => {
+  const current = book('shelf-intro')
+  writeWorkspaceReadingPosition(current, position, fallback, live)
+  const state = { teardownIntro: true }
+  const intro = { ...fallback, tab: teardownEntryTab('teardown', state) }
+  assert.equal(readWorkspaceReadingPosition(current, intro, { ...live, explicitStart: true }).tab, '简介')
+  // 进入后消费标记；切到正文并阅读第二章后，普通返回/刷新不再强制进简介。
+  const consumed = clearTeardownEntry(state)
+  writeWorkspaceReadingPosition(current, position, fallback, live)
+  assert.deepEqual(readWorkspaceReadingPosition(current, fallback, { ...live, explicitStart: teardownEntryTab('teardown', consumed) !== undefined }), position)
+})
 
 test('reading positions return to the selected manuscript/entry/node and keep books separate', () => {
   writeWorkspaceReadingPosition(book('reading-one'), position, fallback, live)
