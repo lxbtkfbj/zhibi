@@ -5,10 +5,12 @@
 2. 第二批验证时用前 50 章试整理设定的结果（data/拆书试验/逆天邪神前五十章/整理设定/）：角色卡、各类设定、「这本书好在哪」。
    这些第三批做完以后由拆书自己出，现在先用验证的结果。
 
-在仓库根目录运行：python docs/界面原型/取样张数据.py
+在仓库根目录运行：python docs/界面原型/取样张数据.py [--api http://127.0.0.1:8000/api] [--book 书的 id]
 写出 docs/界面原型/装修样张-数据.js（window.DATA = {...}）。原书正文不取（只取模型写的章纲和记录）。
+验收时指向独立库的接口和那本书，样张和页面就用同一份数据。人名怎么数、主角怎么认，和新书页装修任务第 6 节的接口一个规矩。
 """
 
+import argparse
 import collections
 import glob
 import io
@@ -22,6 +24,16 @@ API = f"http://127.0.0.1:8000/api/books/{BOOK}"
 TRIAL = ROOT / "data/拆书试验/逆天邪神前五十章"
 
 
+def names_in(rec: dict) -> list[str]:
+    """一章里出场的人：照记录里写的名字，一章算一次。"""
+    out = []
+    for p in rec.get("people", []):
+        n = p["name"].strip()
+        if n and n not in out:
+            out.append(n)
+    return out
+
+
 def get(path: str):
     with urllib.request.urlopen(API + path, timeout=20) as r:
         return json.load(r)
@@ -32,6 +44,12 @@ def load(path: Path):
 
 
 def main() -> None:
+    global API
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--api", default="http://127.0.0.1:8000/api")
+    ap.add_argument("--book", default=BOOK)
+    args = ap.parse_args()
+    API = f"{args.api.rstrip('/')}/books/{args.book}"
     book = get("")
     tree = get("/outline-tree")
     chapters = get("/chapters?with_outline=true")
@@ -51,11 +69,11 @@ def main() -> None:
     def people_count(a: int, b: int):
         cnt, first = collections.Counter(), {}
         for i in range(a, b + 1):
-            for p in records.get(i, {}).get("people", []):
-                n = p["name"].strip()
+            for n in names_in(records.get(i, {})):
                 cnt[n] += 1
                 first.setdefault(n, i)
-        return [[n, c, first[n]] for n, c in cnt.most_common()]
+        # 出场章数多的在前，一样多的按第一次出场先后
+        return [[n, c, first[n]] for n, c in sorted(cnt.items(), key=lambda kv: (-kv[1], first[kv[0]]))]
 
     def things(a: int, b: int):
         seen, out = set(), []
@@ -70,8 +88,11 @@ def main() -> None:
     def waits(a: int, b: int):
         return [[i, w["action"], w["what"]] for i in range(a, b + 1) for w in records.get(i, {}).get("waits", [])]
 
-    hero_names = {"萧澈", "云澈"}
-    changes = [[i, p["change"]] for i in range(1, 102) for p in records[i].get("people", []) if p["name"].strip() in hero_names and p.get("change")]
+    # 主角：读过的各章里出场章数最多的人；他的变化：名字是他、别称里有他、或者 was 是他的那几条
+    hero = people_count(1, max(records))[0][0]
+    def is_hero(p):
+        return p["name"].strip() == hero or hero in [a.strip() for a in p.get("also_called", [])] or p.get("was", "").strip() == hero
+    changes = [[i, p["change"]] for i in sorted(records) for p in records[i].get("people", []) if is_hero(p) and p.get("change")]
 
     # 试整理设定的结果
     cards = load(TRIAL / "整理设定/cards.json")
@@ -83,18 +104,20 @@ def main() -> None:
     for f in sorted(glob.glob(str(TRIAL / "read/batch_*.json"))):
         for c in load(Path(f))["chapters"]:
             trial_read[c["index"]] = c
+    # 角色卡上的人在哪几章出场：拿卡上的名字和别称，去已拆的各章记录里找（名字、别称、was 对上一个就算）
     appear = {}
     for card in cards:
-        names = {card["name"], card["card"]["name"], *card["card"].get("aliases", [])}
-        appear[card["card"]["name"]] = sorted(i for i, c in trial_read.items() if any(p["name"].strip() in names or p.get("was", "").strip() in names for p in c.get("people", [])))
+        names = {card["card"]["name"], *card["card"].get("aliases", [])}
+        appear[card["card"]["name"]] = [i for i in sorted(records) if any(p["name"].strip() in names or p.get("was", "").strip() in names or names & {a.strip() for a in p.get("also_called", [])} for p in records[i].get("people", []))]
 
     data = {
         "book": {"title": book["title"], "teardown": book.get("teardown"), "volumes": [{"index": v["index"], "title": v["title"], "chapters": v["chapter_count"]} for v in volumes]},
         "units": units,
         "outline": {i: outline[i] for i in list(range(1, 23)) + [101, 102] if i in outline},
         "records": {i: records[i] for i in (2, 4)},
+        "last_read": max(i for i, r in records.items() if r),
         "unit1": {"people": people_count(1, 10), "things": things(1, 10), "waits": waits(1, 10)},
-        "vol1": {"people": people_count(1, 101)[:10], "changes": changes},
+        "vol1": {"people": people_count(1, 101)[:10], "changes": changes, "hero": hero},
         "trial": {"cards": [c["card"] | {"chapters": c["chapters"]} for c in cards], "world": world, "merits": merits, "appear": appear, "upto": max(trial_read)},
     }
     out = ROOT / "docs/界面原型/装修样张-数据.js"
