@@ -18,10 +18,11 @@ from pydantic import BaseModel, Field
 
 
 class Point(BaseModel):
-    title: str = Field(description="一句话结论，40 字以内")
-    how: str = Field(description="这本书具体怎么做的，250 字以内")
+    title: str = Field(description="「招式名：一句话说清这一招」，30 字以内，不写人名事件")
+    steps: list[str] = Field(description="怎么用，2-5 步，每步 25 字以内，能照着做的动作")
+    evidence: str = Field(description="这本书里的证据：用了几次＋两三个例子，80 字以内")
+    note: str = Field("", description="什么时候用、要注意什么，40 字以内，没有空着")
     chapters: list[int] = Field(description="证据章号，从小到大，3-8 个")
-    rule: str = Field(description="去掉这本书的人名设定、换到任何书都能照做的一句话，60 字以内")
 
 
 class Section(BaseModel):
@@ -45,6 +46,7 @@ class CastSection(BaseModel):
 
 
 class Overview(BaseModel):
+    genre: str = Field(description="一句话：这是一本什么书、读者追它主要图什么，40 字以内")
     engine: str = Field(description="一句话：这本书靠什么让人一直追下去，60 字以内")
     points: list[Point]
 
@@ -89,19 +91,18 @@ class UnitPlots(BaseModel):
 
 SECTIONS = {
     # 键：（标题，提示词，格式）
-    "shuang": ("爽点类型", "essence_shuang", Section),
-    "rhythm": ("节奏与钩子", "essence_rhythm", Section),
-    "hero": ("主角塑造", "essence_hero", Section),
-    "cast": ("人物与人设", "essence_cast", CastSection),
+    "source": ("情节怎么想", "essence_source", Section),
     "skeleton": ("剧情骨架", "essence_skeleton", Section),
-    "source": ("情节来源", "essence_source", Section),
     "link": ("剧情衔接", "essence_link", Section),
     "fresh": ("保持新鲜", "essence_fresh", Section),
     "longline": ("长线布局", "essence_longline", Section),
+    "setting": ("设定设计", "essence_setting", Section),
+    "shuang": ("爽点类型", "essence_shuang", Section),
+    "scene": ("爽点戏怎么写", "essence_scene", Section),
+    "hero": ("主角", "essence_hero", Section),
+    "cast": ("配角与对手", "essence_cast", CastSection),
+    "rhythm": ("节奏与钩子", "essence_rhythm", Section),
     "opening": ("开篇", "essence_opening", Section),
-    "setting": ("设定运用", "essence_setting", Section),
-    "scene": ("名场面写法", "essence_scene", Section),
-    "genre": ("类型要点", "essence_genre", Section),
 }
 
 # ---------- 读数据、数数 ----------
@@ -495,44 +496,68 @@ def materials(book: Book, key: str) -> str:
         out.append(f"第一次过瘾：第 {good} 章。" if good else "前面还没有过瘾的章。")
         out.append(f"主角：{book.hero}，第 {book.appear[book.hero][0]} 章出场。")
     elif key == "setting":
-        groups = defaultdict(list)
+        groups, first = defaultdict(list), {}
         for c in ch:
             for t in c.get("things", []):
-                groups[t["kind"]].append(f"第 {c['index']} 章「{t['name']}」{('（' + t['secret'] + '）') if t.get('secret') else ''}：{t['note'][:70]}")
-        for kind in ("金手指", "规矩", "等级", "物品功法", "势力", "地方", "秘密"):
+                first.setdefault((t["kind"], t["name"]), c["index"])
+                groups[t["kind"]].append(
+                    f"第 {c['index']} 章「{t['name']}」{('（' + t['secret'] + '）') if t.get('secret') else ''}"
+                    f"{('［属于' + t['belongs'] + '］') if t.get('belongs') else ''}：{t['note'][:70]}"
+                )
+        good = [c for c in ch if c["feel"] in ("爽", "大爽")]
+        link = []
+        for (kind, name), at in first.items():
+            if kind not in ("金手指", "等级", "规矩", "物品功法") or len(name) < 2:
+                continue
+            hit = [c for c in good if name in c["cool_point"] or name in c["summary"]]
+            if len(hit) >= 2:
+                tags = Counter(t for c in hit for t in (book.tags.get(c["index"], {}).get("tags") or [])[:2])
+                link.append((len(hit), f"{kind}「{name}」（第 {at} 章出现）：出现在 {len(hit)} 个过瘾的章里（第 {spans([c['index'] for c in hit])} 章），这些章的爽点：{'、'.join(f'{k}{v}' for k, v in tags.most_common(4))}"))
+        out += ["设定和爽点的对应（程序按设定名字在过瘾章的看点和摘要里数的）："]
+        out += [line for _, line in sorted(link, key=lambda x: -x[0])[:15]] or ["（没有数到）"]
+        out += ["", f"主角（{book.hero}）开局的处境（前三章）："] + [f"第 {c['index']} 章：{c['summary'][:150]}" for c in ch[:3]]
+        card = book.cards.get(book.hero)
+        if card:
+            out.append("主角卡上的身世：" + (card.get("background") or "（没有）"))
+        out += ["", f"主角的变化（实力、地位、在哪）："] + [f"第 {i} 章：{t}" for i, t in book.change[book.hero]]
+        out.append("")
+        for kind in ("金手指", "等级", "规矩", "物品功法", "势力", "地方", "秘密"):
             if groups[kind]:
-                out.append(f"【{kind}】")
+                out.append(f"【{kind}】一共 {len(groups[kind])} 条" + ("，下面列前 25 条" if len(groups[kind]) > 25 else ""))
                 out += groups[kind][:25]
-        out += ["", f"主角（{book.hero}）的变化："] + [f"第 {i} 章：{t}" for i, t in book.change[book.hero]]
-        out += ["", "过瘾的章的看点："] + [f"第 {c['index']} 章（{c['feel']}）{c['cool_point']}" for c in ch if c["feel"] in ("爽", "大爽")]
-    elif key == "scene":
-        score = sorted(ch, key=lambda c: (-(2 if c["feel"] == "大爽" else 1 if c["feel"] == "爽" else 0), -len(c.get("moments", [])), c["index"]))
-        picked = []
-        for c in score:
-            if all(abs(c["index"] - p) > 5 for p in picked):
-                picked.append(c["index"])
-            if len(picked) == 2:
-                break
-        texts = book.text_of(picked)
-        for i in sorted(picked):
-            c = book.by_index[i]
-            out.append(f"===== 第 {i} 章「{c['title']}」（{c['feel']}）=====")
-            out.append(f"看点：{c['cool_point']}；名场面：" + "；".join(f"{m['who']}{m['what']}" for m in c.get("moments", [])))
-            out.append("前面几章：" + "；".join(f"第 {j} 章 {book.by_index[j]['summary'][:90]}" for j in range(max(1, i - 3), i) if j in book.by_index))
-            out.append("【原文】\n" + texts[i])
-            out.append("")
-    elif key == "genre":
-        types = Counter(ctype(c["cool_point"]) for c in ch)
-        tropes = Counter(t for c in ch for t in c.get("tropes", []))
-        kinds = Counter(t["kind"] for c in ch for t in c.get("things", []))
+    return "\n".join(out)
+
+
+def top_tags(book: Book, n=3):
+    count = Counter(t for c in book.chapters if c["feel"] in ("爽", "大爽")
+                    for t in dict.fromkeys(book.tags.get(c["index"], {}).get("tags") or []))
+    return [t for t, _ in count.most_common(n)]
+
+
+def scene_material(book: Book, tag: str) -> str:
+    """这一类排在第一位的爽章里挑三章：大爽优先、名场面多的优先、彼此隔开。"""
+    pool = [c for c in book.chapters if c["feel"] in ("爽", "大爽")
+            and (book.tags.get(c["index"], {}).get("tags") or [""])[0] == tag]
+    pool += [c for c in book.chapters if c["feel"] in ("爽", "大爽") and c not in pool
+             and tag in (book.tags.get(c["index"], {}).get("tags") or [])]
+    score = sorted(pool, key=lambda c: (-(c["feel"] == "大爽"), -len(c.get("moments", [])), c["index"]))
+    picked = []
+    for c in score:
+        if all(abs(c["index"] - p) > 3 for p in picked):
+            picked.append(c["index"])
+        if len(picked) == 3:
+            break
+    texts = book.text_of(picked)
+    out = []
+    for i in sorted(picked):
+        c = book.by_index[i]
+        crowd = book.tags.get(i, {}).get("crowd")
         out += [
-            f"书的简介：{book.meta.get('intro') or '（没有）'}",
-            "看点种类（全部章）：" + "，".join(f"{k} {v}" for k, v in types.most_common(12)),
-            "桥段：" + "，".join(f"{k} {v}" for k, v in tropes.most_common(15)),
-            "新冒出来的东西按类：" + "，".join(f"{k} {v}" for k, v in kinds.most_common()),
-            "各单元：" + "；".join(f"第 {u['first']}–{u['last']} 章「{u['title']}」" for u in units),
-            f"第 1 章：{ch[0]['summary']}",
-            f"主角（{book.hero}）前十个变化：" + "；".join(f"第 {i} 章 {t}" for i, t in book.change[book.hero][:10]),
+            f"===== 第 {i} 章「{c['title']}」（{c['feel']}）=====",
+            f"看点：{c['cool_point']}" + (f"；旁观：{crowd}" if crowd else ""),
+            "前面两章：" + "；".join(f"第 {j} 章 {book.by_index[j]['summary'][:90]}" for j in range(max(1, i - 2), i) if j in book.by_index),
+            "【原文】\n" + texts[i],
+            "",
         ]
     return "\n".join(out)
 
@@ -617,20 +642,34 @@ async def run(slug: str, only: set[str] | None) -> None:
 
         async def section(key):
             name, prompt, schema = SECTIONS[key]
-            text = materials(book, key)
             (book.folder / "materials").mkdir(exist_ok=True)
+            if key == "scene":
+                parts = []
+
+                async def one(tag):
+                    text = scene_material(book, tag)
+                    (book.folder / "materials" / f"scene-{tag}.txt").write_text(text, encoding="utf-8")
+                    return await caller.call(schema, render(prompt, tag=tag, materials=text), f"{name}·{tag}", system=system, check=check_points(book))
+
+                parts = await asyncio.gather(*(one(tag) for tag in top_tags(book)))
+                result["sections"][key] = {"name": name, "points": [p.model_dump() for s in parts for p in s.points],
+                                           "missing": [m for s in parts for m in s.missing]}
+                save(result_path, result)
+                return
+            text = materials(book, key)
             (book.folder / "materials" / f"{key}.txt").write_text(text, encoding="utf-8")
             parsed = await caller.call(schema, render(prompt, materials=text), name, system=system, check=check_points(book))
             result["sections"][key] = {"name": name, **parsed.model_dump()}
             save(result_path, result)
 
         keys = [k for k in SECTIONS if not only or k in only]
+        result["sections"] = {k: v for k, v in result["sections"].items() if k in SECTIONS}
         await asyncio.gather(*(section(k) for k in keys))
         if not only or "overview" in only:
             lines = []
             for key, sec in result["sections"].items():
                 for p in sec["points"]:
-                    lines.append(f"【{sec['name']}】{p['title']}：{p['how'][:120]}（第 {spans(p['chapters'])} 章）")
+                    lines.append(f"【{sec['name']}】{p['title']}｜怎么用：{'；'.join(p['steps'])}｜证据：{p['evidence'][:80]}（第 {spans(p['chapters'])} 章）")
             parsed = await caller.call(Overview, render("essence_overview", materials="\n".join(lines)), "核心要点", system=system, check=check_points(book))
             result["overview"] = parsed.model_dump()
             save(result_path, result)
