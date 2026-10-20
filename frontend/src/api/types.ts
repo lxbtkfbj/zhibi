@@ -291,8 +291,10 @@ export interface TeardownSummary {
   imported_at: string | null
   original_volumes?: boolean
   upto?: number | null
-  stop_reason?: 'author' | 'upto' | 'model' | 'error' | null
+  stop_reason?: 'author' | 'upto' | 'model' | 'error' | 'added' | null
   stop_note?: string | null
+  added?: { at: string; file: string; first: number; last: number; chapters: number }[]
+  adding?: { file: string; chapters: number } | null
   settings?: { upto?: number }
   merits?: { points: { topic: string; text: string }[]; missing?: string[]; upto?: number }
 }

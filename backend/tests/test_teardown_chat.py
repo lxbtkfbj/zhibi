@@ -310,9 +310,10 @@ async def test_context_defers_whole_book_but_explicit_chapter_reads_work(session
 
 
 def test_prompt_bytes_catalog_and_program_text_match_task():
+    # 拆书补章节 §6：锁定作者已改好的提示词基线；实现不得再改提示词。
     assert (
         hashlib.sha256(default_content("chat_teardown").encode()).hexdigest()
-        == "86df934f16471a942aaf2d6270d65a72aeab678e3560dd0cdbf9f020411a4ce5"
+        == "7fcdcc10b0496f975fcd83a5362ee5e482dce6690f4696cd37b5a52bb140208c"
     )
     assert catalog.entry("chat_teardown")[-1] == "拆的书里群聊回答用"
     assert [item["name"] for item in catalog.variables("chat_teardown")] == [

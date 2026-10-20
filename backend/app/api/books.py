@@ -60,7 +60,7 @@ def summary(book: Book, job_status: str | None = None, preview: dict | None = No
 async def detail(session: AsyncSession, book: Book) -> BookDetail:
     out = BookDetail.model_validate(book)
     preview = None
-    if book.source == "teardown" and (book.teardown or {}).get("stage") == "confirming":
+    if book.source == "teardown":
         preview = await session.scalar(select(TeardownSource.preview).where(TeardownSource.book_id == book.id))
     out.logline = (book.concept or {}).get("logline", "")
     job = await jobs.active_job(session, book.id)
@@ -90,19 +90,20 @@ async def list_books(session: AsyncSession = SessionDep) -> list[BookSummary]:
         )
     ).all()
     status_by_book = {book_id: status for book_id, status in latest}
-    confirming = [b.id for b in rows if b.source == "teardown" and (b.teardown or {}).get("stage") == "confirming"]
+    teardown_ids = [b.id for b in rows if b.source == "teardown"]
     previews = (
         dict(
             (
                 await session.execute(
-                    select(TeardownSource.book_id, TeardownSource.preview).where(TeardownSource.book_id.in_(confirming))
+                    select(TeardownSource.book_id, TeardownSource.preview).where(
+                        TeardownSource.book_id.in_(teardown_ids)
+                    )
                 )
             ).all()
         )
-        if confirming
+        if teardown_ids
         else {}
     )
-    teardown_ids = [b.id for b in rows if b.source == "teardown"]
     read_by_book = (
         dict(
             (

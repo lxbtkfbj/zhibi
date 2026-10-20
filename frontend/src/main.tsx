@@ -13,7 +13,7 @@ import './styles/desk-v2.css'
 import './styles/desk-v2-dark.css'
 import { Home } from './pages/Home'
 import { NewBookPage } from './pages/NewBook'
-import { TeardownConfirmPage, TeardownUploadPage } from './pages/Teardown'
+import { TeardownAppendPage, TeardownConfirmPage, TeardownUploadPage } from './pages/Teardown'
 import { OldBookRedirect } from './pages/OldBookRedirect'
 import { AppearanceProvider } from './lib/appearance'
 import { SettingsHost } from './lib/settingsModal'
@@ -31,6 +31,7 @@ const router = createBrowserRouter([
       { path: '/new', element: <NewBookPage /> },
       { path: '/teardown/new', element: <TeardownUploadPage /> },
       { path: '/teardown/:bookId', element: <TeardownConfirmPage /> },
+      { path: '/teardown/:bookId/append', element: <TeardownAppendPage /> },
       { path: '/settings', element: <Navigate to="/" replace state={{ openSettings: true }} /> },
     ],
   },

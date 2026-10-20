@@ -44,21 +44,23 @@ function same(a, b) {
   return aa.length > 0 && aa.length === bb.length && a.replace(/-?\d*\.?\d+px/g, '#') === b.replace(/-?\d*\.?\d+px/g, '#') && aa.every((n, i) => Math.abs(parseFloat(n) - parseFloat(bb[i])) <= .5)
 }
 const computed = page => page.evaluate(props => {
-  const classes = [...new Set([...document.querySelectorAll('[class]')].flatMap(e => [...e.classList]))].filter(c => !['skel', 'placeholder-note'].includes(c))
+  // 补章节任务只豁免简介新增的这一个入口，不放宽其余页面样式门。
+  const elements = [...document.querySelectorAll('[class]')].filter(e => !e.matches('[data-testid="teardown-append-entry"]'))
+  const classes = [...new Set(elements.flatMap(e => [...e.classList]))].filter(c => !['skel', 'placeholder-note'].includes(c))
   const result = {}
-  for (const c of classes) { const e = document.getElementsByClassName(c)[0]; const s = getComputedStyle(e); result[c] = Object.fromEntries(props.map(p => [p, s.getPropertyValue(p)])) }
+  for (const c of classes) { const e = elements.find(e => e.classList.contains(c)); const s = getComputedStyle(e); result[c] = Object.fromEntries(props.map(p => [p, s.getPropertyValue(p)])) }
   return result
 }, props)
 const text = page => page.evaluate(() => {
   const paper = document.querySelector('.page').cloneNode(true)
-  paper.querySelectorAll('.skel,.placeholder-note,.reading-prose,.chapter-prose,[data-reading-body]').forEach(e => e.remove())
+  paper.querySelectorAll('.skel,.placeholder-note,.reading-prose,.chapter-prose,[data-reading-body],[data-testid="teardown-append-entry"]').forEach(e => e.remove())
   // clone must be attached for innerText's line breaks and hidden .rest nodes.
   paper.style.cssText += ';position:fixed;left:-20000px;top:0'
   document.querySelector('.page').parentElement.append(paper)
   const out = { page: paper.innerText, rail: document.querySelector('.rail')?.innerText ?? '' }
   paper.remove(); return out
 })
-const masks = page => page.evaluate(() => [...document.querySelectorAll('.toc-foot .muted,.ball,.skel,.placeholder-note,.reading-prose,.chapter-prose,[data-reading-body]')].map(e => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } }))
+const masks = page => page.evaluate(() => [...document.querySelectorAll('.toc-foot .muted,.ball,.skel,.placeholder-note,.reading-prose,.chapter-prose,[data-reading-body],[data-testid="teardown-append-entry"]')].map(e => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } }))
 function blank(png, rects) { for (const r of rects) for (let y = Math.max(0, Math.floor(r.y)); y < Math.min(png.height, Math.ceil(r.y + r.height)); y++) for (let x = Math.max(0, Math.floor(r.x)); x < Math.min(png.width, Math.ceil(r.x + r.width)); x++) { const i = (y * png.width + x) * 4; png.data[i] = png.data[i + 1] = png.data[i + 2] = 255; png.data[i + 3] = 255 } }
 try {
   for (const [width, height] of SIZES) {
@@ -75,12 +77,18 @@ try {
       }, { book: BOOK, position: positions[view] })
       await actual.goto(`${BASE}/desk/${BOOK}`, { waitUntil: 'domcontentloaded' })
       await actual.locator('.desk-v2 .page h1').waitFor()
+      // 新任务明确允许只遮新增入口。它会换行增高 statline，因此仅涂白
+      // 仍会把这个按钮造成的排版增量误算成旧页面回归；比较期间仅隐藏它，
+      // 不遮父容器、文字或任何其他控件。真实有按钮的截图由补章节验收保留。
+      const appendEntryCount = await actual.locator('[data-testid="teardown-append-entry"]').count()
+      if (appendEntryCount) await actual.addStyleTag({ content: '[data-testid="teardown-append-entry"] { display: none !important; }' })
       await Promise.all([sample.evaluate(() => document.fonts.ready), actual.evaluate(() => document.fonts.ready)])
       await actual.waitForTimeout(750)
       const [a, b, ta, tb, ma, mb] = await Promise.all([computed(sample), computed(actual), text(sample), text(actual), masks(sample), masks(actual)])
       const rows = []
       for (const [cls, values] of Object.entries(a)) for (const [property, expected] of Object.entries(values)) rows.push({ class: cls, property, expected, actual: b[cls]?.[property] ?? '(missing class)', same: b[cls] !== undefined && same(expected, b[cls][property]) })
       const proof = {
+        actualAppendEntries: appendEntryCount,
         samplePlaceholderParagraphs: await sample.locator('.skel .p').count(),
         actualProseCharacters: (await actual.locator('.chapter-prose').allTextContents()).join('').length,
         sampleFirstKidsChapters: await sample.locator('.kids').first().locator('.row').count().catch(() => 0),

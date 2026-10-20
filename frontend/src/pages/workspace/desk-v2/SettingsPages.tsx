@@ -4,6 +4,7 @@ import { Fragment, useMemo, useState, type CSSProperties, type ReactNode } from 
 import { get } from '../../../api/client'
 import { useBookMeta } from '../../../api/newBook'
 import { CategoryPicker, LengthInput, Row, TagPicker } from '../../../components/BookFields'
+import { teardownAddedText, teardownAppendEntryText } from '../../../lib/teardownAppend'
 import { useSave, useWorkspace, type CategoryStyle } from '../actions'
 import {
   chapterNodes, cn, findEntry, isLadder, nounOf, pinnedFirst, splitTitle, templateOf, valueOf,
@@ -94,9 +95,9 @@ export function DeskIntro({ book, nav }: { book: VBook; nav: DeskNav }) {
           <div className="kicker">{teardown ? '拆的书' : '我的书'}</div>
           <DeskEdit as="h1" value={book.title} placeholder="书名" onSave={title => { if (title.trim()) save(actions.saveBook({ title: title.trim() })) }} />
           {teardown ? <><div className="meta">原书作者 {data?.author} · {wan(data?.chars ?? 0)} · {data?.chapters ?? 0} 章 · {data?.original_volumes === false ? '原书没有分卷' : `原书分了 ${data?.volumes ?? 0} 卷`}</div>
-            <div className="meta" style={{ marginTop: 2 }}>{(data?.imported_at ?? '').slice(0, 10)} 导入{data?.number_issue_total ? ` · 原书章号对不上 ${data.number_issue_total} 处` : ''}</div></>
+            <div className="meta" style={{ marginTop: 2 }}>{(data?.imported_at ?? '').slice(0, 10)} 导入{teardownAddedText(data)}{data?.number_issue_total ? ` · 原书章号对不上 ${data.number_issue_total} 处` : ''}</div></>
             : <><div className="meta">{book.genre || '未分类'} · 计划 {book.length ?? 0} 万字 · 已写 {written} 章</div><div className="meta" style={{ marginTop: 2 }}>{(book.createdAt ?? '').slice(0, 10)} 开书</div></>}
-          <div className="statline">{teardown ? <><span className="chip seal">已拆 {last} / {data?.chapters ?? 0} 章</span><span className="chip ochre">{units.length} 个单元</span>{upto != null && <span className="chip jade">设定整理到第 {upto} 章</span>}</> : book.tags.map(tag => <span className="chip plain" key={tag}>{tag}</span>)}</div>
+          <div className="statline">{teardown ? <><span className="chip seal">已拆 {last} / {data?.chapters ?? 0} 章</span><span className="chip ochre">{units.length} 个单元</span>{upto != null && <span className="chip jade">设定整理到第 {upto} 章</span>}<a className="btn seal-line" data-testid="teardown-append-entry" href={`/teardown/${book.id}/append`}>{teardownAppendEntryText(data)}</a></> : book.tags.map(tag => <span className="chip plain" key={tag}>{tag}</span>)}</div>
           {!!units.length && <><div className="small" style={{ marginTop: 12 }}>{teardown ? '已拆部分的节奏（一格一个单元）' : '全书的节奏（一格一个单元）'}</div><Rhythm book={book} nav={nav} /></>}
         </div>
       </div>

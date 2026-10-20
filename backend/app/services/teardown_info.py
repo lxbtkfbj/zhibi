@@ -40,5 +40,9 @@ def teardown_summary(book, preview: dict | None = None, *, read: int = 0) -> Tea
             }
             if merits
             else None,
+            "added": data.get("added") or [],
+            "adding": {"file": preview["file"]["name"], "chapters": preview.get("chapter_count", 0)}
+            if not confirming and preview.get("mode") == "append"
+            else None,
         }
     )

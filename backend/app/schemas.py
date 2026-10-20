@@ -224,11 +224,13 @@ class TeardownSummary(BaseModel):
     imported_at: str | None = None
     original_volumes: bool = False
     upto: int | None = None
-    stop_reason: str | None = None
+    stop_reason: Literal["author", "upto", "model", "error", "added"] | None = None
     stop_note: str | None = None
     names: dict = Field(default_factory=dict)
     settings: dict | None = None
     merits: dict | None = None
+    added: list[dict] = Field(default_factory=list)
+    adding: dict | None = None
 
 
 class BookSummary(ORM):

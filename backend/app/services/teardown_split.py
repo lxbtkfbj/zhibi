@@ -142,7 +142,9 @@ def clean_lines(text: str) -> tuple[list[str], list[str], int]:
     return lines, raw_lines, ads
 
 
-def split(data: bytes, *, encoding: str | None = None, short: int = 500, fallback_size: int = 3000) -> dict:
+def split(
+    data: bytes, *, encoding: str | None = None, short: int = 500, fallback_size: int = 3000, append: bool = False
+) -> dict:
     text, actual_encoding = decode(data, encoding)
     lines, raw_lines, ads = clean_lines(text)
     marks = [heading(line) for line in lines]
@@ -183,7 +185,8 @@ def split(data: bytes, *, encoding: str | None = None, short: int = 500, fallbac
             volume_match = VOL.match(original_volume)
             volume_number = (volume_match.group("num") or volume_match.group("num2")) if volume_match else None
             if (
-                not volumes
+                not append
+                and not volumes
                 and volume_number
                 and parse_number(volume_number) == 2
                 and any(piece.number is not None for piece in pieces)
@@ -250,7 +253,7 @@ def split(data: bytes, *, encoding: str | None = None, short: int = 500, fallbac
                 piece.flags.append("不像正文")
             elif brief:
                 piece.flags.append("太短")
-        if volumes and piece.volume is None:
+        if not append and volumes and piece.volume is None:
             piece.volume = 1
         kept.append(piece)
     return {

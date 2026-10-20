@@ -31,6 +31,25 @@ export interface TeardownPreview extends TeardownFields {
   by_length: boolean
 }
 
+/** 补章节的章号、卷号已经由后台换成补后在书里的位置。 */
+export interface TeardownAppendPreview extends TeardownPreview {
+  mode: 'append'
+  previous: { chapters: number; last: { index: number; title: string }; original_volumes: boolean }
+  junction: { kind: '跳了' | '倒回去了' | null; a: number | null; b: number | null; missing: number }
+  duplicates: { leading: { number: number; title: string }[]; content: number }
+  reopen: { kind: 'unit' | 'summary' | 'volume'; title: string; first?: number; last?: number }[]
+  ignored_volumes: number
+  volumes: { index: number; title: string; chapters: number; continued: boolean }[]
+  selection?: { order: number; title: string; raw_title?: string; number: number | null; volume: number; excluded: boolean; flags: string[] }[]
+  last_numbered?: { number: number; volume: number | null } | null
+  reopen_context?: {
+    tail_unit: { id: string; title: string; first: number; last: number } | null
+    last_volume: { index: number; title: string; summary: boolean }
+    open_volume_id: string | null
+    original_volumes: boolean
+  }
+}
+
 export function teardownWords(chars: number): string {
   return chars >= 10000 ? `${Math.round(chars / 10000)} 万字` : `${chars.toLocaleString('zh-CN')} 字`
 }

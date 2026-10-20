@@ -180,7 +180,8 @@ PROMPT_HASHES = {
     "teardown_units": "c01abb24b399d420f3c40da4b26d248753da65bffed086a3ecd97a095462a3ac",
     "teardown_volumes": "7c0e4199493703b8ddd3e1bc3179d62f33848abd35cf69a1953205544fd356f1",
     "teardown_volume_text": "592f1542a49ae3876f2478d0a8766f6bc414dff3d780ef95fda4ad529bb05c6d",
-    "chat_teardown": "86df934f16471a942aaf2d6270d65a72aeab678e3560dd0cdbf9f020411a4ce5",
+    # 拆书补章节 §6：作者已改好的提示词基线，仍逐字保护，不由实现改写。
+    "chat_teardown": "7fcdcc10b0496f975fcd83a5362ee5e482dce6690f4696cd37b5a52bb140208c",
 }
 
 

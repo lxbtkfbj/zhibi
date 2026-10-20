@@ -1,9 +1,10 @@
 """拆书第一批：上传、确认、换编码和一次事务导入；不调用模型。"""
 
+import hashlib
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis
 from sqlalchemy import insert, select
@@ -11,9 +12,9 @@ from starlette.concurrency import run_in_threadpool
 
 from app.api.books import detail
 from app.api.deps import SessionDep, get_book, get_redis
-from app.models import Book, Chapter, TeardownSource, Volume
+from app.models import Book, Chapter, PlotUnit, TeardownSource, Volume
 from app.schemas import JobOut
-from app.services import book_saves, teardown_jobs, teardown_split
+from app.services import book_saves, jobs, teardown_append, teardown_jobs, teardown_split
 from app.services.library import lock_book
 
 router = APIRouter(tags=["teardown"])
@@ -36,6 +37,15 @@ class ImportIn(BaseModel):
     start: StartIn | None = None
 
 
+class AppendIn(BaseModel):
+    include: list[int] = Field(default_factory=list)
+    start: StartIn | None = None
+
+
+def append_source_signature(source):
+    return source.filename, source.size, source.encoding, hashlib.sha256(source.data).digest()
+
+
 def check_confirming(book):
     if book.source != "teardown":
         raise HTTPException(404, "这本书不是拆的书")
@@ -43,9 +53,9 @@ def check_confirming(book):
         raise HTTPException(409, "这本书已经导入了")
 
 
-async def split_file(data, encoding=None):
+async def split_file(data, encoding=None, *, append=False):
     try:
-        result = await run_in_threadpool(teardown_split.split, data, encoding=encoding or None)
+        result = await run_in_threadpool(teardown_split.split, data, encoding=encoding or None, append=append)
     except UnicodeError as exc:
         label = ENCODINGS.get(encoding, "自动编码")
         raise HTTPException(422, f"用 {label} 读不出来，换一种试试") from exc
@@ -216,6 +226,203 @@ async def import_book(
     await session.delete(source)
     await session.commit()
     await book_saves.safe_checkpoint(session, book.id, title="导入原文")
+    if body.start is not None:
+        await teardown_jobs.start(session, redis, book, body.start.upto)
+    await session.refresh(book)
+    return await detail(session, book)
+
+
+async def locked_append(session, book, *, require_source=False):
+    await lock_book(session, book.id)
+    await session.refresh(book, with_for_update=True)
+    if book.source != "teardown":
+        raise HTTPException(404, "这本书不是拆的书")
+    if (book.teardown or {}).get("stage") == "confirming":
+        raise HTTPException(409, "这本书还没导入，先在确认页导入")
+    if await jobs.is_busy(session, book.id):
+        raise HTTPException(409, "这本书正在拆，先停下再补")
+    source = await session.scalar(
+        select(TeardownSource)
+        .where(TeardownSource.book_id == book.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if require_source and (source is None or (source.preview or {}).get("mode") != "append"):
+        raise HTTPException(404, "没有待确认的补章节")
+    return source
+
+
+async def append_plan(session, book, data, filename, size, *, encoding=None, include=()):
+    result = await split_file(data, encoding, append=True)
+    chapters = list(
+        await session.scalars(
+            select(Chapter)
+            .where(Chapter.book_id == book.id)
+            .order_by(Chapter.index)
+            .execution_options(populate_existing=True)
+        )
+    )
+    volumes = list(
+        await session.scalars(
+            select(Volume)
+            .where(Volume.book_id == book.id)
+            .order_by(Volume.index)
+            .execution_options(populate_existing=True)
+        )
+    )
+    units = list(
+        await session.scalars(
+            select(PlotUnit).where(PlotUnit.book_id == book.id).execution_options(populate_existing=True)
+        )
+    )
+    if not chapters or not volumes:
+        raise HTTPException(422, "这本书还没有原文")
+    plan = teardown_append.plan(
+        book, chapters, volumes, units, result, filename, size, include=include, encoding_auto=not encoding
+    )
+    return result, plan, chapters, volumes, units
+
+
+@router.post("/teardown/{book_id}/append", status_code=201)
+async def upload_append(file: UploadFile, book: Book = Depends(get_book), session=SessionDep):
+    source = await locked_append(session, book)
+    filename = (file.filename or "").replace("\\", "/").rsplit("/", 1)[-1]
+    if not filename.lower().endswith(".txt"):
+        raise HTTPException(422, "只能导入 TXT 文件")
+    data = await file.read(MAX_BYTES + 1)
+    if len(data) > MAX_BYTES:
+        raise HTTPException(413, "文件超过 50MB")
+    _, plan, *_ = await append_plan(session, book, data, filename, len(data))
+    if source is None:
+        source = TeardownSource(book_id=book.id)
+        session.add(source)
+    source.filename, source.size, source.data = filename, len(data), data
+    source.encoding, source.preview = "", plan.preview
+    await session.commit()
+    return preview_out(book, plan.preview)
+
+
+@router.get("/teardown/{book_id}/append")
+async def preview_append(book: Book = Depends(get_book), session=SessionDep):
+    source = await locked_append(session, book, require_source=True)
+    return preview_out(book, source.preview)
+
+
+@router.post("/teardown/{book_id}/append/encoding")
+async def encoding_append(body: EncodingIn, book: Book = Depends(get_book), session=SessionDep):
+    source = await locked_append(session, book, require_source=True)
+    if body.encoding not in ENCODINGS:
+        raise HTTPException(422, "请选择自动、UTF-8、GB18030、UTF-16 或 BIG5")
+    chosen = "" if body.encoding == "auto" else body.encoding
+    _, plan, *_ = await append_plan(session, book, source.data, source.filename, source.size, encoding=chosen)
+    source.encoding, source.preview = chosen, plan.preview
+    await session.commit()
+    return preview_out(book, plan.preview)
+
+
+@router.delete("/teardown/{book_id}/append", status_code=204)
+async def cancel_append(book: Book = Depends(get_book), session=SessionDep):
+    source = await locked_append(session, book, require_source=True)
+    await session.delete(source)
+    await session.commit()
+    return Response(status_code=204)
+
+
+@router.post("/teardown/{book_id}/append/import")
+async def import_append(
+    body: AppendIn, book: Book = Depends(get_book), session=SessionDep, redis: Redis = Depends(get_redis)
+):
+    source = await locked_append(session, book, require_source=True)
+    confirmed_source = append_source_signature(source)
+    # 先验证再存档；存档会提交，因此之后必须重新持锁、重新读取原书并重新分章。
+    await append_plan(
+        session, book, source.data, source.filename, source.size, encoding=source.encoding, include=body.include
+    )
+    await book_saves.checkpoint(session, book.id, title="补章节前", force=True)
+    source = await locked_append(session, book, require_source=True)
+    if append_source_signature(source) != confirmed_source:
+        raise HTTPException(409, "待确认的文件已经换了，请刷新确认页")
+    result, plan, chapters, volumes, units = await append_plan(
+        session, book, source.data, source.filename, source.size, encoding=source.encoding, include=body.include
+    )
+    meta = dict(book.teardown or {})
+    before_total = len(chapters)
+    first, last = before_total + 1, before_total + len(plan.selected)
+    by_index = {volume.index: volume for volume in volumes}
+    for entry in plan.volumes:
+        if not entry["continued"]:
+            volume = Volume(
+                id=uuid.uuid4(),
+                book_id=book.id,
+                index=entry["index"],
+                title=entry["title"],
+                status="done",
+                chapter_count=0,
+            )
+            session.add(volume)
+            by_index[volume.index] = volume
+    await session.flush()
+    for entry in plan.reopen:
+        if entry["kind"] == "unit":
+            unit = next(unit for unit in units if str(unit.id) == entry["id"])
+            for chapter in chapters:
+                if chapter.unit_id == unit.id:
+                    chapter.unit_id = None
+            await session.flush()
+            await session.delete(unit)
+        else:
+            volume = next(volume for volume in volumes if str(volume.id) == entry["id"])
+            volume.summary = ""
+            if entry["kind"] == "volume":
+                volume.title, volume.status = "还没收尾", "planned"
+                meta["open_volume_id"] = str(volume.id)
+    rows = []
+    for index, piece in enumerate(plan.selected, first):
+        volume = by_index[plan.destinations[piece.volume]]
+        volume.chapter_count += 1
+        rows.append(
+            {
+                "book_id": book.id,
+                "volume_id": volume.id,
+                "index": index,
+                "title": piece.title,
+                "content": piece.text,
+                "word_count": piece.chars,
+                "status": "final",
+                "source": "imported",
+                "outline": {},
+                "teardown": {"raw_title": piece.raw, "number": piece.number, "flags": piece.flags},
+            }
+        )
+    for start in range(0, len(rows), 200):
+        await session.execute(insert(Chapter), rows[start : start + 200])
+    meta["split"] = {
+        **(meta.get("split") or {}),
+        "chapters": last,
+        "chars": sum(chapter.word_count for chapter in chapters) + sum(piece.chars for piece in plan.selected),
+        "volumes": len(by_index),
+        "number_issue_total": (meta.get("split") or {}).get("number_issue_total", 0) + plan.issue_total,
+    }
+    meta["number_issues"] = [*(meta.get("number_issues") or []), *plan.issues][:50]
+    meta["excluded"] = [*(meta.get("excluded") or []), *plan.excluded]
+    meta["added"] = [
+        *(meta.get("added") or []),
+        {
+            "at": datetime.now(UTC).isoformat(),
+            "file": source.filename,
+            "first": first,
+            "last": last,
+            "chapters": len(rows),
+        },
+    ]
+    if meta.get("upto") is None:
+        meta["upto"] = before_total
+    if meta.get("stage") == "done":
+        meta.update(stage="stopped", stop_reason="added", stop_note=f"补了第 {first}–{last} 章，还没拆。")
+    book.teardown = meta
+    await session.delete(source)
+    await session.commit()
+    await book_saves.checkpoint(session, book.id, title=f"补了第 {first}–{last} 章")
     if body.start is not None:
         await teardown_jobs.start(session, redis, book, body.start.upto)
     await session.refresh(book)

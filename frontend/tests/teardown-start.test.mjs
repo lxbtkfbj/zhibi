@@ -73,3 +73,14 @@ test('开始停下和导入带start只使用任务1现有接口', () => {
   assert.match(api, /startTeardown = \(bookId: string, upto: number \| null\) => post<Job>\(`\/teardown\/\$\{bookId\}\/start`, \{ upto \}\)/)
   assert.match(api, /stopTeardown = \(bookId: string\) => post<Job>\(`\/teardown\/\$\{bookId\}\/stop`\)/)
 })
+
+test('补完后接着拆默认全本，不把后台为retry判断保留的旧目标预填回去，其他停下原因照旧', () => {
+  const desk = source('../src/pages/workspace/BookDesk.tsx')
+  assert.match(desk, /initialUpto=\{detail\.teardown\?\.stop_reason === 'added' \? null : detail\.teardown\?\.upto \?\? null\}/)
+  assert.match(desk, /retry: \(\) => start\(detail\.teardown\?\.upto \?\? null\)/, '重读失败章入口仍使用原目标')
+  const expression = desk.match(/initialUpto=\{([^}]+)\}/)[1]
+  const initialUpto = new Function('detail', `return (${expression})`)
+  assert.equal(initialUpto({ teardown: { stop_reason: 'added', upto: 300 } }), null)
+  for (const stop_reason of ['author', 'upto', 'model', 'error', undefined, null]) assert.equal(initialUpto({ teardown: { stop_reason, upto: 300 } }), 300)
+  assert.equal(initialUpto({ teardown: { upto: null } }), null)
+})
