@@ -10,9 +10,10 @@ import {
   type VBook, type VCategory, type VEntry,
 } from '../model'
 import { AskPanel, CardTemplateEditor } from '../Workspace'
+import { useTeardownControl } from '../TeardownProgress'
 import { Clamp, More, Refs } from './shared'
 import { DeskEdit } from './settingsEditing'
-import { clean, currentRead, momentLines, nodes, spans, wan } from './settingsData'
+import { clean, currentRead, emptyTeardownSettingsMeta, momentLines, nodes, spans, wan } from './settingsData'
 import './settingsEditing.css'
 
 export interface DeskNav {
@@ -141,6 +142,8 @@ function NewCategory({ book, nav, close }: { book: VBook; nav: DeskNav; close: (
 
 function SettingsOverview({ book, nav }: { book: VBook; nav: DeskNav }) {
   const [creating, setCreating] = useState(false)
+  const control = useTeardownControl()
+  const emptyMeta = emptyTeardownSettingsMeta(book, control?.job ?? null)
   const entries = (name: string) => book.categories.find(category => category.name === name)?.entries ?? []
   const people = entries('角色列表'), goldfingers = entries('金手指'), ladders = entries('等级体系'), places = entries('地点列表')
   const factions = entries('势力列表'), items = entries('物品功法'), secrets = entries('往事秘密'), rules = entries('特殊规则')
@@ -152,8 +155,8 @@ function SettingsOverview({ book, nav }: { book: VBook; nav: DeskNav }) {
   const teardown = book.source === 'teardown'
   const upto = book.teardown?.settings?.upto
   return <section className="page full"><div className="kicker">设定总览</div><h1>设定</h1>
-    <div className="meta">{teardown ? upto != null ? `拆书整理到第 ${upto} 章 · 你改过的条目以后接着拆也不会被盖掉` : '设定还没整理' : '这本书的人物、世界和规矩'}</div>
-    <div className="rule1" /><div className="tiles">
+    <div className="meta">{emptyMeta ?? (teardown ? upto != null ? `拆书整理到第 ${upto} 章 · 你改过的条目以后接着拆也不会被盖掉` : '设定还没整理' : '这本书的人物、世界和规矩')}</div>
+    <div className="rule1" />{emptyMeta === null && <div className="tiles">
       <div className="tile" onClick={open('角色列表')}><div className="hd"><b>角色列表</b><span>{people.length} 人写了全卡</span></div><Names entries={people} nav={nav} /></div>
       <div className="tile" onClick={open('金手指')}><div className="hd"><b>金手指</b><span>{goldfingers.length} 条</span></div><div className="kv">{goldfingers.map(entry => <Fragment key={entry.id}><b onClick={event => { event.stopPropagation(); nav.openEntry(entry.id) }}>{entry.name}</b><span className="ell" title={field(entry, '是什么')}>{entry.createdChapter ? `第 ${entry.createdChapter} 章出现 · ` : ''}{field(entry, '是什么')}</span></Fragment>)}</div></div>
       <div className="tile" onClick={open('等级体系')}>{ladders.length ? ladders.map(entry => <Fragment key={entry.id}><div className="hd"><b>等级体系</b><span className="ell" title={entry.overview}>{entry.name} · {entry.levels?.length ?? 0} 级 · {entry.overview}</span></div><Ladder entry={entry} /></Fragment>) : <div className="hd"><b>等级体系</b><span>还没有</span></div>}</div>
@@ -163,7 +166,7 @@ function SettingsOverview({ book, nav }: { book: VBook; nav: DeskNav }) {
       <div className="tile" onClick={open('往事秘密')}><div className="hd"><b>往事秘密</b><span>{secrets.length} 条</span></div><div className="kv"><More items={secrets} cap={3}>{entry => <Fragment key={entry.id}><b>{entry.name}</b><span>{entry.createdChapter ? `第 ${entry.createdChapter} 章埋下` : '埋下的章没记'} · {/第\s*\d+\s*章揭开/.exec(field(entry, '打算何时揭开'))?.[0] || '还没揭开'}</span></Fragment>}</More></div></div>
       <div className="tile" onClick={open('特殊规则')}><div className="hd"><b>特殊规则</b><span>{rules.length} 条</span></div><Names entries={rules} nav={nav} /></div>
       {book.categories.filter(category => category.custom).map(category => <div className="tile" key={category.key} onClick={open(category.name)}><div className="hd"><b>{category.name}</b><span>{category.entries.length} 条</span></div><Names entries={category.entries} nav={nav} /></div>)}
-    </div>
+    </div>}
     {!teardown && <div className="settings-actions"><button className="btn seal-line" onClick={() => setCreating(true)}>新建类别</button></div>}
     {creating && <NewCategory book={book} nav={nav} close={() => setCreating(false)} />}
   </section>

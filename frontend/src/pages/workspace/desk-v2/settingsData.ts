@@ -1,3 +1,5 @@
+import type { Job } from '../../../api/types.ts'
+import { teardownProgressView } from '../../../lib/teardownProgress.ts'
 import type { VBook, VEntry, VNode } from '../model.ts'
 
 export const clean = (value?: string): string => value && value !== '（记录里没有）' ? value : ''
@@ -9,6 +11,19 @@ export function nodes(root: VNode): VNode[] {
 
 export function currentRead(book: VBook): number {
   return Math.max(0, ...nodes(book.outline).filter(node => node.kind === '章' && node.teardown?.read).map(node => node.range?.[0] ?? 0))
+}
+
+/** 未整理且没有任何条目时只写现状；读到哪章和读过几章是两个不同的数。 */
+export function emptyTeardownSettingsMeta(book: VBook, job: Job | null): string | null {
+  if (book.source !== 'teardown' || book.teardown?.settings?.upto != null || book.categories.some(category => category.entries.length > 0)) return null
+  const view = teardownProgressView(book, job)
+  const pending = job?.pending && 'teardown' in job.pending ? job.pending.teardown : undefined
+  if (view.active && pending?.doing === 'settings') return '设定师在整理设定，整理完这里就有了'
+  if (view.stage === 'running') return '拆书收尾时会整理设定，到时这里就有了'
+  const last = currentRead(book)
+  if (last > 0 && (view.stage === 'stopped' || view.stage === 'queued')) return `设定还没整理：点右上角「接着拆」，拆到第 ${last} 章不变，只整理设定，不重读原文`
+  if (last === 0) return '还没开拆，拆过的章会整理成角色卡和设定'
+  return '设定还没整理'
 }
 
 export function spans(numbers: number[]): string {

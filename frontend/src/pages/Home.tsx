@@ -1,14 +1,17 @@
 import { ArrowRight, Feather, Plus, Trash2 } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'motion/react'
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useBooks, useDeleteBook, useProfiles } from '../api/hooks'
-import type { BookSummary } from '../api/types'
+import { get } from '../api/client'
+import { keys, useBooks, useDeleteBook, useProfiles } from '../api/hooks'
+import type { BookSummary, ChapterBrief } from '../api/types'
 import { BookCover } from '../components/BookCover'
 import { Cloud, Diamond, FretDivider, InkMountains } from '../components/decor'
 import { Badge, Button, ErrorText, Reveal, Skeleton, Spinner } from '../components/ui'
 import { cleanTitle, displayStatus, greeting } from '../lib/status'
 import { teardownWords } from '../lib/teardownPreview'
+import { needsTeardownShelfRead, teardownShelfRead, teardownShelfStatus } from '../lib/teardownShelf'
 
 const IDEAS = [
   '一个能看见别人剩余寿命的杂役弟子，在吃人的宗门里步步为营',
@@ -97,6 +100,13 @@ function ShelfBook({ book, index }: { book: BookSummary; index: number }) {
   const status = displayStatus(book.status, book.job_status)
   const teardown = book.source === 'teardown'
   const confirming = teardown && book.teardown?.stage === 'confirming'
+  const { data: fallbackRead } = useQuery({
+    queryKey: keys.chapterList(book.id),
+    queryFn: () => get<ChapterBrief[]>(`/books/${book.id}/chapters`),
+    enabled: teardown && needsTeardownShelfRead(book.teardown),
+    select: chapters => teardownShelfRead(chapters, book.teardown?.chapters ?? 0),
+  })
+  const teardownStatus = teardownShelfStatus(book.teardown, fallbackRead)
   const remove = useDeleteBook()
   const reduce = useReducedMotion()
   return (
@@ -116,7 +126,7 @@ function ShelfBook({ book, index }: { book: BookSummary; index: number }) {
           <p className="truncate font-serif text-[15px] font-bold">{cleanTitle(book.title)}</p>
           {teardown ? <>
             <p className="mt-1.5 truncate text-xs text-ink-3">{book.teardown?.author ? `${book.teardown.author} · ` : ''}{teardownWords(book.teardown?.chars ?? 0)}</p>
-            <p className="mt-1.5 text-xs text-ink-2">{confirming ? '还没确认分章' : book.teardown?.stage === 'queued' ? '排队中：前面还有书在拆' : book.teardown?.stage === 'running' ? '正在拆' : book.teardown?.stage === 'stopped' ? book.teardown.stop_note || '停了' : book.teardown?.stage === 'done' ? `拆完了 · ${book.teardown.chapters} 章` : `已导入 ${book.teardown?.chapters ?? 0} 章 · 还没开拆`}</p>
+            <p className="mt-1.5 text-xs text-ink-2" title={teardownStatus.title}>{teardownStatus.text}</p>
           </> : <div className="mt-1.5 flex justify-center">
             <Badge tone={status.tone}>
               {status.tone === 'busy' && <Spinner className="size-3" />}

@@ -6,7 +6,7 @@ import { teardownRecordSections } from '../src/lib/teardownRecords.ts'
 
 function fixture(stage = 'running') {
   return {
-    source: 'teardown', teardown: { stage, chapters: 40, upto: 20, stop_note: '拆到第 20 章了（你定的）。' },
+    source: 'teardown', teardown: { stage, chapters: 40, upto: 20, stop_note: '已按开拆时定的范围拆到第 20 章。' },
     outline: { id: 'book', kind: '全书', children: [
       { id: 'v1', kind: '卷', children: [{ id: 'u1', kind: '单元', children: [
         { id: 'c1', kind: '章', ref: { id: '1' }, teardown: { read: true, failed: false } },
@@ -44,7 +44,7 @@ test('运行中只用事件进度，停下/完成从目录重建，旧终态job�
   assert.deepEqual(progress.failed, [5, 7])
   assert.equal(progress.percent, 40)
   const stopped = teardownProgressView(fixture('stopped'), { ...job('read'), status: 'cancelled' })
-  assert.equal(stopped.text, '拆到第 20 章了（你定的）。')
+  assert.equal(stopped.text, '已按开拆时定的范围拆到第 20 章。')
   assert.equal(stopped.read, 1)
   assert.deepEqual(stopped.failed, [2])
   assert.equal(stopped.active, false)

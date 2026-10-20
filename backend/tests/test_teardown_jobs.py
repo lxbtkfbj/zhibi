@@ -123,7 +123,12 @@ async def test_queued_stop_restores_previous_state(client, sessionmaker, generic
     bid = await seed(sessionmaker, stage="stopped", read=2)
     async with sessionmaker() as session:
         book = await session.get(Book, bid)
-        book.teardown = {**book.teardown, "stop_reason": "upto", "stop_note": "拆到第 2 章了（你定的）。", "upto": 2}
+        book.teardown = {
+            **book.teardown,
+            "stop_reason": "upto",
+            "stop_note": "已按开拆时定的范围拆到第 2 章。",
+            "upto": 2,
+        }
         before = dict(book.teardown)
         await session.commit()
     started = (await client.post(f"/api/teardown/{bid}/start", json={"upto": 4})).json()

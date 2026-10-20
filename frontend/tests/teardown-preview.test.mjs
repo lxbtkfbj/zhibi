@@ -75,8 +75,9 @@ test('保存失败阻止下一步并保留待存字段；重新保存能恢复�
 test('上传和确认页只接 TXT、提供上传进度、编码失败保留预览并显示原样错误', () => {
   const page = readFileSync(new URL('../src/pages/Teardown.tsx', import.meta.url), 'utf8')
   const api = readFileSync(new URL('../src/api/teardown.ts', import.meta.url), 'utf8')
+  const shelf = readFileSync(new URL('../src/lib/teardownShelf.ts', import.meta.url), 'utf8')
   for (const text of ['只能导入 TXT 文件', '文件超过 50MB', '正在分章……', '确定不导入？再点一次', '还没确认分章']) {
-    assert.ok((page + readFileSync(new URL('../src/pages/Home.tsx', import.meta.url), 'utf8')).includes(text), text)
+    assert.ok((page + shelf).includes(text), text)
   }
   assert.match(page, /accept="\.txt"/)
   assert.match(page, /aria-valuenow=\{progress\}/)
@@ -110,7 +111,7 @@ test('书房继续写作和自己的书架不混入拆书；拆书卡片用确�
   assert.match(home, /ownBooks = books\?\.filter\(book => book\.source !== 'teardown'\)/)
   assert.match(home, /const latest = ownBooks\?\.\[0\]/)
   assert.match(home, /confirming \? `\/teardown\/\$\{book\.id\}` : `\/desk\/\$\{book\.id\}`/)
-  assert.match(home, /已导入 \$\{book\.teardown\?\.chapters \?\? 0\} 章 · 还没开拆/)
+  assert.match(home, /teardownShelfStatus\(book\.teardown, fallbackRead\)/)
   assert.match(home, /teardownBooks\.length > 0/)
   assert.match(home, /state=\{teardown && !confirming \? \{ teardownIntro: true \} : undefined\}/)
   assert.match(home, /aria-label="删除"/)

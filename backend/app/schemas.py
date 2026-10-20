@@ -208,11 +208,34 @@ class JobOut(ORM):
         return values
 
 
+class TeardownSummary(BaseModel):
+    """书架和书详情的拆书只读摘要，不返回逐章记录。"""
+
+    stage: str = "imported"
+    author: str = ""
+    intro: str = ""
+    chars: int = 0
+    chapters: int = 0
+    read: int = 0
+    volumes: int = 0
+    number_issue_total: int = 0
+    excluded_count: int = 0
+    open_volume_id: str | None = None
+    imported_at: str | None = None
+    original_volumes: bool = False
+    upto: int | None = None
+    stop_reason: str | None = None
+    stop_note: str | None = None
+    names: dict = Field(default_factory=dict)
+    settings: dict | None = None
+    merits: dict | None = None
+
+
 class BookSummary(ORM):
     id: uuid.UUID
     title: str
     source: str
-    teardown: dict | None = None
+    teardown: TeardownSummary | None = None
     genre: str
     status: str
     idea: str

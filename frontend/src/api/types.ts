@@ -283,6 +283,7 @@ export interface TeardownSummary {
   intro: string
   chars: number
   chapters: number
+  read: number
   volumes: number
   number_issue_total: number
   excluded_count: number

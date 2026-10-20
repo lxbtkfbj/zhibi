@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { clean, currentRead, momentLines, spans, wan } from '../src/pages/workspace/desk-v2/settingsData.ts'
+import { clean, currentRead, emptyTeardownSettingsMeta, momentLines, spans, wan } from '../src/pages/workspace/desk-v2/settingsData.ts'
 
 const source = readFileSync(new URL('../src/pages/workspace/desk-v2/SettingsPages.tsx', import.meta.url), 'utf8')
 const editing = readFileSync(new URL('../src/pages/workspace/desk-v2/settingsEditing.tsx', import.meta.url), 'utf8')
@@ -27,6 +27,65 @@ test('出场区间按顺序去重；已拆章数只认已读标记而不拿目�
   ] }] } }
   assert.equal(currentRead(book), 2)
   assert.equal(currentRead({ outline: { kind: '全书' } }), 0)
+})
+
+const emptyBook = (stage = 'stopped') => ({
+  source: 'teardown', teardown: { stage, chapters: 498, read: 2, upto: 100 },
+  categories: [{ name: '角色列表', entries: [] }, { name: '作者自建类别', custom: { style: 'paragraph' }, entries: [] }],
+  outline: { kind: '全书', children: [{ kind: '卷', children: [
+    { kind: '章', range: [1, 1], teardown: { read: true, failed: false } },
+    { kind: '章', range: [2, 2], teardown: { read: false, failed: true } },
+    { kind: '章', range: [3, 3], teardown: { read: true, failed: false } },
+    { kind: '章', range: [100, 100], teardown: { read: false, failed: false } },
+  ] }] },
+})
+const teardownJob = (status, doing) => ({ kind: 'teardown', status, pending: { teardown: { doing, read: 2, target: 100, total: 498 } } })
+const stoppedEmptyMeta = '设定还没整理：点右上角「接着拆」，拆到第 3 章不变，只整理设定，不重读原文'
+
+test('小修1空设定页四行现状逐字匹配，最后读过的章不是已读章数或目标', () => {
+  assert.equal(emptyTeardownSettingsMeta(emptyBook(), teardownJob('running', 'settings')), '设定师在整理设定，整理完这里就有了')
+  for (const doing of ['read', 'units', 'volumes', 'closing']) {
+    assert.equal(emptyTeardownSettingsMeta(emptyBook(), teardownJob('running', doing)), '拆书收尾时会整理设定，到时这里就有了')
+  }
+  for (const stage of ['stopped', 'queued']) assert.equal(emptyTeardownSettingsMeta(emptyBook(stage), null), stoppedEmptyMeta)
+  const unread = emptyBook('imported')
+  unread.outline.children = []
+  assert.equal(emptyTeardownSettingsMeta(unread, null), '还没开拆，拆过的章会整理成角色卡和设定')
+  assert.equal(currentRead(emptyBook()), 3)
+})
+
+test('小修1空设定页与顶栏共用活动job优先级，排队不当作正在读，运行状态即使未读仍写收尾', () => {
+  assert.equal(emptyTeardownSettingsMeta(emptyBook('running'), teardownJob('queued', 'queued')), stoppedEmptyMeta)
+  assert.equal(emptyTeardownSettingsMeta(emptyBook('queued'), teardownJob('running', 'read')), '拆书收尾时会整理设定，到时这里就有了')
+  assert.equal(emptyTeardownSettingsMeta(emptyBook('stopped'), teardownJob('cancelled', 'settings')), stoppedEmptyMeta)
+  const unread = emptyBook('running')
+  unread.outline.children = []
+  assert.equal(emptyTeardownSettingsMeta(unread, null), '拆书收尾时会整理设定，到时这里就有了')
+  for (const stage of ['imported', 'stopped', 'queued']) {
+    unread.teardown.stage = stage
+    assert.equal(emptyTeardownSettingsMeta(unread, null), '还没开拆，拆过的章会整理成角色卡和设定')
+  }
+})
+
+test('小修1只对未整理且所有类别为空的拆书隐藏框，整理到0章、有任何条目和作者书均不变', () => {
+  for (const upto of [0, 3, 100]) {
+    const book = emptyBook()
+    book.teardown.settings = { upto }
+    assert.equal(emptyTeardownSettingsMeta(book, null), null)
+  }
+  for (const categoryIndex of [0, 1]) {
+    const book = emptyBook()
+    book.categories[categoryIndex].entries.push({ id: 'saved', name: '作者内容' })
+    assert.equal(emptyTeardownSettingsMeta(book, null), null)
+  }
+  for (const source of ['new', 'imported', undefined]) assert.equal(emptyTeardownSettingsMeta({ ...emptyBook(), source }, null), null)
+  const book = emptyBook()
+  book.teardown.settings = { upto: null }
+  assert.equal(emptyTeardownSettingsMeta(book, null), stoppedEmptyMeta)
+  assert.match(source, /const control = useTeardownControl\(\)/)
+  assert.match(source, /const emptyMeta = emptyTeardownSettingsMeta\(book, control\?\.job \?\? null\)/)
+  assert.match(source, /<div className="rule1" \/>\{emptyMeta === null && <div className="tiles">/)
+  assert.match(source, /<div className="meta">\{emptyMeta \?\? \(teardown/)
 })
 
 test('名场面按现存栏目拆章号、动作、立住的东西；不认识的旧行原样保留', () => {

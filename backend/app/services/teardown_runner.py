@@ -710,11 +710,11 @@ class Runner:
         volume_count = sum(v.title not in ("还没收尾", "还没分卷", "") for v in volumes)
         author_stop = await self.cancelled()
         if author_stop:
-            reason, note = "author", f"你点了停下，停在第 {max(read, default=0)} 章。"
+            reason, note = "author", f"已手动停下，停在第 {max(read, default=0)} 章。"
         elif self.stop:
             reason, note = self.stop.reason, self.stop.note
         elif self.target < self.total:
-            reason, note = "upto", f"拆到第 {self.target} 章了（你定的）。"
+            reason, note = "upto", f"已按开拆时定的范围拆到第 {self.target} 章。"
         elif (
             any(
                 not c.unit_id
@@ -749,7 +749,7 @@ class Runner:
             if await self.cancelled():
                 author_stop = True
             if author_stop:
-                reason, note = "author", f"你点了停下，停在第 {max(read, default=0)} 章。"
+                reason, note = "author", f"已手动停下，停在第 {max(read, default=0)} 章。"
         await self.progress("closing")
         if settings_error:
             note += settings_error

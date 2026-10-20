@@ -49,6 +49,7 @@ async def test_upload_preview_encoding_import_and_archive(client, sessionmaker):
         assert not await session.scalar(select(func.count()).select_from(Chapter))
     listing = (await client.get("/api/books")).json()[0]
     assert listing["source"] == "teardown" and listing["teardown"]["chapters"] == 4
+    assert listing["teardown"]["read"] == 0
     assert listing["teardown"]["chars"] == preview["chars"]
     assert listing["teardown"]["imported_at"] is None
     changed = await client.patch(
@@ -164,6 +165,61 @@ async def test_no_volumes_virtual_unit_and_readonly_selects(client, sessionmaker
         f"/api/books/{bid}/chapters/1", json={"title": "手改章名", "outline": {"goal": "手改章纲"}}
     )
     assert changed.status_code == 200 and changed.json()["outline"]["goal"] == "手改章纲"
+
+
+async def test_summary_and_detail_count_read_versions_with_one_grouped_list_query(client, sessionmaker):
+    async with sessionmaker() as session:
+        books = [
+            Book(title="已读和未读", source="teardown", teardown={"stage": "stopped", "split": {"chapters": 5}}),
+            Book(title="另一本拆的书", source="teardown", teardown={"stage": "running", "split": {"chapters": 2}}),
+            Book(title="还没读", source="teardown", teardown={"stage": "imported", "split": {"chapters": 1}}),
+            Book(title="作者自己的书", source="new"),
+        ]
+        session.add_all(books)
+        await session.flush()
+        ids = [book.id for book in books]
+        records = [
+            [
+                {"read_version": 1},
+                {"read_version": 2, "read_failed": {"error": "重读失败"}},
+                {"read_failed": {"error": "没读成"}},
+                {},
+                {"read_version": None},
+            ],
+            [{"read_version": 1}, {}],
+            [{}],
+            [{"read_version": 1}],
+        ]
+        for book, teardown_rows in zip(books, records, strict=True):
+            session.add_all(
+                Chapter(book_id=book.id, index=index, content="原文不进书架查询", status="final", teardown=teardown)
+                for index, teardown in enumerate(teardown_rows, 1)
+            )
+        await session.commit()
+        engine = session.bind.sync_engine
+    statements = []
+
+    def capture(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith("SELECT") and "chapters" in statement:
+            statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", capture)
+    try:
+        response = await client.get("/api/books")
+    finally:
+        event.remove(engine, "before_cursor_execute", capture)
+    assert response.status_code == 200, response.text
+    by_id = {book["id"]: book for book in response.json()}
+    assert [by_id[str(bid)]["teardown"]["read"] for bid in ids[:3]] == [2, 1, 0]
+    assert by_id[str(ids[3])]["teardown"] is None
+    assert len(statements) == 1 and "GROUP BY chapters.book_id" in statements[0]
+    assert "chapters.content" not in statements[0]
+    for bid, expected in zip(ids[:3], [2, 1, 0], strict=True):
+        response = await client.get(f"/api/books/{bid}")
+        assert response.status_code == 200, response.text
+        assert response.json()["teardown"]["read"] == expected
+    chapter_flags = (await client.get(f"/api/books/{ids[0]}/chapters")).json()
+    assert [chapter["teardown"]["read"] for chapter in chapter_flags] == [True, True, False, False, False]
 
 
 async def test_search_shared_counts_literal_wildcards_and_limits(client, sessionmaker):

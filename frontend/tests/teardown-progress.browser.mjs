@@ -24,7 +24,7 @@ import { ActionsContext } from '/src/pages/workspace/actions.ts';
 import '/src/index.css';
 const h = React.createElement;
 const originalRecords = {read_version:1,read:{people:[{name:'云澈',shown:'不肯服输',also_called:['萧澈'],change:'离开萧门'}],things:[{kind:'地方',name:'萧门',note:'萧氏所居',belongs:'流云城'},{kind:'秘密',name:'身世',note:'留下线索',secret:'埋下'}],moments:[{who:'云澈',what:'直面长老',shows:'不屈'}],waits:[{action:'立下',what:'如何变强'}],tropes:['退婚','逆袭'],feel:'大爽'}};
-const initial = {id:'ui-fixture',source:'teardown',title:'进度组件合成书',categories:[],teardown:{stage:'queued',chapters:40,upto:20,stop_note:'拆到第 20 章了（你定的）。'},outline:{id:'book',kind:'全书',children:[{id:'v1',kind:'卷',title:'第一卷　流云城',children:[{id:'u1',kind:'单元',title:'单元一　离开萧门',children:[{id:'c1',kind:'章',title:'第1章　青石巷',ref:{type:'chapter',id:'1'},range:[1,1],uses:[],teardown:{read:true,failed:false},body:{status:'done',words:20,text:'云澈站在青石巷里，天毒珠泛起微光。',teardown:originalRecords}},{id:'c2',kind:'章',title:'第2章　雾夜',ref:{type:'chapter',id:'2'},range:[2,2],uses:[],teardown:{read:false,failed:true},body:{status:'done',words:20,text:'雨落下来。'}}]}]}]}};
+const initial = {id:'ui-fixture',source:'teardown',title:'进度组件合成书',categories:[],teardown:{stage:'queued',chapters:40,upto:20,stop_note:'已按开拆时定的范围拆到第 20 章。'},outline:{id:'book',kind:'全书',children:[{id:'v1',kind:'卷',title:'第一卷　流云城',children:[{id:'u1',kind:'单元',title:'单元一　离开萧门',children:[{id:'c1',kind:'章',title:'第1章　青石巷',ref:{type:'chapter',id:'1'},range:[1,1],uses:[],teardown:{read:true,failed:false},body:{status:'done',words:20,text:'云澈站在青石巷里，天毒珠泛起微光。',teardown:originalRecords}},{id:'c2',kind:'章',title:'第2章　雾夜',ref:{type:'chapter',id:'2'},range:[2,2],uses:[],teardown:{read:false,failed:true},body:{status:'done',words:20,text:'雨落下来。'}}]}]}]}};
 const initialJob={kind:'teardown',status:'queued',pending:{teardown:{doing:'queued',read:8,target:20,total:40,reading:[9,12],range:[1,20],eta_seconds:120,failed:[]}}};
 const noop=()=>{};
 const loadChapter=async()=>({text:'云澈站在青石巷里，天毒珠泛起微光。',teardown:window.lazyRecords});
@@ -92,7 +92,7 @@ try {
   check('失败可展开，运行中不能另开重试，点击停下立即变字禁用')
   await setJob(null)
   await page.evaluate(() => window.teardownUI.setStage('stopped'))
-  await expect(strip).toContainText('拆到第 20 章了（你定的）。')
+  await expect(strip).toContainText('已按开拆时定的范围拆到第 20 章。')
   await expect(strip).toContainText('· 1 章没读成')
   await strip.getByRole('button', { name: '再试一次', exact: true }).click()
   await strip.getByRole('button', { name: '接着拆', exact: true }).click()

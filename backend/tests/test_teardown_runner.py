@@ -341,6 +341,7 @@ async def test_author_stop_drains_inflight_batches_without_grouping_and_resume_d
             and (await session.scalar(select(BookSave))).title == "停下拆书"
         )
         before = {c.index for c in await session.scalars(select(Chapter)) if c.teardown.get("read_version")}
+        assert book.teardown["stop_note"] == f"已手动停下，停在第 {max(before)} 章。"
         assert before == set(first_calls) and 4 < len(before) <= 20
         book.teardown = {**book.teardown, "stage": "queued", "upto": 40}
         new = Job(book_id=bid, kind="teardown", thread_id="resumed", status="queued")
@@ -358,7 +359,9 @@ async def test_author_stop_drains_inflight_batches_without_grouping_and_resume_d
     assert not (actual & before) and actual == set(range(1, 41)) - before
     async with sessionmaker() as session:
         book = await session.get(Book, bid)
-        assert book.teardown["stop_reason"] == "upto" and book.teardown["stop_note"] == "拆到第 40 章了（你定的）。"
+        assert (
+            book.teardown["stop_reason"] == "upto" and book.teardown["stop_note"] == "已按开拆时定的范围拆到第 40 章。"
+        )
 
 
 async def test_refresh_throttles_read_but_groups_force_events(sessionmaker, redis):

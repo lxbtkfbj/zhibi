@@ -49,11 +49,11 @@ from app.services.writing_context import chapter_words
 router = APIRouter(tags=["books"])
 
 
-def summary(book: Book, job_status: str | None = None, preview: dict | None = None) -> BookSummary:
+def summary(book: Book, job_status: str | None = None, preview: dict | None = None, *, read: int = 0) -> BookSummary:
     out = BookSummary.model_validate(book)
     out.logline = (book.concept or {}).get("logline", "")
     out.job_status = job_status
-    out.teardown = teardown_summary(book, preview)
+    out.teardown = teardown_summary(book, preview, read=read)
     return out
 
 
@@ -62,19 +62,21 @@ async def detail(session: AsyncSession, book: Book) -> BookDetail:
     preview = None
     if book.source == "teardown" and (book.teardown or {}).get("stage") == "confirming":
         preview = await session.scalar(select(TeardownSource.preview).where(TeardownSource.book_id == book.id))
-    out.teardown = teardown_summary(book, preview)
     out.logline = (book.concept or {}).get("logline", "")
     job = await jobs.active_job(session, book.id)
     out.active_job = JobOut.model_validate(job) if job else None
     out.job_status = job.status if job else None
-    count, words = (
+    count, words, read = (
         await session.execute(
-            select(func.count(), func.coalesce(func.sum(Chapter.word_count), 0)).where(
-                Chapter.book_id == book.id, Chapter.status == "final"
-            )
+            select(
+                func.count().filter(Chapter.status == "final"),
+                func.coalesce(func.sum(Chapter.word_count).filter(Chapter.status == "final"), 0),
+                func.count().filter(Chapter.teardown["read_version"].astext.is_not(None)),
+            ).where(Chapter.book_id == book.id)
         )
     ).one()
     out.chapters_final, out.words_final = int(count), int(words)
+    out.teardown = teardown_summary(book, preview, read=int(read))
     out.chapter_words = chapter_words(book)
     return out
 
@@ -100,7 +102,21 @@ async def list_books(session: AsyncSession = SessionDep) -> list[BookSummary]:
         if confirming
         else {}
     )
-    return [summary(b, status_by_book.get(b.id), previews.get(b.id)) for b in rows]
+    teardown_ids = [b.id for b in rows if b.source == "teardown"]
+    read_by_book = (
+        dict(
+            (
+                await session.execute(
+                    select(Chapter.book_id, func.count())
+                    .where(Chapter.book_id.in_(teardown_ids), Chapter.teardown["read_version"].astext.is_not(None))
+                    .group_by(Chapter.book_id)
+                )
+            ).all()
+        )
+        if teardown_ids
+        else {}
+    )
+    return [summary(b, status_by_book.get(b.id), previews.get(b.id), read=read_by_book.get(b.id, 0)) for b in rows]
 
 
 @router.post("/books", response_model=BookCreated, status_code=201)

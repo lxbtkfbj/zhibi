@@ -109,7 +109,7 @@ try {
   await expect(strip.getByRole('button', { name: '正在停：读完手上这几章就停', exact: true })).toBeDisabled()
   check('stop HTTP返回running后仍禁用，等待SSE终态')
   since = evidence.calls.length
-  currentJob = { ...currentJob, status: 'cancelled' }; book.active_job = null; book.teardown.stage = 'stopped'; book.teardown.stop_note = '你点了停下，停在第 12 章。'
+  currentJob = { ...currentJob, status: 'cancelled' }; book.active_job = null; book.teardown.stage = 'stopped'; book.teardown.stop_note = '已手动停下，停在第 12 章。'
   await emit('job', currentJob)
   await expect(strip.getByRole('button', { name: '接着拆', exact: true })).toBeVisible()
   await pause()

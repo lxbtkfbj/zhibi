@@ -93,7 +93,21 @@ async def test_author_stop_does_not_collect_settings(sessionmaker, redis, monkey
     await runner.finish()
     collect.assert_not_awaited()
     async with sessionmaker() as session:
-        assert (await session.get(Book, bid)).teardown["stop_reason"] == "author"
+        book = await session.get(Book, bid)
+        assert book.teardown["stop_reason"] == "author"
+        assert book.teardown["stop_note"] == "已手动停下，停在第 8 章。"
+
+
+async def test_author_stop_during_settings_uses_formal_stop_note(sessionmaker, redis, monkeypatch):
+    bid, jid = await create_book(sessionmaker, count=8, upto=5, read=True)
+    monkeypatch.setattr("app.services.teardown_settings.collect_settings", AsyncMock(side_effect=JobCancelled()))
+    runner = Runner(jid, sessionmaker, redis, DemoRouter())
+    await runner.initialize()
+    await runner.finish()
+    async with sessionmaker() as session:
+        book = await session.get(Book, bid)
+        assert book.teardown["stop_reason"] == "author"
+        assert book.teardown["stop_note"] == "已手动停下，停在第 8 章。"
 
 
 @pytest.mark.parametrize("step", ["settings", "merits"])
