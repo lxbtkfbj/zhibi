@@ -9,8 +9,6 @@ export interface TeardownNumberIssue {
   end_number?: number
 }
 
-export type TeardownVolumeMode = 'original' | 'editor'
-
 export interface TeardownIgnoredHeading {
   index: number
   title: string
@@ -35,8 +33,6 @@ export interface TeardownPreview extends TeardownFields {
   chars: number
   chapter_count: number
   volumes: { index: number; title: string; chapters: number }[]
-  volume_mode: TeardownVolumeMode
-  largest_volume: { index: number; title: string; chapters: number } | null
   first: { index: number; title: string } | null
   last: { index: number; title: string } | null
   opening: string
@@ -87,9 +83,7 @@ export function teardownPreviewTotals(preview: TeardownPreview, include: readonl
 export function teardownSplitText(preview: TeardownPreview, include: readonly number[] = []): string {
   const totals = teardownPreviewTotals(preview, include)
   if (preview.by_length) return `没认出章节标题，按三千字左右切成了 ${totals.chapters} 段`
-  return preview.volumes.length
-    ? `共 ${teardownWords(totals.chars)} · 分了 ${preview.volumes.length} 卷、${totals.chapters} 章`
-    : `共 ${teardownWords(totals.chars)} · ${totals.chapters} 章，原书没有分卷`
+  return `共 ${teardownWords(totals.chars)} · ${totals.chapters} 章，拆的时候主编按剧情分卷`
 }
 
 export function teardownNumberIssueText(issue: TeardownNumberIssue): string {
@@ -132,12 +126,6 @@ export function teardownIgnoredHeadingSelection(preview: TeardownPreview, includ
     })),
     ignored_heading_total: preview.ignored_heading_total,
   }
-}
-
-export function teardownVolumeDefaultText(volume: TeardownPreview['largest_volume']): string | null {
-  return volume && volume.chapters > 400
-    ? `原书的「${volume.title}」一卷有 ${volume.chapters} 章，太粗，默认让主编按剧情分。`
-    : null
 }
 
 export function teardownCleaningText(preview: Pick<TeardownPreview, 'ads_removed' | 'duplicates_removed'>): string {

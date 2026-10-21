@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { createTeardownFieldSaver, teardownCleaningText, teardownIgnoredHeadingSelection, teardownIgnoredHeadingText, teardownNumberIssueText, teardownPreviewTotals, teardownSplitText, teardownVolumeDefaultText, teardownWords } from '../src/lib/teardownPreview.ts'
+import { createTeardownFieldSaver, teardownCleaningText, teardownIgnoredHeadingSelection, teardownIgnoredHeadingText, teardownNumberIssueText, teardownPreviewTotals, teardownSplitText, teardownWords } from '../src/lib/teardownPreview.ts'
 
 const preview = {
   chars: 1720000, chapter_count: 499, volumes: [{ index: 1, title: '初入江湖', chapters: 499 }], by_length: false,
@@ -9,8 +9,8 @@ const preview = {
 }
 
 test('分章确认有卷、没有卷、按字数切的数字和措辞一致', () => {
-  assert.equal(teardownSplitText(preview), '共 172 万字 · 分了 1 卷、499 章')
-  assert.equal(teardownSplitText({ ...preview, chars: 2230000, chapter_count: 670, volumes: [] }), '共 223 万字 · 670 章，原书没有分卷')
+  assert.equal(teardownSplitText(preview), '共 172 万字 · 499 章，拆的时候主编按剧情分卷')
+  assert.equal(teardownSplitText({ ...preview, chars: 2230000, chapter_count: 670, volumes: [] }), '共 223 万字 · 670 章，拆的时候主编按剧情分卷')
   assert.equal(teardownSplitText({ ...preview, by_length: true, chapter_count: 8 }), '没认出章节标题，按三千字左右切成了 8 段')
   assert.equal(teardownWords(9999), '9,999 字')
   assert.equal(teardownWords(10000), '1 万字')
@@ -20,7 +20,7 @@ test('不像正文默认排除，勾回时只加这份预览里的章数和字�
   assert.deepEqual(teardownPreviewTotals(preview, []), { chars: 1720000, chapters: 499 })
   assert.deepEqual(teardownPreviewTotals(preview, [0, 0, 501, 999]), { chars: 1720150, chapters: 501 })
   assert.equal(preview.chars, 1720000)
-  assert.equal(teardownSplitText({ ...preview, chars: 400, volumes: [] }, [0]), '共 450 字 · 500 章，原书没有分卷')
+  assert.equal(teardownSplitText({ ...preview, chars: 400, volumes: [] }, [0]), '共 450 字 · 500 章，拆的时候主编按剧情分卷')
 })
 
 test('原书章号四种不对的说明逐字使用任务措辞，单章和多章缺漏不同', () => {
@@ -34,11 +34,8 @@ test('原书章号四种不对的说明逐字使用任务措辞，单章和多�
   assert.equal(teardownNumberIssueText({ ...issue, expected: 1790, number: 1780, count: 8, end_index: 1797, end_number: 1787, kind: '打错了' }), '原书把第 1790–1797 章写成了「第1780章」到「第1787章」')
 })
 
-test('忽略的假标题和超400章原卷说明逐字照任务，400章不提醒', () => {
+test('忽略的假标题逐字照任务', () => {
   assert.equal(teardownIgnoredHeadingText({ index: 810, title: '复仇', line: '第1章' }), '第 810 章「复仇」里的「第1章」')
-  assert.equal(teardownVolumeDefaultText({ index: 2, title: '苍风烟云', chapters: 2099 }), '原书的「苍风烟云」一卷有 2099 章，太粗，默认让主编按剧情分。')
-  assert.equal(teardownVolumeDefaultText({ index: 1, title: '原卷', chapters: 400 }), null)
-  assert.equal(teardownVolumeDefaultText(null), null)
 })
 
 test('勾回前置排除章和排除章自身时假标题实时重编号，取消恢复，20条上限重算', () => {
@@ -126,7 +123,7 @@ test('上传和确认页只接 TXT、提供上传进度、编码失败保留预�
   assert.match(page, /reason\.status === 409.*\/desk\//)
   assert.match(page, /replace: true, state: \{ teardownHome: true \}/)
   assert.match(page, /navigate\(`\/desk\/\$\{bookId\}`, \{ state: \{ teardownHome: true \} \}\)/)
-  assert.match(page, /importTeardown\(bookId, fieldsRef\.current, include, start \? \{ upto \} : undefined, volumeMode\)/)
+  assert.match(page, /importTeardown\(bookId, fieldsRef\.current, include, start \? \{ upto \} : undefined\)/)
   assert.match(page, /if \(operating\.current \|\| !preview\) return/)
 })
 
@@ -141,20 +138,19 @@ test('字段保存失败独立显示，最新一次保存成功清掉旧错误�
   assert.doesNotMatch(page, /saveFields\(\)\.catch\(setError\)/)
 })
 
-test('繁简重预览沿用编码的保存队列，分卷只切本地选择，补章节不显示繁简和分卷选择', () => {
+test('繁简重预览沿用编码保存队列，新导入不再选择分卷，补章仍保留原卷信息', () => {
   const page = readFileSync(new URL('../src/pages/Teardown.tsx', import.meta.url), 'utf8')
   const api = readFileSync(new URL('../src/api/teardown.ts', import.meta.url), 'utf8')
   const confirm = page.slice(page.indexOf('function TeardownConfirmBook'), page.indexOf('export function TeardownAppendPage'))
   const append = page.slice(page.indexOf('function TeardownAppendBook'))
-  for (const text of ['原文是繁体，导入时转成简体', '转成简体，拆出来的人名、设定都用简体，不容易把同一个人认成两个', '照原书分卷', '让主编按剧情分卷', '主编一边拆一边分，大约每一百章一卷，收在大高潮上。下面原书的卷名不用。']) assert.ok(confirm.includes(text))
+  for (const text of ['原文是繁体，导入时转成简体', '转成简体，拆出来的人名、设定都用简体，不容易把同一个人认成两个']) assert.ok(confirm.includes(text))
   assert.match(confirm, /preview\.traditional &&/)
   assert.match(confirm, /checked=\{preview\.t2s\}/)
   assert.match(confirm, /changeTeardownEncoding\(bookId, encoding, t2s\)/)
   assert.match(confirm, /t2s = preview\?\.traditional \? preview\.t2s : undefined/)
-  assert.match(confirm, /setVolumeMode\(data\.volume_mode \?\? 'original'\)/)
-  assert.match(confirm, /aria-pressed=\{volumeMode === mode\}/)
-  assert.match(confirm, /onClick=\{\(\) => \{ setVolumeMode\(mode\); setConfirmDelete\(false\) \}\}/)
-  assert.match(api, /volume_mode: volumeMode/)
+  assert.doesNotMatch(confirm, /setVolumeMode|largest_volume|<h2>分卷<\/h2>/)
+  assert.doesNotMatch(api, /volume_mode|volumeMode/)
+  assert.match(append, /aria-label="分卷"/)
   assert.match(api, /t2s === undefined \? \{\} : \{ t2s \}/)
   assert.doesNotMatch(append, /preview\.traditional|setVolumeMode|原文是繁体/)
   assert.match(confirm, /<IgnoredHeadings preview=\{preview\} include=\{include\} \/>/)

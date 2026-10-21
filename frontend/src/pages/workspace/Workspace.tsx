@@ -14,7 +14,7 @@ import { DeskManuscript } from './desk-v2/ManuscriptPages'
 import { EssenceDirectory, EssencePage, TeardownIntro } from './desk-v2/EssencePages'
 import { ESSENCE_NAMES, type EssenceKey } from './desk-v2/essenceData'
 import { DraggableBall } from './desk-v2/DraggableBall'
-import { clearTeardownEntry, readWorkspaceReadingPosition, teardownEntryTab, writeWorkspaceReadingPosition, type WorkspaceReadingPosition } from '../../lib/workspaceReadingPosition'
+import { clearTeardownEntry, initialWorkspaceDirectoryOpen, readWorkspaceReadingPosition, teardownEntryTab, writeWorkspaceReadingPosition, type WorkspaceReadingPosition } from '../../lib/workspaceReadingPosition'
 import { BookContext } from '../book/context'
 import { ActionsContext, type DraftItem, type EntryChange, type RewriteMode, type RewriteOutcome, type WorkspaceActions, blankEntry, childKind, draftToEntry, useSave, useWorkspace, withFields } from './actions'
 import { applyTemplate, cn, emptyCategory, findEntry, findNode, splitTitle, templateOf, type CardTemplate, type FieldItem, type VBook, type VCategory, type VEntry, type VNode } from './model'
@@ -34,7 +34,7 @@ const ROLE_STYLE: Record<string, string> = {
 
 /** 页面之间互相跳：关系点到人，出场点到大纲节点，大纲用到的设定点回设定。 */
 interface Nav {
-  openEntry: (id: string) => void
+  openEntry: (id: string, reveal?: boolean) => void
   openNode: (id: string) => void
   /** 正文里的某一章；home 是正文首页（开写） */
   openChapter: (id: string) => void
@@ -457,7 +457,7 @@ function FloatingEditorial({ setDock, children, size, tools }: { setDock: (dock:
   const [nearEdge, setNearEdge] = useState(false)
 
   const start = (e: ReactPointerEvent) => {
-    if ((e.target as Element).closest('button') || !ref.current) return
+    if ((e.target as Element).closest('button, a, input, textarea, select, [role="listbox"]') || !ref.current) return
     const rect = ref.current.getBoundingClientRect()
     drag.current = { dx: e.clientX - rect.left, dy: e.clientY - rect.top }
     ;(e.currentTarget as Element).setPointerCapture(e.pointerId)
@@ -809,12 +809,7 @@ export function Workspace({ book: base, actions: rawActions, right, sideFooter, 
   const [freshNode, setFreshNode] = useState('')
   // 章号跟着位置走：插在第 1 章前面的新章还是 c1，要让大纲页重新来一遍
   const [nodeNonce, setNodeNonce] = useState(0)
-  const [open, setOpen] = useState(() => {
-    if (initialPosition.directoryVersion === 1) return initialPosition.open
-    const category = base.categories.find(c => c.entries.some(e => e.id === initialPosition.entry) || `cat:${c.name}` === initialPosition.entry)
-    const id = initialPosition.entry === 'world' ? 'world' : category ? `cat:${category.name}` : null
-    return id ? [...new Set([...initialPosition.open, id])] : initialPosition.open
-  })
+  const [open, setOpen] = useState(() => initialWorkspaceDirectoryOpen(base, initialPosition))
   // 正文里看的是哪一章；home 是正文首页（开写）
   const [chapter, setChapter] = useState(initialPosition.chapter)
   const [searchWord, setSearchWord] = useState('')
@@ -828,7 +823,7 @@ export function Workspace({ book: base, actions: rawActions, right, sideFooter, 
   const pageRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
-    writeWorkspaceReadingPosition(base, { tab, entry, node, chapter, open, directoryVersion: 1, ...(teardown ? { essence: essenceKey } : {}) }, defaultPosition, { live: actions.live, manuscript: !!writing })
+    writeWorkspaceReadingPosition(base, { tab, entry, node, chapter, open, directoryVersion: 2, ...(teardown ? { essence: essenceKey } : {}) }, defaultPosition, { live: actions.live, manuscript: !!writing })
   }, [actions.live, base, chapter, defaultPosition, entry, node, open, tab, writing, teardown, essenceKey])
 
   useEffect(() => {
@@ -916,12 +911,12 @@ export function Workspace({ book: base, actions: rawActions, right, sideFooter, 
   }, [actions, book.categories, report, onUndo])
 
   const nav: Nav = {
-    openEntry: (id) => {
+    openEntry: (id, reveal = true) => {
       setTab('设定')
       setEntry(id)
       const category = book.categories.find(c => c.entries.some(e => e.id === id) || `cat:${c.name}` === id)
       const expanded = id === 'world' || id.startsWith('cat:') ? id : category ? `cat:${category.name}` : null
-      if (expanded) setOpen(list => [...new Set([...list, expanded])])
+      if (expanded && reveal) setOpen(list => [...new Set([...list, expanded])])
       setFresh('')
       pageRef.current?.scrollTo({ top: 0 })
     },

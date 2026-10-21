@@ -192,18 +192,33 @@ def split(
     units = {mark[2] for mark in marks if mark and mark[0] == "ch"}
     # 有「章」又有「节」时，节是章内小节，不另起一章。
     sub_sections = "节" in units and ("章" in units or "回" in units)
+    # 看原文里的下一个候选章标题，而不是看已接受的标题；正文夹行不能
+    # 改写这份前瞻，也不能让一次真跳号把书末全部吞进当前章。
+    next_numbers: list[int | None] = [None] * len(lines)
+    following_number = None
+    for index in range(len(lines) - 1, -1, -1):
+        next_numbers[index] = following_number
+        mark = marks[index]
+        if mark and mark[0] == "both":
+            following_number = parse_number(CH.match(mark[2]).group("num"))
+        elif mark and mark[0] == "ch" and not (mark[2] == "节" and sub_sections):
+            following_number = parse_number(CH.match(lines[index]).group("num"))
     info: dict[str, str] = {}
     intro: list[str] = []
     volumes: list[str] = []
     pieces: list[Piece] = []
     current: Piece | None = None
     in_intro = False
-    for line, raw, mark in zip(lines, raw_lines, marks, strict=True):
+    for index, (line, raw, mark) in enumerate(zip(lines, raw_lines, marks, strict=True)):
         if mark and mark[0] == "ch" and mark[2] == "节" and sub_sections:
             mark = None
         if mark and mark[0] == "ch" and not mark[1] and current is not None and current.number is not None:
             number = parse_number(CH.match(line).group("num"))
-            if number not in (current.number + 1, current.number + 2):
+            if number not in (current.number + 1, current.number + 2) and next_numbers[index] not in (
+                number + 1,
+                number + 2,
+                current.number + 2,
+            ):
                 current.ignored_headings.append(line)
                 mark = None
         if mark is None:
@@ -284,9 +299,14 @@ def split(
     dropped = 0
     main_number: int | None = None
     foreign_number: int | None = None
+    previous_volume: int | None = None
+    foreign_chain: list[Piece] = []
     for piece in pieces:
         if piece.number is not None:
-            if main_number is not None and main_number >= 50:
+            if main_number is not None and piece.volume != previous_volume:
+                main_number, foreign_number = piece.number, None
+                foreign_chain = []
+            elif main_number is not None and main_number >= 50:
                 foreign = piece.number < main_number - 5 and (
                     (bool(piece.title) and 1 <= piece.number <= 3)
                     or (foreign_number is not None and piece.number == foreign_number + 1)
@@ -294,10 +314,18 @@ def split(
                 if foreign:
                     piece.flags.append("像是混进来的别的书")
                     foreign_number = piece.number
+                    foreign_chain.append(piece)
+                    if len(foreign_chain) >= 6:
+                        for candidate in foreign_chain:
+                            candidate.flags.remove("像是混进来的别的书")
+                        main_number, foreign_number = piece.number, None
+                        foreign_chain = []
                 else:
                     main_number, foreign_number = piece.number, None
+                    foreign_chain = []
             else:
                 main_number = piece.number
+            previous_volume = piece.volume
         key = (piece.number, piece.title) if piece.number is not None else None
         versions = previous_versions.get(key, []) if key else []
         if (
@@ -439,7 +467,6 @@ def make_preview(result: dict, filename: str, size: int, *, encoding_auto: bool 
         {"index": index, "title": title, "chapters": counts.get(index, 0)}
         for index, title in enumerate(result["volumes"], 1)
     ]
-    largest_volume = max(volumes, key=lambda volume: volume["chapters"], default=None)
     chapter_indices = {id(piece): index for index, piece in enumerate(chapters, 1)}
     ignored_heading_candidates = [
         {"order": order, "title": piece.title, "line": line}
@@ -467,8 +494,6 @@ def make_preview(result: dict, filename: str, size: int, *, encoding_auto: bool 
         "chars": sum(piece.chars for piece in chapters),
         "chapter_count": len(chapters),
         "volumes": volumes,
-        "volume_mode": "editor" if largest_volume and largest_volume["chapters"] > 400 else "original",
-        "largest_volume": largest_volume,
         "first": {"index": 1, "title": chapters[0].title} if chapters else None,
         "last": {"index": len(chapters), "title": chapters[-1].title} if chapters else None,
         "opening": chapters[0].text[:300] if chapters else "",

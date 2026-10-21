@@ -7,6 +7,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import ts from 'typescript'
 import * as model from '../src/pages/workspace/model.ts'
 import * as reading from '../src/lib/teardownReading.ts'
+import * as status from '../src/lib/status.ts'
 import * as closing from '../src/lib/teardownWholebook.ts'
 import * as start from '../src/lib/teardownStart.ts'
 import * as settings from '../src/pages/workspace/desk-v2/settingsData.ts'
@@ -43,6 +44,7 @@ const outline = load('../src/pages/workspace/desk-v2/OutlinePages.tsx', {
 })
 const chrome = load('../src/pages/workspace/desk-v2/Chrome.tsx', {
   '@tanstack/react-query': query, 'react-router-dom': { Link: ({ to, children, ...props }) => React.createElement('a', { href: to, ...props }, children) },
+  '../../../api/hooks': { useBooks: () => ({ data: [] }) }, '../../../lib/status': status,
   '../../../api/textSearch': {}, '../../../lib/teardownReading': { ...reading, readTeardownReading: () => null },
   '../../../lib/teardownProgress': { teardownProgressView }, '../../../lib/teardownStart': start,
   '../TeardownProgress': { useTeardownControl: () => control }, '../model': model, '../actions': workspace, './shared': shared, './settingsData': settings,

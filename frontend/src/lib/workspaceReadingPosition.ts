@@ -5,7 +5,7 @@ import type { EssenceKey } from '../pages/workspace/desk-v2/essenceData'
 export interface WorkspaceReadingPosition {
   tab: '简介' | '精髓' | '设定' | '大纲' | '正文'
   essence?: EssenceKey
-  directoryVersion?: 1
+  directoryVersion?: 1 | 2
   entry: string
   node: string
   chapter: string
@@ -18,6 +18,16 @@ const memory = new Map<string, unknown>()
 const key = (bookId: string) => `zhibi:workspace-reading:${bookId}`
 const tabs: WorkspaceReadingPosition['tab'][] = ['简介', '精髓', '设定', '大纲', '正文']
 const essenceKeys = new Set(['overview', 'source', 'skeleton', 'link', 'fresh', 'longline', 'setting', 'shuang', 'scene', 'hero', 'cast', 'rhythm', 'opening'])
+
+/** 旧目录没有篇折叠状态；首次补齐所有篇，之后只恢复明确保存的状态。 */
+export function initialWorkspaceDirectoryOpen(book: ReadingBook, position: WorkspaceReadingPosition): string[] {
+  const arcs = book.outline.children?.filter(item => item.kind === '篇').map(item => item.id) ?? []
+  const expanded = position.directoryVersion === 2 ? position.open : [...new Set([...position.open, ...arcs])]
+  if (position.directoryVersion) return expanded
+  const category = book.categories.find(c => c.entries.some(e => e.id === position.entry) || `cat:${c.name}` === position.entry)
+  const id = position.entry === 'world' ? 'world' : category ? `cat:${category.name}` : null
+  return id ? [...new Set([...expanded, id])] : expanded
+}
 
 /** 书架进简介、导入后进正文首页；仅覆盖这次进入，不改变阅读记忆。 */
 export function teardownEntryTab(source: unknown, state: unknown): WorkspaceReadingPosition['tab'] | undefined {
@@ -53,7 +63,7 @@ export function resolveWorkspaceReadingPosition(book: ReadingBook, value: unknow
   return {
     tab: tab === '精髓' && book.source !== 'teardown' ? fallback.tab === '精髓' ? '设定' : fallback.tab : tab === '正文' && !manuscript ? '设定' : tab,
     ...(essence === undefined ? {} : { essence }),
-    ...(saved.directoryVersion === 1 ? { directoryVersion: 1 as const } : {}),
+    ...([1, 2].includes(saved.directoryVersion as number) ? { directoryVersion: saved.directoryVersion as 1 | 2 } : {}),
     entry: typeof saved.entry === 'string' && !saved.entry.startsWith('draft-') && entries.has(saved.entry) ? saved.entry : fallback.entry,
     node: typeof saved.node === 'string' && nodes.has(saved.node) ? saved.node : fallback.node,
     chapter: typeof saved.chapter === 'string' && (saved.chapter === 'home' || chapters.has(saved.chapter)) ? saved.chapter : fallback.chapter,

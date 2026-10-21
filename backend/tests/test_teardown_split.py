@@ -570,12 +570,12 @@ def test_false_volume_heading_remains_in_body(unit, name):
     assert line in result["chapters"][0].text
 
 
-@pytest.mark.parametrize("count,mode", [(400, "original"), (401, "editor")])
-def test_large_volume_default_is_editor_only_above_four_hundred(count, mode):
+@pytest.mark.parametrize("count", [400, 401])
+def test_volume_preview_no_longer_offers_volume_mode(count):
     data = ("第一卷 大卷\n" + "\n".join(f"第{n}章 第{n}日\n正文。" for n in range(1, count + 1))).encode()
     preview = make_preview(split(data), "样本.txt", len(data))
-    assert preview["volume_mode"] == mode
-    assert preview["largest_volume"] == {"index": 1, "title": "大卷", "chapters": count}
+    assert "volume_mode" not in preview and "largest_volume" not in preview
+    assert preview["volumes"] == [{"index": 1, "title": "大卷", "chapters": count}]
 
 
 @pytest.mark.parametrize("count", [1, 2, 8, 10])

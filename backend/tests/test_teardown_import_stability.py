@@ -70,15 +70,16 @@ async def test_t2s_preview_switch_import_and_append_follow_book(client, sessionm
         assert chapters[1].content.startswith("头发与发展" if convert else "頭髮與發展")
 
 
-@pytest.mark.parametrize("mode", ["editor", "original"])
-async def test_volume_mode_matches_no_volume_or_original_exactly(client, sessionmaker, mode):
+@pytest.mark.parametrize("mode", [None, "editor", "original"])
+async def test_every_import_matches_no_volume_exactly_even_legacy_mode(client, sessionmaker, mode):
     body = "第一章 开始\n山林中的人向前走。\n第二章 继续\n山林中的人停下来。"
     normal = await upload(client, body)
     assert (await client.post(f"/api/teardown/{normal['book_id']}/import", json={})).status_code == 200
     with_volumes = await upload(client, "第一卷 山林\n" + body.replace("第二章", "第二卷 远方\n第二章"))
-    assert with_volumes["volume_mode"] == "original"
+    assert "volume_mode" not in with_volumes and "largest_volume" not in with_volumes
     bid = with_volumes["book_id"]
-    assert (await client.post(f"/api/teardown/{bid}/import", json={"volume_mode": mode})).status_code == 200
+    payload = {} if mode is None else {"volume_mode": mode}
+    assert (await client.post(f"/api/teardown/{bid}/import", json=payload)).status_code == 200
     async with sessionmaker() as session:
         book = await session.get(Book, uuid.UUID(bid))
         base = await session.get(Book, uuid.UUID(normal["book_id"]))
@@ -86,30 +87,24 @@ async def test_volume_mode_matches_no_volume_or_original_exactly(client, session
         chapters = list(
             await session.scalars(select(Chapter).where(Chapter.book_id == book.id).order_by(Chapter.index))
         )
-        if mode == "editor":
-            base_volume = await session.scalar(select(Volume).where(Volume.book_id == base.id))
-            fields = ("title", "status", "chapter_count", "summary", "index")
-            assert len(volumes) == 1
-            assert [getattr(volumes[0], key) for key in fields] == [getattr(base_volume, key) for key in fields]
-            assert book.teardown["original_volumes"] is base.teardown["original_volumes"] is False
-            assert book.teardown["open_volume_id"] == str(volumes[0].id)
-            assert base.teardown["open_volume_id"] == str(base_volume.id)
-            assert all(ch.volume_id == volumes[0].id for ch in chapters)
-        else:
-            assert book.teardown["original_volumes"] is True and book.teardown["open_volume_id"] is None
-            assert [volume.title for volume in volumes] == ["山林", "远方"]
-            assert [volume.chapter_count for volume in volumes] == [1, 1]
-            assert [ch.volume_id for ch in chapters] == [volume.id for volume in volumes]
-    if mode == "editor":
-        tree = (await client.get(f"/api/books/{bid}/outline-tree")).json()
-        assert tree["arcs"][0]["volumes"][0]["open"] is True
+        base_volume = await session.scalar(select(Volume).where(Volume.book_id == base.id))
+        fields = ("title", "status", "chapter_count", "summary", "index")
+        assert len(volumes) == 1 and volumes[0].title == "还没分卷"
+        assert [getattr(volumes[0], key) for key in fields] == [getattr(base_volume, key) for key in fields]
+        assert book.teardown["original_volumes"] is base.teardown["original_volumes"] is False
+        assert book.teardown["open_volume_id"] == str(volumes[0].id)
+        assert base.teardown["open_volume_id"] == str(base_volume.id)
+        assert all(ch.volume_id == volumes[0].id for ch in chapters)
+    tree = (await client.get(f"/api/books/{bid}/outline-tree")).json()
+    assert tree["arcs"][0]["volumes"][0]["open"] is True
 
 
-async def test_legacy_import_uses_preview_default_for_large_volume(client, sessionmaker):
+async def test_large_volume_import_also_uses_editor_without_preview_choice(client, sessionmaker):
     preview = await upload(
         client, "第一卷 大卷\n" + "\n".join(f"第{i}章 章名{i}\n山林中的人向前走到第{i}处。" for i in range(1, 402))
     )
-    assert preview["volume_mode"] == "editor" and preview["largest_volume"]["chapters"] == 401
+    assert "volume_mode" not in preview and "largest_volume" not in preview
+    assert preview["volumes"][0]["chapters"] == 401
     bid = preview["book_id"]
     assert (await client.post(f"/api/teardown/{bid}/import", json={})).status_code == 200
     async with sessionmaker() as session:

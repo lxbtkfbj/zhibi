@@ -136,20 +136,29 @@ async def waits(session, book) -> dict:
 
 async def appearances(session, book, character_id) -> dict:
     if book.source != "teardown":
-        return {"chapters": []}
+        return {"chapters": [], "lines": []}
     character = await session.scalar(
         select(Character).where(Character.id == character_id, Character.book_id == book.id)
     )
     if character is None:
         raise HTTPException(404, "角色不存在")
     names = {name.strip() for name in [character.name, *(character.aliases or [])] if name.strip()}
-    chapters = []
+    chapters, lines = [], []
     for chapter in await read_records(session, book.id):
-        if any(
-            person["name"].strip() in names
+        matches = [
+            person
+            for person in chapter["read"].get("people", [])
+            if person["name"].strip() in names
             or person.get("was", "").strip() in names
             or names.intersection(alias.strip() for alias in person.get("also_called", []))
-            for person in chapter["read"].get("people", [])
-        ):
-            chapters.append(chapter["index"])
-    return {"chapters": chapters}
+        ]
+        if not matches:
+            continue
+        chapters.append(chapter["index"])
+        shown, change = (
+            "；".join(person.get(key) or "" for person in matches if (person.get(key) or "").strip())
+            for key in ("shown", "change")
+        )
+        if shown or change:
+            lines.append({"chapter": chapter["index"], "shown": shown, "change": change})
+    return {"chapters": chapters, "lines": lines}

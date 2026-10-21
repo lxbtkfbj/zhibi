@@ -126,7 +126,13 @@ async def test_digest_scope_global_hero_names_dedup_first_occurrences_readonly(c
 async def test_digest_queries_appearance_cross_book_and_author_empty(client, sessionmaker):
     bid, uid, vid, foreign, cid, foreign_char = await fixture_book(sessionmaker)
     assert (await client.get(f"/api/books/{bid}/teardown/appearances", params={"character": str(cid)})).json() == {
-        "chapters": [1, 2, 3, 4]
+        "chapters": [1, 2, 3, 4],
+        "lines": [
+            {"chapter": 1, "shown": "出场；出场", "change": "变化1"},
+            {"chapter": 2, "shown": "出场；出场", "change": "别名变化；旧名变化"},
+            {"chapter": 3, "shown": "出场", "change": ""},
+            {"chapter": 4, "shown": "出场", "change": ""},
+        ],
     }
     for params, status in [
         ({}, 422),
@@ -153,7 +159,8 @@ async def test_digest_queries_appearance_cross_book_and_author_empty(client, ses
         "changes": [],
     }
     assert (await client.get(f"/api/books/{bid}/teardown/appearances", params={"character": str(cid)})).json() == {
-        "chapters": []
+        "chapters": [],
+        "lines": [],
     }
 
 

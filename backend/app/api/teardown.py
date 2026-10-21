@@ -3,7 +3,6 @@
 import hashlib
 import uuid
 from datetime import UTC, datetime
-from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field
@@ -37,7 +36,6 @@ class ImportIn(BaseModel):
     author: str | None = Field(None, max_length=200)
     include: list[int] = Field(default_factory=list)
     start: StartIn | None = None
-    volume_mode: Literal["original", "editor"] | None = None
 
 
 class AppendIn(BaseModel):
@@ -178,26 +176,22 @@ async def import_book(
     meta = dict(book.teardown)
     if body.author is not None:
         meta["author"] = body.author
-    volume_mode = body.volume_mode or (source.preview or {}).get("volume_mode", "original")
-    original_volumes = bool(result["volumes"]) and volume_mode == "original"
-    names = result["volumes"] if original_volumes else ["还没分卷"]
     volumes = [
         Volume(
             id=uuid.uuid4(),
             book_id=book.id,
-            index=i,
-            title=name,
+            index=1,
+            title="还没分卷",
             status="done",
-            chapter_count=sum(1 for piece in selected if not original_volumes or (piece.volume or 1) == i),
+            chapter_count=len(selected),
         )
-        for i, name in enumerate(names, 1)
     ]
     session.add_all(volumes)
     await session.flush()
     rows = [
         {
             "book_id": book.id,
-            "volume_id": volumes[(piece.volume or 1) - 1 if original_volumes else 0].id,
+            "volume_id": volumes[0].id,
             "index": i,
             "title": piece.title,
             "content": piece.text,
@@ -215,8 +209,8 @@ async def import_book(
     meta.update(
         stage="imported",
         imported_at=datetime.now(UTC).isoformat(),
-        original_volumes=original_volumes,
-        open_volume_id=None if original_volumes else str(volumes[0].id),
+        original_volumes=False,
+        open_volume_id=str(volumes[0].id),
         t2s=result["t2s"],
         split={
             "chapters": len(rows),

@@ -88,11 +88,15 @@ async def test_upload_preview_encoding_import_and_archive(client, sessionmaker):
         assert chapters[0].teardown["number"] is None
         assert all(c.word_count == len("".join(c.content.split())) for c in chapters)
         volumes = list(await session.scalars(select(Volume).order_by(Volume.index)))
-        assert [v.chapter_count for v in volumes] == [4, 1]
+        assert [v.chapter_count for v in volumes] == [5]
+        assert volumes[0].title == "还没分卷"
+        assert all(c.volume_id == volumes[0].id for c in chapters)
         assert all(v.status == "done" for v in volumes)
         book = await session.get(Book, uuid.UUID(bid))
         assert book.teardown["imported_at"] == imported_at
-        assert book.teardown["open_volume_id"] is None and book.teardown["split"]["number_issue_total"] == 1
+        assert book.teardown["original_volumes"] is False
+        assert book.teardown["open_volume_id"] == str(volumes[0].id)
+        assert book.teardown["split"]["number_issue_total"] == 1
         save = await session.scalar(select(BookSave))
         assert save.title == "导入原文" and "teardown_sources" not in save.tree
     for method, path, kwargs in [
