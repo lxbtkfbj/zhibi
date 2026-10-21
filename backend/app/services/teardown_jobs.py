@@ -143,11 +143,14 @@ async def stop(session, redis, book: Book):
     await redis.set(cancel_key(job.id), "1", ex=24 * 3600)
     if job.status == "queued":
         previous = (job.params or {}).get("previous_teardown")
+        title_edited = (book.teardown or {}).get("title_edited")
         book.teardown = (
             dict(previous)
             if previous
             else {**(book.teardown or {}), "stage": (job.params or {}).get("previous_stage", "imported")}
         )
+        if title_edited:
+            book.teardown = {**book.teardown, "title_edited": True}
         job.status = "cancelled"
         job.pending = None
         job.finished_at = datetime.now(UTC)

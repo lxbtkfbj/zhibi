@@ -1,6 +1,6 @@
 import type { TeardownSummary } from '../api/types'
 import type { TeardownAppendPreview, TeardownNumberIssue } from './teardownPreview'
-import { teardownPreviewTotals } from './teardownPreview.ts'
+import { teardownIgnoredHeadingSelection, teardownPreviewTotals } from './teardownPreview.ts'
 
 /** 勾回只改变展示计划；后台确认时仍会对着当时的书重新分章计算。 */
 export function teardownAppendSelection(preview: TeardownAppendPreview, include: readonly number[]): TeardownAppendPreview {
@@ -23,7 +23,7 @@ export function teardownAppendSelection(preview: TeardownAppendPreview, include:
     if (context.original_volumes && lastVolume.summary) reopen.push({ kind: 'summary', title: lastVolume.title })
     if (!context.original_volumes && !context.open_volume_id) reopen.push({ kind: 'volume', title: lastVolume.title })
   }
-  const numbered = selected.map((chapter, index) => ({ ...chapter, index: preview.previous.chapters + index + 1 })).filter(chapter => chapter.number !== null && !chapter.flags.includes('番外'))
+  const numbered = selected.map((chapter, index) => ({ ...chapter, index: preview.previous.chapters + index + 1 })).filter(chapter => chapter.number !== null && !chapter.flags.includes('番外') && !chapter.flags.includes('像是混进来的别的书'))
   const anchor = preview.last_numbered
   let junction = preview.junction
   if (anchor !== undefined) {
@@ -34,27 +34,38 @@ export function teardownAppendSelection(preview: TeardownAppendPreview, include:
       junction = { kind: b === a + 1 || (first.volume !== anchor.volume && b === 1) ? null : b > a + 1 ? '跳了' : '倒回去了', a, b, missing: Math.max(0, b - a - 1) }
     }
   }
-  // 与 split.number_issues 同一规矩：番外不比较，新卷从1开始不算倒退，孤立笔误不连报。
+  // 与 split.number_issues 同一规矩：番外和别的书不比较，新卷从1开始不算倒退，连续笔误不连报。
   const numberIssues: TeardownNumberIssue[] = []
   let issueTotal = 0
   let previous = anchor?.number ?? null
   let previousVolume = anchor?.volume ?? null
-  for (const [position, chapter] of numbered.entries()) {
+  for (let position = 0; position < numbered.length; position += 1) {
+    const chapter = numbered[position]
     let number = chapter.number!
     const newVolume = chapter.volume !== previousVolume
     if (previous !== null && number !== previous + 1 && !(newVolume && number === 1)) {
-      const following = numbered[position + 1]
       const expected = previous + 1
-      const typo = !!following && !newVolume && following.volume === chapter.volume && following.number === previous + 2 && following.number !== number + 1
-      const kind = typo ? '打错了' : number > expected ? '跳了' : number === previous ? '重了' : '倒回去了'
+      let typoCount = 0
+      if (!newVolume) {
+        for (let count = 1; count <= 10 && position + count < numbered.length; count += 1) {
+          const last = numbered[position + count - 1]
+          if (last.volume !== chapter.volume || last.number !== number + count - 1) break
+          const following = numbered[position + count]
+          if (following.volume === chapter.volume && following.number === expected + count) { typoCount = count; break }
+        }
+      }
+      const kind = typoCount ? '打错了' : number > expected ? '跳了' : number === previous ? '重了' : '倒回去了'
       issueTotal += 1
-      if (numberIssues.length < 50) numberIssues.push({ index: chapter.index, title: chapter.raw_title ?? chapter.title, number, expected, kind })
-      if (typo) number = expected
+      if (numberIssues.length < 50) numberIssues.push({ index: chapter.index, title: chapter.raw_title ?? chapter.title, number, expected, kind,
+        ...(typoCount > 1 ? { count: typoCount, end_index: numbered[position + typoCount - 1].index, end_number: number + typoCount - 1 } : {}),
+      })
+      if (typoCount) { number = expected + typoCount - 1; position += typoCount - 1 }
     }
     previous = number
     previousVolume = chapter.volume
   }
   return { ...preview, volumes, reopen, junction,
+    ...teardownIgnoredHeadingSelection(preview, include, selected, preview.previous.chapters),
     first: selected[0] ? { index: preview.previous.chapters + 1, title: selected[0].title } : null,
     last: selected.length ? { index: preview.previous.chapters + selected.length, title: selected.at(-1)!.title } : null,
     number_issues: anchor === undefined ? preview.number_issues : numberIssues,

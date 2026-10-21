@@ -68,7 +68,11 @@ def plan(book, chapters, volumes, units, result, filename, size, *, include=(), 
     for order in sorted(selectable - included):
         piece = result["chapters"][order]
         excluded.append(
-            {"title": piece.title, "chars": piece.chars, "reason": "空的" if "空的" in piece.flags else "不像正文"}
+            {
+                "title": piece.title,
+                "chars": piece.chars,
+                "reason": next(flag for flag in teardown_split.EXCLUDED_FLAGS if flag in piece.flags),
+            }
         )
 
     destinations = {None: last_volume.index}
@@ -112,7 +116,8 @@ def plan(book, chapters, volumes, units, result, filename, size, *, include=(), 
         (
             ch
             for ch in reversed(chapters)
-            if (ch.teardown or {}).get("number") is not None and "番外" not in (ch.teardown or {}).get("flags", [])
+            if (ch.teardown or {}).get("number") is not None
+            and not {"番外", "像是混进来的别的书"}.intersection((ch.teardown or {}).get("flags", []))
         ),
         None,
     )
@@ -124,12 +129,20 @@ def plan(book, chapters, volumes, units, result, filename, size, *, include=(), 
             (previous.teardown or {}).get("raw_title", ""),
             volume_index,
             number=previous.teardown["number"],
+            flags=previous.teardown.get("flags", []),
         )
         issues, issue_total = teardown_split.number_issues([anchor, *numbered])
         for issue in issues:
             issue["index"] += total - 1
+            if "end_index" in issue:
+                issue["end_index"] += total - 1
         first_numbered = next(
-            (piece for piece in numbered if piece.number is not None and "番外" not in piece.flags), None
+            (
+                piece
+                for piece in numbered
+                if piece.number is not None and not {"番外", "像是混进来的别的书"}.intersection(piece.flags)
+            ),
+            None,
         )
         if first_numbered is not None:
             a, b = anchor.number, first_numbered.number
@@ -140,6 +153,8 @@ def plan(book, chapters, volumes, units, result, filename, size, *, include=(), 
         issues, issue_total = teardown_split.number_issues(numbered)
         for issue in issues:
             issue["index"] += total
+            if "end_index" in issue:
+                issue["end_index"] += total
 
     reopen = []
     tail_unit = None
@@ -157,6 +172,11 @@ def plan(book, chapters, volumes, units, result, filename, size, *, include=(), 
         reopen.append({"kind": "ending"})
 
     preview = teardown_split.make_preview(result, filename, size, encoding_auto=encoding_auto)
+    ignored_headings = [
+        {"index": index, "title": piece.title, "line": line}
+        for index, piece in enumerate(selected, total + 1)
+        for line in piece.ignored_headings
+    ]
     preview.update(
         mode="append",
         title=book.title,
@@ -179,12 +199,14 @@ def plan(book, chapters, volumes, units, result, filename, size, *, include=(), 
         volumes=volume_plans,
         number_issues=issues,
         number_issue_total=issue_total,
+        ignored_headings=ignored_headings[:20],
+        ignored_heading_total=len(ignored_headings),
         excluded=[
             {
                 "order": order,
                 "title": piece.title,
                 "chars": piece.chars,
-                "reason": "空的" if "空的" in piece.flags else "不像正文",
+                "reason": next(flag for flag in teardown_split.EXCLUDED_FLAGS if flag in piece.flags),
                 "head": piece.text[:60],
                 "volume": destinations[piece.volume],
             }

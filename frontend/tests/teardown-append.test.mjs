@@ -163,6 +163,39 @@ test('勾回实时计划不随无关状态打开收尾，主编已有open卷不�
   assert.equal(limited.number_issues.length, 50)
 })
 
+test('补章节勾回后连续两章和八章笔误只报一处，混入其他书不打断主线', () => {
+  const raw = selectablePreview()
+  for (const [anchor, wrong, count] of [[595, 396, 2], [1789, 1780, 8]]) {
+    const numbers = [...Array.from({ length: count }, (_, index) => wrong + index), anchor + count + 1, anchor + count + 2]
+    const selection = numbers.map((number, order) => ({ order, title: `候选${order}`, number, volume: 2, excluded: false, flags: [] }))
+    const result = teardownAppendSelection({ ...raw, last_numbered: { number: anchor, volume: 2 }, selection }, [])
+    assert.equal(result.number_issue_total, 1)
+    assert.deepEqual(result.number_issues, [{ index: 501, title: '候选0', expected: anchor + 1, number: wrong, kind: '打错了', count, end_index: 500 + count, end_number: wrong + count - 1 }])
+  }
+  const selection = [
+    { order: 0, title: '主线', number: 501, volume: 2, excluded: false, flags: [] },
+    { order: 1, title: '外门弟子', number: 1, volume: 2, excluded: true, flags: ['像是混进来的别的书'] },
+    { order: 2, title: '继续', number: 502, volume: 2, excluded: false, flags: [] },
+  ]
+  assert.deepEqual(teardownAppendSelection({ ...raw, selection }, [1]).number_issues, [])
+})
+
+test('补章节假标题按selection重编号，接缝重复候选不出现、勾回章自身同步增减', () => {
+  const raw = selectablePreview()
+  const candidates = [
+    { order: -1, title: '接缝重复的章', line: '第9章' },
+    { order: 0, title: '勾回的开头', line: '第10章' },
+    { order: 1, title: '新卷起点', line: '第11章' },
+    { order: 3, title: '勾回的末尾', line: '第12章' },
+  ]
+  const preview = { ...raw, ignored_heading_candidates: candidates, ignored_headings: [{ index: 501, order: 1, title: '新卷起点', line: '第11章' }], ignored_heading_total: 1 }
+  assert.deepEqual(teardownAppendSelection(preview, []).ignored_headings, [{ ...candidates[2], index: 501 }])
+  const restored = teardownAppendSelection(preview, [0, 3])
+  assert.deepEqual(restored.ignored_headings, [{ ...candidates[1], index: 501 }, { ...candidates[2], index: 502 }, { ...candidates[3], index: 504 }])
+  assert.equal(restored.ignored_heading_total, 3)
+  assert.deepEqual(teardownAppendSelection(preview, []).ignored_headings, [{ ...candidates[2], index: 501 }])
+})
+
 test('确认页每种条件、原文编码、清理、共用选项、上传框和取消两次严格接现有样式与接口', () => {
   const page = source('../src/pages/Teardown.tsx')
   const append = page.slice(page.indexOf('function TeardownAppendBook'))

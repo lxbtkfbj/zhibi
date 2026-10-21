@@ -13,7 +13,7 @@ from app.agents import schemas as s
 from app.agents.context import foreshadow_code
 from app.graphs.deps import JobCancelled
 from app.models import Book, Foreshadowing, StoryNode, Volume
-from app.prompts import render
+from app.services.teardown_prompts import render
 
 ENDING_MARK = re.compile(r"大结局|终章|尾声|全书完|全文完|全剧终|完本|完结|（完）|【完】|\(完\)")
 

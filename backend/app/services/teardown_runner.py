@@ -16,9 +16,9 @@ from app.agents import schemas as s
 from app.graphs.deps import JobCancelled, cancel_key
 from app.llm.router import TeardownPolicy
 from app.models import Book, Chapter, Job, PlotUnit, Volume
-from app.prompts import render
 from app.services import book_saves
 from app.services.meeting import Emitter, job_dict, publish
+from app.services.teardown_prompts import TitlePrompt, render
 
 log = logging.getLogger(__name__)
 MAX_CHARS = 12000
@@ -145,6 +145,8 @@ class Runner:
     async def snapshot(self):
         async with self.sm() as session:
             book = await session.get(Book, self.book_id)
+            if book is not None:
+                self.title = book.title
             chapters = list(
                 await session.scalars(select(Chapter).where(Chapter.book_id == self.book_id).order_by(Chapter.index))
             )
@@ -218,6 +220,15 @@ class Runner:
 
     async def call_user(self, schema, user: str, purpose: str, *, system: str | None = None):
         system = system if system is not None else render("persona_teardown", rules=render("rules"))
+        if isinstance(user, TitlePrompt) or isinstance(system, TitlePrompt):
+            async with self.sm() as session:
+                title = await session.scalar(select(Book.title).where(Book.id == self.book_id))
+            if title is not None:
+                self.title = title
+                if isinstance(user, TitlePrompt):
+                    user = user.with_title(title)
+                if isinstance(system, TitlePrompt):
+                    system = system.with_title(title)
         started = time.monotonic()
         try:
             result = await self.router.structured(
@@ -835,7 +846,8 @@ class Runner:
             closing_error += f"点「{button}」再试一次。"
             note += closing_error
         async with self.sm() as session:
-            book = await session.get(Book, self.book_id)
+            # 改书名也会写 title_edited；先锁书再合并最新元数据，不能把它冲掉。
+            book = await session.scalar(select(Book).where(Book.id == self.book_id).with_for_update())
             job = await session.get(Job, self.job_id)
             if book is None or job is None:
                 return
@@ -995,6 +1007,9 @@ class Runner:
             open_id = (book.teardown or {}).get("open_volume_id")
             opened = next((v for v in volumes if str(v.id) == str(open_id)), volumes[-1])
             async with self.sm() as session:
+                book = await session.scalar(select(Book).where(Book.id == self.book_id).with_for_update())
+                if book is None:
+                    return
                 ordered = sorted(units, key=lambda u: min((c.index for c in chapters if c.unit_id == u.id), default=0))
                 for index, unit in enumerate(ordered, 1):
                     row = await session.get(PlotUnit, unit.id)
@@ -1018,7 +1033,6 @@ class Runner:
                     self.total,
                     "planned",
                 )
-                book = await session.get(Book, self.book_id)
                 book.teardown = {**book.teardown, "open_volume_id": str(opened.id)}
                 await session.commit()
         self.tried_volumes.clear()

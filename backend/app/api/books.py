@@ -210,7 +210,10 @@ async def update_book(
     await lock_book(session, book.id)
     await session.refresh(book, with_for_update=True)
     # 文风参考只给写手看、编辑部不会去改它：只改它时编辑部干活也能改，从下一章起照新的写
-    if book.source == "teardown" or body.model_fields_set - {"style_reference"}:
+    title_only = body.model_fields_set - {"review_changes"} == {"title"} and body.title is not None
+    if (book.source == "teardown" and not title_only) or (
+        book.source != "teardown" and body.model_fields_set - {"style_reference"}
+    ):
         await ensure_idle(session, book.id)
     before = snapshot_of(book)
     if (body.author is not None or body.intro is not None) and book.source != "teardown":
@@ -226,6 +229,8 @@ async def update_book(
                 meta[f"{name}_edited"] = True
         book.teardown = meta
     if body.title is not None:
+        if book.source == "teardown" and not body.title.strip():
+            raise HTTPException(422, "书名不能为空")
         book.title = body.title
         book.concept = {**(book.concept or {}), "title": body.title}
     if body.style_reference is not None:

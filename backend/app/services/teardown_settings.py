@@ -14,8 +14,8 @@ from sqlalchemy import select
 from app.agents import schemas as s
 from app.graphs.deps import JobCancelled
 from app.models import Book, Character, Relationship, WorldEntry
-from app.prompts import render
 from app.services.desk import DEFAULT_FIELDS, value_of, write_value
+from app.services.teardown_prompts import render
 from app.services.teardown_roster import Roster
 from app.services.versions import record_version, snapshot_of
 

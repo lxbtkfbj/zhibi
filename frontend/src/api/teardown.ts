@@ -1,7 +1,7 @@
 import { ApiError, del, get, post } from './client'
 import { useProfiles, useRoles } from './hooks'
 import type { BookDetail, Job } from './types'
-import type { TeardownAppendPreview, TeardownFields, TeardownPreview } from '../lib/teardownPreview'
+import type { TeardownAppendPreview, TeardownFields, TeardownPreview, TeardownVolumeMode } from '../lib/teardownPreview'
 import { teardownModelName } from '../lib/teardownStart'
 import { hasEssence, type TeardownEssence } from '../pages/workspace/desk-v2/essenceData'
 
@@ -63,8 +63,8 @@ function uploadTeardownFile<T extends TeardownPreview>(url: string, file: File, 
 }
 
 export const getTeardownPreview = (bookId: string) => get<TeardownPreview>(`/teardown/${bookId}/preview`)
-export const changeTeardownEncoding = (bookId: string, encoding: TeardownEncoding) => post<TeardownPreview>(`/teardown/${bookId}/encoding`, { encoding })
-export const importTeardown = (bookId: string, fields: TeardownFields, include: number[], start?: { upto: number | null }) => post<BookDetail>(`/teardown/${bookId}/import`, { ...fields, include, ...(start ? { start } : {}) })
+export const changeTeardownEncoding = (bookId: string, encoding: TeardownEncoding, t2s?: boolean) => post<TeardownPreview>(`/teardown/${bookId}/encoding`, { encoding, ...(t2s === undefined ? {} : { t2s }) })
+export const importTeardown = (bookId: string, fields: TeardownFields, include: number[], start?: { upto: number | null }, volumeMode?: TeardownVolumeMode) => post<BookDetail>(`/teardown/${bookId}/import`, { ...fields, include, ...(start ? { start } : {}), ...(volumeMode ? { volume_mode: volumeMode } : {}) })
 export const startTeardown = (bookId: string, upto: number | null) => post<Job>(`/teardown/${bookId}/start`, { upto })
 export const stopTeardown = (bookId: string) => post<Job>(`/teardown/${bookId}/stop`)
 export const getTeardownEssence = async (bookId: string): Promise<TeardownEssence | null> => {

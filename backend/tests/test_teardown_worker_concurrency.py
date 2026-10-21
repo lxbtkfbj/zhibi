@@ -1,4 +1,4 @@
-"""两个拆书进程启动恢复只投一次，同任务互斥、不同书可并行。"""
+"""三个拆书进程启动恢复只投一次，同任务互斥、不同书可并行。"""
 
 import asyncio
 import uuid
@@ -14,9 +14,9 @@ from app.services import job_runner
 from app.worker import tasks
 
 
-async def test_two_workers_claim_orphan_once_and_running_job_is_not_recovered(sessionmaker):
+async def test_three_workers_claim_orphan_once_and_running_job_is_not_recovered(sessionmaker):
     async with sessionmaker() as session:
-        books = [Book(title=f"独立测试书{i}", source="teardown") for i in range(3)]
+        books = [Book(title=f"独立测试书{i}", source="teardown") for i in range(4)]
         session.add_all(books)
         await session.flush()
         jobs = [Job(book_id=book.id, kind="teardown", status="running", thread_id=str(uuid.uuid4())) for book in books]
@@ -25,10 +25,10 @@ async def test_two_workers_claim_orphan_once_and_running_job_is_not_recovered(se
         ids = [job.id for job in jobs]
     redis = Redis.from_url(get_settings().redis_url, decode_responses=True)
     try:
-        await redis.set(job_runner.lock_key(ids[2]), "live-worker", ex=60)
-        first, second = await asyncio.gather(tasks._orphaned_jobs(("teardown",)), tasks._orphaned_jobs(("teardown",)))
-        assert set(first).isdisjoint(second)
-        assert set(first + second) == {str(ids[0]), str(ids[1])}
+        await redis.set(job_runner.lock_key(ids[3]), "live-worker", ex=60)
+        claimed = await asyncio.gather(*(tasks._orphaned_jobs(("teardown",)) for _ in range(3)))
+        assert sum(len(group) for group in claimed) == 3
+        assert {job_id for group in claimed for job_id in group} == {str(job_id) for job_id in ids[:3]}
         assert await tasks._orphaned_jobs(("teardown",)) == []
         assert 0 < await redis.ttl(f"zhibi:recover:{ids[0]}") <= job_runner.LOCK_TIMEOUT_S
     finally:
@@ -136,11 +136,13 @@ async def test_surviving_worker_rescans_claimed_but_never_enqueued_orphan(sessio
         await redis.aclose()
 
 
-def test_start_declares_two_solo_teardown_workers_and_stop_uses_pid_inventory():
+def test_start_declares_three_solo_teardown_workers_and_stop_uses_pid_inventory():
     root = Path(__file__).resolve().parents[2]
     start = (root / "scripts/start.ps1").read_text(encoding="utf-8")
     stop = (root / "scripts/stop.ps1").read_text(encoding="utf-8")
     assert "'-Q', 'teardown', '-n', 'teardown@%h'" in start
     assert "'-Q', 'teardown', '-n', 'teardown2@%h'" in start
+    assert "'-Q', 'teardown', '-n', 'teardown3@%h'" in start
     assert '"$logDir\\teardown2.log"' in start and '"$logDir\\teardown2.err.log"' in start
+    assert '"$logDir\\teardown3.log"' in start and '"$logDir\\teardown3.err.log"' in start
     assert "foreach ($entry in (Get-Content -LiteralPath $pidFile -Raw | ConvertFrom-Json))" in stop

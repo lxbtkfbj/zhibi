@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents import schemas as s
 from app.models import Book, Chapter
-from app.prompts import render
+from app.services.teardown_prompts import render
 from app.services.teardown_roster import Roster
 
 KINDS = ("金手指", "等级", "地方", "势力", "物品功法", "秘密", "规矩")

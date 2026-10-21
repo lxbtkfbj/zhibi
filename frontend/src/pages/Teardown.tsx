@@ -10,11 +10,23 @@ import type { BookDetail, Chapter } from '../api/types'
 import { BookCover } from '../components/BookCover'
 import { TeardownOptions } from '../components/TeardownStart'
 import { Button, ErrorText, Spinner, inputClass } from '../components/ui'
-import { createTeardownFieldSaver, teardownCleaningText, teardownNumberIssueText, teardownPreviewTotals, teardownSplitText, type TeardownAppendPreview, type TeardownFields, type TeardownPreview } from '../lib/teardownPreview'
+import { createTeardownFieldSaver, teardownCleaningText, teardownIgnoredHeadingSelection, teardownIgnoredHeadingText, teardownNumberIssueText, teardownPreviewTotals, teardownSplitText, teardownVolumeDefaultText, type TeardownAppendPreview, type TeardownFields, type TeardownPreview, type TeardownVolumeMode } from '../lib/teardownPreview'
 import { teardownAppendJunctionText, teardownAppendNotes, teardownAppendSelection, teardownAppendSplitText, teardownAppendVolumeText } from '../lib/teardownAppend'
 import { parseTeardownUpto } from '../lib/teardownStart'
 
 const ENCODINGS: readonly (readonly [TeardownEncoding, string])[] = [['auto', '自动'], ['utf-8', 'UTF-8'], ['gb18030', 'GB18030'], ['utf-16', 'UTF-16'], ['big5', 'BIG5']]
+
+function IgnoredHeadings({ preview, include }: { preview: TeardownPreview; include?: readonly number[] }) {
+  const selection = include ? teardownIgnoredHeadingSelection(preview, include) : preview
+  const headings = selection.ignored_headings ?? []
+  if (!headings.length) return null
+  return <section aria-label="这几行没当成章标题">
+    <h2 className="font-serif text-lg font-bold">这几行没当成章标题</h2>
+    <p className="mt-2 text-xs text-ink-3">看着像章标题，其实是正文里的字，留在原来那一章里</p>
+    <div className="mt-3 space-y-2 text-sm text-ink-2">{headings.slice(0, 20).map((heading, index) => <p key={`${heading.index}:${index}`}>{teardownIgnoredHeadingText(heading)}</p>)}</div>
+    {selection.ignored_heading_total > Math.min(headings.length, 20) && <p className="mt-2 text-xs text-ink-3">还有 {selection.ignored_heading_total - Math.min(headings.length, 20)} 处没列</p>}
+  </section>
+}
 
 function TeardownPage({ title, children, back }: { title: string; children: ReactNode; back?: { to: string; label: string } }) {
   return (
@@ -132,6 +144,7 @@ function TeardownConfirmBook({ bookId }: { bookId: string }) {
   const [fieldError, setFieldError] = useState<unknown>(null)
   const fieldAttempt = useRef(0)
   const [include, setInclude] = useState<number[]>([])
+  const [volumeMode, setVolumeMode] = useState<TeardownVolumeMode>('original')
   const [expandedVolumes, setExpandedVolumes] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [uptoInput, setUptoInput] = useState('')
@@ -149,6 +162,7 @@ function TeardownConfirmBook({ bookId }: { bookId: string }) {
         fieldsRef.current = initial
         setFields(initial)
         setPreview(data)
+        setVolumeMode(data.volume_mode ?? 'original')
         saver.current = createTeardownFieldSaver(initial, async changes => {
           await patch(`/books/${bookId}`, changes)
           void queryClient.invalidateQueries({ queryKey: keys.books })
@@ -181,7 +195,7 @@ function TeardownConfirmBook({ bookId }: { bookId: string }) {
     }
   }
 
-  const switchEncoding = async (encoding: TeardownEncoding) => {
+  const switchEncoding = async (encoding: TeardownEncoding, t2s = preview?.traditional ? preview.t2s : undefined) => {
     if (operating.current || !preview) return
     operating.current = true
     setBusy('encoding')
@@ -193,12 +207,13 @@ function TeardownConfirmBook({ bookId }: { bookId: string }) {
       // 鼠标点击先触发离焦；这里仍排队等待并补存一次，键盘操作也不会漏掉手改。
       await saveFields()
       fieldsSaved = true
-      const result = await changeTeardownEncoding(bookId, encoding)
+      const result = await changeTeardownEncoding(bookId, encoding, t2s)
       const next = { title: result.title, author: result.author }
       fieldsRef.current = next
       saver.current?.accept(next)
       setFields(next)
       setPreview(result)
+      setVolumeMode(result.volume_mode ?? 'original')
       setInclude([])
       setExpandedVolumes(false)
     } catch (reason) { if (fieldsSaved) setEncodingError(reason) }
@@ -215,7 +230,7 @@ function TeardownConfirmBook({ bookId }: { bookId: string }) {
     try {
       await saveFields()
       fieldsSaved = true
-      const result = await importTeardown(bookId, fieldsRef.current, include, start ? { upto } : undefined)
+      const result = await importTeardown(bookId, fieldsRef.current, include, start ? { upto } : undefined, volumeMode)
       queryClient.setQueryData(keys.book(bookId), result)
       void queryClient.invalidateQueries({ queryKey: keys.books })
       navigate(`/desk/${bookId}`, { state: { teardownHome: true } })
@@ -272,11 +287,23 @@ function TeardownConfirmBook({ bookId }: { bookId: string }) {
               {busy === 'encoding' && <Spinner className="ml-1 size-3.5 text-ink-3" />}
             </div>
             <div role="alert"><ErrorText error={encodingError} /></div>
+            {preview.traditional && <div className="mt-4">
+              <label className="flex cursor-pointer items-start gap-3 text-sm text-ink-2">
+                <input type="checkbox" checked={preview.t2s} disabled={busy !== null} className="mt-1 accent-ink" onChange={event => { void switchEncoding(preview.encoding_auto ? 'auto' : preview.encoding as TeardownEncoding, event.target.checked) }} />
+                <span>原文是繁体，导入时转成简体</span>
+              </label>
+              <p className="mt-2 text-xs text-ink-3">转成简体，拆出来的人名、设定都用简体，不容易把同一个人认成两个</p>
+            </div>}
           </section>
 
           {preview.volumes.length > 0 && (
             <section aria-label="分卷">
               <h2 className="mb-3 font-serif text-lg font-bold">分卷</h2>
+              <div className="mb-3 flex flex-wrap items-center gap-1.5">
+                {([['original', '照原书分卷'], ['editor', '让主编按剧情分卷']] as const).map(([mode, label]) => <Button key={mode} type="button" size="sm" variant={volumeMode === mode ? 'primary' : 'soft'} aria-pressed={volumeMode === mode} disabled={busy !== null} onClick={() => { setVolumeMode(mode); setConfirmDelete(false) }}>{label}</Button>)}
+              </div>
+              {teardownVolumeDefaultText(preview.largest_volume) && <p className="mb-3 text-xs text-ink-3">{teardownVolumeDefaultText(preview.largest_volume)}</p>}
+              {volumeMode === 'editor' && <p className="mb-3 text-xs text-ink-3">主编一边拆一边分，大约每一百章一卷，收在大高潮上。下面原书的卷名不用。</p>}
               <div className="space-y-2 text-sm text-ink-2">{(expandedVolumes ? preview.volumes : preview.volumes.slice(0, 8)).map(volume => <p key={volume.index}>第 {volume.index} 卷 {volume.title} · {volume.chapters} 章</p>)}</div>
               {!expandedVolumes && preview.volumes.length > 8 && <button type="button" className="mt-3 text-xs text-ink-3 underline underline-offset-4 hover:text-ink" onClick={() => setExpandedVolumes(true)}>还有 {preview.volumes.length - 8} 卷，展开</button>}
             </section>
@@ -305,6 +332,7 @@ function TeardownConfirmBook({ bookId }: { bookId: string }) {
             </section>
           )}
 
+          <IgnoredHeadings preview={preview} include={include} />
           <p className="text-xs leading-relaxed text-ink-3">{teardownCleaningText(preview)}</p>
           <TeardownOptions total={total} value={uptoInput} onChange={setUptoInput} disabled={busy !== null} />
           <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line pt-5">
@@ -492,6 +520,7 @@ function TeardownAppendBook({ bookId }: { bookId: string }) {
         <div className="mt-3 space-y-2 text-sm text-ink-2">{preview.number_issues.map((issue, index) => <p key={`${issue.index}:${index}`}>{teardownNumberIssueText(issue)}</p>)}</div>
         {preview.number_issue_total > preview.number_issues.length && <p className="mt-2 text-xs text-ink-3">还有 {preview.number_issue_total - preview.number_issues.length} 处没列</p>}
       </section>}
+      <IgnoredHeadings preview={preview} />
       <p className="text-xs leading-relaxed text-ink-3">{teardownCleaningText(preview)}</p>
       <TeardownOptions total={total} value={uptoInput} onChange={setUptoInput} disabled={busy !== null} />
       <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line pt-5">

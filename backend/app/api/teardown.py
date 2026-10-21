@@ -3,6 +3,7 @@
 import hashlib
 import uuid
 from datetime import UTC, datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field
@@ -24,6 +25,7 @@ ENCODINGS = {"auto": "自动", "utf-8": "UTF-8", "gb18030": "GB18030", "utf-16":
 
 class EncodingIn(BaseModel):
     encoding: str
+    t2s: bool | None = None
 
 
 class StartIn(BaseModel):
@@ -35,6 +37,7 @@ class ImportIn(BaseModel):
     author: str | None = Field(None, max_length=200)
     include: list[int] = Field(default_factory=list)
     start: StartIn | None = None
+    volume_mode: Literal["original", "editor"] | None = None
 
 
 class AppendIn(BaseModel):
@@ -53,9 +56,9 @@ def check_confirming(book):
         raise HTTPException(409, "这本书已经导入了")
 
 
-async def split_file(data, encoding=None, *, append=False):
+async def split_file(data, encoding=None, *, append=False, t2s=None):
     try:
-        result = await run_in_threadpool(teardown_split.split, data, encoding=encoding or None, append=append)
+        result = await run_in_threadpool(teardown_split.split, data, encoding=encoding or None, append=append, t2s=t2s)
     except UnicodeError as exc:
         label = ENCODINGS.get(encoding, "自动编码")
         raise HTTPException(422, f"用 {label} 读不出来，换一种试试") from exc
@@ -130,7 +133,15 @@ async def encoding(body: EncodingIn, book: Book = Depends(get_book), session=Ses
         raise HTTPException(422, "请选择自动、UTF-8、GB18030、UTF-16 或 BIG5")
     source = await locked_source(session, book)
     chosen = "" if body.encoding == "auto" else body.encoding
-    result = await split_file(source.data, chosen)
+    previous_preview = source.preview or {}
+    conversion = (
+        body.t2s
+        if body.t2s is not None
+        else previous_preview.get("t2s")
+        if previous_preview.get("traditional")
+        else None
+    )
+    result = await split_file(source.data, chosen, t2s=conversion)
     saved = teardown_split.make_preview(result, source.filename, source.size, encoding_auto=not chosen)
     meta = dict(book.teardown)
     if not meta.get("title_edited"):
@@ -150,8 +161,10 @@ async def import_book(
     body: ImportIn, book: Book = Depends(get_book), session=SessionDep, redis: Redis = Depends(get_redis)
 ):
     source = await locked_source(session, book)
-    result = await split_file(source.data, source.encoding)
-    excluded_orders = {i for i, piece in enumerate(result["chapters"]) if set(piece.flags) & {"不像正文", "空的"}}
+    result = await split_file(source.data, source.encoding, t2s=(source.preview or {}).get("t2s"))
+    excluded_orders = {
+        i for i, piece in enumerate(result["chapters"]) if set(piece.flags) & set(teardown_split.EXCLUDED_FLAGS)
+    }
     if set(body.include) - excluded_orders:
         raise HTTPException(422, "勾回的章节不在排除列表里，请刷新确认页")
     selected = teardown_split.selected_chapters(result, body.include)
@@ -165,7 +178,9 @@ async def import_book(
     meta = dict(book.teardown)
     if body.author is not None:
         meta["author"] = body.author
-    names = result["volumes"] or ["还没分卷"]
+    volume_mode = body.volume_mode or (source.preview or {}).get("volume_mode", "original")
+    original_volumes = bool(result["volumes"]) and volume_mode == "original"
+    names = result["volumes"] if original_volumes else ["还没分卷"]
     volumes = [
         Volume(
             id=uuid.uuid4(),
@@ -173,7 +188,7 @@ async def import_book(
             index=i,
             title=name,
             status="done",
-            chapter_count=sum(1 for piece in selected if (piece.volume or 1) == i),
+            chapter_count=sum(1 for piece in selected if not original_volumes or (piece.volume or 1) == i),
         )
         for i, name in enumerate(names, 1)
     ]
@@ -182,7 +197,7 @@ async def import_book(
     rows = [
         {
             "book_id": book.id,
-            "volume_id": volumes[(piece.volume or 1) - 1].id,
+            "volume_id": volumes[(piece.volume or 1) - 1 if original_volumes else 0].id,
             "index": i,
             "title": piece.title,
             "content": piece.text,
@@ -200,8 +215,9 @@ async def import_book(
     meta.update(
         stage="imported",
         imported_at=datetime.now(UTC).isoformat(),
-        original_volumes=bool(result["volumes"]),
-        open_volume_id=None if result["volumes"] else str(volumes[0].id),
+        original_volumes=original_volumes,
+        open_volume_id=None if original_volumes else str(volumes[0].id),
+        t2s=result["t2s"],
         split={
             "chapters": len(rows),
             "volumes": len(volumes),
@@ -215,7 +231,7 @@ async def import_book(
             {
                 "title": piece.title,
                 "chars": len("".join(piece.text.split())),
-                "reason": "空的" if "空的" in piece.flags else "不像正文",
+                "reason": next(flag for flag in teardown_split.EXCLUDED_FLAGS if flag in piece.flags),
             }
             for i, piece in enumerate(result["chapters"])
             if i in excluded_orders - set(body.include)
@@ -253,7 +269,7 @@ async def locked_append(session, book, *, require_source=False):
 
 
 async def append_plan(session, book, data, filename, size, *, encoding=None, include=()):
-    result = await split_file(data, encoding, append=True)
+    result = await split_file(data, encoding, append=True, t2s=bool((book.teardown or {}).get("t2s")))
     chapters = list(
         await session.scalars(
             select(Chapter)

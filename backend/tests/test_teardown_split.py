@@ -10,6 +10,7 @@ from app.services.teardown_split import (
     number_issues,
     parse_number,
     selected_chapters,
+    simplify,
     split,
 )
 
@@ -154,7 +155,8 @@ def test_trial_metadata_ads_duplicates_and_extra():
     assert result["info"] == {"title": "斗破天穹", "author": "某某某"}
     assert result["intro"] == "这里是斗气的世界。少年天才一夜之间沦为废物……\n三十年河东，三十年河西。"
     assert result["ads_removed"] == 2
-    assert result["duplicates_removed"] == 1
+    assert result["duplicates_removed"] == 0
+    assert [piece.title for piece in result["chapters"] if "和前面一章重复" in piece.flags] == ["客人"]
     assert [piece.title for piece in result["chapters"] if "不像正文" in piece.flags] == ["请假条", "完本感言"]
     assert selected_chapters(result)[-1].flags == ["番外"]
     assert all("www.xxbiquge.com" not in piece.text for piece in result["chapters"])
@@ -289,7 +291,7 @@ def test_number_issues_are_capped_but_total_is_not():
 @pytest.mark.parametrize("encoding", ["utf-8", "gb18030", "utf-16", "big5"])
 def test_explicit_encoding(encoding):
     text = "第一章 初見\n這是正文。"
-    result = split(text.encode(encoding), encoding=encoding)
+    result = split(text.encode(encoding), encoding=encoding, t2s=False)
     assert result["encoding"] == encoding
     assert result["chapters"][0].text == "這是正文。"
 
@@ -393,3 +395,207 @@ def test_long_average_falls_back_and_blank_input_has_no_body():
     assert blank["chars"] == 0
     assert selected_chapters(blank) == []
     assert make_preview(blank, "空.txt", 4)["first"] is None
+
+
+def test_traditional_detection_default_and_explicit_conversion_use_opencc_phrases():
+    text = "書名：《龍與劍》\n作者：張三\n內容簡介：這是故事\n第一卷 初見\n第一章 開始\n乾坤依舊，天氣乾燥。這是龍與劍的故事。"
+    automatic = split(text.encode())
+    original = split(text.encode(), t2s=False)
+    assert automatic["traditional"] is original["traditional"] is True
+    assert automatic["t2s"] is True
+    assert original["t2s"] is False
+    assert automatic["info"] == {"title": "龙与剑", "author": "张三"}
+    assert automatic["intro"] == "这是故事"
+    assert automatic["volumes"] == ["初见"]
+    assert automatic["chapters"][0].title == "开始"
+    assert automatic["chapters"][0].text == "乾坤依旧，天气干燥。这是龙与剑的故事。"
+    assert original["chapters"][0].text == "乾坤依舊，天氣乾燥。這是龍與劍的故事。"
+    assert original["info"] == {"title": "龍與劍", "author": "張三"}
+    assert original["intro"] == "這是故事"
+    assert make_preview(original, "別的檔名.txt", 100)["title"] == "龍與劍"
+    assert automatic["t2s_seconds"] >= 0
+    assert make_preview(automatic, "原檔.txt", 100)["traditional"] is True
+    no_title = split("第一章 開始\n這是正文。".encode())
+    assert make_preview(no_title, "龍與劍.txt", 20)["title"] == "龙与剑"
+    simplified = split("第一章 开始\n这是龙与剑的故事。".encode())
+    assert simplified["traditional"] is simplified["t2s"] is False
+    assert split(text.encode(), append=True, t2s=True)["chapters"][0].text == automatic["chapters"][0].text
+    assert split(text.encode(), append=True, t2s=False)["chapters"][0].text == original["chapters"][0].text
+
+
+def test_detection_uses_first_twenty_thousand_han_and_two_percent_inclusive():
+    assert simplify("字" * 19600 + "這" * 400, None)[1:3] == (True, True)
+    assert simplify("字" * 19601 + "這" * 399, None)[1:3] == (False, False)
+    assert simplify("字， a 1" * 20000 + "這" * 1000, None)[1:3] == (False, False)
+    assert simplify("ascii only", None)[1:3] == (False, False)
+
+
+@pytest.mark.parametrize(
+    "line", ["移动端浏览", "阅读更方便", "请收藏本站", "内容试读", "转送地址", "首发地址", "（本章完）", "本章完"]
+)
+def test_added_ad_lines_are_removed_but_long_prose_and_headings_are_not(line):
+    long = line + "他推开门，望向远方。" * 10
+    result = split(f"第1章 {line}\n{BODY}\n{line}\n{long}\n第2章 后续\n{BODY}".encode())
+    assert result["ads_removed"] == 1
+    assert result["chapters"][0].title == line
+    assert long in result["chapters"][0].text
+
+
+def test_bare_unexpected_headings_stay_in_previous_body_and_are_renumbered():
+    result = split(
+        f"第808章\n第809章 正文\n{BODY}\n【第二回合就简单多了(～￣▽￣)～】\n第1章\n（第1461章）\n"
+        f"第810章\n{BODY}\n第812章\n{BODY}后续正文。".encode()
+    )
+    assert len(result["chapters"]) == 4
+    assert [piece.number for piece in result["chapters"]] == [808, 809, 810, 812]
+    assert "第二回合就简单多了" in result["chapters"][1].text
+    assert "第1章" in result["chapters"][1].text
+    assert "（第1461章）" in result["chapters"][1].text
+    preview = make_preview(result, "样本.txt", 100)
+    assert preview["excluded"][0]["reason"] == "空的"
+    assert preview["ignored_headings"] == [
+        {"order": 1, "index": 1, "title": "正文", "line": "第1章"},
+        {"order": 1, "index": 1, "title": "正文", "line": "（第1461章）"},
+    ]
+    assert preview["ignored_heading_total"] == 2
+
+
+def test_ignored_heading_preview_is_capped_but_total_is_not():
+    result = split(("第810章 正文\n" + BODY + "\n第1章" * 23).encode())
+    preview = make_preview(result, "样本.txt", 100)
+    assert len(preview["ignored_headings"]) == 20
+    assert preview["ignored_heading_total"] == 23
+
+
+def test_foreign_book_chain_is_excluded_and_does_not_interrupt_main_numbering():
+    data = "\n".join(
+        chapter(title)
+        for title in ["第100章 主线", "第一章外门弟子", "第二章试炼", "第三章异乡", "第四章归途", "第101章 归来"]
+    ).encode()
+    result = split(data)
+    assert [piece.title for piece in selected_chapters(result)] == ["主线", "归来"]
+    assert [item["reason"] for item in make_preview(result, "样本.txt", len(data))["excluded"]] == [
+        "像是混进来的别的书"
+    ] * 4
+    assert number_issues(selected_chapters(result, range(6))) == ([], 0)
+
+
+@pytest.mark.parametrize("main_number,excluded", [(49, False), (50, True)])
+def test_foreign_book_threshold_includes_fiftieth_chapter(main_number, excluded):
+    result = split((chapter(f"第{main_number}章 主线") + chapter("第一章 外门弟子")).encode())
+    assert ("像是混进来的别的书" in result["chapters"][1].flags) is excluded
+
+
+def test_ignored_heading_candidates_include_excluded_pieces_and_keep_source_order():
+    result = split(
+        (
+            chapter("第100章 主线") + chapter("第一章 外门弟子") + "第999章\n" + chapter("第101章 归来") + "第1章\n"
+        ).encode()
+    )
+    preview = make_preview(result, "样本.txt", 100)
+    assert preview["ignored_heading_candidates"] == [
+        {"order": 1, "title": "外门弟子", "line": "第999章"},
+        {"order": 2, "title": "归来", "line": "第1章"},
+    ]
+    assert preview["ignored_headings"] == [{"order": 2, "index": 2, "title": "归来", "line": "第1章"}]
+    assert preview["ignored_heading_total"] == 1
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "abcd-1234." * 8,
+        "http/1.1 200 ok",
+        "Content-Type: text/html",
+        "Transfer-Encoding: chunked",
+        '"code":400',
+        "余额不足",
+    ],
+)
+def test_garbled_and_web_error_chapters_default_excluded(body):
+    result = split(f"第1章 正文\n{BODY}\n第2章 报错\n{body}\n第3章 后续\n{BODY}".encode())
+    preview = make_preview(result, "样本.txt", 100)
+    assert [piece.title for piece in selected_chapters(result)] == ["正文", "后续"]
+    assert preview["excluded"][0]["reason"] == "乱码"
+    assert len(selected_chapters(result, [1])) == 3
+
+
+def test_chinese_ratio_requires_fifty_nonblank_characters_and_less_than_half_han():
+    for body in ("a" * 49, "a" * 25 + "字" * 25):
+        assert "乱码" not in split(f"第一章 正文\n{body}".encode())["chapters"][0].flags
+    assert "乱码" in split(("第一章 正文\n" + "a " * 26 + "字 " * 24).encode())["chapters"][0].flags
+
+
+def test_near_duplicate_requires_same_number_and_name_and_is_selectable():
+    body = "".join(chr(0x4E00 + number) for number in range(600))
+    changed = body[:100] + "她" + body[101:]
+    other_number = changed[:101] + "他" + changed[102:]
+    result = split(
+        f"第1714章 调龙\n{body}\n第1714章 调龙\n{changed}\n第1715章 调龙\n{other_number}\n第1714章 别名\n{changed}".encode()
+    )
+    assert [piece.flags for piece in result["chapters"]] == [[], ["和前面一章重复"], [], []]
+    assert len(selected_chapters(result)) == 3
+    assert len(selected_chapters(result, [1])) == 4
+    assert make_preview(result, "样本.txt", 100)["excluded"][0]["reason"] == "和前面一章重复"
+
+
+def test_exact_numbered_duplicate_is_retained_for_optional_inclusion():
+    result = split((chapter("第1714章 调龙") + chapter("第1714章 调龙")).encode())
+    assert result["duplicates_removed"] == 0
+    assert len(result["chapters"]) == 2
+    assert result["chapters"][1].flags == ["和前面一章重复"]
+
+
+@pytest.mark.parametrize("unit", ["卷", "部", "集"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "，由千叶影儿所得",
+        ",由千叶影儿所得",
+        "、由千叶影儿所得",
+        "。由千叶影儿所得",
+        "：由千叶影儿所得",
+        ":由千叶影儿所得",
+        "；由千叶影儿所得",
+        ";由千叶影儿所得",
+        "由千叶影儿所得、",
+        "由千叶影儿所得，",
+        "由千叶影儿所得,",
+    ],
+)
+def test_false_volume_heading_remains_in_body(unit, name):
+    line = f"第二{unit}{name}"
+    result = split(f"第一卷 起点\n{chapter('第1章 正文')}\n{line}\n{chapter('第2章 后续')}".encode())
+    assert result["volumes"] == ["起点"]
+    assert line in result["chapters"][0].text
+
+
+@pytest.mark.parametrize("count,mode", [(400, "original"), (401, "editor")])
+def test_large_volume_default_is_editor_only_above_four_hundred(count, mode):
+    data = ("第一卷 大卷\n" + "\n".join(f"第{n}章 第{n}日\n正文。" for n in range(1, count + 1))).encode()
+    preview = make_preview(split(data), "样本.txt", len(data))
+    assert preview["volume_mode"] == mode
+    assert preview["largest_volume"] == {"index": 1, "title": "大卷", "chapters": count}
+
+
+@pytest.mark.parametrize("count", [1, 2, 8, 10])
+def test_consecutive_number_typos_are_one_issue_without_fake_gap(count):
+    numbers = [1789, *range(1780, 1780 + count), 1790 + count, 1791 + count]
+    issues, total = number_issues(numbered(numbers))
+    assert total == 1
+    assert issues[0]["kind"] == "打错了"
+    assert issues[0]["expected"] == 1790
+    assert issues[0]["number"] == 1780
+    if count > 1:
+        assert issues[0]["count"] == count
+        assert issues[0]["end_index"] == count + 1
+        assert issues[0]["end_number"] == 1779 + count
+    else:
+        assert "count" not in issues[0]
+
+
+def test_consecutive_typo_does_not_cross_volume_or_exceed_ten_chapters():
+    too_long = [1789, *range(1780, 1791), 1801]
+    assert number_issues(numbered(too_long))[0][0]["kind"] == "倒回去了"
+    changed_volume = numbered([595, 396]) + numbered([397, 598], volume=2)
+    assert number_issues(changed_volume)[0][0]["kind"] == "倒回去了"

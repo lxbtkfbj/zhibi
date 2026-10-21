@@ -150,10 +150,11 @@ async def test_running_stop_only_marks_cancellation_and_blocks_manual_changes(cl
         book = await session.get(Book, bid)
         book.teardown = {**book.teardown, "stage": "running"}
         await session.commit()
-    for payload in ({"title": "新标题"}, {"style_reference": "文风"}):
-        result = await client.patch(f"/api/books/{bid}", json=payload)
-        assert result.status_code == 409
-        assert result.json()["detail"] == "正在拆，点「停下」才能改"
+    renamed = await client.patch(f"/api/books/{bid}", json={"title": "新标题"})
+    assert renamed.status_code == 200 and renamed.json()["title"] == "新标题"
+    result = await client.patch(f"/api/books/{bid}", json={"style_reference": "文风"})
+    assert result.status_code == 409
+    assert result.json()["detail"] == "正在拆，点「停下」才能改"
     stopped = await client.post(f"/api/teardown/{bid}/stop")
     assert stopped.json()["status"] == "running"
     redis = Redis.from_url(get_settings().redis_url, decode_responses=True)

@@ -63,7 +63,7 @@ try {
     await expect(start).toBeEnabled()
     await start.click()
     await expect(page.getByText('交互回归不实际导入', { exact: true })).toBeVisible()
-    assert.deepEqual(calls.find(call => call.path.endsWith('/import')).body, { title: '合成验收书', author: '演示作者', include: [], start: { upto: null } })
+    assert.deepEqual(calls.find(call => call.path.endsWith('/import')).body, { title: '合成验收书', author: '演示作者', include: [], start: { upto: null }, volume_mode: 'original' })
     await expect(input).toHaveValue('41')
     await expect(start).toBeEnabled()
     await page.getByRole('checkbox').check()

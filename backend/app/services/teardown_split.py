@@ -4,17 +4,24 @@ import hashlib
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 from functools import cached_property
+from itertools import islice
+from time import perf_counter
+
+from opencc import OpenCC
 
 NUM = r"[0-9０-９零〇○一二三四五六七八九十百千万两壹贰叁肆伍陆柒捌玖拾佰仟]+"
 SEP = r"[\s　:：、.．·\-—_]*"
 OPEN, CLOSE = r"[【\[〔(（]?", r"[】\]〕)）]?"
-CH = re.compile(rf"^(?:正文{SEP})?{OPEN}第{SEP}(?P<num>{NUM}){SEP}(?P<unit>[章回节]){CLOSE}{SEP}(?P<name>.{{0,40}})$")
+CH = re.compile(
+    rf"^(?:正文{SEP})?{OPEN}第{SEP}(?P<num>{NUM}){SEP}(?P<unit>章|回(?!合)|节){CLOSE}{SEP}(?P<name>.{{0,40}})$"
+)
 VOL = re.compile(
-    rf"^{OPEN}(?:第{SEP}(?P<num>{NUM}){SEP}[卷部集]|卷{SEP}(?P<num2>{NUM})){CLOSE}{SEP}(?P<name>.{{0,40}})$"
+    rf"^{OPEN}(?:第{SEP}(?P<num>{NUM}){SEP}[卷部集]|卷{SEP}(?P<num2>{NUM})){CLOSE}(?P<tail>{SEP}(?P<name>.{{0,40}}))$"
 )
 BOTH = re.compile(
-    rf"^(?P<vol>{OPEN}第{SEP}{NUM}{SEP}[卷部集]{CLOSE}{SEP}.{{0,30}}?){SEP}(?P<ch>第{SEP}{NUM}{SEP}[章回].{{0,40}})$"
+    rf"^(?P<vol>{OPEN}第{SEP}{NUM}{SEP}[卷部集]{CLOSE}{SEP}.{{0,30}}?){SEP}(?P<ch>第{SEP}{NUM}{SEP}(?:章|回(?!合)).{{0,40}})$"
 )
 SPECIAL = re.compile(
     r"^[【\[]?(?P<kind>序章|序言|序|楔子|引子|引言|前言|尾声|终章|大结局|后记|番外|外传|完本感言|上架感言|感言|请假条|请假)[】\]]?"
@@ -24,19 +31,21 @@ NOT_STORY = re.compile(r"请假|感言|通知|公告|求票|月票|推荐票|打
 AD_PATTERNS = re.compile(
     r"https?://|www\.|[a-z0-9-]+\.(?:com|net|org|cc|cn|info|la|me|io|co|xyz|top|vip)\b"
     r"|本章未完|点击下一页|请记住本站|最新章节|最快更新|手机用户请|手机阅读|一秒记住|无弹窗|全文免费|txt下载|电子书下载|首发域名|本书首发"
-    r"|求收藏|求推荐|求月票|求打赏",
+    r"|求收藏|求推荐|求月票|求打赏|移动端浏览|阅读更方便|请收藏本站|内容试读|转送地址|首发地址|^(?:（本章完）|本章完)$",
     re.I,
 )
 INFO = {
-    "title": re.compile(r"^(?:书名|书 名)[:：]\s*《?(?P<v>[^》]+)》?"),
+    "title": re.compile(r"^[书書] ?名[:：]\s*《?(?P<v>[^》]+)》?"),
     "author": re.compile(r"^(?:作者|作 者)[:：]\s*(?P<v>.+)"),
 }
 BOOK_TITLE = re.compile(r"^《(?P<v>[^》]+)》$")
-INTRO = re.compile(r"^(?:内容)?(?:简介|简 介)[:：]?\s*(?P<v>.*)$")
+INTRO = re.compile(r"^(?:[内內]容)?[简簡] ?介[:：]?\s*(?P<v>.*)$")
 BEG = re.compile(r"[（(【\[][^）)】\]]*(?:求|票|加更|爆更|更新|补更)[^）)】\]]*[）)】\]]\s*$")
 QUOTED = re.compile(r'“([^”]*)”|「([^」]*)」|『([^』]*)』|"([^"]*)"')
 ENCODINGS = {"utf-8", "gb18030", "utf-16", "big5"}
-EXCLUDED_FLAGS = ("不像正文", "空的")
+EXCLUDED_FLAGS = ("不像正文", "空的", "像是混进来的别的书", "乱码", "和前面一章重复")
+HAN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U0002fa1f]")
+WEB_ERROR = re.compile(r'http/1\.1|content-type|transfer-encoding|"code":|余额不足', re.I)
 DIGITS = dict(zip("零〇○一二两三四五六七八九壹贰叁肆伍陆柒捌玖", "0001223456789123456789", strict=True))
 UNITS = {"十": 10, "拾": 10, "百": 100, "佰": 100, "千": 1000, "仟": 1000, "万": 10000}
 
@@ -50,6 +59,7 @@ class Piece:
     number: int | None = None
     lines: list[str] = field(default_factory=list)
     flags: list[str] = field(default_factory=list)
+    ignored_headings: list[str] = field(default_factory=list)
 
     @cached_property
     def text(self) -> str:
@@ -107,6 +117,14 @@ def volume_name(line: str, name: str) -> str:
     return name.strip()
 
 
+def valid_volume(line: str, name: str, tail: str) -> bool:
+    return (
+        not name.startswith(("完", "终", "结束"))
+        and not tail.lstrip().startswith(("，", ",", "、", "。", "：", ":", "；", ";"))
+        and not line.endswith(("、", "，", ","))
+    )
+
+
 def heading(line: str) -> tuple[str, str, str] | None:
     """返回卷、章或特殊章的标题；正文中的长句不当标题。"""
     if len(line) > 50:
@@ -114,11 +132,11 @@ def heading(line: str) -> tuple[str, str, str] | None:
     if (match := BOTH.match(line)) and not line.endswith("。"):
         vol = match.group("vol").strip()
         vol_match = VOL.match(vol)
-        if vol_match and not vol_match.group("name").strip().startswith(("完", "终", "结束")):
+        if vol_match and valid_volume(vol, vol_match.group("name").strip(), vol_match.group("tail")):
             return "both", volume_name(vol, vol_match.group("name")), match.group("ch").strip()
     if (match := VOL.match(line)) and not line.endswith("。"):
         name = match.group("name").strip()
-        if not name.startswith(("完", "终", "结束")):
+        if valid_volume(line, name, match.group("tail")):
             return "vol", volume_name(line, name), "卷"
         return None
     if (match := CH.match(line)) and not (line.endswith("。") and len(match.group("name")) > 12):
@@ -142,10 +160,33 @@ def clean_lines(text: str) -> tuple[list[str], list[str], int]:
     return lines, raw_lines, ads
 
 
+def simplify(text: str, t2s: bool | None) -> tuple[str, bool, bool, float]:
+    """先认前 20000 个汉字，再用 OpenCC 的 t2s 词组词典转换整份原文。"""
+    started = perf_counter()
+    converter = OpenCC("t2s")
+    sample = "".join(match.group() for match in islice(HAN.finditer(text), 20000))
+    converted = converter.convert(sample)
+    changed = sum(left != right for left, right in zip(sample, converted, strict=False)) + abs(
+        len(sample) - len(converted)
+    )
+    traditional = bool(sample) and changed / len(sample) >= 0.02
+    use_t2s = traditional if t2s is None else t2s
+    if use_t2s:
+        text = converter.convert(text)
+    return text, traditional, use_t2s, perf_counter() - started
+
+
 def split(
-    data: bytes, *, encoding: str | None = None, short: int = 500, fallback_size: int = 3000, append: bool = False
+    data: bytes,
+    *,
+    encoding: str | None = None,
+    short: int = 500,
+    fallback_size: int = 3000,
+    append: bool = False,
+    t2s: bool | None = None,
 ) -> dict:
     text, actual_encoding = decode(data, encoding)
+    text, traditional, use_t2s, t2s_seconds = simplify(text, t2s)
     lines, raw_lines, ads = clean_lines(text)
     marks = [heading(line) for line in lines]
     units = {mark[2] for mark in marks if mark and mark[0] == "ch"}
@@ -160,6 +201,11 @@ def split(
     for line, raw, mark in zip(lines, raw_lines, marks, strict=True):
         if mark and mark[0] == "ch" and mark[2] == "节" and sub_sections:
             mark = None
+        if mark and mark[0] == "ch" and not mark[1] and current is not None and current.number is not None:
+            number = parse_number(CH.match(line).group("num"))
+            if number not in (current.number + 1, current.number + 2):
+                current.ignored_headings.append(line)
+                mark = None
         if mark is None:
             if current is not None:
                 current.lines.append(line)
@@ -233,17 +279,48 @@ def split(
         volumes = []
 
     seen: set[str] = set()
+    previous_versions: dict[tuple[int, str], list[Piece]] = {}
     kept: list[Piece] = []
     dropped = 0
+    main_number: int | None = None
+    foreign_number: int | None = None
     for piece in pieces:
+        if piece.number is not None:
+            if main_number is not None and main_number >= 50:
+                foreign = piece.number < main_number - 5 and (
+                    (bool(piece.title) and 1 <= piece.number <= 3)
+                    or (foreign_number is not None and piece.number == foreign_number + 1)
+                )
+                if foreign:
+                    piece.flags.append("像是混进来的别的书")
+                    foreign_number = piece.number
+                else:
+                    main_number, foreign_number = piece.number, None
+            else:
+                main_number = piece.number
+        key = (piece.number, piece.title) if piece.number is not None else None
+        versions = previous_versions.get(key, []) if key else []
+        if (
+            piece.text
+            and versions
+            and any(
+                SequenceMatcher(None, previous.text[:3000], piece.text[:3000]).ratio() >= 0.9 for previous in versions
+            )
+        ):
+            piece.flags.append("和前面一章重复")
         digest = hashlib.sha1((piece.title + "|" + piece.text).encode()).hexdigest()
-        if piece.text and digest in seen:
+        if piece.text and digest in seen and "和前面一章重复" not in piece.flags:
             dropped += 1
             continue
         seen.add(digest)
+        if key:
+            previous_versions.setdefault(key, []).append(piece)
         if not piece.text:
             piece.flags.append("空的")
         else:
+            compact = "".join(piece.text.split())
+            if WEB_ERROR.search(piece.text) or (len(compact) >= 50 and len(HAN.findall(compact)) < len(compact) / 2):
+                piece.flags.append("乱码")
             brief = len(piece.text) < short and "按字数切的" not in piece.flags
             if piece.numbered:
                 not_story = brief and bool(NOT_STORY.search(piece.title) or NOT_STORY.search(piece.text[:200]))
@@ -258,6 +335,9 @@ def split(
         kept.append(piece)
     return {
         "encoding": actual_encoding,
+        "traditional": traditional,
+        "t2s": use_t2s,
+        "t2s_seconds": t2s_seconds,
         "info": info,
         "intro": "\n".join(intro),
         "volumes": volumes,
@@ -293,34 +373,53 @@ def number_issues(chapters: Sequence[Piece]) -> tuple[list[dict], int]:
     numbered = [
         (index, piece)
         for index, piece in enumerate(chapters, 1)
-        if piece.number is not None and "番外" not in piece.flags
+        if piece.number is not None and "番外" not in piece.flags and "像是混进来的别的书" not in piece.flags
     ]
     issues, total = [], 0
     previous: int | None = None
     previous_volume: int | None = None
-    for position, (index, piece) in enumerate(numbered):
+    position = 0
+    while position < len(numbered):
+        index, piece = numbered[position]
         number = piece.number
         new_volume = piece.volume != previous_volume
         if previous is not None and number != previous + 1 and not (new_volume and number == 1):
-            following = numbered[position + 1][1] if position + 1 < len(numbered) else None
             expected = previous + 1
-            typo = (
-                following is not None
-                and not new_volume
-                and following.volume == piece.volume
-                and following.number == previous + 2
-                and following.number != number + 1
+            typo_count = 0
+            if not new_volume:
+                for count in range(1, 11):
+                    if position + count >= len(numbered):
+                        break
+                    following = numbered[position + count][1]
+                    if following.volume != piece.volume:
+                        break
+                    if following.number == expected + count:
+                        typo_count = count
+                        break
+                    if following.number != number + count:
+                        break
+            kind = (
+                "打错了"
+                if typo_count
+                else "跳了"
+                if number > expected
+                else "重了"
+                if number == previous
+                else "倒回去了"
             )
-            kind = "打错了" if typo else "跳了" if number > expected else "重了" if number == previous else "倒回去了"
             total += 1
             if len(issues) < 50:
-                issues.append(
-                    {"index": index, "title": piece.raw, "number": number, "expected": expected, "kind": kind}
-                )
-            if typo:
+                issue = {"index": index, "title": piece.raw, "number": number, "expected": expected, "kind": kind}
+                if typo_count > 1:
+                    end_index, end_piece = numbered[position + typo_count - 1]
+                    issue.update(count=typo_count, end_index=end_index, end_number=end_piece.number)
+                issues.append(issue)
+            if typo_count:
                 # 用应有的章号接着比，避免下一章再报一次因同一笔误产生的跳号。
-                number = expected
+                number = expected + typo_count - 1
+                position += typo_count - 1
         previous, previous_volume = number, piece.volume
+        position += 1
     return issues, total
 
 
@@ -336,25 +435,49 @@ def make_preview(result: dict, filename: str, size: int, *, encoding_auto: bool 
             excluded.append(
                 {"order": order, "title": piece.title, "chars": piece.chars, "reason": reason, "head": piece.text[:60]}
             )
+    volumes = [
+        {"index": index, "title": title, "chapters": counts.get(index, 0)}
+        for index, title in enumerate(result["volumes"], 1)
+    ]
+    largest_volume = max(volumes, key=lambda volume: volume["chapters"], default=None)
+    chapter_indices = {id(piece): index for index, piece in enumerate(chapters, 1)}
+    ignored_heading_candidates = [
+        {"order": order, "title": piece.title, "line": line}
+        for order, piece in enumerate(result["chapters"])
+        for line in piece.ignored_headings
+    ]
+    ignored_headings = [
+        {**candidate, "index": chapter_indices[id(result["chapters"][candidate["order"]])]}
+        for candidate in ignored_heading_candidates
+        if id(result["chapters"][candidate["order"]]) in chapter_indices
+    ]
+    title = result["info"].get("title") or filename_title(filename)
+    if result["t2s"]:
+        title = OpenCC("t2s").convert(title)
     return {
-        "title": result["info"].get("title") or filename_title(filename),
+        "title": title,
         "author": result["info"].get("author", ""),
         "intro": result["intro"],
         "file": {"name": filename, "size": size},
         "encoding": result["encoding"],
         "encoding_auto": encoding_auto,
+        "traditional": result["traditional"],
+        "t2s": result["t2s"],
+        "t2s_seconds": result["t2s_seconds"],
         "chars": sum(piece.chars for piece in chapters),
         "chapter_count": len(chapters),
-        "volumes": [
-            {"index": index, "title": title, "chapters": counts.get(index, 0)}
-            for index, title in enumerate(result["volumes"], 1)
-        ],
+        "volumes": volumes,
+        "volume_mode": "editor" if largest_volume and largest_volume["chapters"] > 400 else "original",
+        "largest_volume": largest_volume,
         "first": {"index": 1, "title": chapters[0].title} if chapters else None,
         "last": {"index": len(chapters), "title": chapters[-1].title} if chapters else None,
         "opening": chapters[0].text[:300] if chapters else "",
         "excluded": excluded,
         "number_issues": issues,
         "number_issue_total": issue_total,
+        "ignored_headings": ignored_headings[:20],
+        "ignored_heading_total": len(ignored_headings),
+        "ignored_heading_candidates": ignored_heading_candidates,
         "ads_removed": result["ads_removed"],
         "duplicates_removed": result["duplicates_removed"],
         "by_length": result["by_length"],

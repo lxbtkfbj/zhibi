@@ -4,6 +4,18 @@ export interface TeardownNumberIssue {
   number: number
   expected: number
   kind: '跳了' | '重了' | '倒回去了' | '打错了'
+  count?: number
+  end_index?: number
+  end_number?: number
+}
+
+export type TeardownVolumeMode = 'original' | 'editor'
+
+export interface TeardownIgnoredHeading {
+  index: number
+  title: string
+  line: string
+  order?: number
 }
 
 export interface TeardownFields {
@@ -17,15 +29,23 @@ export interface TeardownPreview extends TeardownFields {
   file: { name: string; size: number }
   encoding: string
   encoding_auto: boolean
+  traditional: boolean
+  t2s: boolean
+  t2s_seconds: number
   chars: number
   chapter_count: number
   volumes: { index: number; title: string; chapters: number }[]
+  volume_mode: TeardownVolumeMode
+  largest_volume: { index: number; title: string; chapters: number } | null
   first: { index: number; title: string } | null
   last: { index: number; title: string } | null
   opening: string
   excluded: { order: number; title: string; chars: number; reason: string; head: string }[]
   number_issues: TeardownNumberIssue[]
   number_issue_total: number
+  ignored_headings: TeardownIgnoredHeading[]
+  ignored_heading_total: number
+  ignored_heading_candidates?: { order: number; title: string; line: string }[]
   ads_removed: number
   duplicates_removed: number
   by_length: boolean
@@ -80,8 +100,44 @@ export function teardownNumberIssueText(issue: TeardownNumberIssue): string {
       : `第 ${index} 章前：原书没有第 ${expected}–${number - 1} 章`
     case '重了': return `第 ${index} 章：原书第 ${number} 章出现了两次`
     case '倒回去了': return `第 ${index} 章：原书章号从第 ${expected - 1} 章倒回了第 ${number} 章`
-    case '打错了': return `第 ${index} 章：原书把第 ${expected} 章写成了「第${number}章」`
+    case '打错了': return issue.count && issue.count > 1
+      ? `原书把第 ${expected}–${expected + issue.count - 1} 章写成了「第${number}章」到「第${issue.end_number}章」`
+      : `第 ${index} 章：原书把第 ${expected} 章写成了「第${number}章」`
   }
+}
+
+export function teardownIgnoredHeadingText(heading: TeardownPreview['ignored_headings'][number]): string {
+  return `第 ${heading.index} 章「${heading.title}」里的「${heading.line}」`
+}
+
+/** 确认页勾回的排除章会改变实际章号，候选也包括排除章自身的假标题。 */
+export function teardownIgnoredHeadingSelection(preview: TeardownPreview, include: readonly number[], selected?: readonly { order: number }[], offset = 0) {
+  const included = new Set(include)
+  const excludedChapters = preview.excluded ?? []
+  const excluded = new Set(excludedChapters.map(chapter => chapter.order))
+  const positions = selected ? new Map(selected.map((chapter, index) => [chapter.order, offset + index + 1])) : null
+  const indexOf = (order: number) => positions ? positions.get(order) : excluded.has(order) && !included.has(order) ? undefined
+    : order + 1 - [...excluded].filter(value => value < order && !included.has(value)).length
+  const candidates = preview.ignored_heading_candidates
+  if (candidates) {
+    const headings = candidates.flatMap(heading => {
+      const index = indexOf(heading.order)
+      return index === undefined ? [] : [{ ...heading, index }]
+    })
+    return { ignored_headings: headings.slice(0, 20), ignored_heading_total: headings.length }
+  }
+  return {
+    ignored_headings: (preview.ignored_headings ?? []).map(heading => ({ ...heading,
+      index: heading.order === undefined ? heading.index : positions?.get(heading.order) ?? heading.index + excludedChapters.filter(chapter => chapter.order < heading.order! && included.has(chapter.order)).length,
+    })),
+    ignored_heading_total: preview.ignored_heading_total,
+  }
+}
+
+export function teardownVolumeDefaultText(volume: TeardownPreview['largest_volume']): string | null {
+  return volume && volume.chapters > 400
+    ? `原书的「${volume.title}」一卷有 ${volume.chapters} 章，太粗，默认让主编按剧情分。`
+    : null
 }
 
 export function teardownCleaningText(preview: Pick<TeardownPreview, 'ads_removed' | 'duplicates_removed'>): string {

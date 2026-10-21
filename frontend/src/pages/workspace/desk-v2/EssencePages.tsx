@@ -1,5 +1,7 @@
 import { Fragment, useState, type ReactNode } from 'react'
 import type { VBook } from '../model'
+import { useSave, useWorkspace } from '../actions'
+import { DeskEdit } from './settingsEditing'
 import {
   ESSENCE_GROUPS, ESSENCE_LEADS, ESSENCE_NAMES, emptyEssenceText, essenceCount, essenceNumber, hasEssence, introOutline, introSteps,
   type EssenceBars, type EssenceKey, type EssencePoint, type TeardownEssence,
@@ -82,6 +84,8 @@ export function EssencePage({ essence, selected, book, active = false, onChapter
 
 export function TeardownIntro({ book, essence, onChapter, onUnit, onPerson, onEssence, onAppend }: { book: VBook; essence: TeardownEssence | null; onChapter: (chapter: number) => void; onUnit: (number: number) => void; onPerson: (name: string) => void; onEssence: () => void; onAppend: () => void }) {
   essence = hasEssence(essence) ? essence : null
+  const { actions } = useWorkspace()
+  const save = useSave()
   const rail = essence?.rails
   const overview = essence?.overview
   const outline = rail ?? introOutline(book)
@@ -91,7 +95,7 @@ export function TeardownIntro({ book, essence, onChapter, onUnit, onPerson, onEs
   const people = [...(book.categories.find(category => category.name === '角色列表')?.entries ?? [])].sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
   return <section className="page full"><div className="intro2"><div className="main">
     <div className="hero"><div className="cover"><span className="lbl">{book.title}</span><span className="stamp">执笔</span></div><div>
-      <div className="kicker">拆的书</div><h1>{book.title}</h1><div className="meta">原书作者 {book.teardown?.author || '（文件里没写）'} · {total} 章</div>
+      <div className="kicker">拆的书</div><DeskEdit as="h1" value={book.title} placeholder="书名" onSave={title => { if (title.trim()) save(actions.saveBook({ title: title.trim() })) }} /><div className="meta">原书作者 {book.teardown?.author || '（文件里没写）'} · {total} 章</div>
       <div className="statline"><span className="chip seal">已拆 {read} / {total} 章</span><span className="chip ochre">{outline.units.length} 个单元</span>{essence && <span className="chip jade">精髓基于前 {essence.upto} 章</span>}</div>
       {overview && <p className="genre" style={{ marginTop: 14 }}>{overview.genre}</p>}
       <div className="actions"><a className="btn seal-line" data-testid="teardown-append-entry" onClick={onAppend}>补后面的章节</a></div></div></div>

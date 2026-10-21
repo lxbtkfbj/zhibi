@@ -8,7 +8,7 @@ from sqlalchemy import select
 from app.agents.schemas import TeardownMerge
 from app.graphs.deps import JobCancelled
 from app.models import Character, Relationship
-from app.prompts import render
+from app.services.teardown_prompts import render
 from app.services.teardown_settings import SettingsWriter, people_of, reads_of, row_hash, text_hash
 
 

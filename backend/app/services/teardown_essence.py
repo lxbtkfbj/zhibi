@@ -9,7 +9,6 @@ from sqlalchemy import select
 from app.agents import schemas as s
 from app.graphs.deps import JobCancelled
 from app.models import Chapter, Character, Foreshadowing, PlotUnit
-from app.prompts import render
 from app.services.teardown_closing import check, locked_book, text_hash
 from app.services.teardown_essence_materials import (
     BookData,
@@ -22,6 +21,7 @@ from app.services.teardown_essence_materials import (
     top_tags,
     unit_block,
 )
+from app.services.teardown_prompts import render
 from app.services.teardown_settings import run_parallel
 
 SECTIONS = {

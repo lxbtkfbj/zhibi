@@ -11,7 +11,7 @@ $pidFile = Join-Path $DataDirectory 'pids.json'
 
 if (Test-Path $pidFile) {
     foreach ($entry in (Get-Content -LiteralPath $pidFile -Raw | ConvertFrom-Json)) {
-        # 包括 teardown 与 teardown2；只停止这次启动登记的独立进程树。
+        # 包括 teardown、teardown2 与 teardown3；只停止这次启动登记的独立进程树。
         # /T 连同子进程一起结束（uv、npm 都会再启动子进程）
         taskkill /PID $entry.pid /T /F *> $null
         if (-not $Quiet) { Write-Host "已停止 $($entry.name)" }
