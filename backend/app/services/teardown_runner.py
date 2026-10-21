@@ -653,13 +653,14 @@ class Runner:
             while True:
                 await self.changed.wait()
                 self.changed.clear()
+                final = self.reading_done
                 if await self.should_stop():
                     return
                 while not await self.should_stop():
                     # 已有足够单元的旧卷先收，不能越过去先归后面章节的单元。
-                    if await self.volumes_once(final=self.reading_done):
+                    if await self.volumes_once(final=final):
                         continue
-                    if await self.group_once(final=self.reading_done):
+                    if await self.group_once(final=final):
                         continue
                     break
                 if not self.reading_done and not await self.should_stop():
@@ -672,7 +673,8 @@ class Runner:
                     except Exception:
                         # 这段本轮不再试；不妨碍读原文，收尾从已落盘的 upto 接着记。
                         log.exception("拆书 %s 边读边记读者在等的事未完成", self.book_id)
-                if self.reading_done:
+                # 读完信号可能在本轮任意 await 中到达，必须再完整跑一轮收尾。
+                if final:
                     return
         except TeardownStopped as exc:
             self.stop = exc
@@ -738,6 +740,19 @@ class Runner:
         read = [c.index for c in chapters if (c.teardown or {}).get("read_version")]
         failed = [c.index for c in chapters if "read_failed" in (c.teardown or {})]
         volume_count = sum(v.title not in ("还没收尾", "还没分卷", "") for v in volumes)
+        ungrouped: list[tuple[int, int]] = []
+        for chapter in chapters:
+            if chapter.unit_id:
+                continue
+            if not ungrouped or chapter.index != ungrouped[-1][1] + 1:
+                ungrouped.append((chapter.index, chapter.index))
+            else:
+                ungrouped[-1] = (ungrouped[-1][0], chapter.index)
+        unfinished = [f"第 {first}–{last} 章还没归进单元" for first, last in ungrouped]
+        if (current_book.teardown or {}).get("open_volume_id"):
+            unfinished.append("最后一卷还没收尾")
+        if any(not v.summary for v in volumes):
+            unfinished.append("有卷还没写那段话")
         author_stop = await self.cancelled()
         if author_stop:
             reason, note = "author", f"已手动停下，停在第 {max(read, default=0)} 章。"
@@ -754,9 +769,10 @@ class Runner:
             or (current_book.teardown or {}).get("open_volume_id")
             or any(not v.summary for v in volumes)
         ):
+            detail = f"（{'；'.join(unfinished)}）" if unfinished else ""
             reason, note = (
                 "error",
-                "拆的时候出错了（还有章或卷没有归完），停下了。点「接着拆」从停的地方往下拆，读过的不重读。",
+                f"拆的时候出错了{detail}，停下了。点「接着拆」从停的地方往下拆，读过的不重读。",
             )
         else:
             reason, note = None, ""

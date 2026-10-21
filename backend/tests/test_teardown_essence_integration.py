@@ -1,5 +1,6 @@
 """精髓的产品接缝：收尾、摘要、只读接口、重跑和边读边记。"""
 
+import asyncio
 import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -259,9 +260,10 @@ async def test_grouping_live_wait_error_is_logged_not_stopped(sessionmaker, redi
 
     async def bad(*args, **kwargs):
         runner.reading_done = True
+        runner.changed.set()
         raise ValueError("这段失败不阻止读原文")
 
     monkeypatch.setattr(closing, "collect_waits", bad)
     runner.changed.set()
-    await runner.grouping()
+    await asyncio.wait_for(runner.grouping(), timeout=10)
     assert runner.stop is None
