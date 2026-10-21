@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -22,6 +22,7 @@ class AppSetting(Base):
 class AuthorRequirement(UUIDPk, Timestamps, Base):
     __tablename__ = "author_requirements"
 
+    seq: Mapped[int] = mapped_column(Integer, Identity(), index=True)
     book_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("books.id", ondelete="CASCADE"), index=True)
     text: Mapped[str] = mapped_column(Text)
     source: Mapped[str] = mapped_column(String(100), default="manual")

@@ -214,7 +214,7 @@ async def test_restoring_an_old_save_moves_other_rules_into_requirements(client,
     async with sessionmaker() as session:
         assert (await session.get(Book, b)).settings["other_rules"] == ""
         texts = await session.scalars(
-            select(AuthorRequirement.text).where(AuthorRequirement.book_id == b).order_by(AuthorRequirement.created_at)
+            select(AuthorRequirement.text).where(AuthorRequirement.book_id == b).order_by(AuthorRequirement.seq)
         )
         assert list(texts) == ["每章都要有打斗", "别写套话"]
 

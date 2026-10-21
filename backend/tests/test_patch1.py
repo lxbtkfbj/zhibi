@@ -164,7 +164,7 @@ async def test_pending_immediate_and_ordered_routing(sessionmaker, redis, monkey
             await session.scalars(select(MeetingMessage).where(MeetingMessage.id.in_(ids)).order_by(MeetingMessage.id))
         )
         assert all(r.job_id and r.payload["outcome"]["kind"] == "to_job" for r in rows)
-        requirements = list(await session.scalars(select(AuthorRequirement).order_by(AuthorRequirement.created_at)))
+        requirements = list(await session.scalars(select(AuthorRequirement).order_by(AuthorRequirement.seq)))
         assert [r.message_id for r in requirements] == ids
     assert any(e[1]["event"] == "message_update" for e in await redis.xrange(f"zhibi:events:{bid}"))
 

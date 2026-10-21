@@ -573,6 +573,8 @@ def parts(table: str, data: dict | None, texts=None) -> dict[str, str]:
     for key, value in data.items():
         if key in ("id", "book_id", "created_at"):
             continue
+        if table == "author_requirements" and key == "seq":
+            continue
         if table == "characters" and key == "extra":
             for name, item in (value or {}).items():
                 out[name] = text_of(item)
@@ -813,6 +815,9 @@ async def _put_rows(session: AsyncSession, model, rows: list[dict], texts: dict)
                 parents[row["id"]] = row["parent_id"]
             row["parent_id"] = None
     if model is AuthorRequirement:
+        # Pre-sequence saves must keep the old visible order, not manifest order.
+        if all("seq" not in row for row in values):
+            values.sort(key=lambda row: (row["created_at"], row["id"]))
         # 记这条要求的那句话要是不在了，就不再指着它
         ids = {row["message_id"] for row in values if row.get("message_id")}
         if ids:

@@ -12,9 +12,7 @@ async def list_requirements(session: AsyncSession, book_id: uuid.UUID) -> list[A
     return list(
         (
             await session.scalars(
-                select(AuthorRequirement)
-                .where(AuthorRequirement.book_id == book_id)
-                .order_by(AuthorRequirement.created_at, AuthorRequirement.id)
+                select(AuthorRequirement).where(AuthorRequirement.book_id == book_id).order_by(AuthorRequirement.seq)
             )
         ).all()
     )

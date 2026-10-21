@@ -39,7 +39,7 @@ class Book(UUIDPk, Timestamps, Base):
         back_populates="book",
         cascade="all, delete-orphan",
         lazy="selectin",
-        order_by="(AuthorRequirement.created_at, AuthorRequirement.id)",
+        order_by="AuthorRequirement.seq",
     )
 
     @property
