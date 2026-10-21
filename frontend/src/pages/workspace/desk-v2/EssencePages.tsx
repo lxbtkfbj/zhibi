@@ -3,7 +3,7 @@ import type { VBook } from '../model'
 import { useSave, useWorkspace } from '../actions'
 import { DeskEdit } from './settingsEditing'
 import {
-  ESSENCE_GROUPS, ESSENCE_LEADS, ESSENCE_NAMES, emptyEssenceText, essenceCount, essenceNumber, hasEssence, introOutline, introSteps,
+  ESSENCE_GROUPS, ESSENCE_LEADS, ESSENCE_NAMES, emptyEssenceText, essenceCount, essenceNumber, hasEssence, introOutline, introSteps, introVolumes,
   type EssenceBars, type EssenceKey, type EssencePoint, type TeardownEssence,
 } from './essenceData'
 
@@ -82,13 +82,17 @@ export function EssencePage({ essence, selected, book, active = false, onChapter
   </section><EssenceRail essence={essence} selected={key} /></>
 }
 
-export function TeardownIntro({ book, essence, onChapter, onUnit, onPerson, onEssence, onAppend }: { book: VBook; essence: TeardownEssence | null; onChapter: (chapter: number) => void; onUnit: (number: number) => void; onPerson: (name: string) => void; onEssence: () => void; onAppend: () => void }) {
+export function TeardownIntro({ book, essence, onChapter, onUnit, onVolume, onPerson, onEssence, onAppend }: { book: VBook; essence: TeardownEssence | null; onChapter: (chapter: number) => void; onUnit: (number: number) => void; onVolume: (id: string) => void; onPerson: (name: string) => void; onEssence: () => void; onAppend: () => void }) {
   essence = hasEssence(essence) ? essence : null
   const { actions } = useWorkspace()
   const save = useSave()
   const rail = essence?.rails
   const overview = essence?.overview
-  const outline = rail ?? introOutline(book)
+  const bookOutline = introOutline(book)
+  const outline = rail ?? bookOutline
+  const byVolume = Math.max(outline.units.length, bookOutline.units.length) > 24
+  const volumes = byVolume ? introVolumes(book) : null
+  const tail = volumes ? volumes.tail : outline.tail
   const read = book.teardown?.last_read ?? 0
   const total = book.teardown?.chapters ?? 0
   const archetypes = Object.fromEntries((essence?.sections.cast?.figures ?? []).map(figure => [figure.name, figure.archetype]))
@@ -102,7 +106,10 @@ export function TeardownIntro({ book, essence, onChapter, onUnit, onPerson, onEs
     {overview && <><div className="sec"><div className="label">一句话看懂<span className="n" onClick={onEssence} style={{ cursor: 'pointer' }}>去精髓页 ›</span></div><p className="lead">{overview.engine}</p></div>
       <div className="sec"><div className="label">最值得学的几件事<span className="n" onClick={onEssence} style={{ cursor: 'pointer' }}>全部知识点 ›</span></div><ol className="learn">{overview.points.slice(0, 4).map((point, i) => <li onClick={onEssence} key={i}><b>{point.title}</b><span>{introSteps(point)}</span></li>)}</ol></div></>}
     {!essence && <div className="state">精髓还没整理：拆书收尾时会整理，整理好以后这里会有一句话看懂和最值得学的几件事。</div>}
-    <div className="sec"><div className="label">故事走到哪了<span className="n">一格一个单元</span></div><div className="ugrid">{outline.units.map(unit => <div className="ucard" onClick={() => onUnit(unit.n)} key={unit.n}><b><span className="seal-no">{essenceNumber(unit.n)}</span>{unit.title}</b><small>第 {unit.first}–{unit.last} 章 · {unit.last - unit.first + 1} 章</small></div>)}{outline.tail && <div className="ucard wait" onClick={() => onChapter(outline.tail![0])}><b><span className="seal-no">…</span>还没收尾</b><small>第 {outline.tail[0]}–{outline.tail[1]} 章</small></div>}</div></div>
+    <div className="sec"><div className="label">故事走到哪了<span className="n">{byVolume ? '一格一卷，点进去看这一卷的单元' : '一格一个单元'}</span></div><div className="ugrid">{volumes ? volumes.groups.map((group, index) => <Fragment key={index}>
+      {group.arc && <div className="intro-volume-arc"><b>{group.arc.title}</b><small>第 {group.arc.first}–{group.arc.last} 章 · {group.volumes.length} 卷</small></div>}
+      {group.volumes.map(volume => <div className="ucard" onClick={() => onVolume(volume.id)} key={volume.id}><b><span className="seal-no">{essenceNumber(volume.n)}</span>{volume.title}</b><small>第 {volume.first}–{volume.last} 章 · {volume.last - volume.first + 1} 章 · {volume.units} 个单元</small></div>)}
+    </Fragment>) : outline.units.map(unit => <div className="ucard" onClick={() => onUnit(unit.n)} key={unit.n}><b><span className="seal-no">{essenceNumber(unit.n)}</span>{unit.title}</b><small>第 {unit.first}–{unit.last} 章 · {unit.last - unit.first + 1} 章</small></div>)}{tail && <div className="ucard wait" onClick={() => onChapter(tail[0])}><b><span className="seal-no">…</span>还没收尾</b><small>第 {tail[0]}–{tail[1]} 章</small></div>}</div></div>
     {book.teardown?.intro && <div className="sec"><div className="label">原书简介</div><p className="lead" style={{ fontSize: 16, whiteSpace: 'pre-line' }}>{book.teardown.intro}</p></div>}
   </div><div className="side">
     <div className="side-box"><div className="label">主要人物<span className="n">主角在前，其余按出场</span></div><ul className="plist cast2">{rail ? rail.people.slice(0, 7).map(([name, count], i) => <li key={i}><span className="nm" onClick={() => onPerson(name)}>{name}</span><span>{name === rail.hero ? <span className="chip seal">主角</span> : archetypes[name] ? <span className="chip ochre">{archetypes[name]}</span> : null}</span><span className="ct">{count} 章</span></li>)

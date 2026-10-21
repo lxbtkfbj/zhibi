@@ -48,3 +48,13 @@
 .desk-v2 .book-switch-row:hover, .desk-v2 .book-switch-row.current { background: var(--color-subtle); }
 .desk-v2 .book-switch-row > span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .desk-v2 .book-switch-row > small { flex: none; font-size: 12px; color: var(--color-ink-3); }
+
+/* Grid items may shrink below their text's intrinsic width; ellipses stay inside. */
+.desk-v2 .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.desk-v2 .tiles > .tile { min-width: 0; }
+.desk-v2 .tiles .settings-many-ladders .hd > b { flex-shrink: 0; }
+.desk-v2 .tiles .kv { grid-template-columns: auto minmax(0, 1fr); }
+.desk-v2 .intro2 .intro-volume-arc { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 10px; color: var(--ink-2); }
+.desk-v2 .intro2 .intro-volume-arc:not(:first-child) { margin-top: 6px; }
+.desk-v2 .intro2 .intro-volume-arc b { font: 700 13px var(--serif); }
+.desk-v2 .intro2 .intro-volume-arc small { font-size: 12px; color: var(--ink-3); }

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import vm from 'node:vm'
+import { cn } from '../src/pages/workspace/model.ts'
 import {
   ESSENCE_GROUPS, ESSENCE_LEADS, ESSENCE_NAMES, emptyEssenceText, essenceCount, essenceNumber, hasEssence, introOutline, introSteps,
 } from '../src/pages/workspace/desk-v2/essenceData.ts'
@@ -16,7 +17,7 @@ test('精髓节名、每节说明和五组顺序逐字采用精髓样张，不�
   assert.deepEqual(ESSENCE_LEADS, sample.leads)
   assert.deepEqual(ESSENCE_GROUPS, sample.groups)
   assert.equal(ESSENCE_GROUPS.flatMap(([, keys]) => keys).length, 12)
-  for (let i = 1; i <= 30; i++) assert.equal(essenceNumber(i), i <= 10 ? '一二三四五六七八九十'[i - 1] : i <= 19 ? '十' + '一二三四五六七八九十'[i - 11] : String(i))
+  for (let i = 1; i <= 99; i++) assert.equal(essenceNumber(i), cn(i))
 })
 
 test('目录数字为知识点加人物，搜索逐字段命中，空白恢复原数而不计missing', () => {

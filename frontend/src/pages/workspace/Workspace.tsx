@@ -1055,6 +1055,7 @@ export function Workspace({ book: base, actions: rawActions, right, sideFooter, 
           <main ref={pageRef} className="desk">
             {tab === '简介' && (teardown ? essenceUnready ? essencePlaceholder(true) : <TeardownIntro book={book} essence={essence}
               onChapter={index => nav.openNode(`c${index}`)}
+              onVolume={nav.openNode}
               onUnit={index => { const units: VNode[] = []; const visit = (item: VNode) => { if (item.kind === '单元' && !item.virtual) units.push(item); item.children?.forEach(visit) }; visit(book.outline); if (units[index - 1]) nav.openNode(units[index - 1].id) }}
               onPerson={name => { const person = book.categories.flatMap(c => c.entries).find(e => e.kind === 'character' && e.name === name); if (person) nav.openEntry(person.id) }}
               onEssence={() => { setEssenceKey('overview'); setTab('精髓') }} onAppend={() => { void navigate(`/teardown/${book.id}/append`) }} /> : <DeskIntro book={book} nav={nav} />)}

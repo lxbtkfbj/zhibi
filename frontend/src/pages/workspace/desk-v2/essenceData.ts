@@ -1,4 +1,4 @@
-import type { VBook, VNode } from '../model'
+import { cn, splitTitle, type VBook, type VNode } from '../model.ts'
 
 export const ESSENCE_NAMES = {
   source: '情节怎么想', skeleton: '剧情骨架', link: '剧情衔接', fresh: '保持新鲜', longline: '长线布局',
@@ -40,7 +40,7 @@ export function hasEssence<T extends { upto?: number | null }>(value: T | null |
   return typeof value?.upto === 'number'
 }
 
-export const essenceNumber = (n: number) => n <= 10 ? '一二三四五六七八九十'[n - 1] : n <= 19 ? '十' + '一二三四五六七八九十'[n - 11] : String(n)
+export const essenceNumber = cn
 export function essenceCount(essence: TeardownEssence | null, key: EssenceKey, query = ''): number {
   if (!hasEssence(essence)) return 0
   const q = query.trim()
@@ -72,6 +72,37 @@ export function introOutline(book: VBook): { units: EssenceUnit[]; tail: [number
   }
   walk(book.outline)
   return { units, tail }
+}
+
+export interface IntroVolume extends EssenceUnit { id: string; units: number }
+export interface IntroVolumeGroup {
+  arc?: { title: string; first: number; last: number }
+  volumes: IntroVolume[]
+}
+
+/** 卷格只取已归好的卷；主编还在归的部分合成一张尾卡。 */
+export function introVolumes(book: VBook): { groups: IntroVolumeGroup[]; tail: [number, number] | null } {
+  const groups: IntroVolumeGroup[] = []
+  const read = book.teardown?.last_read ?? 0
+  const openId = book.teardown?.open_volume_id
+  let n = 0, last = 0
+  const add = (nodes: VNode[], arc?: VNode) => {
+    const volumes: IntroVolume[] = []
+    for (const node of nodes) {
+      if (node.kind !== '卷' || !node.range || node.range[1] > read || node.open
+        || (openId && (node.ref?.id === openId || node.id === `v:${openId}`))
+        || (splitTitle(node.title)[1] || node.title) === '还没分卷') continue
+      volumes.push({ id: node.id, n: ++n, title: splitTitle(node.title)[1] || node.title.replace(/^第[一二三四五六七八九十百\d]+卷[ ·　]*/, ''),
+        first: node.range[0], last: node.range[1], units: (node.children ?? []).filter(unit => unit.kind === '单元' && !unit.virtual).length })
+      last = node.range[1]
+    }
+    if (volumes.length) groups.push({ ...(arc ? { arc: { title: arc.title.replace('　', ' '), first: volumes[0].first, last: volumes.at(-1)!.last } } : {}), volumes })
+  }
+  for (const node of book.outline.children ?? []) {
+    if (node.kind === '篇') add(node.children ?? [], node)
+    else if (node.kind === '卷') add([node])
+  }
+  return { groups, tail: last < read ? [last + 1, read] : null }
 }
 
 export function introSteps(point: EssencePoint): string {

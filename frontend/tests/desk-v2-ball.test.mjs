@@ -12,9 +12,9 @@ test('精髓样张两类拆书页面保留literal返回字，装修页面及作�
   assert.match(chrome, /teardown && \(tab === '简介' \|\| tab === '精髓'\) \? '‹ 书房' : <><Icon name="l" \/>书房<\/>/)
 })
 
-test('精髓样张两类拆书页面空作者不多出间隔点，其余旧页和作者书不改', () => {
+test('拆书导入小修2五个拆书页面空作者不多出间隔点，作者书不改', () => {
   assert.match(prototype, /'拆的书' \+ \(M.author \? ' · ' \+ M.author : ''\)/)
-  assert.match(chrome, /teardown && <span className="tag">\{\(tab === '简介' \|\| tab === '精髓'\) && !book.teardown\?\.author \? '拆的书' : <>拆的书 · \{book.teardown\?\.author\}<\/>\}/)
+  assert.match(chrome, /teardown && <span className="tag">\{!book.teardown\?\.author\?\.trim\(\) \? '拆的书' : <>拆的书 · \{book.teardown\?\.author\}<\/>\}/)
 })
 
 test('印章位置只接受有效side和有限高度比例，坏localStorage都回默认', () => {
