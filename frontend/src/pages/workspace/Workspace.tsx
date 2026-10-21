@@ -513,7 +513,10 @@ function savedSideWidth(fallback: number): number {
   }
 }
 
-/** 贴在右边的编辑部：左边缘可以拖宽拖窄，记住上次的宽度。 */
+/** 贴在右边的编辑部：左边缘可以拖宽拖窄，记住上次的宽度。
+ *  右栏是 `.desk-v2 .body` 网格的一格，min-h-0 让这一格永远只有书桌主体那么高：
+ *  聊天再长也是在栏里自己滚（里面的列表 overflow-y-auto、输入框钉在最下面），
+ *  不会把网格那一行撑高、把输入框顶到屏幕外——左边目录和中间页面同理（.toc、.desk 都有 min-height: 0）。 */
 function DockedEditorial({ setDock, children, width, setWidth, tools }: { setDock: (dock: Dock) => void; children: ReactNode; width: number; setWidth: (width: number) => void; tools?: ReactNode }) {
   const ref = useRef<HTMLElement>(null)
   const [dragging, setDragging] = useState(false)
@@ -538,7 +541,7 @@ function DockedEditorial({ setDock, children, width, setWidth, tools }: { setDoc
     } catch { /* 存不了就只管这一次 */ }
   }, [dragging, width])
   return (
-    <aside ref={ref} data-testid="editorial-docked" className="desk-legacy relative flex shrink-0 flex-col border-l border-line bg-paper" style={{ width }}>
+    <aside ref={ref} data-testid="editorial-docked" className="desk-legacy relative flex min-h-0 shrink-0 flex-col border-l border-line bg-paper" style={{ width }}>
       <div onPointerDown={(e) => { e.preventDefault(); setDragging(true) }} title="拖动调宽窄"
         className={clsx('absolute inset-y-0 -left-1.5 z-10 w-3 cursor-col-resize after:absolute after:inset-y-0 after:left-1.5 after:w-0.5 after:transition-colors', dragging ? 'after:bg-chief/60' : 'hover:after:bg-chief/40')} />
       {dragging && <div className="fixed inset-0 z-50 cursor-col-resize" />}
