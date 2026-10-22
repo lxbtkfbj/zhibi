@@ -75,7 +75,7 @@ export function ChatOutcome({ message, result, step }: { message: MeetingMessage
   }
   const act = async (action: string) => {
     if (busy) return
-    if (action === '改一下' || action === '其实要记下') { setEditing(true); return }
+    if (action === '改一下') { setEditing(true); return }
     if (action === '去看存档') { openSaves?.(outcome.save_id); return }
     setBusy(true); setError(null)
     try {
@@ -100,14 +100,14 @@ export function ChatOutcome({ message, result, step }: { message: MeetingMessage
     } finally { setBusy(false) }
   }
   const save = async (text: string, scope: RequirementScope) => {
-    if (row) await patch(`/requirements/${row.id}`, { text, scope })
-    else await post(`/books/${bookId}/requirements`, { text, scope, message_id: message.id })
+    if (!row) return
+    await patch(`/requirements/${row.id}`, { text, scope })
     await qc.invalidateQueries({ queryKey: settingsKeys.requirements(bookId) })
   }
   const link = 'underline underline-offset-4 hover:text-chief disabled:cursor-not-allowed disabled:no-underline disabled:opacity-40'
-  const dialog = editing && <RequirementDialog initial={row?.text ?? message.content} scope={row?.scope === 'chapter' ? 'next_chapter' : row?.scope === 'volume' ? 'this_volume' : 'always'} onClose={() => setEditing(false)} onSave={save} />
+  const dialog = editing && row && <RequirementDialog initial={row.text} scope={row.scope === 'chapter' ? 'next_chapter' : row.scope === 'volume' ? 'this_volume' : 'always'} onClose={() => setEditing(false)} onSave={save} />
   if (shown) {
-    const what = isRequirement ? (outcome.kind === 'to_job' ? '交给了编辑部：记成写作要求' : '记成了写作要求') : copy.text
+    const what = isRequirement ? (outcome.kind === 'to_job' ? '交给了编辑部：加一条写作要求' : '加了一条写作要求') : copy.text
     const canGo = !isRequirement && outcome.kind !== 'deleted' && !!outcome.target_type && !!outcome.target_id
     return (
       <div data-testid={`outcome-${message.id}`} className="mt-2 space-y-1.5 text-xs leading-relaxed text-ink-2">
@@ -128,6 +128,7 @@ export function ChatOutcome({ message, result, step }: { message: MeetingMessage
       </div>
     )
   }
+  if (!copy.text && !copy.actions.length && outcome.kind !== 'pending' && outcome.kind !== 'working') return null
   return <div data-testid={`outcome-${message.id}`} className="mt-2 space-y-1 text-xs leading-relaxed text-ink-2"><div className="flex flex-wrap items-center gap-x-2"><span>{gone ? '已换回原来的' : copy.text}</span>{(outcome.kind === 'pending' || outcome.kind === 'working') && <TypingDots />}{outcome.kind === 'working' && <span className="text-ink-3 tabular-nums">{Math.max(0, Math.round((now - Date.parse(outcome.since ?? started ?? '')) / 1000))} 秒</span>}{!gone && copy.actions.filter(action => action !== '去看存档' || openSaves).map(action => <button key={action} disabled={busy} className="underline underline-offset-4 hover:text-chief disabled:opacity-40" onClick={() => void act(action)}>{action}</button>)}</div><ErrorText error={error} />{outcome.kind === 'edit' && outcome.mode === 'options' && outcome.candidate_id && outcome.target_type && outcome.target_id && <ChatOptions bookId={bookId} candidateId={outcome.candidate_id} targetType={outcome.target_type} targetId={outcome.target_id} />}{dialog}</div>
 }
 

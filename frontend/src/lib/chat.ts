@@ -23,7 +23,7 @@ export function typingVisible(value: ChatTyping, thread: string, now: number) { 
 export function outcomeCopy(outcome: ChatOutcome, requirement?: AuthorRequirement) {
   if (outcome.kind === 'requirement' || outcome.kind === 'to_job') {
     if (!requirement) return { text: '这条要求已经删了', actions: [] }
-    return { text: outcome.kind === 'to_job' ? '已交给编辑部：做完手头这一步就照办' : `已记成要求：「${requirement.text}」（${requirement.label}）`, actions: outcome.kind === 'to_job' ? [] : ['改一下'] }
+    return { text: outcome.kind === 'to_job' ? '已交给编辑部：做完手头这一步就照办' : `加了一条写作要求：「${requirement.text}」（${requirement.label}）`, actions: outcome.kind === 'to_job' ? [] : ['改一下'] }
   }
   if (outcome.kind === 'pending') return { text: '主编在看…', actions: [] }
   if (outcome.kind === 'working') return { text: `${outcome.text ?? '编辑部在做'}…`, actions: [] }
@@ -33,9 +33,9 @@ export function outcomeCopy(outcome: ChatOutcome, requirement?: AuthorRequiremen
   if (outcome.kind === 'created') return { text: `写好了，放进了${outcome.target_label ?? '设定库'}`, actions: ['去看看'] }
   if (outcome.kind === 'outline') return { text: `写好了${outcome.target_label ?? '这一段'}，已经换上去`, actions: ['去看看'] }
   if (outcome.kind === 'plan_pending') return { text: '正在整理方案…', actions: [] }
-  if (outcome.kind === 'too_late') return { text: '编辑部这时在等你拍板，这句话没有记，也没有改。要改的话，在拍板的地方提意见，或者让我总结成方案。', actions: [] }
+  if (outcome.kind === 'too_late') return { text: '编辑部在等你拍板，这句话没改书。要改，就在拍板的地方提意见，或者说「总结一下」整理成方案。', actions: [] }
   if (outcome.kind === 'failed' && outcome.redo_failed) return { text: `再改一版没做成（${outcome.reason}），这一处现在是改之前的样子。`, actions: [] }
-  if (outcome.kind === 'failed') return { text: `没判断出来（${outcome.reason}），这句话没有记，也没有改。`, actions: ['其实要记下'] }
+  if (outcome.kind === 'failed') return { text: `没判断出这句话要做什么（${outcome.reason}），书没改。换个说法再说一次试试。`, actions: [] }
   if (outcome.kind === 'plan_apply') return { text: `照方案办：${outcome.label ?? '方案'}`, actions: [] }
   if (outcome.kind === 'plan_made') return outcome.count
     ? { text: `${outcome.deleting ? '要删东西' : `一次要动 ${outcome.count} 处`}，先整理成了方案卡：你看过、划掉不要的，点「按这个来」才改`, actions: [] }
@@ -45,7 +45,7 @@ export function outcomeCopy(outcome: ChatOutcome, requirement?: AuthorRequiremen
   if (outcome.kind === 'not_found') return { text: `没找到「${outcome.target_name ?? ''}」，没改`, actions: [] }
   if (outcome.kind === 'suggestion') return { text: '放进了待处理的建议', actions: ['去看看'] }
   if (outcome.kind === 'feedback') return { text: outcome.label ?? '', actions: [] }
-  if (outcome.kind === 'chat') return { text: '只是聊天，没有记', actions: ['其实要记下'] }
+  if (outcome.kind === 'chat') return { text: '', actions: [] }
   if (outcome.kind === 'later') return { text: '编辑部写完再改：在待处理的建议里', actions: ['去看看'] }
   if (outcome.kind === 'edit') return { text: `${outcome.mode === 'options' ? '三种写法，挑一个换上' : '改了'}：${outcome.target_label}`, actions: outcome.mode === 'options' ? [] : ['去看看'] }
   if (outcome.kind === 'saved') return { text: `存好了一档「${outcome.title ?? ''}」`, actions: ['去看存档'] }

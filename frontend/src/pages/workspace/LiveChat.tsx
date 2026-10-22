@@ -154,7 +154,7 @@ function toChat(messages: MeetingMessage[], outline: Outline | undefined, go: Go
         id, who: '作者', text: m.content, to: ask ? NAME[ask] : undefined, below: <StepOutcomes message={m} />,
         // 作者在聊天里说的话能从这里重来；这句和后面的话改过书，先提醒书不跟着退
         rewind: m.kind === 'note' && m.payload?.conv
-          ? { warn: n ? `这句和后面的话改过书（${n} 处）。聊天退回这里，书不跟着退：要退书，用那几处下面的「换回原来的」，或者去「存档」。` : undefined }
+          ? { warn: n ? `这句和后面的话改过书（${n} 处）。改了重发，聊天退回这里，书不跟着退：要退书，用那几处下面的「换回原来的」，或者去「存档」。` : undefined }
           : undefined,
       })
     } else if (isRole(m.speaker) && m.kind === 'plan') {
@@ -258,6 +258,7 @@ export function LiveChat({ writing }: { writing?: WritingControl }) {
   const target = waiting ? pendingTarget(job?.pending, bookId) : null
   const old = conv && latest && conv !== latest ? convs?.find((c) => c.id === conv) : undefined
   const control: ChatControl = {
+    bookId,
     messages: chatMessages,
     answering: !!current,
     sending,
@@ -266,18 +267,20 @@ export function LiveChat({ writing }: { writing?: WritingControl }) {
     send: async (content, to, rewindFrom) => {
       setSending(true)
       try {
-        const recipient = chatRecipient(to, undefined, quote)
+        // 原地修改只重发那句话；底下尚未发送的新引用留给下一问。
+        const sentQuote = rewindFrom ? undefined : quote
+        const recipient = chatRecipient(to, undefined, sentQuote)
         const sent = await run(() => sendChatFirst(
           () => {
             // 带上作者正在看的那一页：说「帮我写这一篇」就写这一页
             const seeing = viewing?.() ?? null
             return post<MeetingMessage>(`/books/${bookId}/notes`, {
-              content, ...(recipient ? { ask: CODE[recipient] } : {}), ...(quote ? { quote } : {}), ...(seeing ? { viewing: seeing } : {}),
+              content, ...(recipient ? { ask: CODE[recipient] } : {}), ...(sentQuote ? { quote: sentQuote } : {}), ...(seeing ? { viewing: seeing } : {}),
               ...(conv ? { conv } : {}), ...(rewindFrom ? { rewind_from: Number(rewindFrom) } : {}),
             })
           },
           () => feedback(content), false))
-        if (sent && quote) clearQuote()
+        if (sent && sentQuote) setChatQuotes(current => clearSentQuote(current, sentQuote))
         return sent
       } finally {
         setSending(false)
@@ -303,5 +306,5 @@ export function LiveChat({ writing }: { writing?: WritingControl }) {
     sendError: <ErrorText error={error} />,
     focusKey: focusComposer,
   }
-  return <EditorialChat key={conv} chat={control} />
+  return <EditorialChat key={`${bookId}:${conv}`} chat={control} />
 }

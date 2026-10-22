@@ -200,6 +200,20 @@ async def test_setting_change_creates_note_and_is_consumed(client, sessionmaker)
     assert (await client.get(f"/api/books/{book_id}/requirements")).json() == []
 
 
+async def test_chat_requirement_confirmation_uses_add_wording(client, sessionmaker):
+    book_id, _ = await fixture_book(sessionmaker)
+    response = await client.post(
+        f"/api/books/{book_id}/requirements",
+        json={"text": "每章都要推动主线", "source": "chat:chief", "scope": "always"},
+    )
+    assert response.status_code == 201
+    async with sessionmaker() as session:
+        message = await session.scalar(sa.select(MeetingMessage).where(MeetingMessage.book_id == book_id))
+        assert message.content == "加了一条写作要求：「每章都要推动主线」（一直有效）"
+        assert message.speaker == "system"
+        assert message.payload == {"thread": "chief"}
+
+
 async def test_style_reference_can_change_while_editorial_works(client, sessionmaker):
     # 文风参考只给写手看、编辑部不会去改：编辑部干活时也能改，从下一章起照新的写；别的照样等编辑部停下
     book_id, _ = await fixture_book(sessionmaker, kind="write_book")

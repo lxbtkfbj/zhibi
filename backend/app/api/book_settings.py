@@ -239,7 +239,7 @@ async def post_requirement(
             job_id=None,
             speaker="system",
             kind="decision",
-            content=f"已记成要求：「{row.text}」（{out['label']}）",
+            content=f"加了一条写作要求：「{row.text}」（{out['label']}）",
             payload={"thread": body.source.split(":", 1)[1]},
         )
     if message:

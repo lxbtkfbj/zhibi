@@ -196,13 +196,16 @@ try {
     await expect(conversation().getByText('方案「（演示）方案」照办了：改了 1 处，新建 1 条，记了 1 条要求。', { exact: true })).toBeVisible()
     evidence.group_plan = plan
     await shot('05b-改删后逐条落地')
-    await card.getByTestId(`outcome-${plan.id}`).filter({ hasText: '已记成要求' }).getByRole('button', { name: '撤销', exact: true }).click()
+    await card.getByTestId(`outcome-${plan.id}`).filter({ hasText: '加了一条写作要求' }).getByRole('button', { name: '撤销', exact: true }).click()
     await expect(card.getByText('已撤销', { exact: true })).toBeVisible()
     await shot('05c-撤销方案要求'); evidence.checks[5] = true
     await send('测试分流出错，下一章快一点'); note = await latestNote()
-    await expect(page.getByTestId(`outcome-${note.id}`)).toContainText('没判断出来')
-    await expect(page.getByTestId(`outcome-${note.id}`).getByRole('button', { name: '其实要记下', exact: true })).toBeVisible()
-    await shot('09-分流失败可明确记下'); evidence.checks[9] = true
+    await expect.poll(async () => (await history()).find(message => message.id === note.id)?.payload?.outcome.kind).toBe('failed')
+    note = (await history()).find(message => message.id === note.id)
+    await expect(page.getByTestId(`outcome-${note.id}`)).toContainText(`没判断出这句话要做什么（${note.payload.outcome.reason}），书没改。换个说法再说一次试试。`)
+    await expect(page.getByTestId(`outcome-${note.id}`).getByRole('button')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: '其实要记下', exact: true })).toHaveCount(0)
+    await shot('09-分流失败说明新字且没有手动加要求按钮'); evidence.checks[9] = true
     await selectRole('设定师')
     await expect(conversation().getByText('这里只聊天，不会改动书稿，也不会记成要求。聊出想法以后说「总结一下」，看过方案再点「按这个来」。', { exact: true })).toBeVisible()
     await send('老怪的夺舍条件还可以怎么限制？'); await waitReply((await latestNote()).id)

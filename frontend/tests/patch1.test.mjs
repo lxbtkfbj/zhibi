@@ -17,8 +17,8 @@ test('异步判断两分钟后显示超时，不覆盖已完成结果', () => {
 })
 
 test('分流失败、过时与方案结果说清是否生效', () => {
-  assert.deepEqual(outcomeCopy({ kind: 'failed', reason: '判断超时' }), { text: '没判断出来（判断超时），这句话没有记，也没有改。', actions: ['其实要记下'] })
-  assert.deepEqual(outcomeCopy({ kind: 'too_late' }).actions, [])
+  assert.deepEqual(outcomeCopy({ kind: 'failed', reason: '判断超时' }), { text: '没判断出这句话要做什么（判断超时），书没改。换个说法再说一次试试。', actions: [] })
+  assert.deepEqual(outcomeCopy({ kind: 'too_late' }), { text: '编辑部在等你拍板，这句话没改书。要改，就在拍板的地方提意见，或者说「总结一下」整理成方案。', actions: [] })
   assert.equal(outcomeCopy({ kind: 'plan_apply', label: '开篇和老怪' }).text, '照方案办：开篇和老怪')
   assert.equal(outcomeCopy({ kind: 'plan_made' }).text, '刚才聊了不少，我先整理成方案，你看看再照办')
   assert.deepEqual(outcomeCopy({ kind: 'suggestion' }).actions, ['去看看'])

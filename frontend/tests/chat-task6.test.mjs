@@ -15,10 +15,10 @@ test('群聊一律先 notes，仅 409 use_feedback 再给修改意见；502 和�
 })
 test('处理结果采用当前要求文字和范围，删除后不会显示旧文字', () => {
   const row = { text: '快一点', label: '只管第 3 章' }
-  assert.deepEqual(outcomeCopy({ kind: 'requirement' }, row), { text: '已记成要求：「快一点」（只管第 3 章）', actions: ['改一下'] })
+  assert.deepEqual(outcomeCopy({ kind: 'requirement' }, row), { text: '加了一条写作要求：「快一点」（只管第 3 章）', actions: ['改一下'] })
   assert.deepEqual(outcomeCopy({ kind: 'requirement' }), { text: '这条要求已经删了', actions: [] })
-  assert.equal(outcomeCopy({ kind: 'chat' }).text, '只是聊天，没有记')
-  assert.deepEqual(outcomeCopy({ kind: 'chat' }).actions, ['其实要记下'])
+  assert.equal(outcomeCopy({ kind: 'chat' }).text, '')
+  assert.deepEqual(outcomeCopy({ kind: 'chat' }).actions, [])
   assert.deepEqual(outcomeCopy({ kind: 'created', target_label: '角色列表 · 封不觉' }), { text: '写好了，放进了角色列表 · 封不觉', actions: ['去看看'] })
   assert.equal(outcomeCopy({ kind: 'to_job' }, row).text, '已交给编辑部：做完手头这一步就照办')
   // 2026-10-18：三种写法就在消息下面挑，不再跳去设定库

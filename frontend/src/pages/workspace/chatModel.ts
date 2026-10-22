@@ -32,13 +32,15 @@ export interface ChatMessage {
   looked?: { label: string; text: string }[]
   /** 消息下面再放点东西：改了什么、去看看、撤销…… */
   below?: ReactNode
-  /** 作者的话能「从这里重来」；warn：这句和后面的话改过书，书不跟着退，先提醒一声 */
+  /** 作者的话能「修改」；warn：这句和后面的话改过书，书不跟着退，先提醒一声 */
   rewind?: { warn?: string }
   /** 不是一问一答的（编辑部干活的进度、方案卡）：整条换成这个 */
   custom?: ReactNode
 }
 
 export interface ChatControl {
+  /** 真书的草稿按书保存在浏览器里；原型没有书 ID，不落盘。 */
+  bookId?: string
   messages: ChatMessage[]
   /** 正在回答：发送键变成「停」 */
   answering: boolean
