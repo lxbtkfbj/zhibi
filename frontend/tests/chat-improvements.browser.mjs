@@ -23,7 +23,7 @@ const books = [{ kind: 'new', id: fixture.new_book_id }, { kind: 'teardown', id:
 assert.ok(books.every(book => typeof book.id === 'string' && book.id.length))
 assert.notEqual(books[0].id, books[1].id)
 const data = resolve(process.env.TEST_ARTIFACT_DIR || dirname(fixturePath))
-const output = resolve(root, 'docs/聊天改进验收')
+const output = resolve(process.env.TEST_SCREENSHOT_DIR || resolve(root, 'docs/聊天改进验收'))
 const profile = resolve(data, `browser-profile-${Date.now()}`)
 await Promise.all([mkdir(data, { recursive: true }), mkdir(output, { recursive: true })])
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || process.env.ZHIBI_CHROMIUM || ['C:/Program Files/Google/Chrome/Application/chrome.exe'].find(existsSync)
@@ -140,6 +140,12 @@ async function wheelUp() {
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
   await page.mouse.wheel(0, -750)
   await expect.poll(() => messages().evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeGreaterThan(48)
+}
+
+async function followingLatest() {
+  await expect.poll(() => messages().evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeLessThanOrEqual(48)
+  await expect(page.getByRole('button', { name: /^(回到最新|有新回答)$/ })).toHaveCount(0)
+  return messages().evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight)
 }
 
 async function outcomes(book) {
@@ -324,6 +330,70 @@ async function conversation(book) {
   await page.emulateMedia({ reducedMotion: 'reduce' })
 }
 
+async function authorInitiatedReplies(book) {
+  await bottom()
+  await type(composer(), '合成故事里的灯光和街道有什么关系？')
+  await role('主编')
+  await wheelUp()
+  const beforeSend = await messages().evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight)
+  await expect(page.getByRole('button', { name: '回到最新', exact: true })).toBeVisible()
+  const notesURL = `${base}/api/books/${book.id}/notes`
+  const sentResponse = page.waitForResponse(response => response.request().method() === 'POST' && response.url() === notesURL)
+  // 滚轮不夺走底部输入框焦点；直接键盘发送，不让定位器替测试先滚到底。
+  await expect(composer()).toBeFocused()
+  await page.keyboard.press('Enter')
+  const posted = await sentResponse
+  assert.equal(posted.status(), 201)
+  const note = await posted.json()
+  await expect(composer()).toHaveValue('')
+  const afterSend = await followingLatest()
+  await replyFor(book.id, note)
+  const afterReply = await followingLatest()
+  record(`${book.kind}: 上翻超过48px后底部发送成功立即回底、回答跟到底、无回到最新或有新回答`, { beforeSend, afterSend, afterReply })
+
+  await edit(note)
+  const input = inline().getByLabel('修改这句话')
+  await expect(input).toBeFocused()
+  await expect.poll(() => input.evaluate(el => ({ start: el.selectionStart, end: el.selectionEnd, length: el.value.length })))
+    .toEqual({ start: note.content.length, end: note.content.length, length: note.content.length })
+  record(`${book.kind}: 点修改后原地输入框获焦、光标两端都在原话末尾`, { length: note.content.length })
+  await type(input, '合成故事里的灯光为什么让街道显得安静？')
+  await wheelUp()
+  const beforeRewind = await messages().evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight)
+  await expect(input).toBeFocused()
+  const changedResponse = page.waitForResponse(response => response.request().method() === 'POST' && response.url() === notesURL)
+  await page.keyboard.press('Enter')
+  const changedPost = await changedResponse
+  assert.equal(changedPost.status(), 201)
+  assert.equal(changedPost.request().postDataJSON().rewind_from, note.id)
+  const revised = await changedPost.json()
+  await expect(inline()).toHaveCount(0)
+  const afterRewind = await followingLatest()
+  const revisedReply = await replyFor(book.id, revised)
+  const afterRevisedReply = await followingLatest()
+  record(`${book.kind}: 上翻超过48px后原地修改Enter成功回底、回答跟到底、无回到最新或有新回答`, { beforeRewind, afterRewind, afterRevisedReply })
+
+  const again = revisedReply.locator.getByRole('button', { name: '重新回答', exact: true })
+  await composer().click()
+  // 真键盘逆向Tab聚焦最新回答的按钮，再上翻后Enter触发原生click。
+  // 不能直接again.click()，它会为可见性自动滚动，让缺少产品回底逻辑也假通过。
+  for (let tabs = 0; tabs < 8 && !(await again.evaluate(el => el === document.activeElement)); tabs++) {
+    await page.keyboard.press('Shift+Tab')
+  }
+  await expect(again).toBeFocused()
+  await wheelUp()
+  const beforeAgain = await messages().evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight)
+  await expect(again).toBeFocused()
+  const againResponse = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `/api/books/${book.id}/chat/replies/${revisedReply.message.id}/again`)
+  await page.keyboard.press('Enter')
+  const immediatelyAfterAgain = await followingLatest()
+  assert.equal((await againResponse).status(), 202)
+  await expect(revisedReply.locator).toHaveAttribute('data-state', /thinking|streaming/)
+  await replyFor(book.id, revised)
+  const afterAgainReply = await followingLatest()
+  record(`${book.kind}: 上翻超过48px后重新回答原生click立即回底、回答继续跟到底`, { beforeAgain, immediatelyAfterAgain, afterAgainReply, activation: 'keyboard-Enter-native-click' })
+}
+
 async function inFlightDrafts(book) {
   for (const change of [false, true]) {
     await bottom()
@@ -441,6 +511,7 @@ try {
     await open(book.id)
     await outcomes(book)
     await conversation(book)
+    await authorInitiatedReplies(book)
     await drafts(book)
     await inFlightDrafts(book)
     if (book.kind === 'new') await clipboardFaults(book)

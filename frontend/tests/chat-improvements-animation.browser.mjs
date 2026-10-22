@@ -1,5 +1,6 @@
 /** 聊天改进任务 1 的动画补验：两书 × 浮窗/侧栏，真实 demo 流式回答中点击回最新。
- * 独立保存 browser-animation-results.json，不覆盖完整26组证据或三张截图。
+ * 独立保存 browser-animation-results.json，不覆盖完整34组证据或三张截图。
+ * 独立预览使用 ZHIBI_DEMO_DELAY=16，给真实流式上翻和220ms动画留下完整采样窗口。
  * TEST_BASE_URL=http://127.0.0.1:4381 node tests/chat-improvements-animation.browser.mjs
  */
 import assert from 'node:assert/strict'
@@ -52,17 +53,28 @@ try {
       await expect(page.getByRole('button', { name: '回到最新', exact: true })).toBeVisible()
       await composer().click()
       await page.keyboard.insertText('@主编 灯光\n影子\n人物\n街道\n场景\n是什么样？')
+      // 先把鼠标放在消息区，短demo流式期间只滚轮，不耗在重新定位上。
+      const listBox = await list().boundingBox()
+      await page.mouse.move(listBox.x + listBox.width / 2, listBox.y + listBox.height / 2)
       const responsePromise = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `/api/books/${id}/notes`)
       await composer().press('Enter')
       assert.equal((await responsePromise).status(), 201)
-      // 上翻已在发送前完成，等第一个真实流式字；避免短demo回答耗在滚轮定位上。
+      // 作者主动发送会重新跟到底；等真实流式开头后再上翻，验编辑部后续新字不拽回。
       const live = page.locator('[data-testid^="reply-"][data-state="streaming"]').last()
+      await page.waitForFunction(() => document.querySelector('[data-testid^="reply-"][data-state="streaming"]'))
       await expect(live).toBeVisible()
       const replyTestId = await live.getAttribute('data-testid')
+      await page.mouse.wheel(0, -750)
+      await page.waitForFunction(() => {
+        const el = document.querySelector('[data-testid="chat-messages"]')
+        return el.scrollHeight - el.scrollTop - el.clientHeight > 48
+      })
+      await expect.poll(distance).toBeGreaterThan(48)
       const jump = page.getByRole('button', { name: '有新回答', exact: true })
+      await page.waitForFunction(() => document.querySelector('button[aria-label="有新回答"]'))
       await expect(jump).toBeVisible()
       await expect(page.getByTestId(replyTestId)).toHaveAttribute('data-state', 'streaming')
-      // demo按200ms产字，SSE可能合并相邻两块；等半个合并周期再点，令220ms动画覆盖下一次推字。
+      // 本轮独立预览的demo延迟为16（每8字约400ms）；等半个产字周期再点，令220ms动画覆盖下一次推字。
       await page.waitForTimeout(200)
       await expect(page.getByTestId(replyTestId)).toHaveAttribute('data-state', 'streaming')
       // 被动记录真实帧；不改scrollTop，也不模拟点击。点击时间由真实鼠标事件标记。

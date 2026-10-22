@@ -241,7 +241,12 @@ function InlineEdit({ message, chat, onCancel }: { message: ChatMessage; chat: C
   const ref = useRef<HTMLTextAreaElement>(null)
   const pending = useRef(false)
   const caretAt = useRef<number | null>(null)
-  useLayoutEffect(() => { ref.current?.focus() }, [])
+  useLayoutEffect(() => {
+    const field = ref.current
+    if (!field) return
+    field.focus()
+    field.setSelectionRange(field.value.length, field.value.length)
+  }, [])
   useLayoutEffect(() => {
     if (caretAt.current === null || !ref.current) return
     ref.current.setSelectionRange(caretAt.current, caretAt.current)
@@ -507,6 +512,25 @@ export function EditorialChat({ chat }: { chat: ChatControl }) {
   useLayoutEffect(() => {
     if (pinned.current && !smoothing.current && box.current) box.current.scrollTop = box.current.scrollHeight
   })
+  // 作者主动发话/重答要看见这次回答；被动到来的内容仍按上翻状态处理。
+  const followLatest = () => {
+    if (scrollFrame.current !== undefined) cancelAnimationFrame(scrollFrame.current)
+    scrollFrame.current = undefined
+    smoothing.current = false
+    pinned.current = true
+    setAway(false)
+    setUnread(false)
+    if (box.current) box.current.scrollTop = box.current.scrollHeight
+  }
+  const authorChat: ChatControl = {
+    ...chat,
+    send: async (...args) => {
+      if ((await chat.send(...args)) === false) return false
+      followLatest()
+      return true
+    },
+    again: (id) => { followLatest(); chat.again(id) },
+  }
   const scrollLatest = () => {
     const el = box.current
     if (!el) return
@@ -553,8 +577,8 @@ export function EditorialChat({ chat }: { chat: ChatControl }) {
           const body = m.custom ? m.custom
             : m.who === '作者'
               ? <AuthorBubble message={m} canRewind={!chat.answering && !chat.sending && !rewinding}
-                onRewind={() => setRewinding(m.id)} editing={rewinding === m.id} chat={chat} endRewind={() => setRewinding(null)} />
-              : <Reply message={m} latest={m === latest} answering={chat.answering} onAgain={() => chat.again(m.id)} />
+                onRewind={() => setRewinding(m.id)} editing={rewinding === m.id} chat={authorChat} endRewind={() => setRewinding(null)} />
+              : <Reply message={m} latest={m === latest} answering={chat.answering} onAgain={() => authorChat.again(m.id)} />
           return <div key={m.id} className={clsx('transition-opacity', from >= 0 && i > from && 'opacity-35')}>{body}</div>
         })}
         {chat.footer}
@@ -566,7 +590,7 @@ export function EditorialChat({ chat }: { chat: ChatControl }) {
         </button>
       )}
       </div>
-      <Composer chat={chat} draft={draft} updateDraft={updateDraft} clearDraft={clearDraft} focusKey={focusKey} editing={!!rewinding} />
+      <Composer chat={authorChat} draft={draft} updateDraft={updateDraft} clearDraft={clearDraft} focusKey={focusKey} editing={!!rewinding} />
     </div>
   )
 }
