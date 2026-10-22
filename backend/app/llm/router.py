@@ -99,6 +99,7 @@ class ResolvedProfile:
     temperature: float = 0.8
     max_tokens: int | None = None
     structured_method: str = "function_calling"
+    chat_tools: bool | None = None
     timeout_s: int = 300
     reasoning_effort: str | None = None
     profile_id: uuid.UUID | None = None
@@ -117,6 +118,7 @@ class ResolvedProfile:
             temperature=row.temperature,
             max_tokens=row.max_tokens,
             structured_method=row.structured_method,
+            chat_tools=row.chat_tools,
             timeout_s=row.timeout_s,
             reasoning_effort=row.reasoning_effort or None,
         )
@@ -305,20 +307,31 @@ class LLMRouter:
             first = (await session.execute(select(LlmProfile).order_by(LlmProfile.created_at).limit(1))).scalar()
             return ResolvedProfile.from_row(first) if first else DEMO_PROFILE
 
+    def _unchanged_profile(self, profile: ResolvedProfile):
+        statement = update(LlmProfile).where(
+            LlmProfile.id == profile.profile_id,
+            LlmProfile.structured_method == profile.structured_method,
+            LlmProfile.base_url == profile.base_url,
+            LlmProfile.model == profile.model,
+            LlmProfile.provider == profile.provider,
+        )
+        if profile.updated_at is not None:
+            # Never overwrite a configuration the author edited while this call ran.
+            statement = statement.where(LlmProfile.updated_at == profile.updated_at)
+        return statement
+
+    async def _remember_chat_tools(self, profile: ResolvedProfile, supported: bool) -> None:
+        if profile.profile_id is None:
+            return
+        async with self.sessionmaker() as session:
+            await session.execute(self._unchanged_profile(profile).values(chat_tools=supported))
+            await session.commit()
+
     async def _remember_structured_method(self, profile: ResolvedProfile, method: str) -> None:
         if profile.profile_id is None:
             return
         async with self.sessionmaker() as session:
-            statement = update(LlmProfile).where(
-                LlmProfile.id == profile.profile_id,
-                LlmProfile.structured_method == profile.structured_method,
-                LlmProfile.base_url == profile.base_url,
-                LlmProfile.model == profile.model,
-                LlmProfile.provider == profile.provider,
-            )
-            if profile.updated_at is not None:
-                # Never overwrite a configuration the author edited while this call ran.
-                statement = statement.where(LlmProfile.updated_at == profile.updated_at)
+            statement = self._unchanged_profile(profile)
             result = await session.execute(statement.values(structured_method=method, structured_method_auto=True))
             await session.commit()
             if result.rowcount:
@@ -740,8 +753,7 @@ class LLMRouter:
             if isinstance(failure, openai.BadRequestError):
                 if not parts and _unsupported_structured_method(failure, "function_calling"):
                     log.warning("模型配置 %s 不支持工具调用，以后聊天走老路", profile.name)
-                    if profile.structured_method != "json_mode":
-                        await self._remember_structured_method(profile, "json_mode")
+                    await self._remember_chat_tools(profile, False)
                     raise ToolsUnsupported(f"这个模型不支持工具调用：{failure}") from failure
                 raise LLMError(f"模型接口拒绝了请求：{failure}") from failure
             if isinstance(failure, (openai.APIError, TimeoutError)):
@@ -916,17 +928,12 @@ PROBE_TOOL = {
 
 async def tool_support(profile: ResolvedProfile) -> tuple[bool | None, str]:
     """测试时顺带看：群聊里编辑部用这个模型能不能自己查资料、自己动手。
-    和 chat_agent.supports_tools 同一套规矩（本机模型、JSON 模式不调），能调的再真叫它调一次。"""
+    演示模式、本机模型不测；其余不管结构化输出方式，真叫它调一次普通工具。"""
     if profile.provider == "demo":
         return None, "演示模式不真调工具"
     url = urlparse(profile.base_url or "")
     if url.hostname in LOCAL_HOSTS or url.port == 11434:
-        return False, "本机模型不让编辑部自己查资料、动手（太慢）：群聊里先判断要做什么，再一件件做"
-    if profile.structured_method == "json_mode":
-        return (
-            False,
-            "这个接口以前不认工具调用，已改用 JSON 模式：群聊里编辑部不会自己查资料、动手，先判断要做什么，再一件件做",
-        )
+        return False, "本机模型不让编辑部自己查资料、翻手册、动手（太慢）：群聊里先判断要做什么，再一件件做"
     clients = _HttpClients()
     try:
         client, async_client = clients.for_profile(profile)
@@ -937,5 +944,5 @@ async def tool_support(profile: ResolvedProfile) -> tuple[bool | None, str]:
     finally:
         await clients.aclose()
     if getattr(reply, "tool_calls", None):
-        return True, "能调工具：群聊里编辑部会自己查资料、自己动手"
+        return True, "能调工具：群聊里编辑部会自己查资料、翻手册、动手"
     return False, "叫它调工具它没调：群聊里编辑部用它时会退回老办法，先判断要做什么，再一件件做"

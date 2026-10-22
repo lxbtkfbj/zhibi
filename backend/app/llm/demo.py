@@ -1144,6 +1144,8 @@ def tool_turn(system: str, user: str, tools: list[str], done: list) -> tuple[lis
         return [], _teardown_reply(system, user, "\n\n".join(result for _, result in done))
     library = _tag("设定库", user)
     called = [call.name for call, _ in done]
+    if "开书" in note and "read_skill" in tools and "read_skill" not in called:
+        return [("read_skill", {"name": "开书"})], ""
     known = [*re.findall(r"^- ([^（：\n]+)", library, re.M), *re.findall(r"^[^\n·：]+ · ([^\n：]+)$", library, re.M)]
     names = [n for n in dict.fromkeys(k.strip() for k in known) if n]
     mentioned = [n for n in names if n in note]
@@ -1157,6 +1159,8 @@ def tool_turn(system: str, user: str, tools: list[str], done: list) -> tuple[lis
     looked = "、".join(n for call, _ in done if call.name == "look_up_settings" for n in call.args.get("names", []))
     acted = next((result for call, result in reversed(done) if call.name == "make_changes"), "")
     text = f"（演示）{role}回答：{note[:20]}。" + (f"查了{looked}。" if looked else "")
+    if "read_skill" in called:
+        text += "翻了开书手册。"
     return [], text + (f"动手的结果：{acted[:80]}" if acted else "")
 
 

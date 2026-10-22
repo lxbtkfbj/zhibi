@@ -56,6 +56,7 @@ class ProfileOut(ORM):
     max_tokens: int | None
     structured_method: str
     structured_method_auto: bool = False
+    chat_tools: bool | None = None
     timeout_s: int
     reasoning_effort: str | None
     has_key: bool = False

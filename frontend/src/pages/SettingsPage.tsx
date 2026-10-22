@@ -79,7 +79,8 @@ function ProfileForm({ profile, onBack }: { profile: LlmProfile | null; onBack: 
 function ProfileRow({ profile, onEdit }: { profile: LlmProfile; onEdit: () => void }) {
   const { remove, test } = useProfileMutations()
   return <SettingsRow label={profile.name} hint={profile.provider === 'demo' ? '演示模式 · 内置示例内容，不联网' : `${profile.model} · ${profile.has_key ? '已保存密钥' : '未填 Key'}`} extra={<>
-    {profile.structured_method_auto && <p className="settings-note">这个接口不认工具调用，已自动改用 JSON 模式：群聊里编辑部不会自己查资料、动手，先判断要做什么，再一件件做。</p>}
+    {profile.structured_method_auto && <p className="settings-note">这个接口不认强制调工具，出结构化结果已自动改用 JSON 模式；不影响群聊里调工具。</p>}
+    {profile.chat_tools === false && <p className="settings-note">这个接口在群聊里调工具被拒过：编辑部不会自己查资料、翻手册、动手，先判断要做什么，再一件件做。点「测试」可以重新试。</p>}
     {test.data && <p className={`flex items-center gap-1 text-[13px] ${test.data.ok ? 'text-lore' : 'text-seal'}`}>{test.data.ok ? <CheckCircle2 className="size-3.5 shrink-0" /> : <XCircle className="size-3.5 shrink-0" />}{test.data.ok ? `连上了：${test.data.message}` : test.data.message}</p>}
     {test.data?.ok && test.data.tools_message && <p className={`settings-note ${test.data.tools ? '!text-lore' : ''}`}>{test.data.tools_message}</p>}
     <ErrorText error={remove.error || test.error} />

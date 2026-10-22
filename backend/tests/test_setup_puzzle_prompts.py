@@ -94,6 +94,15 @@ PROMPT_HASHES = {
 }
 
 
+def test_handbook_prompt_moves_are_byte_exact():
+    for name, digest in {
+        "chat_agent": "d2519631f90ffa57eaae03a82bb00b4b858c659a0a3c7558b2806ffc4ec465e4",
+        "skills/opening": "0a537d08995076293bd6b24f87f88ba147331b7ba5caba0aa8bc65bde96b27b1",
+    }.items():
+        assert hashlib.sha256((ROOT / f"backend/app/prompts/{name}.md").read_bytes()).hexdigest() == digest
+        assert not (ROOT / f"docs/codex任务/主编手册/提示词/{name}.md").exists()
+
+
 def test_prompt_moves_are_byte_exact_and_retired_hidden():
     for name, digest in PROMPT_HASHES.items():
         path = ROOT / f"backend/app/prompts/{name}.md"

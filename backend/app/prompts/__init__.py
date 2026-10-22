@@ -15,7 +15,7 @@ _rendered: ContextVar[tuple[tuple[str, str], ...]] = ContextVar("rendered_prompt
 
 def canonical_name(name: str) -> str:
     name = name.replace("/", ".")
-    if not re.fullmatch(r"(?:playbooks\.)?[a-z][a-z0-9_]*", name):
+    if not re.fullmatch(r"(?:(?:playbooks|skills)\.)?[a-z][a-z0-9_]*", name):
         raise ValueError("无效的提示词名称")
     return name
 

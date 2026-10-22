@@ -21,7 +21,7 @@ from app.llm.router import DEMO_PROFILE, LLMError, LLMRouter, Outcome, ResolvedP
 from app.main import app
 from app.models import Book, LlmCall, PromptOverride
 from app.prompts import default_content, render
-from app.prompts.catalog import CATALOG, variables
+from app.prompts.catalog import entries, variables
 
 
 class Answer(BaseModel):
@@ -48,7 +48,7 @@ def remote(router, monkeypatch, method="function_calling"):
 async def test_catalog_has_chinese_variable_labels_and_safe_names(client):
     response = await client.get("/api/prompts")
     assert response.status_code == 200
-    assert len(response.json()) == len(CATALOG)
+    assert len(response.json()) == len(entries())
     for row in response.json():
         assert row["customized"] is False
         assert row["variables"] == variables(row["name"])

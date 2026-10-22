@@ -243,7 +243,10 @@ def test_pick_role_and_router_helpers():
     assert not _truncated(Message())
     Message.response_metadata = {"finish_reason": "lengthlength"}
     assert _truncated(Message())
-    assert {t["function"]["name"] for t in chat_tools.tool_specs(read_only=True)} == set(chat_tools.QUERY_TOOLS)
+    assert {t["function"]["name"] for t in chat_tools.tool_specs(read_only=True)} == {
+        *chat_tools.QUERY_TOOLS,
+        "read_skill",
+    }
 
 
 async def test_writing_tool_arguments_counts_as_activity(sessionmaker, monkeypatch):

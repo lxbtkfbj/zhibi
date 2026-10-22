@@ -379,7 +379,7 @@ export function useProfileMutations() {
       onSuccess: refresh,
     }),
     remove: useMutation({ mutationFn: (id: string) => del(`/llm/profiles/${id}`), onSuccess: refresh }),
-    test: useMutation({ mutationFn: (id: string) => post<{ ok: boolean; message: string; tools?: boolean | null; tools_message?: string }>(`/llm/profiles/${id}/test`) }),
+    test: useMutation({ mutationFn: (id: string) => post<{ ok: boolean; message: string; tools?: boolean | null; tools_message?: string }>(`/llm/profiles/${id}/test`), onSuccess: refresh }),
     setRoles: useMutation({
       mutationFn: (body: Partial<RoleAssignments>) => put<RoleAssignments>('/llm/roles', body),
       onSuccess: (data) => qc.setQueryData(keys.roles, data),

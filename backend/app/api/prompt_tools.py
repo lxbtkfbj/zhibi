@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import SessionDep
 from app.models import Book, LlmCall, PromptOverride
 from app.prompts import VARIABLE, default_content
-from app.prompts.catalog import CATALOG, entry, validate_content, variables
+from app.prompts.catalog import entries, entry, validate_content, variables
 from app.services.usage import sum_known, token_sum
 
 router = APIRouter(tags=["prompts-and-calls"])
@@ -46,6 +46,10 @@ async def _last_calls(session: AsyncSession) -> dict:
 
 def _meta(row: tuple, override: PromptOverride | None, last: dict | None) -> dict:
     name, title, group, role, when = row
+    if name.startswith("skills.") and override is not None:
+        from app.prompts.handbooks import parse
+
+        _, title, group, role, when = parse(name.split(".", 1)[1], override.content).entry()
     default_variables = variables(name)
     current = set(VARIABLE.findall(override.content)) if override else {item["name"] for item in default_variables}
     default = {item["name"] for item in default_variables}
@@ -68,7 +72,10 @@ def _meta(row: tuple, override: PromptOverride | None, last: dict | None) -> dic
 async def list_prompts(session: AsyncSession = SessionDep) -> list[dict]:
     overrides = {row.name: row for row in (await session.scalars(select(PromptOverride))).all()}
     calls = await _last_calls(session)
-    return [_meta(row, overrides.get(row[0]), calls.get(row[0])) for row in CATALOG]
+    return [
+        _meta(row, overrides.get(row[0]), calls.get(row[0]))
+        for row in entries({name: row.content for name, row in overrides.items()})
+    ]
 
 
 @router.get("/prompts/{name:path}")
@@ -84,8 +91,12 @@ async def get_prompt(name: str, session: AsyncSession = SessionDep) -> dict:
 @router.put("/prompts/{name:path}")
 async def save_prompt(name: str, body: PromptIn, session: AsyncSession = SessionDep) -> dict:
     name = _entry(name)[0]
+    if name.startswith("skills."):
+        # 不同手册并发改名时也不能落下同名目录项。
+        await session.execute(text("SELECT pg_advisory_xact_lock(hashtext('zhibi:skill-names'))"))
     try:
-        validate_content(name, body.content)
+        contents = {row.name: row.content for row in await session.scalars(select(PromptOverride))}
+        validate_content(name, body.content, skill_contents=contents)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     await session.execute(
@@ -102,6 +113,13 @@ async def save_prompt(name: str, body: PromptIn, session: AsyncSession = Session
 @router.delete("/prompts/{name:path}")
 async def restore_prompt(name: str, session: AsyncSession = SessionDep) -> dict:
     name = _entry(name)[0]
+    if name.startswith("skills."):
+        await session.execute(text("SELECT pg_advisory_xact_lock(hashtext('zhibi:skill-names'))"))
+        contents = {row.name: row.content for row in await session.scalars(select(PromptOverride))}
+        try:
+            validate_content(name, default_content(name), skill_contents=contents)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
     row = await session.get(PromptOverride, name)
     if row is not None:
         await session.delete(row)

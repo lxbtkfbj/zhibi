@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from app.agents.context import format_ledger, format_secrets
 from app.agents.schemas import Lenient, LibraryIntent
 from app.models import Book, Chapter, Character, NodeAnchor, Relationship, WorldEntry
+from app.prompts import handbooks
 from app.services import book_saves, outline_structure
 from app.services.chat_context import done_text
 from app.services.group_notes import CONCEPT_NAMES, SAID, SHOWN, apply_with_change
@@ -71,6 +72,10 @@ class LookUpClues(BaseModel):
     codes: list[str] = Field(default_factory=list, description="编号，比如 F3、E2、S1；不知道编号就留空")
 
 
+class ReadSkill(BaseModel):
+    name: str
+
+
 # ---------- 动手 ----------
 
 
@@ -125,7 +130,7 @@ QUERY_TOOLS = {
 ACT_TOOLS = {"make_changes": MakeChanges}
 
 
-def tool_specs(read_only: bool) -> list[dict]:
+def tool_specs(read_only: bool, *, skills: bool = True) -> list[dict]:
     """给模型的工具；只读的（只问不改、拆书）只有查的那几个。"""
     tools = QUERY_TOOLS if read_only else {**QUERY_TOOLS, **ACT_TOOLS}
     specs = []
@@ -133,11 +138,15 @@ def tool_specs(read_only: bool) -> list[dict]:
         spec = convert_to_openai_tool(model)
         spec["function"]["name"] = name
         specs.append(spec)
+    if skills and (skill := handbooks.tool_spec()) is not None:
+        specs.append(skill)
     return specs
 
 
 def doing_of(name: str, args: BaseModel) -> str:
     """回答框里那一行：在查什么、在改什么。"""
+    if isinstance(args, ReadSkill):
+        return f"在翻《{args.name}》"
     if isinstance(args, LookUpSettings):
         return f"在查{'、'.join(args.names[:5])}"
     if isinstance(args, LookUpOutline):
@@ -166,6 +175,8 @@ def item_doing(item: ChangeItem) -> str:
 
 async def look_up(session, book: Book, name: str, args: BaseModel, viewing: dict | None) -> tuple[str, str]:
     """查的工具：返回 (给作者看的「查了：……」里那一项, 交回给模型的资料)。"""
+    if isinstance(args, ReadSkill):
+        return f"手册《{args.name}》", handbooks.read(args.name)
     if isinstance(args, LookUpSettings):
         ctx = await load_context(session, book)
         labels, blocks = [], []
@@ -590,7 +601,8 @@ async def plan_change(session, book: Book, item: dict) -> ChangeItem:
 
 
 def tool_args(name: str, raw: dict) -> BaseModel:
-    model = {**QUERY_TOOLS, **ACT_TOOLS}.get(name)
+    models = {**QUERY_TOOLS, **ACT_TOOLS, "read_skill": ReadSkill}
+    model = models.get(name)
     if model is None:
-        raise ValueError(f"没有这个工具：{name}。能用的是：{'、'.join([*QUERY_TOOLS, *ACT_TOOLS])}")
+        raise ValueError(f"没有这个工具：{name}。能用的是：{'、'.join(models)}")
     return model.model_validate(raw)

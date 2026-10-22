@@ -1,4 +1,5 @@
 import uuid
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
@@ -7,8 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import SessionDep
 from app.crypto import SecretError, decrypt, encrypt
+from app.db import get_sessionmaker
 from app.llm.discovery import ModelDiscoveryError, fetch_models, normalize_base_url
-from app.llm.router import LLMError, ResolvedProfile, ping, tool_support
+from app.llm.router import LOCAL_HOSTS, LLMError, LLMRouter, ResolvedProfile, ping, tool_support
 from app.models import ROLES, LlmProfile, RoleAssignment
 from app.schemas import ModelListIn, ModelListOut, ProfileIn, ProfileOut, ProfilePatch, TestResult
 
@@ -101,6 +103,10 @@ async def update_profile(profile_id: uuid.UUID, body: ProfilePatch, session: Asy
         for key in ("provider", "base_url", "model", "structured_method")
     ):
         profile.structured_method_auto = False
+    if body.api_key or any(
+        key in changes and changes[key] != getattr(profile, key) for key in ("provider", "base_url", "model")
+    ):
+        profile.chat_tools = None
     for key, value in changes.items():
         setattr(profile, key, value)
     if body.api_key:
@@ -130,6 +136,11 @@ async def test_profile(profile_id: uuid.UUID, session: AsyncSession = SessionDep
     except (LLMError, SecretError) as exc:
         return TestResult(ok=False, message=str(exc)[:500])
     tools, tools_message = await tool_support(resolved)
+    # 演示、本机模型照旧不测，也不把跳过测试记成能力结论。
+    url = urlparse(resolved.base_url or "")
+    if resolved.provider != "demo" and url.hostname not in LOCAL_HOSTS and url.port != 11434 and tools is not None:
+        async with LLMRouter(get_sessionmaker()) as llm:
+            await llm._remember_chat_tools(resolved, tools)
     return TestResult(ok=True, message=reply, tools=tools, tools_message=tools_message)
 
 

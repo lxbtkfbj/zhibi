@@ -60,14 +60,14 @@ def pick_role(text: str) -> str:
 
 
 async def supports_tools(role: str) -> bool:
-    """这个角色用的模型能不能自己调工具：本机模型、演示模式不调；接口拒绝过工具的（记成了 json_mode）不调。"""
+    """普通群聊工具与结构化输出无关；没试过就试，只有明确拒绝过才走分流。"""
     profile = await LLMRouter(get_sessionmaker()).resolve(role)
     if profile.provider == "demo":
         return demo.FAKE_TOOLS
     url = urlparse(profile.base_url or "")
     if url.hostname in LOCAL_HOSTS or url.port == 11434:
         return False
-    return profile.structured_method != "json_mode"
+    return profile.chat_tools is not False
 
 
 @dataclass
@@ -81,6 +81,7 @@ class Turn:
     role: str
     read_only: bool
     viewing: dict | None
+    allow_skills: bool = True
     # 做过的那几处（重试时跳过同一处）；算进处数的那几处
     done_keys: set[str] = field(default_factory=set)
     touched: set[str] = field(default_factory=set)
@@ -98,14 +99,14 @@ class Turn:
         self.last_activity = time.monotonic()
 
 
-async def set_doing(turn: Turn, text: str) -> None:
+async def set_doing(turn: Turn, text: str, *, ellipsis: bool = True) -> None:
     """回答框里那一行跟着变：「在查陈默……」「在改陈默的性格……」。"""
     async with get_sessionmaker()() as session:
         reply = await session.get(MeetingMessage, turn.reply_id)
         if reply is None or (reply.payload or {}).get("state") not in LIVE:
             return
         reply.content = ""
-        reply.payload = {**(reply.payload or {}), "state": "thinking", "doing": text + "……"}
+        reply.payload = {**(reply.payload or {}), "state": "thinking", "doing": text + ("……" if ellipsis else "")}
         await session.commit()
         await publish(turn.redis, turn.book_id, "message_update", message_dict(reply))
 
@@ -127,6 +128,8 @@ async def run_tool(turn: Turn, call: ToolCall) -> str:
     if turn.stopping:
         raise Stopped
     try:
+        if call.name == "read_skill" and not turn.allow_skills:
+            return "拆的书群聊不能翻手册。"
         args = chat_tools.tool_args(call.name, call.args or {})
     except Exception as exc:
         return f"参数不对：{exc}。照工具说明重新调一次。"
@@ -137,7 +140,7 @@ async def run_tool(turn: Turn, call: ToolCall) -> str:
         if turn.stopping:
             raise Stopped
         return result
-    await set_doing(turn, chat_tools.doing_of(call.name, args))
+    await set_doing(turn, chat_tools.doing_of(call.name, args), ellipsis=not isinstance(args, chat_tools.ReadSkill))
     async with get_sessionmaker()() as session:
         book = await session.get(Book, turn.book_id)
         try:
@@ -266,7 +269,7 @@ async def drive(turn: Turn, system: str, user: str) -> str:
             turn.role,
             system,
             user,
-            chat_tools.tool_specs(turn.read_only),
+            chat_tools.tool_specs(turn.read_only, skills=turn.allow_skills),
             lambda call: run_tool(turn, call),
             purpose=f"聊天·{SPEAKER_NAMES[turn.role]}",
             max_rounds=MAX_ROUNDS,
@@ -493,7 +496,9 @@ async def answer_note(redis, book_id, message_id, *, reply_id=None, retry=False)
         message = await session.get(MeetingMessage, message_id)
         values = await agent_values(session, book, role, message, rows, summary, read_only, retry)
         await session.rollback()
-    turn = Turn(redis, book_id, message_id, reply_id, role, read_only, payload.get("viewing"))
+    turn = Turn(
+        redis, book_id, message_id, reply_id, role, read_only, payload.get("viewing"), allow_skills=not teardown
+    )
     if retry:
         for step in payload.get("steps") or []:
             if step.get("key") and step.get("kind") not in ("failed", "not_found", "too_late"):

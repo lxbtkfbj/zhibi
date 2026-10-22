@@ -636,6 +636,7 @@ export interface LlmProfile {
   max_tokens: number | null
   structured_method: StructuredMethod
   structured_method_auto: boolean
+  chat_tools: boolean | null
   timeout_s: number
   reasoning_effort: string | null
   has_key: boolean

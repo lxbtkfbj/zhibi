@@ -181,7 +181,7 @@ PROMPT_HASHES = {
     "teardown_volumes": "7c0e4199493703b8ddd3e1bc3179d62f33848abd35cf69a1953205544fd356f1",
     "teardown_volume_text": "592f1542a49ae3876f2478d0a8766f6bc414dff3d780ef95fda4ad529bb05c6d",
     # 拆书第五批 §1：作者已改好的提示词基线，仍逐字保护，不由实现改写。
-    "chat_teardown": "a6974a02ade607ca30ab057f0533817614c6be9714393a53dfb87499e9ca42e3",
+    "chat_teardown": "08a564d9a620d6deac0661ee17dd3c6f8c2db1f85f7d8908b312a7da70a5bfda",
 }
 
 

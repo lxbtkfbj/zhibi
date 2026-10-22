@@ -127,10 +127,20 @@ async def test_profiles_and_roles(client):
     assert (await client.post("/api/llm/profiles", json={"name": "演示", "provider": "demo"})).status_code == 409
 
 
-async def test_tool_support_follows_chat_agent_rules():
-    """本机模型、JSON 模式不让编辑部调工具，测试时不用真叫它调就能说清楚"""
+async def test_tool_support_follows_chat_agent_rules(monkeypatch):
+    """本机模型不测，JSON 模式也必须真走普通工具测试（假的模型客户端）。"""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, Mock
+
+    from app.llm import router
+
+    invoke = AsyncMock(return_value=SimpleNamespace(tool_calls=[{"name": "look_up", "args": {"name": "测试"}}]))
+    model = Mock()
+    model.bind_tools.return_value.ainvoke = invoke
+    monkeypatch.setattr(router, "build_chat_model", Mock(return_value=model))
     local = ResolvedProfile(name="本机", provider="openai_compatible", base_url="http://127.0.0.1:11434/v1", model="m")
     assert (await tool_support(local))[0] is False
+    invoke.assert_not_awaited()
     json_mode = ResolvedProfile(
         name="中转",
         provider="openai_compatible",
@@ -139,7 +149,8 @@ async def test_tool_support_follows_chat_agent_rules():
         structured_method="json_mode",
     )
     tools, message = await tool_support(json_mode)
-    assert tools is False and "JSON" in message
+    assert tools is True and message == "能调工具：群聊里编辑部会自己查资料、翻手册、动手"
+    invoke.assert_awaited_once()
 
 
 @pytest.mark.usefixtures("legacy_piece_gates")

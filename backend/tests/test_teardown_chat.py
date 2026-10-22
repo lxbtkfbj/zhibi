@@ -146,7 +146,7 @@ async def test_every_group_message_is_read_only(client, sessionmaker, monkeypatc
         assert (teardown_chat.LOOKUP_TOOLS if tools else teardown_chat.LOOKUP_PLAIN) in call.request["user"]
         assert "已定稿" not in call.request["user"] and "正在写：" not in call.request["user"]
         if tools:
-            assert "make_changes" not in [tool["function"]["name"] for tool in call.request["schema"]]
+            assert not {"make_changes", "read_skill"} & {tool["function"]["name"] for tool in call.request["schema"]}
 
 
 @pytest.mark.parametrize("role", ["chief", "lorekeeper", "writer", "reviewer"])
