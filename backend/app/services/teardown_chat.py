@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import defer
 
 from app.models import Chapter
+from app.prompts import tagged
 from app.services.chat_context import dialogue_text, related_of
 from app.services.library_context import load_context
 
@@ -158,7 +159,7 @@ async def values(session, book, role, message, rows, summary, *, tools: bool, re
         found = await related_of(session, ctx, chapters, message.content)
         blocks = [found] if found and found != "（没有）" else []
         blocks.extend([await search_text(session, book, word) for word in quoted_words(message.content)])
-        related = "【和这次的话有关的资料】\n" + ("\n\n".join(blocks) or "（没找到）")
+        related = tagged("和这次的话有关的资料", "\n\n".join(blocks) or "（没找到）")
     return dict(
         material_note="" if small else "（书比较大：设定和大纲只列了目录，要细节用工具查）",
         book_info=book_info(book, chapters, ctx.volumes, ctx.units, ctx.nodes),
@@ -172,7 +173,7 @@ async def values(session, book, role, message, rows, summary, *, tools: bool, re
         related=related,
         summary=summary or "（没有）",
         recent=dialogue_text(rows[-20:]),
-        quote=f"【作者选中的原文】（{quote['where']}）\n{quote['text'][:2000]}" if quote else "",
+        quote=tagged("作者选中的原文", f"（{quote['where']}）\n{quote['text'][:2000]}") if quote else "",
         retry=retry_note(payload.get("steps") or []) if retry else "",
         note=message.content,
         lookup=LOOKUP_TOOLS if tools else LOOKUP_PLAIN,

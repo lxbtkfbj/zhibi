@@ -181,7 +181,7 @@ async def look_up(session, book: Book, name: str, args: BaseModel, viewing: dict
     if isinstance(args, LookUpOutline):
         found = await resolve_outline_target(session, book, args.where, viewing)
         if found is None:
-            return f"大纲 · {args.where}", f"大纲上没找到「{args.where}」。大纲上有哪些见资料里的【大纲】。"
+            return f"大纲 · {args.where}", f"大纲上没找到「{args.where}」。大纲上有哪些，见资料里的 <大纲>。"
         return f"大纲 · {found[2]}", clip(await outline_piece(session, book, found[0], found[1]))
     if isinstance(args, ReadChapter):
         return f"第 {args.index} 章", await chapter_text(session, book, args)

@@ -52,6 +52,11 @@ def prompt_names_for(system: str, user: str) -> list[str]:
     return list(dict.fromkeys(name for name, content in _rendered.get() if content in system or content in user))
 
 
+def tagged(name: str, body: str) -> str:
+    """聊天提示词里的一大块资料用 <名字>…</名字> 包起来，和资料里每一条开头的【名字】分开。"""
+    return f"<{name}>\n{body.strip()}\n</{name}>"
+
+
 def render(name: str, /, **values: str) -> str:
     text = _load(name)
     # 一次替换，作者原文里的 {{...}} 不会被二次解释成模板变量。

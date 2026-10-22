@@ -735,6 +735,11 @@ def _match(pattern: str, text: str) -> str:
     return found.group(1).strip() if found else ""
 
 
+def _tag(name: str, text: str) -> str:
+    """取出聊天提示词里 <name>…</name> 这一块。"""
+    return _match(rf"<{name}>\n(.*?)\n</{name}>", text)
+
+
 def _section(text: str, name: str) -> str:
     """取出提示词里【name…】这一篇的内容。"""
     found = re.search(rf"【{name}[^】]*】\n(.*?)(?=\n【|\Z)", text, re.S)
@@ -1059,8 +1064,8 @@ def _library_intent(user: str) -> s.LibraryIntent:
 def _chat_reply(system, user):
     if "作者导入的别人已经写好的小说" in user:
         return s.ChatReply(reply=_teardown_reply(system, user))
-    note = _match(r"【作者这次说的】\n(.*?)(?=\n\n要求：|\Z)", user)
-    related = _match(r"【和这次的话有关的资料】\n(.*?)(?=\n\n【|\Z)", user)
+    note = _tag("作者这次说的", user)
+    related = _tag("和这次的话有关的资料", user)
     names = re.findall(r"^.+? · ([^\n]+)$", related, re.M)
     role = next((r for r in ("主编", "设定师", "写手", "审稿") if r in (system.splitlines() or ["主编"])[0]), "主编")
     return s.ChatReply(reply=f"（演示）{role}回答：{note[:20]}。相关资料里有：{'、'.join(names) or '没有'}。")
@@ -1068,7 +1073,7 @@ def _chat_reply(system, user):
 
 def _teardown_reply(system, user, found=""):
     """拆书演示只复述程序提供的出处，不凭演示书内容编原书情节。"""
-    note = _match(r"【作者这次说的】\n(.*?)(?=\n\n怎么做：|\Z)", user).strip()
+    note = _tag("作者这次说的", user)
     role = next((r for r in ("主编", "设定师", "写手", "审稿") if r in (system.splitlines() or ["主编"])[0]), "主编")
     prefix = f"（演示）{role}回答："
     if any(word in note for word in ("改", "补齐", "删", "总结", "按这个来", "写作要求", "存档", "存个档")):
@@ -1076,7 +1081,7 @@ def _teardown_reply(system, user, found=""):
             prefix
             + "拆的书里编辑部只回答问题，要改直接在页面上改。章纲在大纲那一页，人物和设定在设定那一页；原文和大纲结构照原书来，改不了。"
         )
-    related = found or _match(r"【和这次的话有关的资料】\n(.*?)(?=\n\n【|\Z)", user)
+    related = found or _tag("和这次的话有关的资料", user)
     if matched := re.search(r"「[^」]+」在 \d+ 章里出现过，第一次在第 \d+ 章。", related):
         return prefix + matched[0] + "这是程序检索原文找到的位置，没有修改这本书。"
     if related and related != "（没找到）":
@@ -1126,7 +1131,7 @@ def _demo_changes(note: str, library: str, names: list[str]) -> list[dict]:
 def tool_turn(system: str, user: str, tools: list[str], done: list) -> tuple[list[tuple[str, dict]], str]:
     """演示模型「假装调工具」：先查话里提到的设定，再照演示分流动手，最后说一段话。
     返回 (这一来回要调的工具, 这一来回说的字)；tools 是这一来回能调的工具名，空的就是不许再调。"""
-    note = _match(r"【作者这次说的】\n(.*?)(?=\n\n【|\n\n怎么做：|\Z)", user).strip()
+    note = _tag("作者这次说的", user)
     if "作者导入的别人已经写好的小说" in user:
         from app.services.teardown_chat import quoted_words
 
@@ -1137,7 +1142,7 @@ def tool_turn(system: str, user: str, tools: list[str], done: list) -> tuple[lis
             if words:
                 return [("search_text", {"word": word}) for word in words], ""
         return [], _teardown_reply(system, user, "\n\n".join(result for _, result in done))
-    library = _match(r"【设定库】\n(.*?)(?=\n\n【大纲】|\Z)", user)
+    library = _tag("设定库", user)
     called = [call.name for call, _ in done]
     known = [*re.findall(r"^- ([^（：\n]+)", library, re.M), *re.findall(r"^[^\n·：]+ · ([^\n：]+)$", library, re.M)]
     names = [n for n in dict.fromkeys(k.strip() for k in known) if n]
@@ -1146,7 +1151,7 @@ def tool_turn(system: str, user: str, tools: list[str], done: list) -> tuple[lis
         return [("look_up_settings", {"names": mentioned[:3]})], ""
     if "make_changes" in tools and "make_changes" not in called and (items := _demo_changes(note, library, names)):
         return [("make_changes", {"items": items, "title": "演示改动"})], ""
-    if "演示中途出错" in note and "make_changes" in called and "【上次做到一半】" not in user:
+    if "演示中途出错" in note and "make_changes" in called and "<上次做到一半>" not in user:
         raise RuntimeError("演示中途出错")
     role = next((r for r in ("主编", "设定师", "写手", "审稿") if r in (system.splitlines() or ["主编"])[0]), "主编")
     looked = "、".join(n for call, _ in done if call.name == "look_up_settings" for n in call.args.get("names", []))
@@ -1156,8 +1161,8 @@ def tool_turn(system: str, user: str, tools: list[str], done: list) -> tuple[lis
 
 
 def _chat_plan(user):
-    recent = _match(r"【最近的对话】\n(.*?)(?=\n\n【|\n\n要求：|\Z)", user)
-    library = _match(r"【设定库目录】\n(.*?)(?=\n\n【|\Z)", user)
+    recent = _tag("最近的对话", user)
+    library = _tag("设定库目录", user)
     entries = library.split("【", 1)[-1] if library else ""
     entries = re.sub(r"角色卡片】.*?(?=【|\Z)", "", entries, flags=re.S)
     target = next(iter(re.findall(r"^- ([^（：\n]+)", entries, re.M)), "世界概况")
@@ -1446,7 +1451,7 @@ def _hook(user: str) -> str:
 
 
 async def stream_text(system: str, user: str) -> AsyncIterator[str]:
-    if "【作者这次说的】" in user:
+    if "<作者这次说的>" in user:
         # 聊天回答：和以前按固定格式交的那一段一样，只是一点点吐出来
         text = _chat_reply(system, user).reply
         for i in range(0, len(text), 8):

@@ -17,6 +17,7 @@ from app.agents.context import (
 )
 from app.book_settings import compile_rules
 from app.models import Chapter, ChatThread, Job, MeetingMessage
+from app.prompts import tagged
 from app.services.library_context import load_context
 from app.services.meeting import SPEAKER_NAMES
 from app.services.requirements import active_requirements, requirements_list
@@ -275,28 +276,28 @@ async def extras_of(session, ctx, chapters, role, text):
         volume = next((v for v in ctx.volumes if v.status != "done"), None)
         arc = next((n for n in ctx._arcs() if volume and n.id == volume.target_node_id), None)
         if done and arc:
-            blocks.append("【正在写的这一篇】\n" + ((arc.segment or {}).get("text") or arc.event))
+            blocks.append(tagged("正在写的这一篇", (arc.segment or {}).get("text") or arc.event))
         if done and volume:
-            lines = ["【正在写的这一卷】", volume.summary]
+            lines = [volume.summary]
             current = next((u.id for u in ctx.units if u.volume_id == volume.id and u.status != "done"), None)
             lines.extend(
                 f"单元「{u.title}」（{'已写完' if u.status == 'done' else '正在写' if u.id == current else '还没写'}）：{u.summary}"
                 for u in ctx.units
                 if u.volume_id == volume.id
             )
-            blocks.append("\n".join(lines))
+            blocks.append(tagged("正在写的这一卷", "\n".join(lines)))
         opened = [f for f in ledger if f.get("kind") == "期待" and f.get("status") == "planted"]
         if opened:
-            blocks.append("【还开着的期待】\n" + format_ledger(opened))
+            blocks.append(tagged("还开着的期待", format_ledger(opened)))
     elif role == "lorekeeper":
         if ctx.characters:
-            blocks.append("【人物现在的状态】\n" + character_states(ctx.characters))
+            blocks.append(tagged("人物现在的状态", character_states(ctx.characters)))
         secrets = [s for s in await load_secrets(session, ctx.book.id) if s.get("status") == "hidden"][:20]
         if secrets:
-            blocks.append("【还藏着的信息差】\n" + format_secrets(secrets))
+            blocks.append(tagged("还藏着的信息差", format_secrets(secrets)))
         opened = [f for f in ledger if f.get("kind") != "期待" and f.get("status") in {"planned", "planted"}][:20]
         if opened:
-            blocks.append("【还没收的伏笔】\n" + format_ledger(opened))
+            blocks.append(tagged("还没收的伏笔", format_ledger(opened)))
     elif role == "reviewer":
         mentioned = references(text, "章", 3)
         c = (
@@ -305,7 +306,7 @@ async def extras_of(session, ctx, chapters, role, text):
             else (done[-1] if done else None)
         )
         if c and c.status == "final":
-            lines = ["【最近定稿的一章】", f"第 {c.index} 章《{c.title}》：{c.summary}"]
+            lines = [f"第 {c.index} 章《{c.title}》：{c.summary}"]
             review = c.review or {}
             review = review.get("review", review)
             if review.get("highlights"):
@@ -316,14 +317,14 @@ async def extras_of(session, ctx, chapters, role, text):
                     f"- [{i.get('severity', '')}] {i.get('problem', '')}——{i.get('suggestion', '')}"
                     for i in review["issues"]
                 )
-            blocks.append("\n".join(lines))
+            blocks.append(tagged("最近定稿的一章", "\n".join(lines)))
     else:
         if rules := compile_rules(ctx.book.settings):
-            blocks.append("【写作规矩】\n" + rules)
+            blocks.append(tagged("写作规矩", rules))
         if style := format_style(ctx.book.style_reference or ""):
-            blocks.append("【文风参考】\n" + style)
+            blocks.append(tagged("文风参考", style))
         if done:
-            blocks.append("【最近定稿一章的结尾】\n" + (await chapter_content(session, done[-1]))[-1500:])
+            blocks.append(tagged("最近定稿一章的结尾", (await chapter_content(session, done[-1]))[-1500:]))
     return "\n\n".join(blocks)
 
 
@@ -363,7 +364,7 @@ def pending_of(job, ctx):
             "chapter_stuck": f"第 {p.get('chapter')} 章（写不过去了）",
         }.get(kind, "定调")
         body = f"等你确认：{name}（内容在上面的资料里）"
-    return "【等你确认的内容】\n" + body
+    return tagged("等你确认的内容", body)
 
 
 async def reply_values(session, book, thread, role, rows, unanswered, summary):
@@ -381,8 +382,8 @@ async def reply_values(session, book, thread, role, rows, unanswered, summary):
     )
     note = "\n\n".join(m.content for m in unanswered)
     quotes = [(m.payload or {}).get("quote") for m in unanswered if (m.payload or {}).get("quote")]
-    quote = "\n\n".join(f"【作者选中的原文】（{q['where']}）\n{q['text'][:2000]}" for q in quotes)
-    # 作者这次说的单独放在【作者这次说的】，最近的对话里不再重复
+    quote = "\n\n".join(tagged("作者选中的原文", f"（{q['where']}）\n{q['text'][:2000]}") for q in quotes)
+    # 作者这次说的单独放在 <作者这次说的>，最近的对话里不再重复
     asked = {m.id for m in unanswered}
     rows = [m for m in rows if m.id not in asked]
     query = note + "\n" + quote + "\n" + "\n".join(m.content for m in rows[-4:])

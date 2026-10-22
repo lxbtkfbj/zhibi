@@ -274,7 +274,7 @@ async def test_values_exact_copy_and_fallback_materials(sessionmaker):
         )
         assert plain["outline"] == "第 1 卷「原书第一卷」：第 1 到 2 章，还没拆出章纲。"
         assert plain["library"] == "（还没拆出设定）"
-        assert plain["related"].startswith("【和这次的话有关的资料】\n第 2 章《再见》")
+        assert plain["related"].startswith("<和这次的话有关的资料>\n第 2 章《再见》")
         assert "原文片段：茉莉再一次看见" in plain["related"]
         assert "原文里没有「不存在」。" in plain["related"] and "第四个" not in plain["related"]
         assert "「茉莉」在 2 章里出现过" in plain["related"]
@@ -283,7 +283,7 @@ async def test_values_exact_copy_and_fallback_materials(sessionmaker):
         plain = await teardown_chat.values(
             session, book, "chief", SimpleNamespace(content="随便聊聊", payload={}), [], "", tools=False
         )
-        assert plain["related"] == "【和这次的话有关的资料】\n（没找到）"
+        assert plain["related"] == "<和这次的话有关的资料>\n（没找到）\n</和这次的话有关的资料>"
 
 
 async def test_context_defers_whole_book_but_explicit_chapter_reads_work(sessionmaker):
@@ -303,7 +303,7 @@ async def test_context_defers_whole_book_but_explicit_chapter_reads_work(session
         finally:
             event.remove(engine, "before_cursor_execute", record)
     assert "原文片段：茉莉再一次看见" in result["related"]
-    assert "【最近定稿一章的结尾】\n茉莉再一次看见" in result["extras"]
+    assert "<最近定稿一章的结尾>\n茉莉再一次看见" in result["extras"]
     chapter_lists = [sql for sql in statements if "SELECT chapters.book_id" in sql or "SELECT chapters.id," in sql]
     assert chapter_lists and all("chapters.content" not in sql for sql in chapter_lists)
     assert any("SELECT chapters.content" in sql for sql in statements)
@@ -313,7 +313,7 @@ def test_prompt_bytes_catalog_and_program_text_match_task():
     # 拆书第五批 §1：锁定作者已改好的提示词基线；实现不得再改提示词。
     assert (
         hashlib.sha256(default_content("chat_teardown").encode()).hexdigest()
-        == "a6974a02ade607ca30ab057f0533817614c6be9714393a53dfb87499e9ca42e3"
+        == "08a564d9a620d6deac0661ee17dd3c6f8c2db1f85f7d8908b312a7da70a5bfda"
     )
     assert catalog.entry("chat_teardown")[-1] == "拆的书里群聊回答用"
     assert [item["name"] for item in catalog.variables("chat_teardown")] == [

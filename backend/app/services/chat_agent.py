@@ -19,7 +19,7 @@ from app.db import get_sessionmaker
 from app.llm import demo
 from app.llm.router import LOCAL_HOSTS, LLMRouter, ToolCall, ToolsUnsupported
 from app.models import Book, Chapter, Job, MeetingMessage
-from app.prompts import render
+from app.prompts import render, tagged
 from app.services import book_saves, chat_tools, jobs
 from app.services.chat import PUSH_EVERY, answer, answered_ids, conversation_lock, finish_reply, merge_summary, stop_key
 from app.services.chat_context import (
@@ -399,8 +399,10 @@ ASK_RULE = "作者这句话是在问。只查只答，不要动手改书；你�
 
 def retry_note(steps: list[dict]) -> str:
     done = [done_text(o) for o in steps if o.get("kind") != "failed" and done_text(o)]
-    return "【上次做到一半】\n这句话上次没做完就断了。" + (
-        f"已经做完的：{'；'.join(done)}。这次只接着做没做完的，做过的不要再做。" if done else "这次重新做。"
+    return tagged(
+        "上次做到一半",
+        "这句话上次没做完就断了。"
+        + (f"已经做完的：{'；'.join(done)}。这次只接着做没做完的，做过的不要再做。" if done else "这次重新做。"),
     )
 
 
@@ -437,15 +439,16 @@ async def agent_values(session, book, role, message, rows, summary, read_only, r
         requirements=requirements_list(await active_requirements(session, book.id)),
         viewing=await viewing_full(session, book, ctx, payload.get("viewing")),
         pending=pending_of(job, ctx),
-        working=(
-            "【编辑部正在干活】\n编辑部正在写书。这时改设定不会马上改，会放进待处理的建议，等写完作者点「现在改」；"
-            "写作要求会交给正在干活的编辑部；大纲这时改不了。"
+        working=tagged(
+            "编辑部正在干活",
+            "编辑部正在写书。这时改设定不会马上改，会放进待处理的建议，等写完作者点「现在改」；"
+            "写作要求会交给正在干活的编辑部；大纲这时改不了。",
         )
         if busy
         else "",
         summary=summary or "（没有）",
         recent=dialogue_text(rows[-20:]),
-        quote=f"【作者选中的原文】（{quote['where']}）\n{quote['text'][:2000]}" if quote else "",
+        quote=tagged("作者选中的原文", f"（{quote['where']}）\n{quote['text'][:2000]}") if quote else "",
         retry=retry_note(payload.get("steps") or []) if retry else "",
         note=message.content,
         act_rule=ASK_RULE if read_only else ACT_RULE,

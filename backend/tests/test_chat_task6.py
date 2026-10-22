@@ -291,10 +291,10 @@ async def test_context_blocks_and_limits(sessionmaker):
         assert "已定稿 1 章，全书计划约 100 章。" in await progress_of(session, ctx, [c], None)
         related = await related_of(session, ctx, [c], "小风的境界，第 二 章")
         assert "设定：" in related and "楚风" in related and "原文片段：" in related
-        assert "【人物现在的状态】" in await extras_of(session, ctx, [c], "lorekeeper", "")
-        assert "【最近定稿一章的结尾】" in await extras_of(session, ctx, [c], "writer", "")
-        assert "【最近定稿的一章】" in await extras_of(session, ctx, [c], "reviewer", "")
-        assert "【等你确认的内容】" in pending_of(
+        assert "<人物现在的状态>" in await extras_of(session, ctx, [c], "lorekeeper", "")
+        assert "<最近定稿一章的结尾>" in await extras_of(session, ctx, [c], "writer", "")
+        assert "<最近定稿的一章>" in await extras_of(session, ctx, [c], "reviewer", "")
+        assert "<等你确认的内容>" in pending_of(
             Job(status="waiting_author", pending={"kind": "volume_review", "volume": 1}), ctx
         )
     assert references("第十一章 第 21 章 第两百零三章 第五章", "章", 3) == [11, 21, 203]
@@ -591,10 +591,10 @@ async def test_related_all_blocks_role_extras_pending_and_dialogue_filters(sessi
         assert "单元「试炼1」：单元概要1" in related
         assert "台账：" in related and "信息差：" in related and "S2" in related
         chief = await extras_of(session, ctx, chapters, "chief", "")
-        assert all(h in chief for h in ["【正在写的这一篇】", "【正在写的这一卷】", "【还开着的期待】"])
+        assert all(h in chief for h in ["<正在写的这一篇>", "<正在写的这一卷>", "<还开着的期待>"])
         assert "（正在写）" in chief
         keeper = await extras_of(session, ctx, chapters, "lorekeeper", "")
-        assert "【还藏着的信息差】" in keeper and "【还没收的伏笔】" in keeper
+        assert "<还藏着的信息差>" in keeper and "<还没收的伏笔>" in keeper
         review = await extras_of(session, ctx, chapters, "reviewer", "第一章")
         assert "第 1 章《章1》" in review and "审稿时的问题：" in review
         pitches = pending_of(
