@@ -70,6 +70,13 @@ CATALOG = [
         "作者在群聊里说话、模型支持工具调用时：接话的人自己查资料、自己动手改书，再回作者一段话；实际用接话的人的角色",
     ),
     ("chat_summary", "对话摘要", "聊天", "lorekeeper", "对话太长时把更早的部分折成摘要"),
+    (
+        "feedback_memory",
+        "看稿意见要不要记",
+        "聊天",
+        "chief",
+        "编辑部停下来请作者看稿时，作者写的意见里有没有以后要一直照做的，有才记进记忆",
+    ),
     ("chat_plan", "总结方案", "聊天", "chief", "作者让编辑部把聊过的想法总结成方案卡；实际用聊天对象的角色"),
     ("requirements_tidy", "整理作者要求", "聊天", "chief", "把作者要求清单里像提问、闲聊、重复、过时的标出来"),
     ("library_route", "群聊分流", "聊天", "router", "作者在群聊里说话时，判断是改设定、写作要求还是提问闲聊"),
@@ -134,6 +141,7 @@ VARIABLE_LABELS = {
     "summary": "之前聊过",
     "quote": "作者选中的原文",
     "where": "在哪里聊",
+    "what_happens": "这段意见怎么处理",
     "how_to_apply": "结论怎么生效",
     "material_note": "资料是全文还是目录",
     "working": "编辑部在不在干活",
@@ -273,6 +281,8 @@ def entry(name: str) -> tuple:
 def variables(name: str) -> list[dict[str, str]]:
     text = default_content(name)
     labels = dict(VARIABLE_LABELS)
+    if name == "feedback_memory":
+        labels.update(where="看稿的那一步", feedback="作者写的意见")
     # 变量单独成行、紧接【标题】时，以那份模板的标题为准。
     for match in re.finditer(r"^【([^\n]+)】\s*\n\s*\{\{(\w+)\}\}\s*$", text, re.M):
         labels[match.group(2)] = match.group(1)

@@ -42,9 +42,41 @@ function compile(source, imports) {
 const notice = compile(readFileSync(new URL('../src/pages/book/MemoryNotice.tsx', import.meta.url), 'utf8'), imports)
 imports['./MemoryNotice'] = notice.exports
 const module = compile(source, imports)
+const live = compile(`${readFileSync(new URL('../src/pages/workspace/LiveChat.tsx', import.meta.url), 'utf8')}\nexport { toChat }`, {
+  ...imports,
+  '../book/MemoryNotice': notice.exports,
+  'lucide-react': {},
+  '../../lib/workspace': {},
+  '../book/context': imports['./context'],
+  '../book/MeetingFeed': {},
+  '../book/PlanCard': {},
+  '../book/useGroupFeedback': {},
+  './Chat': {},
+  './convs': {},
+  './chatModel': {},
+  './writing': {},
+})
 const render = outcome => renderToStaticMarkup(React.createElement(module.exports.ChatOutcome, {
   message: { id: 1, speaker: 'author', content: '作者的话', created_at: new Date().toISOString(), payload: { outcome } },
 }))
+
+test('看稿判断带写作任务也保留主编回话和可撤销记忆行，不开放重新回答', () => {
+  const answer = { id: 30, job_id: 'writing-job', speaker: 'chief', kind: 'speech', content: '以后都照做的已经记下了。', payload: { feedback_to: 29, memories: [{ kind: 'memory', memory: row }] } }
+  const [message] = live.exports.toChat([answer], undefined, undefined)
+  assert.equal(message.id, '30')
+  assert.equal(message.who, '主编')
+  assert.equal(message.text, answer.content)
+  assert.equal(message.replyTo, undefined)
+  assert.equal(message.custom, undefined, '不能折成工作记录小字行而吞掉回执')
+  const html = renderToStaticMarkup(React.createElement(React.Fragment, null, message.below))
+  assert.match(html, /记住了：快一点/u)
+  assert.match(html, /撤销/u)
+  assert.doesNotMatch(html, /重新回答/u)
+  const [nothing] = live.exports.toChat([{ ...answer, payload: { feedback_to: 29, memories: [] }, content: '这段只改眼前这一处，不记。' }], undefined, undefined)
+  assert.equal(nothing.text, '这段只改眼前这一处，不记。')
+  assert.equal(nothing.custom, undefined)
+  assert.deepEqual(nothing.below, [])
+})
 
 test('纯聊天和空结果不渲染任何节点，不留空行', () => {
   for (const kind of ['chat', 'agent', 'feedback']) assert.equal(render({ kind }), '')

@@ -85,7 +85,11 @@ async def get_job(job_id: uuid.UUID, session: AsyncSession = SessionDep) -> JobO
 
 @router.post("/jobs/{job_id}/decision", response_model=JobOut)
 async def decide(
-    job_id: uuid.UUID, body: Decision, session: AsyncSession = SessionDep, redis: Redis = Depends(get_redis)
+    job_id: uuid.UUID,
+    body: Decision,
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = SessionDep,
+    redis: Redis = Depends(get_redis),
 ) -> JobOut:
     job = await _locked_job(session, job_id)
     if job is None:
@@ -99,20 +103,11 @@ async def decide(
     if body.action == "revise" and not feedback:
         raise HTTPException(422, "请写下修改意见")
     if body.action == "revise" and kind in {"volume_review", "chapters_review"}:
-        return await feedback_to_job(session, redis, job, feedback)
-    if feedback:
-        source = (
-            "trial"
-            if kind == "trial_read"
-            else f"volume:{(job.pending or {}).get('volume')}"
-            if kind == "volume_review"
-            else f"unit:{(job.pending or {}).get('unit_id')}"
-            if kind == "chapters_review"
-            else "trial"
-        )
-        await add_requirement(session, job.book_id, feedback, source)
+        return await feedback_to_job(session, redis, job, feedback, background_tasks=background_tasks)
     content = APPROVE_TEXT[kind] if body.action == "approve" else feedback
-    return await _queue_setup_response(session, redis, job, content, {"action": body.action, "feedback": feedback})
+    return await _queue_setup_response(
+        session, redis, job, content, {"action": body.action, "feedback": feedback}, background_tasks=background_tasks
+    )
 
 
 async def _setup_gate(session: AsyncSession, job_id: uuid.UUID, kind: str) -> Job:
@@ -130,10 +125,15 @@ async def _setup_gate(session: AsyncSession, job_id: uuid.UUID, kind: str) -> Jo
     return job
 
 
-async def _queue_setup_response(session: AsyncSession, redis: Redis, job: Job, content: str, resume: dict) -> JobOut:
-    # post_message 会提交；在同一事务里写要求、作者消息和 queued，不能先放开 waiting_author 的锁。
+async def _queue_setup_response(
+    session: AsyncSession, redis: Redis, job: Job, content: str, resume: dict, *, background_tasks=None
+) -> JobOut:
+    from app.services import feedback_memory
+
+    # 判断资料和 queued/作者消息一起提交，先排改稿再后台判断，不占改稿的等待。
+    info = await feedback_memory.context(session, job, resume) if background_tasks is not None else None
     job.status = "queued"
-    await post_message(
+    message = await post_message(
         session,
         redis,
         book_id=job.book_id,
@@ -141,11 +141,13 @@ async def _queue_setup_response(session: AsyncSession, redis: Redis, job: Job, c
         speaker="author",
         kind="decision",
         content=content,
-        payload={"requirement_saved": True},
+        payload={"requirement_saved": True, **({"feedback_memory": info} if info else {})},
     )
     await session.refresh(job)
     await publish(redis, job.book_id, "job", job_dict(job))
     jobs.enqueue(job.id, {**resume, "requirement_saved": True})
+    if info:
+        background_tasks.add_task(feedback_memory.judge, message["id"], redis)
     return JobOut.model_validate(job)
 
 
@@ -158,7 +160,7 @@ FEEDBACK_LABELS = {
 }
 
 
-async def feedback_to_job(session, redis, job, feedback, *, remember=True):
+async def feedback_to_job(session, redis, job, feedback, *, remember=True, background_tasks=None):
     kind = jobs.pending_kind(job)
     if jobs.is_legacy_setup(job):
         raise HTTPException(409, jobs.LEGACY_SETUP_MESSAGE)
@@ -167,21 +169,12 @@ async def feedback_to_job(session, redis, job, feedback, *, remember=True):
         raise HTTPException(409, "这一步不能接修改意见")
     if not feedback.strip():
         raise HTTPException(422, "请写下修改意见")
-    if remember:
-        source = (
-            f"volume:{job.pending.get('volume')}"
-            if kind == "volume_review"
-            else f"unit:{job.pending.get('unit_id')}"
-            if kind == "chapters_review"
-            else f"segment:{job.pending.get('number', 2)}"
-            if kind == "segment_review"
-            else "trial"
-        )
-        await add_requirement(session, job.book_id, feedback, source)
     resume = {"action": "redo" if kind == "setup_pitches" else "revise", "feedback": feedback}
     if key == "outline":
         resume["piece"] = "outline"
-    return await _queue_setup_response(session, redis, job, feedback, resume)
+    return await _queue_setup_response(
+        session, redis, job, feedback, resume, background_tasks=background_tasks if remember else None
+    )
 
 
 @router.post("/jobs/{job_id}/directions")
@@ -195,17 +188,23 @@ async def retired_directions(job_id: uuid.UUID, session: AsyncSession = SessionD
 async def choose_pitch(
     job_id: uuid.UUID,
     body: PitchDecision,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = SessionDep,
     redis: Redis = Depends(get_redis),
 ) -> JobOut:
     if body.action == "start":
         job = await _setup_gate(session, job_id, "setup_prefill")
-        if body.feedback.strip():
-            await add_requirement(session, job.book_id, body.feedback.strip(), "trial")
-        return await _queue_setup_response(session, redis, job, "出三个故事方向", {"action": "start"})
+        return await _queue_setup_response(
+            session,
+            redis,
+            job,
+            "出三个故事方向",
+            {"action": "start", "feedback": body.feedback.strip()},
+            background_tasks=background_tasks,
+        )
     job = await _setup_gate(session, job_id, "setup_pitches")
     if body.action == "redo":
-        return await feedback_to_job(session, redis, job, body.feedback.strip())
+        return await feedback_to_job(session, redis, job, body.feedback.strip(), background_tasks=background_tasks)
     feedback = body.feedback.strip()
     if body.action == "fill":
         book = await session.get(Book, job.book_id)
@@ -223,7 +222,6 @@ async def choose_pitch(
     else:
         if not feedback:
             raise HTTPException(422, "请写下重新出故事方向的要求")
-        await add_requirement(session, job.book_id, feedback, "trial")
         content = feedback
     if body.length is not None:
         await add_requirement(session, job.book_id, f"这本书打算写 {body.length} 万字。", "answer")
@@ -232,13 +230,14 @@ async def choose_pitch(
             raise HTTPException(422, "书名不能为空")
         await add_requirement(session, job.book_id, f"书名用《{body.title.strip()}》", "answer")
     resume = {**body.model_dump(), "feedback": feedback}
-    return await _queue_setup_response(session, redis, job, content, resume)
+    return await _queue_setup_response(session, redis, job, content, resume, background_tasks=background_tasks)
 
 
 @router.post("/jobs/{job_id}/segment", response_model=JobOut)
 async def decide_segment(
     job_id: uuid.UUID,
     body: SegmentDecision,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = SessionDep,
     redis: Redis = Depends(get_redis),
 ) -> JobOut:
@@ -258,13 +257,9 @@ async def decide_segment(
     if body.action == "revise" and not (feedback or body.flips):
         raise HTTPException(422, "请写下修改意见或选择要改的决定")
     if body.action == "revise" and not body.flips:
-        return await feedback_to_job(session, redis, job, feedback)
+        return await feedback_to_job(session, redis, job, feedback, background_tasks=background_tasks)
     pending = job.pending or {}
     number = pending.get("number", 2)
-    if feedback:
-        await add_requirement(session, job.book_id, feedback, f"segment:{number}")
-    for flip in body.flips:
-        await add_requirement(session, job.book_id, f"「{flip.topic}」改成：{flip.choice}", "trial")
     if body.action == "confirm":
         volumes = (pending.get("split") or {}).get("volumes") or []
         first = volumes[0].get("index", 1) if volumes else 1
@@ -274,7 +269,12 @@ async def decide_segment(
     else:
         content = feedback or "\n".join(f"「{flip.topic}」改成：{flip.choice}" for flip in body.flips)
     return await _queue_setup_response(
-        session, redis, job, content, {**body.model_dump(mode="json"), "feedback": feedback}
+        session,
+        redis,
+        job,
+        content,
+        {**body.model_dump(mode="json"), "feedback": feedback},
+        background_tasks=background_tasks,
     )
 
 
@@ -282,6 +282,7 @@ async def decide_segment(
 async def decide_piece(
     job_id: uuid.UUID,
     body: PieceDecision,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = SessionDep,
     redis: Redis = Depends(get_redis),
 ) -> JobOut:
@@ -298,11 +299,7 @@ async def decide_piece(
     if body.action == "revise" and not (feedback or body.flips):
         raise HTTPException(422, "请写下修改意见或选择要改的决定")
     if current == "outline" and body.action == "revise" and not body.flips:
-        return await feedback_to_job(session, redis, job, feedback)
-    if feedback and current != "settings":
-        await add_requirement(session, job.book_id, feedback, "trial")
-    for flip in body.flips:
-        await add_requirement(session, job.book_id, f"「{flip.topic}」改成：{flip.choice}", "trial")
+        return await feedback_to_job(session, redis, job, feedback, background_tasks=background_tasks)
     label = PIECE_NAMES[current]
     changes = "\n".join(f"「{flip.topic}」改成：{flip.choice}" for flip in body.flips)
     content = (
@@ -318,7 +315,7 @@ async def decide_piece(
         "feedback": feedback,
         "decision_piece": body.piece or current,
     }
-    return await _queue_setup_response(session, redis, job, content, resume)
+    return await _queue_setup_response(session, redis, job, content, resume, background_tasks=background_tasks)
 
 
 @router.post("/jobs/{job_id}/answers", response_model=JobOut)

@@ -179,7 +179,7 @@ export function useLiveWriting({ bookId, detail, parts, messages, draft }: {
       if (!writingJob?.pending || !text.trim()) return
       if (writingJob.pending.kind === 'segment_review') setJob(await post<Job>(`/jobs/${writingJob.id}/segment`, { action: 'revise', feedback: text.trim() }))
       else setJob(await post<Job>(`/jobs/${writingJob.id}/decision`, { action: 'revise', feedback: text.trim() }))
-      return writingJob.pending.kind === 'trial_read' ? '记下了：以后每一章都照这个写（记在写作要求里，随时能改）' : '好，交给编辑部改'
+      return writingJob.pending.kind === 'trial_read' ? '好，交给主编：要后面每章照着写的，会记进记忆' : '好，交给编辑部改'
     },
     rewrite: async (node, request) => {
       if (!node.ref) throw new Error('这一章还不能重写')

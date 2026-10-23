@@ -90,7 +90,7 @@ async def test_manual_planning_double_click_only_creates_one_job(client, session
 
 
 @pytest.mark.parametrize("action", ["confirm", "delegate", "revise"])
-async def test_segment_decisions_save_requirements_and_queue_once(client, sessionmaker, queued, action):
+async def test_segment_decisions_keep_feedback_local_and_queue_once(client, sessionmaker, queued, action):
     book_id, job_id = await book_fixture(sessionmaker, status="writing", job_status="waiting_author")
     payload = {
         "action": action,
@@ -107,7 +107,7 @@ async def test_segment_decisions_save_requirements_and_queue_once(client, sessio
         requirements = {
             (row.text, row.source) for row in await session.scalars(select(Memory).where(Memory.book_id == book_id))
         }
-        assert requirements == {("这一篇不要赶路", "看稿时说的"), ("「对手」改成：师兄", "看稿时说的")}
+        assert requirements == set()
         message = await session.scalar(select(MeetingMessage).where(MeetingMessage.job_id == job_id))
         assert message.payload["requirement_saved"]
         if action == "confirm":
@@ -214,6 +214,8 @@ async def test_decision_across_tabs_is_queued_exactly_once(client, sessionmaker,
     assert len(queued) == 1
     async with sessionmaker() as session:
         requirements = list(await session.scalars(select(Memory).where(Memory.book_id == bid)))
-        assert len(requirements) == 1
-        assert requirements[0].source == "看稿时说的"
-        assert len(list(await session.scalars(select(MeetingMessage).where(MeetingMessage.job_id == jid)))) == 1
+        assert requirements == []
+        messages = list(await session.scalars(select(MeetingMessage).where(MeetingMessage.job_id == jid)))
+        assert len([m for m in messages if m.speaker == "author"]) == 1
+        assert len([m for m in messages if m.speaker == "chief"]) == 1
+        assert [m for m in messages if m.speaker == "author"][0].payload["feedback_memory"]["state"] == "done"

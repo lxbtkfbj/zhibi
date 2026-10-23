@@ -549,13 +549,20 @@ async def test_legacy_prefill_combined_and_existing_text(flow, sessionmaker):
     assert "已按要求修改" in changed["concept"]["story"]
     assert "作者手改的结尾。" in changed["concept"]["story"]
     changed_library = await flow("GET", f"/books/{bid}/library")
-    # 2026-10-19 起定位不给编辑部看了：「师父」只能从卡的内容里认，演示模型认不出，这一句只记成要求
+    # 定位不给编辑部看了，演示模型认不出「师父」；眼前意见也不再自动记成长期规矩。
     assert all("已按要求修改" not in c["background"] for c in changed_library["characters"])
     req = await flow("GET", f"/books/{bid}/memories")
-    assert any("大纲卷首要快" in r["detail"] for r in req)
+    assert not any("大纲卷首要快" in r["detail"] for r in req)
     await flow("POST", f"/jobs/{jid}/piece", {"action": "confirm", "piece": "settings"})
     book = await flow("GET", f"/books/{bid}")
     assert book["setup_progress"]["pieces"]["concept"] == book["setup_progress"]["pieces"]["settings"] == "confirmed"
+    async with sessionmaker() as session:
+        calls = list(await session.scalars(select(LlmCall).where(LlmCall.book_id == uuid.UUID(bid))))
+        assert any(
+            "setup_outline" in call.request.get("prompt_names", []) and "大纲卷首要快" in call.request["user"]
+            for call in calls
+        )
+    assert not any("大纲卷首要快" in r["detail"] for r in await flow("GET", f"/books/{bid}/memories"))
 
 
 async def test_focus_wrong_ai_name_fills_only_blanks_and_rest_alias_skip(sessionmaker):

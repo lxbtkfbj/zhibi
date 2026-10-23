@@ -102,7 +102,7 @@ function toChat(messages: MeetingMessage[], outline: Outline | undefined, go: Go
   let authorLine: { job: string; index: number } | null = null
   for (const m of messages) {
     const id = String(m.id)
-    if (m.job_id && m.kind !== 'error' && !isMemoryNote(m) && !(m.speaker === 'author' && m.kind === 'decision' && m.content.startsWith('【和作者商量定的方案'))) {
+    if (m.job_id && m.kind !== 'error' && !isMemoryNote(m) && !(m.speaker === 'chief' && m.payload?.feedback_to) && !(m.speaker === 'author' && m.kind === 'decision' && m.content.startsWith('【和作者商量定的方案'))) {
       // 编辑部干活：进度不占聊天（最底下那一行跟着变），做完的、交代的一行小字
       if (m.kind === 'status') continue
       if (m.kind === 'artifact') {

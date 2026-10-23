@@ -193,7 +193,7 @@ async def test_revision_repeats_both_steps_with_current_version_and_flips(sessio
         requirements = {
             (row.text, row.source) for row in await session.scalars(select(Memory).where(Memory.book_id == book_id))
         }
-        assert requirements == {("这一篇不要赶路", "看稿时说的"), ("「目标」改成：先救出证人", "看稿时说的")}
+        assert requirements == set()  # 本次意见和 flips 已直接传给重出，不能自动变成以后每章的规矩。
     await execute_job(job_id, {"action": "delegate"})
     assert (await get_job(sessionmaker, job_id)).status == "succeeded"
     # 下一篇则采用新设置，自动通过且手动规划任务仍然不开始写正文。

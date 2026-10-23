@@ -55,7 +55,7 @@ from app.services import arc_store, setup_store, writing_store
 from app.services.enrichment import arc_text, normalize_split, pending_library
 from app.services.library_context import load_context
 from app.services.notes import note_thread
-from app.services.requirements import active_notes, add_requirement, deleted_texts, ingest_notes
+from app.services.requirements import active_notes, deleted_texts, ingest_notes
 from app.services.segment_planning import normalize_next_segment, segment_checks
 from app.services.writing_context import (
     SENTENCE,
@@ -153,6 +153,8 @@ class WriteState(TypedDict, total=False):
     start_unit: str
     chapters_revision: str
     chapters_pending: bool
+    # 只由开书图调用出第一单元章纲时传入；不写进记忆或后续写作任务。
+    setup_requirements: str
 
 
 def initial_state(params: dict) -> WriteState:
@@ -166,10 +168,6 @@ def initial_state(params: dict) -> WriteState:
         "revision": "",
         "feedback": "",
     }
-
-
-async def _requirement(session: AsyncSession, book_id: uuid.UUID, line: str, source: str = "note") -> None:
-    await add_requirement(session, book_id, line, source)
 
 
 async def live_settings(d: GraphDeps) -> dict:
@@ -550,11 +548,6 @@ async def segment_gate_node(
     feedback = str(decision.get("feedback") or "").strip()
     flips = decision.get("flips") or []
     async with d.sessionmaker() as session:
-        if not decision.get("requirement_saved"):
-            if feedback:
-                await _requirement(session, d.book_id, feedback, f"segment:{number}")
-            for flip in flips:
-                await _requirement(session, d.book_id, f"「{flip['topic']}」改成：{flip['choice']}", "trial")
         if decision.get("action") == "revise":
             await session.commit()
             feedback = "\n".join(
@@ -1256,9 +1249,6 @@ async def volume_gate_node(
                 kind="decision",
             )
             return Command(goto="dispatch", update={"open_issues": [], "node_update": None})
-        # 卷纲的修改意见也要记住，免得以后的规划又改回去
-        if not decision.get("requirement_saved"):
-            await _requirement(session, d.book_id, feedback, f"volume:{index}")
         await session.commit()
     return Command(
         goto="revise_volume",
@@ -1320,6 +1310,8 @@ async def prepare_unit_chapters(state: WriteState, runtime: Runtime[GraphDeps], 
         first = replaced[0].index if replaced else await writing_store.unit_next_chapter_index(session, d.book_id, unit)
         expected = None if undecided else unit.chapter_count - exists + len(replaced)
         blocks = await chapter_plan_blocks(session, book, volume, unit, first, chapter_count=expected or 0)
+        if "setup_requirements" in state:
+            blocks["requirements"] = state["setup_requirements"]
         blocks["revision"] = state.get("chapters_revision", "")
         key = pick(book.concept, settings_of(book)["playbook"]).key
         history = list(
@@ -1436,8 +1428,6 @@ async def chapters_gate_node(
         current = "\n\n".join(
             f"第 {row.index} 章《{row.title}》\n{format_chapter_outline(row.outline)}" for row in chapters
         )
-        if not decision.get("requirement_saved"):
-            await _requirement(session, d.book_id, feedback, f"unit:{unit.id}")
         await session.commit()
     return Command(
         goto="revise_chapters",
@@ -1937,8 +1927,6 @@ async def trial_gate_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dic
     async with d.sessionmaker() as session:
         book = await session.get(Book, d.book_id)
         book.trial_read_done = True
-        if feedback and not decision.get("requirement_saved"):
-            await _requirement(session, d.book_id, feedback, "trial")
         await session.commit()
     await d.emit.say(
         "system",
@@ -1947,8 +1935,6 @@ async def trial_gate_node(state: WriteState, runtime: Runtime[GraphDeps]) -> dic
         else f"作者试读完前 {TRIAL_READ_AFTER} 章，满意，继续写。",
         kind="decision",
     )
-    if feedback:
-        await d.emit.say("chief", "意见记下了，后面每一章都按这个来写。")
     return {}
 
 

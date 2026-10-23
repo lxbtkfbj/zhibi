@@ -280,7 +280,7 @@ export function useWritingSim(book: VBook, setBook: Dispatch<SetStateAction<VBoo
           round.current ??= { plan: '3', wrote: [] }
           setStatus({ state: 'working', who: '主编', doing: '主编在接着排' })
           kick()
-          return '记下了：以后每一章都照这个写（记在写作要求里，随时能改）'
+          return '好，交给主编：要后面每章照着写的，会记进记忆'
         }
         if (gate.kind === 'stuck') {
           const node = findNode(bookRef.current.outline, gate.node)?.at(-1)

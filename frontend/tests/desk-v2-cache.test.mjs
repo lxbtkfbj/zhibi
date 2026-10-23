@@ -74,6 +74,18 @@ test('同字数手改后立即返回：正文、review和changes都重新读，�
   assert.deepEqual(await qc.fetchQuery(options), { text: '新稿四字', changes: ['新变化'], teardown: undefined, review: { good: ['新看点'], issues: ['新问题'] } })
 })
 
+test('试读交意见先交主编判断，真书和原型的回话逐字一致', async t => {
+  const qc = cache(t), requests = []
+  const { writing } = hooks(qc, { post: async (url, body) => { requests.push({ url, body }); return {} } })
+  const control = writing.useLiveWriting({ bookId: 'book-a', detail: { active_job: { id: 'trial', kind: 'write_book', status: 'waiting_author', pending: { kind: 'trial_read', chapters: 3 } } }, messages: [], draft: null })
+  const copy = '好，交给主编：要后面每章照着写的，会记进记忆'
+  assert.equal(await control.revise('  以后每章打斗都多一点  '), copy)
+  assert.deepEqual(requests, [{ url: '/jobs/trial/decision', body: { action: 'revise', feedback: '以后每章打斗都多一点' } }])
+  assert.ok(read('../src/pages/workspace/writingSim.ts').includes(`return '${copy}'`))
+  assert.ok(!read('../src/pages/workspace/liveWriting.ts').includes('记下了：以后每一章都照这个写'))
+  assert.ok(!read('../src/pages/workspace/writingSim.ts').includes('记下了：以后每一章都照这个写'))
+})
+
 test('真实actions完成路径覆盖采纳候选、撤销版本和章纲手改，整书前缀不漏其他章', async t => {
   const qc = cache(t)
   const { actions } = hooks(qc)

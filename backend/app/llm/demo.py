@@ -1238,6 +1238,24 @@ def _chat_plan(user):
     )
 
 
+def _feedback_memory(user: str) -> s.FeedbackMemory:
+    feedback = _tag("作者写的意见", user)
+    if any(word in feedback for word in ("以后", "每章", "都")):
+        summary = feedback[:30]
+        lasts = next((f"只管{scope}" for scope in ("下一章", "这一卷", "下一卷") if scope in feedback), "一直有效")
+        return s.FeedbackMemory(
+            items=[s.FeedbackMemoryItem(summary=summary, detail=feedback, lasts=lasts)],
+            reply=f"记住了：{summary}。后面写书时会照着做。",
+        )
+    if "前 3 章已经写完，不会照这段意见重写" in user:
+        reply = "这段意见不记成规矩；要改那一章，去「正文」那一页让编辑部重写。"
+    elif "作者点了确认，这一处不再改" in user:
+        reply = "这段意见不记成规矩；要改这一处，在聊天里跟编辑部说。"
+    else:
+        reply = "这段意见只用来改眼前这一处，不记成以后都要照做的规矩。"
+    return s.FeedbackMemory(reply=reply)
+
+
 def _setup_notes(user):
     notes = _match(r"【作者刚才的插话】\n(.*?)(?=\n\n要求：|\n【|\Z)", user)
     parts = {"concept": [], "settings": [], "outline": []}
@@ -1408,6 +1426,7 @@ async def respond(schema: type[BaseModel], system: str, user: str) -> BaseModel:
             summary=f"（演示）之前聊了 {len(re.findall(r'^(?:作者|主编|设定师|写手|审稿)：', _match(r'【要并进去的对话】\n(.*?)(?=\n\n要求：|\Z)', user), re.M))} 条。"
         ),
         s.ChatPlan: lambda: _chat_plan(user),
+        s.FeedbackMemory: lambda: _feedback_memory(user),
         s.RequirementsTidy: lambda: _requirements_tidy(user),
     }
     if schema not in handlers:

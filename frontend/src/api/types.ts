@@ -597,7 +597,7 @@ export interface MeetingMessage {
     /** 群聊里接话的人自己查、自己动手的那一句（tools）；ask_only 是只查只答 */
     turn?: 'tools'; ask_only?: boolean
     /** 自己查、自己动手的回答：正在做什么（「在查陈默……」），查了什么、做了什么 */
-    tools_mode?: boolean; doing?: string; tools?: ChatToolUse[]; memories?: ChatOutcome[]
+    tools_mode?: boolean; doing?: string; tools?: ChatToolUse[]; memories?: ChatOutcome[]; feedback_to?: number
     /** 群聊里属于哪一段对话；dropped 是「从这里重来」收起来的 */
     conv?: string; dropped?: boolean } | null
   created_at: string | null

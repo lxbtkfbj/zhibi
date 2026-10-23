@@ -152,7 +152,9 @@ async def test_redo_exact_previous_latest_round_title_and_requirements(flow, mon
     concept = (await flow("GET", f"/books/{bid}"))["concept"]
     assert concept["title"] == "作者自己起名" and concept["target_length"] == 300
     requirements = await flow("GET", f"/books/{bid}/memories")
-    assert {"保留经营", "加入追凶"} <= {row["detail"] for row in requirements}
+    assert {"保留经营", "加入追凶"}.isdisjoint(row["detail"] for row in requirements)
+    assert any(row["detail"] == "书名用《作者自己起名》" for row in requirements)
+    assert any(row["source"] == "开书时答的" and "300" in row["detail"] for row in requirements)
 
 
 async def test_oneshot_finishes_without_piece_waits(flow):

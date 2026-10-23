@@ -95,14 +95,16 @@ async def test_retired_actions_are_422_without_writes(client, queued, sessionmak
     assert not queued
 
 
-async def test_piece_revision_saves_feedback_and_flips_once(client, queued, sessionmaker):
+async def test_piece_revision_uses_feedback_and_flips_without_auto_memory(client, queued, sessionmaker):
     bid, jid, _ = await gate(sessionmaker, piece="settings")
     body = {"action": "revise", "feedback": "把境界改成九重天", "flips": [{"topic": "感情线", "choice": "单女主"}]}
     assert (await client.post(f"/api/jobs/{jid}/piece", json=body)).status_code == 200
     assert ("把境界改成九重天", "note") not in await requirements(
         sessionmaker, bid
     )  # 在合成关分块处理，不把整段存成要求。
-    assert ("「感情线」改成：单女主", "看稿时说的") in await requirements(sessionmaker, bid)
+    assert await requirements(sessionmaker, bid) == set()
+    assert queued[0][1]["feedback"] == body["feedback"]
+    assert queued[0][1]["flips"] == body["flips"]
     assert queued[0][1]["requirement_saved"]
 
 
@@ -139,12 +141,13 @@ async def test_pitch_invalid_inputs(client, queued, sessionmaker, body):
     assert not queued
 
 
-async def test_redo_saves_requirement_and_old_directions_are_retired(client, queued, sessionmaker):
+async def test_redo_keeps_feedback_local_and_old_directions_are_retired(client, queued, sessionmaker):
     bid, jid, _ = await gate(sessionmaker, kind="setup_pitches")
     response = await client.post(
         f"/api/jobs/{jid}/pitches", json={"action": "redo", "feedback": "保留主角，换个金手指"}
     )
     assert response.status_code == 200, response.text
-    assert ("保留主角，换个金手指", "看稿时说的") in await requirements(sessionmaker, bid)
+    assert await requirements(sessionmaker, bid) == set()
+    assert queued[0][1]["feedback"] == "保留主角，换个金手指"
     old = await client.post(f"/api/jobs/{jid}/directions", json={})
     assert old.status_code == 409 and old.json()["detail"] == "这个任务用的是旧流程，请按新流程重开"

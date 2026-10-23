@@ -299,7 +299,7 @@ async def test_one_pitch_does_not_call_direction_or_judgement_llm(sessionmaker, 
     directions.assert_not_called()
 
 
-async def test_trial_and_volume_sources(sessionmaker, monkeypatch):
+async def test_trial_and_volume_gates_do_not_auto_remember(sessionmaker, monkeypatch):
     from app.graphs import write_book
 
     book_id, job_id = await fixture_book(sessionmaker)
@@ -310,10 +310,7 @@ async def test_trial_and_volume_sources(sessionmaker, monkeypatch):
     await trial_gate_node({}, rt)
     async with sessionmaker() as session:
         rows = (await session.scalars(sa.select(Memory).where(Memory.book_id == book_id))).all()
-    assert {row.text: row.source for row in rows} == {
-        "卷纲的意见": "看稿时说的",
-        "试读的意见": "看稿时说的",
-    }
+    assert rows == []
 
 
 async def test_three_finished_chapters_do_not_trigger_disabled_trial(sessionmaker):
@@ -383,7 +380,7 @@ async def test_deleted_legacy_pending_note_cannot_resurrect(client, sessionmaker
     assert (await client.get(f"/api/books/{book_id}/memories")).json() == []
 
 
-async def test_delete_invalidates_author_feedback_but_preserves_reviewer_instructions(client, sessionmaker):
+async def test_delete_memory_does_not_invalidate_local_feedback_or_reviewer_instructions(client, sessionmaker):
     book_id, job_id = await fixture_book(sessionmaker)
     row = (
         await client.post(f"/api/books/{book_id}/memories", json={"book_id": str(book_id), "summary": "让主角永远失败"})
@@ -400,9 +397,11 @@ async def test_delete_invalidates_author_feedback_but_preserves_reviewer_instruc
         },
         runtime(sessionmaker, book_id, job_id).context,
     )
-    assert current["feedback"] == ""
-    assert current["feedback_sources"] == []
-    assert current["instructions"] == {"concept": "审稿要求修复逻辑。", "world": "审稿要求修复人物年龄矛盾。"}
+    assert current["feedback"] == "让主角永远失败"
+    assert current["instructions"] == {
+        "concept": "审稿要求修复逻辑。改成失意者的故事。",
+        "world": "审稿要求修复人物年龄矛盾。",
+    }
 
 
 @pytest.mark.parametrize("kind", ["trial_read", "volume_review"])
@@ -419,7 +418,7 @@ async def test_decision_feedback_is_saved_once_even_if_worker_replays_after_dele
     queued = []
     monkeypatch.setattr(jobs, "enqueue", lambda _, payload: queued.append(payload))
     response = await client.post(
-        f"/api/jobs/{job_id}/decision", json={"action": "revise", "feedback": "已经删去的意见"}
+        f"/api/jobs/{job_id}/decision", json={"action": "revise", "feedback": "以后每章都留悬念"}
     )
     assert response.status_code == 200
     rows = (await client.get(f"/api/books/{book_id}/memories")).json()

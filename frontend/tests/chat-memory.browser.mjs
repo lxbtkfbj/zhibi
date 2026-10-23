@@ -6,9 +6,14 @@ import path from 'node:path'
 import { chromium, expect as baseExpect } from '@playwright/test'
 
 const ROOT = path.resolve(import.meta.dirname, '../..')
-const OUT = path.join(ROOT, 'data/chat-improvements-task3')
-const BASE = 'http://127.0.0.1:4387'
-const fixture = JSON.parse(await fs.readFile(path.join(OUT, 'fixture.json'), 'utf8'))
+const OUT = path.resolve(process.env.ZHIBI_MEMORY_OUT || path.join(ROOT, 'data/chat-improvements-task3'))
+const BASE = process.env.ZHIBI_MEMORY_BASE || 'http://127.0.0.1:4387'
+const baseURL = new URL(BASE)
+assert.equal(baseURL.hostname, '127.0.0.1', '只允许独立本机演示环境')
+assert.ok(baseURL.port && !['8000', '4320', '5433', '6380'].includes(baseURL.port), '不能操作日常端口')
+const fixture = JSON.parse(await fs.readFile(process.env.ZHIBI_MEMORY_FIXTURE || path.join(OUT, 'fixture.json'), 'utf8'))
+const screenshotName = name => process.env.ZHIBI_MEMORY_SCREENSHOT_PREFIX ? name.replace(/^任务3/u, process.env.ZHIBI_MEMORY_SCREENSHOT_PREFIX) : name
+await fs.mkdir(OUT, { recursive: true })
 const report = { checks: [], errors: [], externalRequests: [], requests: [], screenshots: [], demoOnly: true }
 const expect = baseExpect.configure({ timeout: 15000 })
 const browser = await chromium.launch({ executablePath: ['C:/Program Files/Google/Chrome/Application/chrome.exe'].find(existsSync) })
@@ -53,6 +58,7 @@ async function send(id, text) {
 function notice(result) { return result.box.locator('[data-testid^="memory-notice-"]') }
 async function back() { await memories().getByRole('button', { name: '回到聊天', exact: true }).click(); await expect(composer()).toBeVisible() }
 async function shot(name) {
+  name = screenshotName(name)
   await page.evaluate(async () => { await document.fonts.ready; await Promise.allSettled(document.getAnimations().filter(animation => Number.isFinite(animation.effect?.getComputedTiming().endTime)).map(animation => animation.finished)) })
   await page.screenshot({ path: path.join(ROOT, 'docs/聊天改进验收', name) }); report.screenshots.push(name)
 }
@@ -123,14 +129,24 @@ try {
   assert.equal(asked.note.payload.ask_only, true)
   await expect(notice(asked)).toContainText('记住了：')
   const oldReceipt = asked.reply.payload.memories[0].memory
+  const oldMemories = asked.reply.payload.memories
+  const beforeAgain = await rows(bid)
+  const again = page.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname === `/api/books/${bid}/chat/replies/${asked.reply.id}/again`)
   await asked.box.getByRole('button', { name: '重新回答', exact: true }).click()
-  await expect.poll(async () => (await meeting(bid)).find(row => row.id === asked.reply.id)?.payload?.memories?.[0]?.memory?.version, { timeout: 90000 }).toBeGreaterThan(oldReceipt.version)
+  assert.equal((await again).status(), 202)
+  await expect.poll(async () => { const reply = (await meeting(bid)).find(row => row.id === asked.reply.id); return !!reply.content && (reply.payload?.state ?? 'done') === 'done' }, { timeout: 90000 }).toBe(true)
   await expect(asked.box).toHaveAttribute('data-state', 'done', { timeout: 90000 })
-  const newReceipt = (await meeting(bid)).find(row => row.id === asked.reply.id).payload.memories
+  const newReply = (await meeting(bid)).find(row => row.id === asked.reply.id)
+  const newReceipt = newReply.payload.memories
   assert.equal(newReceipt.length, 1); assert.equal(newReceipt[0].memory.id, oldReceipt.id)
-  assert.equal(newReceipt[0].memory.action, 'update')
-  await expect(notice(asked)).toContainText('改了一条记忆：')
-  pass('只查只答也能记；重新回答不回退记忆，旧行换掉，新答照目录改同一条')
+  assert.deepEqual(newReceipt, oldMemories)
+  assert.deepEqual(await rows(bid), beforeAgain)
+  assert.ok(!newReply.payload.tools?.length, '重新回答走不给工具的旧路')
+  await expect(notice(asked)).toContainText(`记住了：${oldReceipt.summary}`)
+  await expect(notice(asked).getByRole('button', { name: '撤销', exact: true })).toBeEnabled()
+  const againBounds = await asked.box.evaluate(el => ({ receipt: el.querySelector('[data-testid^="memory-notice-"]').getBoundingClientRect().top, answer: el.querySelector('.chat-text').getBoundingClientRect().bottom }))
+  assert.ok(againBounds.receipt >= againBounds.answer, '原记忆行挪到新回答下面')
+  pass('只查只答也能记；重新回答走无工具旧路，原记忆和回执完全不变，原撤销仍可用')
 
   // Later changes disable old receipts, without using a mocked server response.
   await panel().getByRole('button', { name: '记忆', exact: true }).click()

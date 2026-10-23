@@ -72,7 +72,7 @@ class SetupState(TypedDict, total=False):
     pieces: dict[str, str]
     queue: list[str]
     instructions: dict[str, str]
-    instruction_sources: dict[str, list[str]]
+    outline_instructions: list[str]
     concept: dict
     settings_focus: dict
     settings_rest: dict
@@ -111,7 +111,7 @@ def initial_state(
         "pieces": dict.fromkeys(PIECE_ORDER, "todo"),
         "queue": ["concept"],
         "instructions": {},
-        "instruction_sources": {},
+        "outline_instructions": [],
         "decisions": {},
         "warnings": [],
         "revised": {},
@@ -124,7 +124,12 @@ def initial_state(
 
 def requirements(state: SetupState) -> str:
     # 以前的开书流程要起书名：书名规矩照带
-    return format_requirements(state.get("live_requirements") or [], [], state.get("settings"), title=True)
+    return format_requirements(
+        state.get("live_requirements") or [],
+        state.get("outline_instructions") or [],
+        state.get("settings"),
+        title=True,
+    )
 
 
 def _saved_state(saved: dict) -> dict:
@@ -146,20 +151,6 @@ async def live_state(state: SetupState, d: GraphDeps, *, refresh: bool = False) 
     if state.get("dirty_concept") and not refresh:
         saved.pop("concept", None)
     current = {**state, **saved, "settings": settings, "live_requirements": [requirement_text(row) for row in rows]}
-    instructions = dict(state.get("instructions") or {})
-    for target, sources in (state.get("instruction_sources") or {}).items():
-        if any(source in deleted for source in sources):
-            fallback = (state.get("instruction_fallbacks") or {}).get(target)
-            if fallback:
-                instructions[target] = fallback
-            else:
-                instructions.pop(target, None)
-    current["instructions"] = instructions
-    current["feedback_sources"] = [text for text in state.get("feedback_sources", []) if text not in deleted]
-    if any(text in state.get("feedback", "") for text in deleted):
-        current["feedback"] = "\n".join(current["feedback_sources"])
-    if state.get("previous_feedback") in deleted:
-        current["previous"] = ""
     pitch = dict(state.get("pitch") or {})
     if pitch.get("title") and f"书名用《{pitch['title']}》" in deleted:
         pitch.pop("title")
@@ -219,7 +210,11 @@ async def prefill_gate_node(state: SetupState, runtime: Runtime[GraphDeps]) -> d
     decision = interrupt({"kind": "setup_prefill", "flow": 3})
     if decision.get("action") != "start":
         raise ValueError("先写设定时请点「出三个故事方向」")
-    return {"prefill": False}
+    feedback = str(decision.get("feedback") or "").strip()
+    return {
+        "prefill": False,
+        **({"previous": f"【作者的意见】\n{feedback}", "previous_feedback": feedback} if feedback else {}),
+    }
 
 
 def _revision(state: SetupState, target: str, current=None) -> str:
@@ -287,10 +282,6 @@ async def pitches_gate_node(state: SetupState, runtime: Runtime[GraphDeps]) -> C
         feedback = decision.get("feedback", "").strip()
         if not feedback:
             raise ValueError("请写一句对故事方向的意见")
-        if not decision.get("requirement_saved"):
-            async with d.sessionmaker() as session:
-                await add_requirement(session, d.book_id, feedback, "trial")
-                await session.commit()
         previous = (
             "【上一轮的故事方向】\n"
             + "\n".join(f"{index}. {pitch['name']}：{pitch['text']}" for index, pitch in enumerate(state["pitches"], 1))
@@ -436,10 +427,7 @@ async def _combined_feedback(d, state, feedback):
             await session.commit()
     if result.settings_instructions:
         await _library_feedback(d, result.settings_instructions)
-    if result.outline_instructions:
-        async with d.sessionmaker() as session:
-            await add_requirement(session, d.book_id, result.outline_instructions, "note")
-            await session.commit()
+    return result.outline_instructions.strip()
 
 
 async def intake_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
@@ -479,14 +467,7 @@ async def intake_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
             elif target in done:
                 # 已确认上游绝不从流程检查点整块回写，意见只进入建议。
                 await _review(d, f"按作者的意见查一遍：{text}", "concept" if target == "concept" else "review")
-        update.update(
-            queue=queue,
-            instructions=instructions,
-            instruction_sources={
-                **state.get("instruction_sources", {}),
-                **{target: [content for _, content, _ in rows] for target in instructions},
-            },
-        )
+        update.update(queue=queue, instructions=instructions)
     else:
         await d.emit.say("chief", "收到，接下来就按你说的写。")
     for _, _, payload in rows:
@@ -638,7 +619,13 @@ async def outline_chapters_node(state: SetupState, runtime: Runtime[GraphDeps]) 
     units = state.get("outline", {}).get("units") or []
     if units:
         try:
-            await plan_chapters_node({"unit_id": str(units[0]["id"])}, runtime)
+            await plan_chapters_node(
+                {
+                    "unit_id": str(units[0]["id"]),
+                    **({"setup_requirements": requirements(state)} if state.get("outline_instructions") else {}),
+                },
+                runtime,
+            )
         except LLMError as exc:
             if str(exc) != "主编没有给出章纲":
                 raise
@@ -776,7 +763,7 @@ async def _confirm_piece(state: SetupState, d: GraphDeps) -> Command:
         await mark_progress(d, {**state, **update})
         return Command(goto="finalize", update=update)
     following = PIECE_ORDER[PIECE_ORDER.index(piece) + 1]
-    update.update(piece=following, queue=list(PIECES[following]), instructions={}, instruction_sources={})
+    update.update(piece=following, queue=list(PIECES[following]), instructions={})
     await mark_progress(d, {**state, **update})
     return Command(goto="intake", update=update)
 
@@ -823,25 +810,28 @@ async def piece_gate_node(
         raise ValueError("只支持确认、交给编辑部定或提意见")
     feedback = decision.get("feedback", "").strip()
     flips = decision.get("flips") or []
-    if not decision.get("requirement_saved"):
-        async with d.sessionmaker() as session:
-            if feedback:
-                await add_requirement(session, d.book_id, feedback, "trial")
-            for flip in flips:
-                await add_requirement(session, d.book_id, f"「{flip['topic']}」改成：{flip['choice']}", "trial")
-            await session.commit()
     if state["piece"] == "settings":
         concept_flips = flips if decision.get("decision_piece") == "concept" else []
         settings_flips = [] if concept_flips else flips
         notes = [feedback, *[f"把「{flip['topic']}」改成「{flip['choice']}」" for flip in concept_flips]]
+        outline_instructions = list(state.get("outline_instructions") or [])
         if any(notes):
-            await _combined_feedback(d, state, "\n".join(filter(None, notes)))
+            instruction = await _combined_feedback(d, state, "\n".join(filter(None, notes)))
+            if instruction:
+                outline_instructions = list(dict.fromkeys([*outline_instructions, instruction]))
         for flip in settings_flips:
             await _library_feedback(d, f"把「{flip['topic']}」改成「{flip['choice']}」")
         latest = await live_state(state, d, refresh=True)
         summary = latest.get("library", {}).get("summary", "")
         await d.emit.say("chief", summary)
-        return Command(goto="piece_gate", update={"library": latest.get("library", {}), "summary": summary})
+        return Command(
+            goto="piece_gate",
+            update={
+                "library": latest.get("library", {}),
+                "summary": summary,
+                "outline_instructions": outline_instructions,
+            },
+        )
     target = state["piece"]
     instruction = "\n".join(
         filter(None, [feedback, *[f"把「{flip['topic']}」改成「{flip['choice']}」" for flip in flips]])
@@ -856,9 +846,6 @@ async def piece_gate_node(
             "pitch": state.get("pitch") or {},
             "queue": list(PIECES[target]),
             "instructions": {target: instruction},
-            "instruction_sources": {
-                target: [feedback, *[f"「{flip['topic']}」改成：{flip['choice']}" for flip in flips]]
-            },
             "revised": {},
             "warnings": [],
         },
@@ -875,7 +862,7 @@ async def finalize_node(state: SetupState, runtime: Runtime[GraphDeps]) -> dict:
             await session.scalar(select(func.count()).select_from(Character).where(Character.book_id == d.book_id))
         ) + (await session.scalar(select(func.count()).select_from(WorldEntry).where(WorldEntry.book_id == d.book_id)))
         await session.commit()
-    update = {"piece": None, "pieces": dict.fromkeys(PIECE_ORDER, "confirmed")}
+    update = {"piece": None, "pieces": dict.fromkeys(PIECE_ORDER, "confirmed"), "outline_instructions": []}
     await mark_progress(d, {**state, **update})
     await d.emit.say(
         "chief",

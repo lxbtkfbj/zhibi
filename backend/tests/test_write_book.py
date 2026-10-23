@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 
 from app.graphs.write_book import clean_text
 from app.llm import demo
-from app.models import Book, Chapter, Character, Foreshadowing, Job, LlmCall, MeetingMessage, PlotUnit, Volume
+from app.models import Book, Chapter, Character, Foreshadowing, Job, LlmCall, MeetingMessage, Memory, PlotUnit, Volume
 from app.services.job_runner import execute_job
 from app.services.setup_store import save_setup
 
@@ -145,7 +145,11 @@ async def test_first_chapters_then_trial_read(sessionmaker):
     async with sessionmaker() as session:
         book = await session.get(Book, book_id)
         assert book.trial_read_done
-        assert "打斗再多一点" in book.requirements
+        assert "打斗再多一点" not in book.requirements
+        assert not await session.scalar(select(Memory.id).where(Memory.book_id == book_id))
+        messages = list(await session.scalars(select(MeetingMessage.content).where(MeetingMessage.job_id == job_id)))
+        assert "作者试读完前 3 章：打斗再多一点" in messages
+        assert "意见记下了，后面每一章都按这个来写。" not in messages
 
 
 async def test_whole_volume_then_next_volume_plan(sessionmaker, monkeypatch):
@@ -215,7 +219,8 @@ async def test_whole_volume_then_next_volume_plan(sessionmaker, monkeypatch):
     assert rows[31].status == "final" and rows[31].index == 32
     async with sessionmaker() as session:
         book = await session.get(Book, book_id)
-        assert "苏晚晴的戏份再多一点" in book.requirements
+        assert "苏晚晴的戏份再多一点" not in book.requirements
+        assert not await session.scalar(select(Memory.id).where(Memory.book_id == book_id))
 
 
 async def test_chapter_stuck_goes_to_author(sessionmaker, monkeypatch):

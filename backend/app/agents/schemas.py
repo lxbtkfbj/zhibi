@@ -937,6 +937,22 @@ class ChatSummary(Lenient):
     )
 
 
+class FeedbackMemoryItem(Lenient):
+    id: str = Field(default="", description="改记忆里已有的哪一条，填编号（比如「记12」）；新记的留空")
+    summary: str = Field(min_length=1, max_length=30, description="简述：一句话，30 字以内")
+    detail: str = Field(description="详细内容：作者原话怎么说的、具体要怎么做")
+    lasts: Literal["一直有效", "只管下一章", "只管这一卷", "只管下一卷"] = Field(
+        description="一直有效、只管下一章、只管这一卷、只管下一卷，选一个"
+    )
+
+
+class FeedbackMemory(Lenient):
+    items: list[FeedbackMemoryItem] = Field(
+        default_factory=list, max_length=3, description="要记的，最多 3 条；没有就空着"
+    )
+    reply: str = Field(description="主编回作者的一句")
+
+
 class PlanItem(Lenient):
     where: Literal["定调", "设定库", "大纲", "写作要求", "删除"] = Field(
         description="这一条落在哪：定调的一段话；设定库里的一条；大纲里的篇、卷、单元或结局；以后规划和写作都要照做的写作要求；要删掉的一张设定卡或大纲上还没开写的一段"
