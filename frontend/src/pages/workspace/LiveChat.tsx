@@ -88,6 +88,12 @@ function changedPlaces(m: MeetingMessage): number {
   return list.filter((o) => CHANGED.has(o.kind) && !o.undone && !(o.kind === 'edit' && o.mode === 'options') && !(o.kind === 'fill' && !o.filled?.length)).length
 }
 
+const isAuthorMemory = (item: ChatOutcome | undefined) => !!item?.memory && (item.kind === 'requirement' || item.kind === 'to_job')
+function memoryNotices(items: ChatOutcome[] | undefined, id: number) {
+  const receipts = items?.filter(item => item.memory)
+  return receipts?.length ? receipts.map((item, index) => <MemoryNotice key={`${id}:${index}:${item.memory!.version}`} receipt={item.memory!} undone={item.undone} />) : undefined
+}
+
 function toChat(messages: MeetingMessage[], outline: Outline | undefined, go: Go | undefined): ChatMessage[] {
   const out: ChatMessage[] = []
   // 从后往前数：这句和后面的话一共改过书几处（从这里重来时提醒书不跟着退）
@@ -119,8 +125,9 @@ function toChat(messages: MeetingMessage[], outline: Outline | undefined, go: Go
         continue
       }
       if (m.speaker === 'author') {
-        const text = `你：${m.content}`
-        out.push({ id: `line:${id}`, who: '主编', text, custom: <Line>{text}</Line> })
+        const feedback = m.payload?.author_feedback
+        const text = feedback && !m.content.includes(feedback) ? `${m.content}\n${feedback}` : m.content
+        out.push({ id, who: '作者', text })
         authorLine = { job: m.job_id, index: out.length - 1 }
         continue
       }
@@ -152,8 +159,15 @@ function toChat(messages: MeetingMessage[], outline: Outline | undefined, go: Go
       }
       const ask = m.payload?.ask
       const n = changedFrom.get(m.id) ?? 0
+      const payload = m.payload
+      const memories = (payload?.steps?.length ? payload.steps : payload?.outcome ? [payload.outcome] : []).filter(isAuthorMemory)
+      // StepOutcomes 有 steps 时只另显示正在做的 current；移走最后一条记忆后也不补显旧结果。
+      const current = payload?.outcome
+      const keepCurrent = !payload?.steps?.length || current && ['working', 'pending', 'agent'].includes(current.kind)
+      const outcomes = memories.length ? { ...m, payload: { ...payload, steps: payload?.steps?.filter(item => !isAuthorMemory(item)), outcome: keepCurrent && !isAuthorMemory(current) ? current : undefined } } : m
       out.push({
-        id, who: '作者', text: m.content, to: ask ? NAME[ask] : undefined, below: <StepOutcomes message={m} />,
+        id, who: '作者', text: m.content, to: ask ? NAME[ask] : undefined, below: <StepOutcomes message={outcomes} />,
+        memories: memoryNotices(memories, m.id),
         // 作者在聊天里说的话能从这里重来；这句和后面的话改过书，先提醒书不跟着退
         rewind: m.kind === 'note' && m.payload?.conv
           ? { warn: n ? `这句和后面的话改过书（${n} 处）。改了重发，聊天退回这里，书不跟着退：要退书，用那几处下面的「换回原来的」，或者去「存档」。` : undefined }
@@ -171,7 +185,7 @@ function toChat(messages: MeetingMessage[], outline: Outline | undefined, go: Go
         // 自己查、自己动手的回答：干活时那一行，答完下面「查了：……」
         doing: m.payload?.doing,
         looked: m.payload?.tools?.filter((t) => t.kind === 'query'),
-        below: m.payload?.memories?.map((item, index) => item.memory ? <MemoryNotice key={`${m.id}:${index}:${item.memory.version}`} receipt={item.memory} undone={item.undone} /> : null),
+        memories: memoryNotices(m.payload?.memories, m.id),
       })
     } else if (m.content) {
       out.push({ id: `line:${id}`, who: '主编', text: m.content, custom: <Line full>{m.content}</Line> })

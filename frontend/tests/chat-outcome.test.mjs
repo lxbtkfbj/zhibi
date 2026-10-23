@@ -68,18 +68,51 @@ test('看稿判断带写作任务也保留主编回话和可撤销记忆行，�
   assert.equal(message.text, answer.content)
   assert.equal(message.replyTo, undefined)
   assert.equal(message.custom, undefined, '不能折成工作记录小字行而吞掉回执')
-  const html = renderToStaticMarkup(React.createElement(React.Fragment, null, message.below))
+  const html = renderToStaticMarkup(React.createElement(React.Fragment, null, message.memories))
   assert.match(html, /记住了：快一点/u)
   assert.match(html, /撤销/u)
   assert.doesNotMatch(html, /重新回答/u)
   const [nothing] = live.exports.toChat([{ ...answer, payload: { feedback_to: 29, memories: [] }, content: '这段只改眼前这一处，不记。' }], undefined, undefined)
   assert.equal(nothing.text, '这段只改眼前这一处，不记。')
   assert.equal(nothing.custom, undefined)
-  assert.deepEqual(nothing.below, [])
+  assert.equal(nothing.memories, undefined)
 })
 
 test('纯聊天和空结果不渲染任何节点，不留空行', () => {
   for (const kind of ['chat', 'agent', 'feedback']) assert.equal(render({ kind }), '')
+})
+
+test('看稿与开书拍板用作者消息；原话另起一行、不重复、旧消息不补造', () => {
+  const decision = { id: 40, job_id: 'setup-job', speaker: 'author', kind: 'decision', content: '确认「定调」。', payload: { author_feedback: '主角不要自言自语。\n结尾留一点悬念。' } }
+  const system = { id: 41, job_id: 'setup-job', speaker: 'system', kind: 'decision', content: '作者确认了定调。' }
+  const [message, ...rest] = live.exports.toChat([decision, system], undefined, undefined)
+  assert.deepEqual(message, { id: '40', who: '作者', text: '确认「定调」。\n主角不要自言自语。\n结尾留一点悬念。' })
+  assert.deepEqual(rest, [], '紧跟的系统复述仍隐藏')
+  assert.equal(message.rewind, undefined, '拍板不能从这里重来')
+  const [old] = live.exports.toChat([{ ...decision, payload: null }], undefined, undefined)
+  assert.equal(old.text, decision.content)
+  const [revision] = live.exports.toChat([{ ...decision, content: '主角不要自言自语。\n「结尾」改成：留悬念', payload: { author_feedback: '主角不要自言自语。' } }], undefined, undefined)
+  assert.equal(revision.text, '主角不要自言自语。\n「结尾」改成：留悬念')
+})
+
+test('非工具作者消息的记忆回执与其余结果分开，不重复、不吞掉改书结果', () => {
+  const memory = { kind: 'requirement', memory: row }
+  const change = { kind: 'edit', label: '定调' }
+  const note = { id: 42, speaker: 'author', kind: 'note', content: '以后每章留悬念', payload: { conv: 'conv', steps: [change, memory], outcome: memory } }
+  const [message] = live.exports.toChat([note], undefined, undefined)
+  assert.deepEqual(message.below.props.message.payload.steps, [change])
+  assert.equal(message.below.props.message.payload.outcome, undefined)
+  assert.equal(message.memories.length, 1)
+  assert.equal(message.memories[0].props.receipt, row)
+  assert.deepEqual(note.payload.steps, [change, memory], '只做显示适配，不修改源消息')
+  const [single] = live.exports.toChat([{ ...note, payload: { outcome: memory } }], undefined, undefined)
+  assert.equal(single.memories.length, 1)
+  assert.equal(single.below.props.message.payload.outcome, undefined)
+  const [withOldCurrent] = live.exports.toChat([{ ...note, payload: { steps: [memory], outcome: change } }], undefined, undefined)
+  assert.equal(withOldCurrent.below.props.message.payload.outcome, undefined, '移走最后一条记忆后不补显原来没显示的旧结果')
+  const working = { kind: 'working' }
+  const [withWork] = live.exports.toChat([{ ...note, payload: { steps: [memory], outcome: working } }], undefined, undefined)
+  assert.equal(withWork.below.props.message.payload.outcome, working, '正在做的当前结果仍交给原组件显示')
 })
 
 test('没判断出来和等拍板逐字显示新字，不留手动加要求按钮', () => {

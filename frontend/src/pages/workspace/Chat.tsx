@@ -79,19 +79,19 @@ function AuthorBubble({ message, canRewind, onRewind, editing, chat, endRewind }
   return (
     <div data-testid={`note-${message.id}`} className="group flex flex-col items-end">
       {editing ? <InlineEdit message={message} chat={chat} onCancel={endRewind} /> : (
-        <div className="flex max-w-[85%] items-start gap-1">
-          <div className="mt-1.5 flex shrink-0 flex-wrap justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+        <div className="flex max-w-[85%] flex-col items-end">
+          <p data-testid="author-bubble" className="min-w-0 max-w-full rounded-[16px_4px_16px_16px] bg-author-bubble px-4 py-2.5 chat-text leading-[1.75] break-words whitespace-pre-wrap text-ink">
+            {message.to && <span className={clsx('mr-1.5 font-medium', ROLE_COLOR[message.to].text)}>@{message.to}</span>}
+            {message.text}
+          </p>
+          <div data-testid="author-actions" className="mt-1.5 flex shrink-0 items-center justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+            <CopyButton text={message.text} />
             {canRewind && message.rewind && (
               <button type="button" onClick={rewind} title="改这句话再发：这句和后面的聊天收起来，从改过的这句重新回答；书里改过的不跟着退" className={ACTION_CLASS}>
                 <PencilLine className="size-3.5" />修改
               </button>
             )}
-            <CopyButton text={message.text} />
           </div>
-          <p className="min-w-0 rounded-[16px_4px_16px_16px] bg-author-bubble px-4 py-2.5 chat-text leading-[1.75] break-words whitespace-pre-wrap text-ink">
-            {message.to && <span className={clsx('mr-1.5 font-medium', ROLE_COLOR[message.to].text)}>@{message.to}</span>}
-            {message.text}
-          </p>
         </div>
       )}
       {asking && (
@@ -104,22 +104,26 @@ function AuthorBubble({ message, canRewind, onRewind, editing, chat, endRewind }
         </div>
       )}
       {message.below && <div className="max-w-[85%]">{message.below}</div>}
+      {message.memories && <div className="max-w-[85%]"><MemoryBox>{message.memories}</MemoryBox></div>}
     </div>
   )
 }
 
 /** 回答下面一行小字「查了：陈默、第 12 章」，点开看查到的原文 */
-function Looked({ items }: { items: { label: string; text: string }[] }) {
+function ReplyFooter({ items = [], children }: { items?: { label: string; text: string }[]; children: ReactNode }) {
   const [open, setOpen] = useState(false)
   const labels = [...new Set(items.map((item) => item.label))]
   return (
     <div className="mt-1.5 text-xs text-ink-3">
-      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} title="点开看查到的原文"
-        className="flex max-w-full items-center gap-1 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-line/50 hover:text-ink">
-        <Search className="size-3.5 shrink-0" /><span className="min-w-0 truncate">查了：{labels.join('、')}</span>
-        <ChevronDown className={clsx('size-3.5 shrink-0 transition-transform', open && 'rotate-180')} />
-      </button>
-      {open && (
+      <div data-testid="reply-footer" className="flex min-w-0 items-center gap-2">
+        {!!items.length && <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} title="点开看查到的原文"
+          className="flex min-w-0 items-center gap-1 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-line/50 hover:text-ink">
+          <Search className="size-3.5 shrink-0" /><span className="min-w-0 truncate">查了：{labels.join('、')}</span>
+          <ChevronDown className={clsx('size-3.5 shrink-0 transition-transform', open && 'rotate-180')} />
+        </button>}
+        {children}
+      </div>
+      {open && !!items.length && (
         <div className="mt-1.5 space-y-1.5">
           {items.map((item, i) => (
             <div key={i} className="rounded-lg border border-line bg-card px-3 py-2">
@@ -131,6 +135,11 @@ function Looked({ items }: { items: { label: string; text: string }[] }) {
       )}
     </div>
   )
+}
+
+/** 沿用查阅原文的圆角、细边与浅底；回执本身的字、撤销和灰态不动。 */
+function MemoryBox({ children }: { children: ReactNode }) {
+  return <div data-testid="chat-memory-box" className="mt-1.5 space-y-1.5 rounded-lg border border-line bg-card px-3 py-2 [&>div]:mt-0">{children}</div>
 }
 
 function Reply({ message, latest, answering, onAgain }: { message: ChatMessage; latest: boolean; answering: boolean; onAgain: () => void }) {
@@ -164,20 +173,22 @@ function Reply({ message, latest, answering, onAgain }: { message: ChatMessage; 
             <span className={clsx('break-words whitespace-pre-wrap', message.state === 'streaming' && 'caret')}>{message.text}</span>
           </div>
         ) : null}
-        {!live && !!message.looked?.length && <Looked items={message.looked} />}
         {message.below}
+        {message.memories && <MemoryBox>{message.memories}</MemoryBox>}
         {message.state === 'stopped' && (
           <p className="mt-1.5 text-xs text-ink-3">{message.text ? '你让它停下了，写出来的留着' : '还没开口就停下了'}</p>
         )}
-        {(canCopy || showAgain) && (
-          <div className={clsx('mt-1.5 flex flex-wrap items-center gap-2 transition-opacity', !latest && 'opacity-0 group-hover:opacity-100 focus-within:opacity-100')}>
-            {canCopy && <CopyButton text={message.text} />}
-            {showAgain && (
-              <button type="button" onClick={onAgain} title="把上面你那句话重新答一遍，这一条换成新的" className={ACTION_CLASS}>
-                <RotateCcw className="size-3.5" />重新回答
-              </button>
-            )}
-          </div>
+        {(!live && !!message.looked?.length || canCopy || showAgain) && (
+          <ReplyFooter items={!live ? message.looked : undefined}>
+            <div className={clsx('flex shrink-0 items-center gap-2 transition-opacity', !latest && 'opacity-0 group-hover:opacity-100 focus-within:opacity-100')}>
+              {canCopy && <CopyButton text={message.text} />}
+              {showAgain && (
+                <button type="button" onClick={onAgain} title="把上面你那句话重新答一遍，这一条换成新的" className={ACTION_CLASS}>
+                  <RotateCcw className="size-3.5" />重新回答
+                </button>
+              )}
+            </div>
+          </ReplyFooter>
         )}
       </div>
     </div>

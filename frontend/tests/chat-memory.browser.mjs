@@ -60,7 +60,7 @@ async function back() { await memories().getByRole('button', { name: '回到聊�
 async function shot(name) {
   name = screenshotName(name)
   await page.evaluate(async () => { await document.fonts.ready; await Promise.allSettled(document.getAnimations().filter(animation => Number.isFinite(animation.effect?.getComputedTiming().endTime)).map(animation => animation.finished)) })
-  await page.screenshot({ path: path.join(ROOT, 'docs/聊天改进验收', name) }); report.screenshots.push(name)
+  await page.screenshot({ path: path.join(process.env.ZHIBI_MEMORY_SCREENSHOT_DIR || path.join(ROOT, 'docs/聊天改进验收'), name) }); report.screenshots.push(name)
 }
 try {
   const bid = fixture.new_book_id
@@ -83,12 +83,12 @@ try {
   assert.notEqual(original.id, firstReceipt.id)
   await expect(second.box.getByRole('button', { name: /查了：记忆「/u })).toBeVisible()
   const bounds = await second.box.evaluate(el => ({ query: [...el.querySelectorAll('button')].find(node => node.textContent.startsWith('查了：')).getBoundingClientRect().top, receipt: el.querySelector('[data-testid^="memory-notice-"]').getBoundingClientRect().top }))
-  assert.ok(bounds.receipt > bounds.query)
+  assert.ok(bounds.receipt < bounds.query)
   await second.box.getByRole('button', { name: /查了：记忆「/u }).click()
   await expect(second.box.getByText(second.reply.payload.tools[0].text, { exact: true })).toBeVisible()
   await second.box.getByRole('button', { name: /查了：记忆「/u }).click()
   await shot('任务3-01-查了和记住了.png')
-  pass('read_memory 查了每条简述，点开原样模型资料；查了在上、记忆行在下，删除号不重用')
+  pass('read_memory 查了每条简述，点开原样模型资料；任务5记忆框在上、查阅按钮行在下，删除号不重用')
 
   const before = (await rows(bid)).find(row => row.id === original.id)
   const changed = await send(bid, `把记${original.id}改成我喜欢先给两个选项`)

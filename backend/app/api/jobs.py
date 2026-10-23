@@ -132,6 +132,12 @@ async def _queue_setup_response(
 
     # 判断资料和 queued/作者消息一起提交；改稿不等，确认/试读由 worker 限时等判断落库。
     info = await feedback_memory.context(session, job, resume) if background_tasks is not None else None
+    feedback = resume.get("feedback")
+    author_feedback = (
+        {"author_feedback": feedback}
+        if isinstance(feedback, str) and feedback.strip() and feedback not in content
+        else {}
+    )
     job.status = "queued"
     message = await post_message(
         session,
@@ -141,7 +147,7 @@ async def _queue_setup_response(
         speaker="author",
         kind="decision",
         content=content,
-        payload={"requirement_saved": True, **({"feedback_memory": info} if info else {})},
+        payload={"requirement_saved": True, **({"feedback_memory": info} if info else {}), **author_feedback},
     )
     await session.refresh(job)
     await publish(redis, job.book_id, "job", job_dict(job))

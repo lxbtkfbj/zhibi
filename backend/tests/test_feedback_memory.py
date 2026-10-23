@@ -142,6 +142,10 @@ async def test_review_entry_uses_original_feedback_and_background_context(
         )
         rows = list(await session.scalars(select(MeetingMessage).where(MeetingMessage.book_id == bid)))
         author = next(m for m in rows if m.speaker == "author")
+        if "眼前这一处加点打斗" not in author.content:
+            assert author.payload["author_feedback"] == "眼前这一处加点打斗"
+        else:
+            assert "author_feedback" not in author.payload
         assert next(m for m in rows if m.speaker == "chief").content == "这段意见只改眼前这一处。"
         if what in (feedback_memory.CONFIRM, feedback_memory.TRIAL):
             assert queued[0]["feedback_memory_id"] == author.id

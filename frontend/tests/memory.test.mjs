@@ -58,9 +58,9 @@ test('三种行后改后删都变灰，忘掉行只认自己删的那一版', ()
     assert.equal(receiptCopy(value, { ...receipt, deleted_at: '后来删除', version: receipt.version + 2 }, false).title, '这条后来删掉了')
   }
 })
-test('回答回执排在查了下面，忘掉行不跳转，工具记忆不再挂作者步骤', () => {
+test('回答回执单独交给任务5记忆框，忘掉行不跳转，工具记忆不再挂作者步骤', () => {
   const live = readFileSync(new URL('../src/pages/workspace/LiveChat.tsx', import.meta.url), 'utf8')
-  assert.match(live, /below: m.payload\?\.memories\?\.map/u)
+  assert.match(live, /memories: memoryNotices\(m.payload\?\.memories, m.id\)/u)
   const notice = readFileSync(new URL('../src/pages/book/MemoryNotice.tsx', import.meta.url), 'utf8')
   assert.match(notice, /receipt.action === 'forget' \? <span>\{copy.text\}<\/span>/u)
 })

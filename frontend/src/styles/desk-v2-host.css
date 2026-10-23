@@ -18,7 +18,7 @@
 .desk-v2-theme {
   --color-paper: #f7f2e9; --color-paper-2: #faf4ea; --color-card: #fffcf6;
   --color-sidebar: #f3ece0; --color-subtle: #faf4ea; --color-conversation: #f7f2e9;
-  --color-manuscript: #fffcf6; --color-pane-left: #f3ece0; --color-pane-mid: #e8dfcf;
+  --color-manuscript: #fffcf6; --color-pane-left: #f3ece0; --color-pane-mid: #f3ece0;
   --color-page: #fffcf6; --color-ink: #2a2420; --color-ink-2: #554c43; --color-ink-3: #6f665b;
   --color-line: #e2d6c2; --color-line-2: #d6c7ad; --color-divider: #e2d6c2;
   --color-seal: #b4432e; --color-seal-dark: #8f3322; --color-seal-soft: #f6e4dc;
