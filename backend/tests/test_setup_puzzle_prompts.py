@@ -96,7 +96,7 @@ PROMPT_HASHES = {
 
 def test_handbook_prompt_moves_are_byte_exact():
     for name, digest in {
-        "chat_agent": "42894c24975b767516a766cd15716e7dbfed31d2425bb086f71f559aeb2344e0",
+        "chat_agent": "dfbe9bba4cabe9c987861e2a3592bc9ecfff96a8e8147f7fbbed8f4def721a94",
         "skills/opening": "4aa306890d634f444d43c4da71c0faea4ca303c6a05aa96d6936867918f6ef67",
     }.items():
         assert hashlib.sha256((ROOT / f"backend/app/prompts/{name}.md").read_bytes()).hexdigest() == digest

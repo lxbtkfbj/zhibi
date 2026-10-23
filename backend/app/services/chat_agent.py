@@ -20,7 +20,7 @@ from app.llm import demo
 from app.llm.router import LOCAL_HOSTS, LLMRouter, ToolCall, ToolsUnsupported
 from app.models import Book, Chapter, Job, MeetingMessage
 from app.prompts import render, tagged
-from app.services import book_saves, chat_tools, jobs
+from app.services import book_saves, chat_tools, jobs, teardown_lookup
 from app.services.chat import PUSH_EVERY, answer, answered_ids, conversation_lock, finish_reply, merge_summary, stop_key
 from app.services.chat_context import (
     ROLE_FOCUS,
@@ -72,6 +72,8 @@ class Turn:
     viewing: dict | None
     allow_skills: bool = True
     allow_memories: bool = True
+    allow_teardowns: bool = True
+    teardown_catalog: list[teardown_lookup.CatalogEntry] = field(default_factory=list)
     memory_actions: list[dict] = field(default_factory=list)
     book_changed: bool = False
     # 做过的那几处（重试时跳过同一处）；算进处数的那几处
@@ -122,6 +124,8 @@ async def run_tool(turn: Turn, call: ToolCall) -> str:
     try:
         if call.name == "read_skill" and not turn.allow_skills:
             return "拆的书群聊不能翻手册。"
+        if call.name == "look_up_teardown" and not turn.allow_teardowns:
+            return "拆的书群聊不能查别的拆过的书。"
         args = chat_tools.tool_args(call.name, call.args or {})
     except Exception as exc:
         return f"参数不对：{exc}。照工具说明重新调一次。"
@@ -136,14 +140,21 @@ async def run_tool(turn: Turn, call: ToolCall) -> str:
         if turn.stopping:
             raise Stopped
         return result
-    await set_doing(turn, chat_tools.doing_of(call.name, args), ellipsis=not isinstance(args, chat_tools.ReadSkill))
+    doing = chat_tools.doing_of(call.name, args, teardowns=turn.teardown_catalog)
+    await set_doing(
+        turn,
+        doing,
+        ellipsis=not isinstance(args, (chat_tools.ReadSkill, teardown_lookup.LookUpTeardown)),
+    )
     async with get_sessionmaker()() as session:
         book = await session.get(Book, turn.book_id)
         try:
-            label, text = await chat_tools.look_up(session, book, call.name, args, turn.viewing)
+            label, text = await chat_tools.look_up(
+                session, book, call.name, args, turn.viewing, teardowns=turn.teardown_catalog
+            )
         except Exception as exc:
             log.exception("聊天里查资料出错")
-            label, text = chat_tools.doing_of(call.name, args).removeprefix("在"), f"没查成：{exc}"
+            label, text = doing.removeprefix("在"), f"没查成：{exc}"
         await session.rollback()
     turn.tools.append({"kind": "query", "label": label, "text": text})
     turn.touch()
@@ -293,7 +304,12 @@ async def drive(turn: Turn, system: str, user: str) -> str:
             turn.role,
             system,
             user,
-            chat_tools.tool_specs(turn.read_only, skills=turn.allow_skills, memories=turn.allow_memories),
+            chat_tools.tool_specs(
+                turn.read_only,
+                skills=turn.allow_skills,
+                memories=turn.allow_memories,
+                teardowns=turn.teardown_catalog if turn.allow_teardowns else [],
+            ),
             lambda call: run_tool(turn, call),
             purpose=f"聊天·{SPEAKER_NAMES[turn.role]}",
             max_rounds=MAX_ROUNDS,
@@ -501,6 +517,7 @@ async def answer_note(redis, book_id, message_id, *, reply_id=None, retry=False)
             reply_id = reply["id"]
         book = await session.get(Book, book_id)
         teardown = book.source == "teardown"
+        teardown_catalog = [] if teardown else await teardown_lookup.load_catalog(session)
         read_only = teardown or bool(payload.get("ask_only"))
         # 只带这句话所在的那一段对话和它的摘要
         state = await conversation_state(session, book_id, "group", payload.get("conv"))
@@ -522,6 +539,8 @@ async def answer_note(redis, book_id, message_id, *, reply_id=None, retry=False)
         payload.get("viewing"),
         allow_skills=not teardown,
         allow_memories=not teardown,
+        allow_teardowns=not teardown,
+        teardown_catalog=teardown_catalog,
     )
     if retry:
         async with sm() as session:

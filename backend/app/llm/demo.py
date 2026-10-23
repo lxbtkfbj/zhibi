@@ -1181,6 +1181,8 @@ def tool_turn(system: str, user: str, tools: list[str], done: list) -> tuple[lis
         return [], _teardown_reply(system, user, "\n\n".join(result for _, result in done))
     library = _tag("设定库", user)
     called = [call.name for call, _ in done]
+    if "look_up_teardown" in tools and "look_up_teardown" not in called and (book := re.search(r"《([^》]+)》", note)):
+        return [("look_up_teardown", {"book": book[1], "look": "精髓", "words": []})], ""
     if "开书" in note and "read_skill" in tools and "read_skill" not in called:
         return [("read_skill", {"name": "开书"})], ""
     if calls := _demo_memory(note, _tag("记忆", user), tools, called):
@@ -1200,6 +1202,8 @@ def tool_turn(system: str, user: str, tools: list[str], done: list) -> tuple[lis
     text = f"（演示）{role}回答：{note[:20]}。" + (f"查了{looked}。" if looked else "")
     if "read_skill" in called:
         text += "翻了开书手册。"
+    if teardown := next((call for call, _ in done if call.name == "look_up_teardown"), None):
+        text += f"翻了《{teardown.args['book']}》的精髓。"
     memories = [result for call, result in done if call.name in {"remember", "read_memory", "forget"}]
     return [], text + (f"动手的结果：{acted[:80]}" if acted else "") + (
         "我记得：" + "；".join(memories) if memories else ""

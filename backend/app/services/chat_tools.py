@@ -14,7 +14,7 @@ from app.agents.context import format_ledger, format_secrets
 from app.agents.schemas import Lenient, LibraryIntent
 from app.models import Book, Chapter, Character, NodeAnchor, Relationship, WorldEntry
 from app.prompts import handbooks
-from app.services import book_saves, outline_structure
+from app.services import book_saves, outline_structure, teardown_lookup
 from app.services.chat_context import done_text
 from app.services.chat_memories import MEMORY_TOOLS, Forget, ReadMemory, Remember
 from app.services.group_notes import CONCEPT_NAMES, SAID, SHOWN, apply_with_change
@@ -125,7 +125,13 @@ QUERY_TOOLS = {
 ACT_TOOLS = {"make_changes": MakeChanges}
 
 
-def tool_specs(read_only: bool, *, skills: bool = True, memories: bool = True) -> list[dict]:
+def tool_specs(
+    read_only: bool,
+    *,
+    skills: bool = True,
+    memories: bool = True,
+    teardowns: list[teardown_lookup.CatalogEntry] | None = None,
+) -> list[dict]:
     """给模型的工具；只读的（只问不改、拆书）只有查的那几个。"""
     tools = QUERY_TOOLS if read_only else {**QUERY_TOOLS, **ACT_TOOLS}
     if memories:
@@ -137,10 +143,12 @@ def tool_specs(read_only: bool, *, skills: bool = True, memories: bool = True) -
         specs.append(spec)
     if skills and (skill := handbooks.tool_spec()) is not None:
         specs.append(skill)
+    if teardown := teardown_lookup.tool_spec(teardowns or []):
+        specs.append(teardown)
     return specs
 
 
-def doing_of(name: str, args: BaseModel) -> str:
+def doing_of(name: str, args: BaseModel, *, teardowns=None) -> str:
     """回答框里那一行：在查什么、在改什么。"""
     if isinstance(args, ReadMemory):
         return "在翻记忆"
@@ -150,6 +158,8 @@ def doing_of(name: str, args: BaseModel) -> str:
         return "在删一条记忆"
     if isinstance(args, ReadSkill):
         return f"在翻《{args.name}》"
+    if isinstance(args, teardown_lookup.LookUpTeardown):
+        return teardown_lookup.doing_of(args, teardowns or [])
     if isinstance(args, LookUpSettings):
         return f"在查{'、'.join(args.names[:5])}"
     if isinstance(args, LookUpOutline):
@@ -175,10 +185,14 @@ def item_doing(item: ChangeItem) -> str:
     }[item.kind]
 
 
-async def look_up(session, book: Book, name: str, args: BaseModel, viewing: dict | None) -> tuple[str, str]:
+async def look_up(
+    session, book: Book, name: str, args: BaseModel, viewing: dict | None, *, teardowns=None
+) -> tuple[str, str]:
     """查的工具：返回 (给作者看的「查了：……」里那一项, 交回给模型的资料)。"""
     if isinstance(args, ReadSkill):
         return f"手册《{args.name}》", handbooks.read(args.name)
+    if isinstance(args, teardown_lookup.LookUpTeardown):
+        return await teardown_lookup.look_up(session, teardowns or [], args)
     if isinstance(args, LookUpSettings):
         ctx = await load_context(session, book)
         labels, blocks = [], []
@@ -594,7 +608,13 @@ async def plan_change(session, book: Book, item: dict) -> ChangeItem:
 
 
 def tool_args(name: str, raw: dict) -> BaseModel:
-    models = {**QUERY_TOOLS, **ACT_TOOLS, **MEMORY_TOOLS, "read_skill": ReadSkill}
+    models = {
+        **QUERY_TOOLS,
+        **ACT_TOOLS,
+        **MEMORY_TOOLS,
+        "read_skill": ReadSkill,
+        "look_up_teardown": teardown_lookup.LookUpTeardown,
+    }
     model = models.get(name)
     if model is None:
         raise ValueError(f"没有这个工具：{name}。能用的是：{'、'.join(models)}")
