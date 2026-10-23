@@ -199,22 +199,20 @@ async def receive_note(body, background_tasks, book, session, redis):
         agent_role = body.ask or pick_role(text)
         tools = await supports_tools(agent_role)
         agent = {"outcome": {"kind": "agent"}, "turn": "tools", "chat_role": agent_role}
-        if asked and tools:
+        job = await active_note_job(session, book_id)
+        # 等拍板时，能调工具的模型也先分流；明显问句不能绕过这个判断。
+        waiting_tools = tools and waiting_feedback(job)
+        if asked and tools and not waiting_tools:
             # 明显是在问：只给查资料的工具，只查只答
             payload.update(agent, ask_only=True)
             task = "agent"
-        elif asked:
+        elif asked and not waiting_tools:
             payload.update(outcome={"kind": "chat", "shortcut": True}, chat_role=body.ask or asked)
             task = "reply"
         else:
-            job = await active_note_job(session, book_id)
             if jobs.open_wait(job) and wants_new_pitches(text):
                 raise HTTPException(409, {"code": "use_feedback", "message": "等你拍板时请直接提意见"})
-            if waiting_feedback(job) and tools:
-                # Memory is not a book edit: keep tools while the book waits, but no make_changes.
-                payload.update(agent, ask_only=True)
-                task = "agent"
-            elif waiting_feedback(job):
+            if waiting_feedback(job):
                 try:
                     intent = await classify(session, book_id, text, payload.get("viewing"), conv_id)
                 except Exception as exc:
@@ -226,12 +224,11 @@ async def receive_note(body, background_tasks, book, session, redis):
                         raise HTTPException(409, {"code": "use_feedback", "message": "等你拍板时请直接提意见"})
                     payload["outcome"] = {"kind": "plan_made"}
                     task = "plan"
-                elif intent.kind == "写作要求":
-                    payload["outcome"] = {"kind": "pending"}
-                    task = intent
                 elif tools:
-                    # 等拍板时只是在问：照旧只查只答，要改的在拍板的地方提
-                    payload.update(agent, ask_only=True)
+                    # 提问和写作要求可查资料、记忆；要改书的仍走拍板或方案卡。
+                    payload.update(agent)
+                    if intent.kind in ("提问闲聊", "写作要求"):
+                        payload["ask_only"] = True
                     task = "agent"
                 else:
                     payload["outcome"] = {"kind": "pending"}

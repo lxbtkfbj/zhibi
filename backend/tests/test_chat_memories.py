@@ -267,7 +267,11 @@ async def test_agent_cross_conversation_ask_only_and_reanswer(client, sessionmak
     fresh = await reply_of(client, bid, note["id"])
     assert len(fresh["payload"]["memories"]) == 1
     assert fresh["payload"]["memories"][0]["memory"]["id"] == receipt["id"]
-    assert fresh["payload"]["memories"][0]["memory"]["action"] == "update"
+    assert fresh["payload"]["memories"] == reply["payload"]["memories"]
+    async with sessionmaker() as session:
+        last = await session.scalar(select(LlmCall).where(LlmCall.book_id == bid).order_by(LlmCall.id.desc()))
+        assert last.request["method"] == "demo_stream" and not last.request.get("schema")
+        assert "【记忆】\n" + reply["payload"]["memories"][0]["model_text"] in last.request["user"]
     async with sessionmaker() as session:
         assert await session.scalar(select(func.count()).select_from(BookSave)) == 0
     conv = await client.post(f"/api/books/{bid}/chat/conversations", json={})
@@ -388,3 +392,56 @@ async def test_update_undo_after_original_source_message_is_deleted(client, sess
     async with sessionmaker() as session:
         row = await session.get(Memory, rid)
         assert row.summary == "每章留钩子" and row.message_id is None
+
+
+@pytest.mark.parametrize("action", ["create", "update", "forget"])
+@pytest.mark.parametrize("undone", [False, True])
+async def test_again_keeps_actual_memory_results_and_receipts(client, sessionmaker, monkeypatch, action, undone):
+    from app.llm.router import LLMRouter, ToolCall
+
+    bid = await seed(sessionmaker)
+    rid = None
+    if action != "create":
+        _, existing, _ = await invoke(sessionmaker, bid, args())
+        rid = existing["memory"]["id"]
+    called, results = [], []
+
+    async def rounds(self, role, system, user, specs, run, **kwargs):
+        called.append(True)
+        changed = await run(
+            ToolCall(
+                "edit",
+                "make_changes",
+                {"items": [{"kind": "改设定", "target": "楚风", "field": "personality", "instruction": "冷静沉稳"}]},
+            )
+        )
+        assert "做成了：" in changed
+        tool = (
+            ToolCall("mem", "forget", {"id": f"记{rid}"})
+            if action == "forget"
+            else ToolCall("mem", "remember", args(id=f"记{rid}" if rid else "").model_dump())
+        )
+        results.append(await run(tool))
+        yield "text", "改好也处理了记忆。"
+
+    monkeypatch.setattr(LLMRouter, "tool_rounds", rounds)
+    note = await say(client, bid, "把楚风的性格改成冷静，再处理记忆")
+    reply = await reply_of(client, bid, note["id"])
+    memory = reply["payload"]["memories"][0]["memory"]
+    if undone:
+        res = await client.post(f"/api/books/{bid}/memories/{memory['id']}/undo", json={"version": memory["version"]})
+        assert res.status_code == 200, res.text
+        reply = await reply_of(client, bid, note["id"])
+    assert (await client.post(f"/api/books/{bid}/chat/replies/{reply['id']}/again")).status_code == 202
+    fresh = await reply_of(client, bid, note["id"])
+    assert called == [True] and fresh["payload"]["memories"] == reply["payload"]["memories"]
+    async with sessionmaker() as session:
+        last = await session.scalar(select(LlmCall).where(LlmCall.book_id == bid).order_by(LlmCall.id.desc()))
+        assert last.request["method"] == "demo_stream" and not last.request.get("schema")
+        material = last.request["user"]
+        assert "【动手 1 处】" in material and "做成了：" in material
+        assert "【记忆】\n" + results[0] + ("（作者点了撤销）" if undone else "") in material
+    if not undone:
+        res = await client.post(f"/api/books/{bid}/memories/{memory['id']}/undo", json={"version": memory["version"]})
+        assert res.status_code == 200, res.text
+        assert (await reply_of(client, bid, note["id"]))["payload"]["memories"][0]["undone"]

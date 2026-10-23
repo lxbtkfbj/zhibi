@@ -170,9 +170,22 @@ async def merge_summary(session, book_id, thread, summary, old, conv=None):
         return summary
 
 
-def tools_text(tools):
+def tools_text(tools, memories=None):
     """这一轮查到的、做了的：重新回答时交给模型照着说，不再给工具。"""
-    return "\n\n".join(f"【{t.get('label', '')}】\n{t.get('text', '')}" for t in tools or []) or "（没有）"
+    blocks = [f"【{t.get('label', '')}】\n{t.get('text', '')}" for t in tools or []]
+    for outcome in memories or []:
+        memory = outcome["memory"]
+        # 旧回执没存工具原话；按当时同一套固定回话补齐，新回执原样使用。
+        text = (
+            outcome.get("model_text")
+            or {
+                "create": f"做成了：记住了「{memory['summary']}」，编号记{memory['id']}。",
+                "update": f"做成了：记{memory['id']} 改成了「{memory['summary']}」。",
+                "forget": f"做成了：删掉了记{memory['id']}「{memory['summary']}」。",
+            }[memory["action"]]
+        )
+        blocks.append("【记忆】\n" + text + ("（作者点了撤销）" if outcome.get("undone") else ""))
+    return "\n\n".join(blocks) or "（没有）"
 
 
 async def answer(
@@ -298,7 +311,7 @@ async def again_background(book_id, thread, reply_id, redis):
         if not unanswered:
             await finish_reply(session, redis, reply_id, "", "failed", "原来那句话找不到了")
             return
-        if payload.get("tools_mode"):
+        if payload.get("tools_mode") and payload.get("again") == "retry":
             from app.services.chat_agent import answer_note
 
             await answer_note(
@@ -306,11 +319,13 @@ async def again_background(book_id, thread, reply_id, redis):
                 book_id,
                 unanswered[0].id,
                 reply_id=reply_id,
-                retry=payload.get("again") == "retry",
-                replay=payload.get("again") != "retry",
+                retry=True,
             )
             return
-        await answer(session, redis, book_id, thread, role, reply_id, rows, unanswered, summary, old, conv=conv)
+        related = tools_text(payload.get("tools"), payload.get("memories")) if payload.get("tools_mode") else None
+        await answer(
+            session, redis, book_id, thread, role, reply_id, rows, unanswered, summary, old, related=related, conv=conv
+        )
 
 
 async def clean_live_replies(redis):

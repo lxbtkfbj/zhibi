@@ -163,7 +163,7 @@ async def test_demo_asks_reads_full_handbook_and_again_keeps_material(client, se
     assert (await client.post(f"/api/books/{bid}/chat/replies/{reply['id']}/again")).status_code == 202
     async with sessionmaker() as session:
         last = await session.scalar(sa.select(LlmCall).where(LlmCall.book_id == bid).order_by(LlmCall.id.desc()))
-        assert full in last.request["user"] and last.request["method"] == "tools"
+        assert full in last.request["user"] and last.request["method"] == "demo_stream"
 
 
 async def test_private_chat_does_not_get_handbook_tools(client, sessionmaker):

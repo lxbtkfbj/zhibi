@@ -176,12 +176,13 @@ async def test_again_only_rewrites_the_words(client, sessionmaker):
     res = await client.post(f"/api/books/{bid}/chat/replies/{reply['id']}/again")
     assert res.status_code == 202, res.text
     again = await reply_of(client, bid, note["id"])
-    assert again["id"] == reply["id"] and "查了楚风。" in again["content"]
+    assert again["id"] == reply["id"] and again["content"]
     assert [s["kind"] for s in (await final_message(client, bid, note["id"]))["payload"]["steps"]] == ["edit"]
     async with sessionmaker() as session:
         new = list(await session.scalars(select(LlmCall).where(LlmCall.book_id == bid).order_by(LlmCall.id)))[before:]
-    assert new and all(c.request["method"] == "tools" for c in new)
-    assert all("make_changes" not in [tool["function"]["name"] for tool in c.request["schema"]] for c in new)
+    assert new and all(c.request["method"] == "demo_stream" for c in new)
+    assert all(not c.request.get("schema") for c in new)
+    assert "做成了：" in new[-1].request["user"] and "楚风" in new[-1].request["user"]
 
 
 async def test_stop_finishes_the_place_being_changed(client, sessionmaker, monkeypatch):

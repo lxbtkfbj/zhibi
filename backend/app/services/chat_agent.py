@@ -172,6 +172,7 @@ async def memory_tool(turn: Turn, name: str, args) -> str:
         async with get_sessionmaker()() as session:
             text, outcome, queries = await execute(session, turn.book_id, turn.message_id, args)
             if outcome:
+                outcome["model_text"] = text
                 reply = await session.get(MeetingMessage, turn.reply_id)
                 actions = [*((reply.payload or {}).get("memories") or []), outcome]
                 await update_message(session, turn.redis, reply, memories=actions)
@@ -488,7 +489,7 @@ async def agent_values(session, book, role, message, rows, summary, read_only, r
     )
 
 
-async def answer_note(redis, book_id, message_id, *, reply_id=None, retry=False, replay=False) -> None:
+async def answer_note(redis, book_id, message_id, *, reply_id=None, retry=False) -> None:
     """答作者的一句话（调用方已经拿着群聊的锁）：先占一条回答，接话的人自己查、自己动手，最后说一段话。"""
     sm = get_sessionmaker()
     async with sm() as session:
@@ -511,7 +512,7 @@ async def answer_note(redis, book_id, message_id, *, reply_id=None, retry=False,
             reply_id = reply["id"]
         book = await session.get(Book, book_id)
         teardown = book.source == "teardown"
-        read_only = teardown or replay or bool(payload.get("ask_only"))
+        read_only = teardown or bool(payload.get("ask_only"))
         # 只带这句话所在的那一段对话和它的摘要
         state = await conversation_state(session, book_id, "group", payload.get("conv"))
         await session.commit()
