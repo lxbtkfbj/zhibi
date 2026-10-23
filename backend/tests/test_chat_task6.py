@@ -132,7 +132,7 @@ async def test_group_questions_never_become_feedback(client, sessionmaker, state
     assert r.json()["payload"]["outcome"]["kind"] == "chat" and r.json()["job_id"] is None
     async with sessionmaker() as session:
         assert not list(await session.scalars(select(Memory)))
-        reply = await session.scalar(select(MeetingMessage).where(MeetingMessage.speaker == "lorekeeper"))
+        reply = await session.scalar(select(MeetingMessage).where(MeetingMessage.speaker == "chief"))
         assert "楚风" in reply.content
         assert not (reply.payload or {}).get("thread")
         job = await session.scalar(select(Job))

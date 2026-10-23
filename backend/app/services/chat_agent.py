@@ -47,17 +47,6 @@ IDLE_LIMIT = 90
 SMALL_BOOK = 10000
 LIVE = ("thinking", "streaming")
 
-# 不点名时挑谁接话：按话里的词，不另调模型；四个人工具一样，人设不同
-ROLE_WORDS = (
-    ("reviewer", ("毛病", "漏洞", "不好看", "哪里不对")),
-    ("writer", ("怎么写", "文风", "写法", "示范", "描写", "对话")),
-    ("lorekeeper", ("人物", "设定", "境界", "地点", "势力", "物品", "金手指")),
-)
-
-
-def pick_role(text: str) -> str:
-    return next((role for role, words in ROLE_WORDS if any(word in text for word in words)), "chief")
-
 
 async def supports_tools(role: str) -> bool:
     """普通群聊工具与结构化输出无关；没试过就试，只有明确拒绝过才走分流。"""

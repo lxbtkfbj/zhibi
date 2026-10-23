@@ -991,16 +991,7 @@ def _library_intent(user: str) -> s.LibraryIntent:
             kind="写大纲", outline_target=target or "正在看的", instruction="", reply="好，这一段我来写。"
         )
     if note.endswith(("？", "?")) or any(word in note for word in ("吗", "为什么", "怎么样", "什么")):
-        who = (
-            "设定师"
-            if any(w in note for w in ("境界", "设定", "在哪", "谁知道"))
-            else "写手"
-            if any(w in note for w in ("怎么写", "文风", "示范"))
-            else "审稿"
-            if any(w in note for w in ("毛病", "不好看", "漏洞"))
-            else "主编"
-        )
-        return s.LibraryIntent(kind="提问闲聊", who=who)
+        return s.LibraryIntent(kind="提问闲聊")
     library = _match(r"【设定库目录】\n(.*?)(?=\n【最近的对话】|\Z)", user)
     names = re.findall(r"^- ([^\n（：]+)", library, re.M)
     name = next((name for name in names if name in note), "")

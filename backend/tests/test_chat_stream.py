@@ -73,14 +73,19 @@ async def test_ask_picks_who_answers(client, sessionmaker, monkeypatch):
     assert note["payload"]["ask"] == "writer"
     assert (await meeting(client, bid))[-1]["speaker"] == "writer"
 
-    # 分流判断成闲聊：也照点的名，不照分流挑的人
+    # 分流判断成闲聊：照点的名
     async def chat_intent(*args, **kwargs):
-        return s.LibraryIntent(kind="提问闲聊", who="主编")
+        return s.LibraryIntent(kind="提问闲聊")
 
     monkeypatch.setattr(group_notes, "classify", chat_intent)
     await client.post(f"/api/books/{bid}/notes", json={"content": "随便聊聊", "ask": "reviewer"})
     last = (await meeting(client, bid))[-1]
     assert last["speaker"] == "reviewer" and last["content"].startswith("（演示）审稿回答")
+
+    # 没点名：明显的提问、分流判成闲聊，都由主编答，话里带了「境界」「毛病」也一样
+    for text in ("楚风现在什么境界？", "这一段的毛病随便聊聊"):
+        await client.post(f"/api/books/{bid}/notes", json={"content": text})
+        assert (await meeting(client, bid))[-1]["speaker"] == "chief"
 
     # 私聊的 to 和点名分开：私聊里不记点名
     note = (

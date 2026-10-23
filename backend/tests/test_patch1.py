@@ -61,21 +61,22 @@ def test_accepts_plan(text):
 
 
 @pytest.mark.parametrize(
-    "text,role",
+    "text,asked",
     [
-        ("楚风现在什么境界？", "lorekeeper"),
-        ("第三个单元为什么这样安排？", "chief"),
-        ("怎么写？", "writer"),
-        ("有什么漏洞？", "reviewer"),
-        ("下一章节奏快一点，行吗？", None),
-        ("把境界名称换一套好不好？", None),
-        ("以后慢点？", None),
-        ("记住了吗？", None),
-        ("帮我查设定？", None),
+        ("楚风现在什么境界？", True),
+        ("第三个单元为什么这样安排？", True),
+        ("怎么写？", True),
+        ("有什么漏洞？", True),
+        ("下一章节奏快一点，行吗？", False),
+        ("把境界名称换一套好不好？", False),
+        ("以后慢点？", False),
+        ("记住了吗？", False),
+        ("帮我查设定？", False),
+        ("这一段还行", False),
     ],
 )
-def test_question_shortcuts(text, role):
-    assert obvious_question(text) == role
+def test_question_shortcuts(text, asked):
+    assert obvious_question(text) is asked
 
 
 async def plan_for(sessionmaker, redis, bid, items, *, thread="group", status="open"):

@@ -4,14 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChatControl, ChatMessage, ChatRole } from './chatModel'
 import type { VBook } from './model'
 
-/** 没点名：原型照话里的字挑人；真书上是编辑部自己挑 */
-function pickRole(text: string): ChatRole {
-  if (/毛病|漏洞|节奏|節奏|拖|审|審/.test(text)) return '审稿'
-  if (/文笔|文筆|描写|描寫|场面|場面|怎么写|怎麼寫|句子|对话|對話|文风|文風|示范|示範/.test(text)) return '写手'
-  if (/设定|設定|人物|角色|主角|境界|实力|實力|世界|地点|地點|势力|勢力|金手指|对得上|對得上/.test(text)) return '设定师'
-  return '主编'
-}
-
 /** 打招呼、问是谁：按身份答。每人两句，重新回答换另一句 */
 const INTRO: Record<ChatRole, string[]> = {
   主编: [
@@ -95,7 +87,8 @@ export function useChatSim(book: VBook): ChatControl {
     clearTimeout(timer.current)
     const n = tries.current.get(question.id) ?? 0
     tries.current.set(question.id, n + 1)
-    const role = question.to ?? pickRole(question.text)
+    // 没点名由主编答，和真书一样
+    const role: ChatRole = question.to ?? '主编'
     update(replyId, { who: role, text: '', state: 'thinking', error: undefined })
     const fail = /出错|出錯/.test(question.text) && !failed.current.has(question.id)
     const full = replyFor(role, question.text, n).replace(/\{(书名|主角)\}/g, (_, key: '书名' | '主角') => names[key])

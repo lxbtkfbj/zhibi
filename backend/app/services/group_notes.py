@@ -17,7 +17,6 @@ from app.schemas import ArcCreate, DraftRequest, MeetingMessageOut
 from app.services import book_saves, jobs
 from app.services.chat import conversation_lock, reply_background
 from app.services.chat_context import (
-    ROLES,
     accepts_plan,
     conversation_state,
     dialogue,
@@ -172,10 +171,10 @@ async def receive_note(body, background_tasks, book, session, redis):
         return MeetingMessageOut(**data)
     if book.source == "teardown":
         # 拆的书每句话都当提问：包括「存档」「总结」「按这个来」和明确要改的指令。
-        # 私聊沿用原来的无工具路径；群聊按当前角色模型能力选择查资料或直接回答。
-        from app.services.chat_agent import pick_role, supports_tools
+        # 私聊沿用原来的无工具路径；群聊按当前角色模型能力选择查资料或直接回答。没点名就是主编。
+        from app.services.chat_agent import supports_tools
 
-        role = body.to or body.ask or pick_role(text)
+        role = body.to or body.ask or "chief"
         tools = not body.to and await supports_tools(role)
         payload.update(outcome={"kind": "agent" if tools else "chat"}, chat_role=role, ask_only=True)
         if tools:
@@ -192,11 +191,11 @@ async def receive_note(body, background_tasks, book, session, redis):
         payload.update(outcome={"kind": "chat"}, chat_role=body.to)
         task = "reply"
     else:
-        from app.services.chat_agent import pick_role, supports_tools
+        from app.services.chat_agent import supports_tools
 
         asked = obvious_question(text)
-        # 模型能自己调工具：接话的人（点了名的，或者按话挑的）自己查、自己动手；不能的照旧先分流
-        agent_role = body.ask or pick_role(text)
+        # 模型能自己调工具：接话的人（点了名的，没点名就是主编）自己查、自己动手；不能的照旧先分流
+        agent_role = body.ask or "chief"
         tools = await supports_tools(agent_role)
         agent = {"outcome": {"kind": "agent"}, "turn": "tools", "chat_role": agent_role}
         job = await active_note_job(session, book_id)
@@ -207,7 +206,7 @@ async def receive_note(body, background_tasks, book, session, redis):
             payload.update(agent, ask_only=True)
             task = "agent"
         elif asked and not waiting_tools:
-            payload.update(outcome={"kind": "chat", "shortcut": True}, chat_role=body.ask or asked)
+            payload.update(outcome={"kind": "chat", "shortcut": True}, chat_role=agent_role)
             task = "reply"
         else:
             if jobs.open_wait(job) and wants_new_pitches(text):
@@ -355,8 +354,8 @@ async def apply_intent(session, redis, message, intent):
         await update_message(session, redis, message, outcome={"kind": "too_late"})
         return False
     if intent.kind == "提问闲聊":
-        # 作者点了名就由他答，没点名照分流挑的人
-        role = (message.payload or {}).get("ask") or ROLES[intent.who]
+        # 作者点了名就由他答，没点名由主编答
+        role = (message.payload or {}).get("ask") or "chief"
         await update_message(session, redis, message, outcome={"kind": "chat"}, chat_role=role)
         return True
     working = job is not None and job.status in jobs.BUSY_STATUSES

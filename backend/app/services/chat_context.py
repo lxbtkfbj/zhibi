@@ -469,7 +469,7 @@ def accepts_plan(text):
 
 
 def obvious_question(text):
-    if not text.rstrip().endswith(("？", "?")) or any(
+    return text.rstrip().endswith(("？", "?")) and not any(
         word in text
         for word in (
             "改",
@@ -492,13 +492,4 @@ def obvious_question(text):
             "细化",
             "重写",
         )
-    ):
-        return None
-    for role, words in (
-        ("lorekeeper", ("境界", "设定", "在哪", "谁知道", "前后")),
-        ("writer", ("怎么写", "文风", "示范", "写法")),
-        ("reviewer", ("毛病", "不好看", "漏洞", "问题")),
-    ):
-        if any(word in text for word in words):
-            return role
-    return "chief"
+    )

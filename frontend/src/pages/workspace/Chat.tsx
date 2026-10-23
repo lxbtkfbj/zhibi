@@ -199,7 +199,7 @@ function EmptyChat({ onPick }: { onPick: (role: ChatRole) => void }) {
   return (
     <div className="flex min-h-full flex-col items-center justify-center px-4 py-8 text-center">
       <p className="font-serif text-lg text-ink">跟编辑部说点什么</p>
-      <p className="mt-2 max-w-[22rem] text-[13px] leading-relaxed text-ink-3">想改哪儿、想问什么直接说，编辑部自己挑人来答。想找谁，就打 @ 点他的名：</p>
+      <p className="mt-2 max-w-[22rem] text-[13px] leading-relaxed text-ink-3">想改哪儿、想问什么直接说，主编来答。想找谁，就打 @ 点他的名：</p>
       <div className="mt-4 grid w-full max-w-[18rem] gap-1">
         {CHAT_ROLES.map(({ role, duty }) => (
           <button key={role} type="button" onClick={() => onPick(role)}
@@ -238,7 +238,7 @@ function RecipientBadge({ role, clear }: { role: ChatRole; clear?: () => void })
     <div className="px-3 pt-2.5">
       <span className={clsx('inline-flex items-center gap-1.5 rounded-full py-0.5 pr-1 pl-1 text-[13px]', ROLE_COLOR[role].soft, ROLE_COLOR[role].text)}>
         <Avatar role={role} small />问{role}
-        {clear && <button type="button" onClick={clear} aria-label="不点名了" title="不点名，让编辑部自己挑人答"
+        {clear && <button type="button" onClick={clear} aria-label="不点名了" title="不点名，由主编来答"
           className="rounded-full p-0.5 opacity-70 hover:bg-card/70 hover:opacity-100"><X className="size-3.5" /></button>}
       </span>
     </div>
@@ -405,7 +405,7 @@ function Composer({ chat, draft, updateDraft, clearDraft, focusKey, editing }: {
             <span className={clsx('inline-flex items-center gap-1.5 rounded-full py-0.5 pr-1 pl-1 text-[13px]', ROLE_COLOR[recipient].soft, ROLE_COLOR[recipient].text)}>
               <Avatar role={recipient} small />
               问{recipient}
-              {to && <button type="button" onClick={() => { setTo(undefined); ref.current?.focus() }} aria-label="不点名了" title="不点名，让编辑部自己挑人答"
+              {to && <button type="button" onClick={() => { setTo(undefined); ref.current?.focus() }} aria-label="不点名了" title="不点名，由主编来答"
                 className="rounded-full p-0.5 opacity-70 hover:bg-card/70 hover:opacity-100"><X className="size-3.5" /></button>}
             </span>
           </div>

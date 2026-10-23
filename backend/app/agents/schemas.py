@@ -675,10 +675,6 @@ class LibraryIntent(Lenient):
         default="一直有效",
         description="写作要求时才写：作者说了「下一章」「这一卷」「下一卷」的照选，没说的选一直有效",
     )
-    who: Literal["主编", "设定师", "写手", "审稿"] = Field(
-        default="主编",
-        description="提问闲聊时才写：谁来回答最合适：问设定、前后对不对、谁知道什么找设定师；问怎么写、文风找写手；要挑毛病找审稿；其余找主编",
-    )
     reply: str = Field(
         default="", description="改设定、新建设定、写大纲、写作要求时，主编在群聊里回作者的一句话；提问闲聊留空"
     )

@@ -15,7 +15,6 @@ from app.main import create_app
 from app.models import Book, Character, LlmCall, MeetingMessage, WorldEntry
 from app.services import chat_tools
 from app.services.chat import stop_key
-from app.services.chat_agent import pick_role
 from tests.test_chat_task6 import final_message, seed
 
 
@@ -85,15 +84,20 @@ async def test_looks_up_then_changes_one_place(client, sessionmaker):
 
 async def test_question_only_looks_up(client, sessionmaker):
     bid = await seed(sessionmaker)
+    # 没点名：话里有「境界」也是主编答
     note = await say(client, bid, "楚风现在什么境界？")
-    assert note["payload"]["ask_only"] is True and note["payload"]["chat_role"] == "lorekeeper"
+    assert note["payload"]["ask_only"] is True and note["payload"]["chat_role"] == "chief"
     assert note["payload"]["outcome"] == {"kind": "chat", "handled": True} and not note["payload"].get("steps")
     reply = await reply_of(client, bid, note["id"])
-    assert reply["speaker"] == "lorekeeper" and [t["kind"] for t in reply["payload"]["tools"]] == ["query"]
+    assert reply["speaker"] == "chief" and [t["kind"] for t in reply["payload"]["tools"]] == ["query"]
     async with sessionmaker() as session:
-        call = await session.scalar(select(LlmCall).where(LlmCall.book_id == bid, LlmCall.purpose == "聊天·设定师"))
+        call = await session.scalar(select(LlmCall).where(LlmCall.book_id == bid, LlmCall.purpose == "聊天·主编"))
     names = [tool["function"]["name"] for tool in call.request["schema"]]
     assert "make_changes" not in names and "look_up_settings" in names
+    # 点了名照旧由他答
+    note = await say(client, bid, "楚风现在什么境界？", ask="lorekeeper")
+    assert note["payload"]["chat_role"] == "lorekeeper"
+    assert (await reply_of(client, bid, note["id"]))["speaker"] == "lorekeeper"
 
 
 async def test_three_places_become_a_plan_card_and_apply_with_diffs(client, sessionmaker):
@@ -227,11 +231,7 @@ async def test_model_without_tools_falls_back_to_routing(client, sessionmaker, m
     assert "turn" not in note["payload"] and note["payload"]["outcome"]["kind"] == "edit"
 
 
-def test_pick_role_and_router_helpers():
-    assert pick_role("这段剧情哪里不对") == "reviewer"
-    assert pick_role("主角的金手指再强一点") == "lorekeeper"
-    assert pick_role("帮我写一下第二篇") == "chief"
-
+def test_router_helpers():
     class Message:
         tool_calls = [{"id": "", "name": "look_up_settings", "args": {"names": ["楚风"]}}]
         invalid_tool_calls = [{"id": "x", "name": "make_changes", "args": "{坏"}]

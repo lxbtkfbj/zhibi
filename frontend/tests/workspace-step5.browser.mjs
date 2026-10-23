@@ -61,7 +61,7 @@ try {
   await expect(page.getByRole('button', { name: '重新回答' })).toBeVisible({ timeout: 30000 })
   await shot('6-重新回答-换成新的一段')
 
-  // 7. 没点名：编辑部自己挑人；这一句演示没答上来，给「重试」
+  // 7. 没点名：主编来答；这一句演示没答上来，给「重试」
   await box.fill('演示一下出错：这一卷节奏拖不拖？')
   await page.keyboard.press('Enter')
   await expect(page.getByRole('button', { name: '重试' })).toBeVisible({ timeout: 10000 })
