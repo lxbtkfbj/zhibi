@@ -187,6 +187,7 @@ VARIABLE_LABELS = {
     "idea": "作者的点子",
     "catalog": "可选的类别和常见标签",
     "requirements": "作者的要求",
+    "memory": "记忆",
     "style": "文风参考",
     "revision": "修改要求",
     "playbook": "题材打法",

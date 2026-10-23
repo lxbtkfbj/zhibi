@@ -13,17 +13,18 @@ import { ArrowLeft, NotebookPen } from 'lucide-react'
 // 直接渲染真正的 ChatOutcome；只替换数据 hooks，React 和 JSX 照常运行。
 const row = { id: 1, version: 1, summary: '快一点', detail: '快一点', book_id: 'outcome-book', kind: 'writing', label: '只管第 3 章', scope: 'chapter' }
 let memoryRows = [row]
+let memoryItem = row
 const noop = () => {}
 const source = readFileSync(new URL('../src/pages/book/ChatActions.tsx', import.meta.url), 'utf8')
 const imports = {
   react: React,
   'react/jsx-runtime': jsx,
-  '@tanstack/react-query': { useQuery: () => ({ data: {} }), useQueryClient: () => ({ invalidateQueries: noop }) },
+  '@tanstack/react-query': { useQuery: () => ({ data: memoryItem }), useQueryClient: () => ({ invalidateQueries: noop }) },
   '../../api/client': { get: noop, patch: noop, post: noop },
   '../../api/library': { useLibrary: () => ({ data: { entries: [] } }), useRevertVersion: noop },
   '../../api/settings': { useAuthorRequirements: () => ({ data: [row] }), settingsKeys: { requirements: id => ['author-requirements', id] } },
   './MemoryNotice': null,
-  '../../api/memories': { useMemories: () => ({ data: memoryRows }), memoryKeys: { all: ['memories'] } },
+  '../../api/memories': { useMemories: () => ({ data: memoryRows }), memoryKeys: { all: ['memories'], book: id => ['memories', id] } },
   '../../lib/memory': memory,
   '../../components/ui': { ErrorText: () => null, TypingDots: () => React.createElement('i', { 'data-typing': true }) },
   '../../lib/chat': chat,
@@ -116,4 +117,20 @@ test('方案卡真实渲染记忆类别与期限，而非旧写作要求标签',
   assert.match(html, /记忆 · 写书时照做 · 只管下一卷/u)
   assert.doesNotMatch(html, /写作要求 ·/u)
   assert.match(html, /按这个来/u)
+})
+
+
+test('三种记忆回执真实渲染，修改撤销显示原简述，忘掉行不是跳转按钮', () => {
+  const renderNotice = (receipt, undone = false) => renderToStaticMarkup(React.createElement(notice.exports.MemoryNotice, { receipt, undone }))
+  const previousRows = memoryRows
+  memoryRows = [row]; memoryItem = row
+  assert.match(renderNotice({ ...row, action: 'create' }), /记住了：快一点/u)
+  assert.match(renderNotice({ ...row, action: 'update', before: { summary: '原来的规矩' } }), /改了一条记忆：快一点/u)
+  assert.match(renderNotice({ ...row, action: 'update', before: { summary: '原来的规矩' } }, true), /换回了原来的：原来的规矩/u)
+  memoryItem = { ...row, deleted_at: '2026-10-23' }
+  const deleted = renderNotice({ ...row, action: 'forget' })
+  assert.match(deleted, /<span>忘掉了：快一点<\/span>/u)
+  assert.doesNotMatch(deleted, /disabled=|<button[^>]*>忘掉了/u)
+  assert.match(renderNotice({ ...row, action: 'forget' }, true), /找回来了：快一点/u)
+  memoryRows = previousRows; memoryItem = row
 })

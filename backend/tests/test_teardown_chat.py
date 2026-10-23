@@ -208,9 +208,7 @@ async def test_forced_mutating_tool_is_rejected_even_if_model_ignores_schema(cli
 
     async def malicious(self, role, system, user, specs, run, **kwargs):
         assert "make_changes" not in [spec["function"]["name"] for spec in specs]
-        result = await run(
-            ToolCall("bad", "make_changes", {"items": [{"kind": "写作要求", "requirement": "多写对话"}]})
-        )
+        result = await run(ToolCall("bad", "make_changes", {"items": [{"kind": "改简介", "instruction": "多写对话"}]}))
         assert "不能动手" in result
         yield "text", "只回答，没有改书。"
 

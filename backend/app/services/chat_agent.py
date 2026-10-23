@@ -32,9 +32,9 @@ from app.services.chat_context import (
     progress_of,
     thread_of,
 )
+from app.services.chat_memories import memory_directory
 from app.services.library_context import load_context
 from app.services.meeting import SPEAKER_NAMES, message_dict, post_message, publish
-from app.services.requirements import active_requirements, requirements_list
 from app.services.versions import target_type_of
 
 log = logging.getLogger(__name__)
@@ -82,6 +82,8 @@ class Turn:
     read_only: bool
     viewing: dict | None
     allow_skills: bool = True
+    allow_memories: bool = True
+    memory_actions: list[dict] = field(default_factory=list)
     book_changed: bool = False
     # 做过的那几处（重试时跳过同一处）；算进处数的那几处
     done_keys: set[str] = field(default_factory=set)
@@ -134,6 +136,10 @@ async def run_tool(turn: Turn, call: ToolCall) -> str:
         args = chat_tools.tool_args(call.name, call.args or {})
     except Exception as exc:
         return f"参数不对：{exc}。照工具说明重新调一次。"
+    if call.name in chat_tools.MEMORY_TOOLS:
+        if not turn.allow_memories:
+            return "拆的书群聊不能用记忆。"
+        return await memory_tool(turn, call.name, args)
     if isinstance(args, chat_tools.MakeChanges):
         if turn.read_only:
             return "作者这句话是在问，只查只答，不能动手；觉得该改，在回答里问作者一句要不要改。"
@@ -153,6 +159,32 @@ async def run_tool(turn: Turn, call: ToolCall) -> str:
     turn.tools.append({"kind": "query", "label": label, "text": text})
     turn.touch()
     return text
+
+
+async def memory_tool(turn: Turn, name: str, args) -> str:
+    from app.services.chat_memories import execute
+    from app.services.group_notes import update_message
+    from app.services.memories import notify
+
+    await set_doing(turn, chat_tools.doing_of(name, args))
+    turn.in_action = True
+    try:
+        async with get_sessionmaker()() as session:
+            text, outcome, queries = await execute(session, turn.book_id, turn.message_id, args)
+            if outcome:
+                reply = await session.get(MeetingMessage, turn.reply_id)
+                actions = [*((reply.payload or {}).get("memories") or []), outcome]
+                await update_message(session, turn.redis, reply, memories=actions)
+                turn.memory_actions = actions
+                await notify(session, turn.redis)
+                turn.finished.append(done_text(outcome))
+            else:
+                await session.rollback()
+            turn.tools.extend({"kind": "query", "label": label, "text": block} for label, block in queries)
+            return text
+    finally:
+        turn.in_action = False
+        turn.touch()
 
 
 async def act(turn: Turn, args: chat_tools.MakeChanges) -> str:
@@ -271,7 +303,7 @@ async def drive(turn: Turn, system: str, user: str) -> str:
             turn.role,
             system,
             user,
-            chat_tools.tool_specs(turn.read_only, skills=turn.allow_skills),
+            chat_tools.tool_specs(turn.read_only, skills=turn.allow_skills, memories=turn.allow_memories),
             lambda call: run_tool(turn, call),
             purpose=f"聊天·{SPEAKER_NAMES[turn.role]}",
             max_rounds=MAX_ROUNDS,
@@ -393,12 +425,8 @@ async def viewing_full(session, book, ctx, viewing) -> str:
     return label or "（作者在看某一页）"
 
 
-ACT_RULE = (
-    "作者明说要改、要写、要记的，自己动手（make_changes）：改一栏、补齐空着的栏目、出三种写法、新建设定卡、"
-    "写大纲上的一段（还没有的下一篇也能写）、改简介、记写作要求、删掉一张卡或还没开写的一段。"
-    "作者只是问、商量、出主意的，只查只答，不要动手；拿不准是要改还是在问，就当成在问，最后问一句要不要改。"
-    "作者说了「先别改」「先别动」「我再想想」的，哪怕说的是以后怎么写，也一处都不动（写作要求也不记），只聊。"
-)
+ACT_RULE = "作者明说要改、要写的，自己动手（make_changes）：改一栏、补齐空着的栏目、出三种写法、新建设定卡、写大纲上的一段（还没有的下一篇也能写）、改简介、删掉一张卡或还没开写的一段。作者只是问、商量、出主意的，只查只答，不要动手；拿不准是要改还是在问，就当成在问，最后问一句要不要改。作者说了「先别改」「先别动」「我再想想」的，哪怕说的是以后怎么写，也一处都不动，写书时照做的规矩也不记，只聊。"
+
 ASK_RULE = "作者这句话是在问。只查只答，不要动手改书；你觉得该改，最多在回答里问一句要不要改。"
 
 
@@ -441,13 +469,12 @@ async def agent_values(session, book, role, message, rows, summary, read_only, r
         else "这里只列名字和一句话，要细节用 look_up_settings 查：\n" + ctx.library,
         outline=full_outline if small else outline_of(ctx, full=False),
         progress=await progress_of(session, ctx, chapters, job),
-        requirements=requirements_list(await active_requirements(session, book.id)),
+        memory=await memory_directory(session, book.id),
         viewing=await viewing_full(session, book, ctx, payload.get("viewing")),
         pending=pending_of(job, ctx),
         working=tagged(
             "编辑部正在干活",
-            "编辑部正在写书。这时改设定不会马上改，会放进待处理的建议，等写完作者点「现在改」；"
-            "写作要求会交给正在干活的编辑部；大纲这时改不了。",
+            "编辑部正在写书。这时改设定不会马上改，会放进待处理的建议，等写完作者点「现在改」；大纲这时改不了；记忆照常能记，写书时照做的，正在写的编辑部从下一步起照办。",
         )
         if busy
         else "",
@@ -461,7 +488,7 @@ async def agent_values(session, book, role, message, rows, summary, read_only, r
     )
 
 
-async def answer_note(redis, book_id, message_id, *, reply_id=None, retry=False) -> None:
+async def answer_note(redis, book_id, message_id, *, reply_id=None, retry=False, replay=False) -> None:
     """答作者的一句话（调用方已经拿着群聊的锁）：先占一条回答，接话的人自己查、自己动手，最后说一段话。"""
     sm = get_sessionmaker()
     async with sm() as session:
@@ -484,7 +511,7 @@ async def answer_note(redis, book_id, message_id, *, reply_id=None, retry=False)
             reply_id = reply["id"]
         book = await session.get(Book, book_id)
         teardown = book.source == "teardown"
-        read_only = teardown or bool(payload.get("ask_only"))
+        read_only = teardown or replay or bool(payload.get("ask_only"))
         # 只带这句话所在的那一段对话和它的摘要
         state = await conversation_state(session, book_id, "group", payload.get("conv"))
         await session.commit()
@@ -496,9 +523,20 @@ async def answer_note(redis, book_id, message_id, *, reply_id=None, retry=False)
         values = await agent_values(session, book, role, message, rows, summary, read_only, retry)
         await session.rollback()
     turn = Turn(
-        redis, book_id, message_id, reply_id, role, read_only, payload.get("viewing"), allow_skills=not teardown
+        redis,
+        book_id,
+        message_id,
+        reply_id,
+        role,
+        read_only,
+        payload.get("viewing"),
+        allow_skills=not teardown,
+        allow_memories=not teardown,
     )
     if retry:
+        async with sm() as session:
+            previous_reply = await session.get(MeetingMessage, reply_id)
+            turn.memory_actions = list((previous_reply.payload or {}).get("memories") or [])
         for step in payload.get("steps") or []:
             if step.get("key") and step.get("kind") not in ("failed", "not_found", "too_late"):
                 turn.done_keys.add(step["key"])

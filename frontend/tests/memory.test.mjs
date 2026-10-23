@@ -41,3 +41,26 @@ test('关联写作任务的聊天记忆仍是作者气泡，不被当成干活�
   assert.equal(isMemoryNote({ speaker: 'chief', payload: { outcome: { memory: receipt } } }), false)
   assert.match(readFileSync(new URL('../src/pages/workspace/LiveChat.tsx', import.meta.url), 'utf8'), /m.job_id[^\n]+!isMemoryNote\(m\)/u)
 })
+
+test('改记忆与忘记的行及撤销以后的字逐字一致', () => {
+  const changed = { ...receipt, action: 'update', summary: '改后的', before: { summary: '原来的' } }
+  assert.equal(receiptCopy(changed, changed, false).text, '改了一条记忆：改后的')
+  assert.equal(receiptCopy(changed, changed, true).text, '换回了原来的：原来的')
+  const forgotten = { ...receipt, action: 'forget' }
+  assert.equal(receiptCopy(forgotten, { ...receipt, deleted_at: '2026-10-23' }, false).text, '忘掉了：少用套话')
+  assert.equal(receiptCopy(forgotten, { ...receipt, deleted_at: '2026-10-23' }, false).disabled, false)
+  assert.equal(receiptCopy(forgotten, receipt, true).text, '找回来了：少用套话')
+})
+test('三种行后改后删都变灰，忘掉行只认自己删的那一版', () => {
+  for (const action of ['create', 'update', 'forget']) {
+    const value = { ...receipt, action }
+    assert.equal(receiptCopy(value, { ...receipt, version: receipt.version + 1 }, false).title, '这条后来又改过，去「记忆」里改')
+    assert.equal(receiptCopy(value, { ...receipt, deleted_at: '后来删除', version: receipt.version + 2 }, false).title, '这条后来删掉了')
+  }
+})
+test('回答回执排在查了下面，忘掉行不跳转，工具记忆不再挂作者步骤', () => {
+  const live = readFileSync(new URL('../src/pages/workspace/LiveChat.tsx', import.meta.url), 'utf8')
+  assert.match(live, /below: m.payload\?\.memories\?\.map/u)
+  const notice = readFileSync(new URL('../src/pages/book/MemoryNotice.tsx', import.meta.url), 'utf8')
+  assert.match(notice, /receipt.action === 'forget' \? <span>\{copy.text\}<\/span>/u)
+})

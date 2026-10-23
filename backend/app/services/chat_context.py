@@ -18,9 +18,9 @@ from app.agents.context import (
 from app.book_settings import compile_rules
 from app.models import Chapter, ChatThread, Job, MeetingMessage
 from app.prompts import tagged
+from app.services.chat_memories import memory_directory
 from app.services.library_context import load_context
 from app.services.meeting import SPEAKER_NAMES
-from app.services.requirements import active_requirements, requirements_list
 from app.services.setup_store import load_ledger, load_secrets
 from app.services.writing_context import best_excerpt, character_states, story_so_far
 
@@ -100,6 +100,10 @@ async def dialogue(session, book_id, thread, reset_after=0, conv=None):
 def done_text(outcome):
     """编辑部照作者这句话实际做了什么，一小句；只是聊天、还在判断的不算"""
     kind, label = outcome.get("kind"), outcome.get("target_label") or ""
+    if kind == "memory":
+        memory = outcome["memory"]
+        text = {"create": "记住了", "update": "改了一条记忆", "forget": "忘掉了"}[memory["action"]]
+        return f"{text}：{memory['summary']}" + ("（作者点了撤销）" if outcome.get("undone") else "")
     if kind == "edit":
         return f"给「{label}」出了三种写法，等作者挑" if outcome.get("mode") == "options" else f"改了「{label}」"
     if kind == "fill":
@@ -108,11 +112,11 @@ def done_text(outcome):
     return {
         "created": f"新建了{label}，放进了设定库",
         "outline": f"写好了大纲里的{label}，已经换上去",
-        "requirement": "记成了写作要求",
-        "to_job": "交给了正在干活的编辑部，做完手头这一步照办",
+        "requirement": f"记住了：{(outcome.get('memory') or {}).get('summary', '')}（写书时照做）",
+        "to_job": f"记住了：{(outcome.get('memory') or {}).get('summary', '')}（写书时照做），正在写的编辑部从下一步起照办",
         "later": "编辑部当时在写，没改，放进了待处理的建议",
         "not_found": f"设定库里没找到「{outcome.get('target_name') or ''}」，什么也没改",
-        "too_late": "当时在等作者拍板，没记也没改",
+        "too_late": "当时在等作者拍板，没改书",
         "failed": f"再改一版没做成（{outcome.get('reason') or ''}），这一处换回了改之前的样子"
         if outcome.get("redo_failed")
         else f"没做成（{outcome.get('reason') or ''}），什么也没改",
@@ -127,9 +131,10 @@ def done_note(message):
     """写进对话里：作者这句话后面带上编辑部照办了什么，回答的人才知道已经改了、写了"""
     payload = getattr(message, "payload", None) or {}
     if message.speaker != "author":
-        return ""
+        parts = [done_text(item) for item in payload.get("memories") or []]
+        return f"（编辑部照这句做了：{'；'.join(parts)}）" if parts else ""
     parts = [
-        t + ("（作者后来换回了原来的）" if o.get("undone") else "")
+        t + (("（作者点了撤销）" if o.get("memory") else "（作者后来换回了原来的）") if o.get("undone") else "")
         for o in payload.get("steps") or [payload.get("outcome") or {}]
         if (t := done_text(o))
     ]
@@ -393,7 +398,7 @@ async def reply_values(session, book, thread, role, rows, unanswered, summary):
         library=ctx.library_material,
         outline=ctx.outline,
         progress=await progress_of(session, ctx, chapters, job),
-        requirements=requirements_list(await active_requirements(session, book.id)),
+        memory=await memory_directory(session, book.id),
         related=await related_of(session, ctx, chapters, query),
         extras=await extras_of(session, ctx, chapters, role, query),
         pending=pending_of(job, ctx),
@@ -402,7 +407,7 @@ async def reply_values(session, book, thread, role, rows, unanswered, summary):
         quote=quote,
         note=note,
         how_to_apply=(
-            "作者想让聊出来的想法生效，要先让你「总结一下」出一张方案卡，看过再点「按这个来」。聊到想法差不多成形时，可以提醒他一句；不要说「就这么定了」「咱们直接开始排……」，聊天里说的都还没生效。"
+            "作者想让聊出来的想法生效，要先让你「总结一下」出一张方案卡，看过再点「按这个来」。聊到想法差不多成形时，可以提醒他一句；不要说「就这么定了」「咱们直接开始排……」，聊天里说的都还没生效。作者要你记住什么，私聊里记不了，请作者到群聊里说「记住……」。"
             if thread != "group"
             else "群聊里作者明说要改、要写、要记的，编辑部已经照办了：最近的对话里作者那句话后面写着「（编辑部照这句做了：……）」，那些就是真改了、真写进去了，照实说，别说成没生效。"
             "只是商量出来的想法还没生效：作者想改哪一处，直接说「把……改成……」就会改（一次要动三处以上或者要删东西，会先出方案卡，他点「按这个来」才改）；"

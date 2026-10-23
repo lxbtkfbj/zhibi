@@ -1,6 +1,6 @@
 """聊天里接话的人能用的工具：查（设定卡、大纲一段、某一章、搜正文、伏笔信息差）和动手（只有一个，参数是一张清单）。
-动手由程序把关：同一张卡、大纲同一段算一处，新建和记要求不算；一两处直接改，落笔交给现成的几套提示词
-（改一栏、补齐、帮写、大纲帮写、记要求），改完消息下面给前后对照；三处以上或者要删东西，整理成方案卡。"""
+动手由程序把关：同一张卡、大纲同一段算一处，新建不算；一两处直接改，落笔交给现成的几套提示词
+（改一栏、补齐、帮写、大纲帮写），改完消息下面给前后对照；三处以上或者要删东西，整理成方案卡。"""
 
 import re
 import uuid
@@ -16,6 +16,7 @@ from app.models import Book, Chapter, Character, NodeAnchor, Relationship, World
 from app.prompts import handbooks
 from app.services import book_saves, outline_structure
 from app.services.chat_context import done_text
+from app.services.chat_memories import MEMORY_TOOLS, Forget, ReadMemory, Remember
 from app.services.group_notes import CONCEPT_NAMES, SAID, SHOWN, apply_with_change
 from app.services.library_context import load_context
 from app.services.outline_write import chapter_fields, current_text, find_target, resolve_outline_target
@@ -80,12 +81,12 @@ class ReadSkill(BaseModel):
 
 
 class ChangeItem(Lenient):
-    kind: Literal["改设定", "补齐", "给几个写法", "新建设定", "写大纲", "写作要求", "改简介", "删除"] = Field(
-        description="做哪一种：改设定库里已有一条的某一栏，选「改设定」；把一条设定空着的栏目补上，选「补齐」；作者只说不满意、没说怎么改，给他三种写法挑，选「给几个写法」；在设定库里新写现在还没有的人物、地方、势力、物品、规矩……，选「新建设定」；把大纲上的一段（结局、某一篇、某一卷、某个单元、某一章）写出来或重写，选「写大纲」；以后规划、写作都要照着做的，选「写作要求」；改简介那段话，选「改简介」；删掉一张设定卡或大纲上还没开写的一段，选「删除」"
+    kind: Literal["改设定", "补齐", "给几个写法", "新建设定", "写大纲", "改简介", "删除"] = Field(
+        description="做哪一种：改设定库里已有一条的某一栏，选「改设定」；把一条设定空着的栏目补上，选「补齐」；作者只说不满意、没说怎么改，给他三种写法挑，选「给几个写法」；在设定库里新写现在还没有的人物、地方、势力、物品、规矩……，选「新建设定」；把大纲上的一段（结局、某一篇、某一卷、某个单元、某一章）写出来或重写，选「写大纲」；改简介那段话，选「改简介」；删掉一张设定卡或大纲上还没开写的一段，选「删除」"
     )
     target: str = Field(
         default="",
-        description="改哪一处：设定写那一条的名字，照设定库里的写法；大纲写「结局」「第 N 篇」「第 N 卷」「单元「名称」」「第 N 章」，作者正在看的那一页写「正在看的」；要写还没有的下一篇写「第 N 篇」。新建设定、写作要求、改简介留空",
+        description="改哪一处：设定写那一条的名字，照设定库里的写法；大纲写「结局」「第 N 篇」「第 N 卷」「单元「名称」」「第 N 章」，作者正在看的那一页写「正在看的」；要写还没有的下一篇写「第 N 篇」。新建设定、改简介留空",
     )
     part: str = Field(
         default="",
@@ -102,12 +103,6 @@ class ChangeItem(Lenient):
     instruction: str = Field(
         default="",
         description="改成什么样、写成什么样：把作者的意思和商量好的具体内容写清楚，不看前面的对话也能照做；不要写「照刚才说的」",
-    )
-    requirement: str = Field(
-        default="", description="写作要求时写：写成一句清楚的要求，说清做什么、不写理由，60 字以内"
-    )
-    scope: Literal["一直有效", "只管下一章", "只管这一卷", "只管下一卷"] = Field(
-        default="一直有效", description="写作要求时写：作者说了只管下一章、这一卷、下一卷的照选，没说的选一直有效"
     )
 
 
@@ -130,9 +125,11 @@ QUERY_TOOLS = {
 ACT_TOOLS = {"make_changes": MakeChanges}
 
 
-def tool_specs(read_only: bool, *, skills: bool = True) -> list[dict]:
+def tool_specs(read_only: bool, *, skills: bool = True, memories: bool = True) -> list[dict]:
     """给模型的工具；只读的（只问不改、拆书）只有查的那几个。"""
     tools = QUERY_TOOLS if read_only else {**QUERY_TOOLS, **ACT_TOOLS}
+    if memories:
+        tools = {**tools, **MEMORY_TOOLS}
     specs = []
     for name, model in tools.items():
         spec = convert_to_openai_tool(model)
@@ -145,6 +142,12 @@ def tool_specs(read_only: bool, *, skills: bool = True) -> list[dict]:
 
 def doing_of(name: str, args: BaseModel) -> str:
     """回答框里那一行：在查什么、在改什么。"""
+    if isinstance(args, ReadMemory):
+        return "在翻记忆"
+    if isinstance(args, Remember):
+        return "在记"
+    if isinstance(args, Forget):
+        return "在删一条记忆"
     if isinstance(args, ReadSkill):
         return f"在翻《{args.name}》"
     if isinstance(args, LookUpSettings):
@@ -167,7 +170,6 @@ def item_doing(item: ChangeItem) -> str:
         "给几个写法": f"在给{item.target}想三种写法",
         "新建设定": f"在新建{'、'.join(item.new_names) or item.category or '设定'}",
         "写大纲": f"在写{'正在看的这一段' if item.target in ('', '正在看的') else item.target}",
-        "写作要求": "在记写作要求",
         "改简介": "在改简介",
         "删除": f"在删{item.target}",
     }[item.kind]
@@ -310,7 +312,7 @@ def norm(text: str) -> str:
 
 
 async def place_of(session, book: Book, item: ChangeItem, viewing: dict | None) -> tuple[str, bool]:
-    """这一条动的是哪一处：(一处的记号, 算不算处数)。同一张卡、大纲同一段是同一处；新建、记要求不算处数。"""
+    """这一条动的是哪一处：(一处的记号, 算不算处数)。同一张卡、大纲同一段是同一处；新建不算处数。"""
     ctx = await load_context(session, book)
     if item.kind == "改简介" or (item.kind in ("改设定", "补齐", "给几个写法") and norm(item.target) in CONCEPT_NAMES):
         return "简介", True
@@ -322,8 +324,6 @@ async def place_of(session, book: Book, item: ChangeItem, viewing: dict | None) 
         return (
             "新建:" + "、".join(names)
         ) if names else f"新建:{norm(item.category)}:{item.instruction.strip()[:60]}", False
-    if item.kind == "写作要求":
-        return f"要求:{(item.requirement or item.instruction).strip()}", False
     if item.kind == "删除":
         target = ctx.find_target(item.target)
         if target is not None:
@@ -353,7 +353,7 @@ def to_intent(item: ChangeItem) -> LibraryIntent:
         )
     if item.kind == "写大纲":
         return LibraryIntent(kind="写大纲", outline_target=item.target or "正在看的", instruction=item.instruction)
-    return LibraryIntent(kind="写作要求", requirement=item.requirement or item.instruction, scope=item.scope)
+    raise ValueError("这一类不能直接落笔")
 
 
 async def run_change(session, redis, message, item: ChangeItem) -> tuple[dict, list[str]]:
@@ -365,9 +365,6 @@ async def run_change(session, redis, message, item: ChangeItem) -> tuple[dict, l
         if item.kind == "删除":
             outcome = await delete_change(session, message, item)
         else:
-            if item.kind == "写作要求":
-                message.payload = {**(message.payload or {}), "tools_mode": True}
-                await session.flush()
             await apply_with_change(session, redis, message, to_intent(item))
             await session.refresh(message)
             outcome = dict((message.payload or {}).get("outcome") or {})
@@ -382,7 +379,7 @@ def result_text(item: ChangeItem, outcome: dict, said: list[str]) -> str:
     head = f"「{item_doing(item).removeprefix('在')}」"
     if kind == "edit" and outcome.get("mode") == "options":
         return f"{head}：给「{outcome.get('target_label')}」出了三种写法，放在作者那句话下面等他挑；还没换上。"
-    if kind in SHOWN or kind in ("deleted", "requirement", "to_job"):
+    if kind in SHOWN or kind == "deleted":
         written = "\n".join(
             f"【{d['label']}】\n原来：{d['before'] or '（空着）'}\n现在：{d['after'] or '（删掉了）'}"
             for d in outcome.get("diff") or []
@@ -529,8 +526,6 @@ def plan_item(item: ChangeItem, linked: str = "") -> dict:
         target, category, change = "、".join(item.new_names), item.category or "（编辑部挑一类）", item.instruction
     elif item.kind == "写大纲":
         where, change = "大纲", item.instruction or "把这一段写出来"
-    elif item.kind == "写作要求":
-        where, target, change = "写作要求", "", item.requirement or item.instruction
     elif item.kind == "改简介":
         where, target, change = "定调", "", item.instruction
     else:
@@ -541,7 +536,7 @@ def plan_item(item: ChangeItem, linked: str = "") -> dict:
         "part": part if item.kind in ("改设定", "给几个写法") else "",
         "category": category,
         "change": change or item.instruction or "照作者的话改",
-        "scope": item.scope,
+        "scope": "一直有效",
         "tool": {**item.model_dump(), "shown": change, "linked": linked},
     }
 
@@ -562,15 +557,10 @@ def change_from_plan(item: dict) -> ChangeItem:
     change = (item.get("change") or "").strip()
     if tool := item.get("tool"):
         result = ChangeItem.model_validate(tool)
-        if change and change != (tool.get("shown") or "").strip():
-            if result.kind == "写作要求":
-                result.requirement = change
-            elif result.kind != "删除":
-                result.instruction = change
+        if change and change != (tool.get("shown") or "").strip() and result.kind != "删除":
+            result.instruction = change
         return result
     where, target = item.get("where"), item.get("target") or ""
-    if where == "写作要求":
-        return ChangeItem(kind="写作要求", requirement=change, scope=item.get("scope") or "一直有效")
     if where == "定调":
         return ChangeItem(kind="改简介", instruction=change)
     if where == "删除":
@@ -604,7 +594,7 @@ async def plan_change(session, book: Book, item: dict) -> ChangeItem:
 
 
 def tool_args(name: str, raw: dict) -> BaseModel:
-    models = {**QUERY_TOOLS, **ACT_TOOLS, "read_skill": ReadSkill}
+    models = {**QUERY_TOOLS, **ACT_TOOLS, **MEMORY_TOOLS, "read_skill": ReadSkill}
     model = models.get(name)
     if model is None:
         raise ValueError(f"没有这个工具：{name}。能用的是：{'、'.join(models)}")

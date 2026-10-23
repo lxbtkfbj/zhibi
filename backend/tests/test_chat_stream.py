@@ -219,7 +219,7 @@ async def test_answer_knows_what_the_editors_did(client, sessionmaker, monkeypat
     await client.post(f"/api/books/{bid}/notes", json={"content": "以后每章都要有一场打斗"})
     await client.post(f"/api/books/{bid}/notes", json={"content": "刚才那条记上了吗？"})
     recent, hint = seen[-1]["recent"], seen[-1]["how_to_apply"]
-    assert "以后每章都要有一场打斗（编辑部照这句做了：记成了写作要求）" in recent
+    assert "以后每章都要有一场打斗（编辑部照这句做了：记住了：以后每章都要有一场打斗（写书时照做））" in recent
     assert "已经照办了" in hint and "别说成没生效" in hint
     # 私聊照旧：聊的都还没生效
     await client.post(f"/api/books/{bid}/notes", json={"content": "为什么？", "to": "chief"})
@@ -277,7 +277,7 @@ async def test_revert_is_recorded_on_the_message(client, sessionmaker, monkeypat
         )
     ).status_code == 409
     await client.post(f"/api/books/{bid}/notes", json={"content": "刚才那条还算数吗？"})
-    assert "（编辑部照这句做了：记成了写作要求（作者后来换回了原来的））" in seen[-1]
+    assert "（编辑部照这句做了：记住了：以后每章都要有一场打斗（写书时照做）（作者点了撤销））" in seen[-1]
 
     # 拆成好几件事的：换回记在那一件上；没改过书的不能换
     async with sessionmaker() as session:

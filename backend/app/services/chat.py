@@ -299,15 +299,16 @@ async def again_background(book_id, thread, reply_id, redis):
             await finish_reply(session, redis, reply_id, "", "failed", "原来那句话找不到了")
             return
         if payload.get("tools_mode"):
-            if payload.get("again") == "retry":
-                # 自己查、自己动手那一轮中途断了：重试接着做没做完的
-                from app.services.chat_agent import answer_note
+            from app.services.chat_agent import answer_note
 
-                await answer_note(redis, book_id, unanswered[0].id, reply_id=reply_id, retry=True)
-                return
-            # 重新回答：只重写那段话，不给工具，照这一轮查到的、做了的说；改动不动、也不重做
-            related = tools_text(payload.get("tools"))
-            await answer(session, redis, book_id, thread, role, reply_id, rows, unanswered, summary, old, related, conv)
+            await answer_note(
+                redis,
+                book_id,
+                unanswered[0].id,
+                reply_id=reply_id,
+                retry=payload.get("again") == "retry",
+                replay=payload.get("again") != "retry",
+            )
             return
         await answer(session, redis, book_id, thread, role, reply_id, rows, unanswered, summary, old, conv=conv)
 

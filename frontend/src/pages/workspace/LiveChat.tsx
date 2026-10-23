@@ -3,6 +3,7 @@
  *  编辑部干活的进度压成一行：正在做的只在最底下留一行跟着变；做完的一行小字带「去看」；等拍板的一行「……等你看 · 去看」；
  *  大块产出只放在页面上。 */
 
+import { MemoryNotice } from '../book/MemoryNotice'
 import { isMemoryNote } from '../../lib/memory'
 import { AlertTriangle } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
@@ -170,6 +171,7 @@ function toChat(messages: MeetingMessage[], outline: Outline | undefined, go: Go
         // 自己查、自己动手的回答：干活时那一行，答完下面「查了：……」
         doing: m.payload?.doing,
         looked: m.payload?.tools?.filter((t) => t.kind === 'query'),
+        below: m.payload?.memories?.map((item, index) => item.memory ? <MemoryNotice key={`${m.id}:${index}:${item.memory.version}`} receipt={item.memory} undone={item.undone} /> : null),
       })
     } else if (m.content) {
       out.push({ id: `line:${id}`, who: '主编', text: m.content, custom: <Line full>{m.content}</Line> })

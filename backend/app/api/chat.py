@@ -140,7 +140,11 @@ async def again_reply(
         raise HTTPException(409, "后面又聊了，只有最新的一条回答能重新回答")
     # 没答上来的点的是「重试」：自己动手的那一轮接着做没做完的；答完、停下的点的是「重新回答」：只重写那段话
     again = "retry" if reply_state(m) == "failed" else "again"
-    payload = {k: v for k, v in (m.payload or {}).items() if k not in ("state", "error", "doing")}
+    payload = {
+        k: v
+        for k, v in (m.payload or {}).items()
+        if k not in ("state", "error", "doing") and (again == "retry" or k not in ("memories", "tools"))
+    }
     m.content, m.payload = "", {**payload, "state": "thinking", "again": again}
     await session.commit()
     data = message_dict(m)
@@ -267,7 +271,24 @@ async def run_chat_suggestion(
         outcome = (message.payload or {}).get("outcome", {})
         # 编辑部自己动手的那一轮：结果在 steps 里，做成了一处就算
         done = {o.get("kind") for o in (message.payload or {}).get("steps") or [outcome]}
-        if not done & {"edit", "fill", "created", "outline", "requirement", "to_job", "plan_apply", "plan_made"}:
+        if outcome.get("kind") == "agent":
+            replies = await session.scalars(select(MeetingMessage).where(MeetingMessage.book_id == book.id))
+            if any(
+                data.id in (reply.payload or {}).get("reply_to", []) and (reply.payload or {}).get("memories")
+                for reply in replies
+            ):
+                done.add("memory")
+        if not done & {
+            "edit",
+            "fill",
+            "created",
+            "outline",
+            "requirement",
+            "to_job",
+            "memory",
+            "plan_apply",
+            "plan_made",
+        }:
             raise HTTPException(409, outcome.get("reason") or "这一条还没有落实，建议已保留，请看看群聊里的处理结果")
         row = await session.get(SettingSuggestion, suggestion_id)
         row.status, row.resolved_at = "accepted", datetime.now(UTC)

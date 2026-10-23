@@ -597,7 +597,7 @@ export interface MeetingMessage {
     /** 群聊里接话的人自己查、自己动手的那一句（tools）；ask_only 是只查只答 */
     turn?: 'tools'; ask_only?: boolean
     /** 自己查、自己动手的回答：正在做什么（「在查陈默……」），查了什么、做了什么 */
-    tools_mode?: boolean; doing?: string; tools?: ChatToolUse[]
+    tools_mode?: boolean; doing?: string; tools?: ChatToolUse[]; memories?: ChatOutcome[]
     /** 群聊里属于哪一段对话；dropped 是「从这里重来」收起来的 */
     conv?: string; dropped?: boolean } | null
   created_at: string | null
@@ -671,7 +671,7 @@ export interface ChatViewing {
 }
 
 export interface ChatOutcome {
-  kind: 'requirement' | 'to_job' | 'edit' | 'fill' | 'outline' | 'working' | 'not_found' | 'later' | 'chat' | 'pending' | 'too_late' | 'failed' | 'plan_apply' | 'plan_made' | 'plan_pending' | 'created' | 'suggestion' | 'feedback' | 'saved' | 'agent' | 'deleted'
+  kind: 'memory' | 'requirement' | 'to_job' | 'edit' | 'fill' | 'outline' | 'working' | 'not_found' | 'later' | 'chat' | 'pending' | 'too_late' | 'failed' | 'plan_apply' | 'plan_made' | 'plan_pending' | 'created' | 'suggestion' | 'feedback' | 'saved' | 'agent' | 'deleted'
   reason?: string
   /** 再改一版要照着重做的那个判断：有它才能「再改一版」（删掉的没有） */
   redo?: Record<string, unknown>

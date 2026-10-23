@@ -210,7 +210,11 @@ async def receive_note(body, background_tasks, book, session, redis):
             job = await active_note_job(session, book_id)
             if jobs.open_wait(job) and wants_new_pitches(text):
                 raise HTTPException(409, {"code": "use_feedback", "message": "等你拍板时请直接提意见"})
-            if waiting_feedback(job):
+            if waiting_feedback(job) and tools:
+                # Memory is not a book edit: keep tools while the book waits, but no make_changes.
+                payload.update(agent, ask_only=True)
+                task = "agent"
+            elif waiting_feedback(job):
                 try:
                     intent = await classify(session, book_id, text, payload.get("viewing"), conv_id)
                 except Exception as exc:

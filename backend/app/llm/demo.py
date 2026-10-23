@@ -1110,7 +1110,7 @@ def _change_of(intent: s.LibraryIntent) -> dict | None:
         }
     if intent.kind == "写大纲":
         return {"kind": "写大纲", "target": intent.outline_target, "instruction": intent.instruction}
-    return {"kind": "写作要求", "requirement": intent.requirement, "scope": intent.scope}
+    return None
 
 
 def _demo_changes(note: str, library: str, names: list[str]) -> list[dict]:
@@ -1126,6 +1126,52 @@ def _demo_changes(note: str, library: str, names: list[str]) -> list[dict]:
         elif change := _change_of(_library_intent(route.format(piece))):
             changes.append(change)
     return changes
+
+
+def _demo_memory(note, directory, tools, called):
+    rows, group = [], ("这本书", "写书时照做")
+    for line in directory.splitlines():
+        if " · " in line and not line.startswith("-"):
+            group = tuple(line.split(" · ", 1))
+        elif match := re.match(r"- (记\d+)(?:（[^）]*）)?：(.*)", line):
+            rows.append((match[1], match[2], *group))
+    explicit = re.search(r"记\d+", note)
+    target = next((row for row in rows if explicit and row[0] == explicit[0]), rows[-1] if rows else None)
+    if "read_memory" in tools and "read_memory" not in called and "你记得" in note:
+        return [("read_memory", {"ids": [row[0] for row in rows[:5]]})]
+    if any(word in note for word in ("这条不用记了", "记错了", "忘掉")):
+        if "forget" in tools and "forget" not in called and target:
+            return [("forget", {"id": target[0]})]
+        return []
+    editing = bool(explicit and "改成" in note)
+    if (
+        "remember" not in tools
+        or "remember" in called
+        or not (editing or any(word in note for word in ("记住", "以后都", "我喜欢", "我所有书", "别再")))
+    ):
+        return []
+    if any(word in note for word in ("先别改", "先别动", "我再想想")):
+        return []
+    detail = note.split("改成", 1)[-1] if editing else note.split("记住", 1)[-1]
+    detail = detail.strip("，, ：:。")
+    kind = "聊天时记得" if "我喜欢" in detail or "选项" in detail else "写书时照做"
+    scope = "全局" if any(word in detail for word in ("我喜欢", "所有书", "全局")) else "这本书"
+    lasts = next((word for word in ("只管下一章", "只管这一卷", "只管下一卷") if word in detail), "一直有效")
+    summary = detail[:30]
+    prior = target if editing else next((row for row in rows if row[1] == summary and row[2:] == (scope, kind)), None)
+    return [
+        (
+            "remember",
+            {
+                "id": prior[0] if prior else explicit[0] if editing else "",
+                "kind": kind,
+                "scope": scope,
+                "summary": summary,
+                "detail": detail,
+                "lasts": lasts,
+            },
+        )
+    ]
 
 
 def tool_turn(system: str, user: str, tools: list[str], done: list) -> tuple[list[tuple[str, dict]], str]:
@@ -1146,6 +1192,8 @@ def tool_turn(system: str, user: str, tools: list[str], done: list) -> tuple[lis
     called = [call.name for call, _ in done]
     if "开书" in note and "read_skill" in tools and "read_skill" not in called:
         return [("read_skill", {"name": "开书"})], ""
+    if calls := _demo_memory(note, _tag("记忆", user), tools, called):
+        return calls, ""
     known = [*re.findall(r"^- ([^（：\n]+)", library, re.M), *re.findall(r"^[^\n·：]+ · ([^\n：]+)$", library, re.M)]
     names = [n for n in dict.fromkeys(k.strip() for k in known) if n]
     mentioned = [n for n in names if n in note]
@@ -1161,7 +1209,10 @@ def tool_turn(system: str, user: str, tools: list[str], done: list) -> tuple[lis
     text = f"（演示）{role}回答：{note[:20]}。" + (f"查了{looked}。" if looked else "")
     if "read_skill" in called:
         text += "翻了开书手册。"
-    return [], text + (f"动手的结果：{acted[:80]}" if acted else "")
+    memories = [result for call, result in done if call.name in {"remember", "read_memory", "forget"}]
+    return [], text + (f"动手的结果：{acted[:80]}" if acted else "") + (
+        "我记得：" + "；".join(memories) if memories else ""
+    )
 
 
 def _chat_plan(user):

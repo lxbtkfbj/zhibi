@@ -215,20 +215,63 @@ async def undo_memory(
     await lock_book(session, book.id)
     await lock_memories(session)
     row = await accessible(session, book.id, memory_id, deleted=True)
-    if row.deleted_at is not None:
-        raise HTTPException(409, "这条后来删掉了")
-    if row.version != body.version:
-        raise HTTPException(409, "这条后来又改过，去「记忆」里改")
-    await forget(session, row)
-    # Persist undo on every matching outcome, including plan results and agent steps.
     from app.models import MeetingMessage
+    from app.services.chat_memories import SNAPSHOT_FIELDS
     from app.services.group_notes import update_message
 
     messages = list(await session.scalars(select(MeetingMessage).where(MeetingMessage.book_id == book.id)))
+    snapshots = []
+    for message in messages:
+        payload = message.payload or {}
+        for key in ("outcome", "steps", "results", "memories"):
+            values = payload.get(key) or []
+            for item in values if isinstance(values, list) else [values]:
+                snapshot = item.get("memory") or {}
+                if snapshot.get("id") == row.id and snapshot.get("version") == body.version:
+                    snapshots.append(snapshot)
+    receipt = next((item for item in snapshots if item.get("action")), {})
+    action = receipt.get("action", "create")
+    # A forget receipt owns exactly this deleted version, not later deletions.
+    own_forget = action == "forget" and row.deleted_at is not None and row.version == body.version
+    if row.deleted_at is not None and not own_forget:
+        raise HTTPException(409, "这条后来删掉了")
+    if row.version != body.version:
+        raise HTTPException(409, "这条后来又改过，去「记忆」里改")
+    if action == "create":
+        await forget(session, row)
+    else:
+        before = receipt.get("before") or {}
+        target = uuid.UUID(before["book_id"]) if before.get("book_id") else None
+        check_target(book, target)
+        duplicate = await session.scalar(
+            select(Memory.id).where(
+                Memory.book_id == target,
+                Memory.kind == before["kind"],
+                Memory.summary == before["summary"],
+                Memory.deleted_at.is_(None),
+                Memory.id != row.id,
+            )
+        )
+        if duplicate is not None:
+            raise HTTPException(409, "这条记忆已经存在")
+        if row.book_id is not None and row.kind == "writing":
+            await suppress_legacy_text(session, row.book_id, row.detail)
+        # JSON snapshots do not participate in FK SET NULL. Resolve the old
+        # source before mutating the row, so query autoflush cannot revive it.
+        origin = before["message_id"]
+        if origin is not None and await session.get(MeetingMessage, origin) is None:
+            before = {**before, "message_id": None}
+        for key in SNAPSHOT_FIELDS:
+            setattr(row, key, target if key == "book_id" else before[key])
+        row.deleted_at = None
+        row.version += 1
+        if row.book_id is not None and row.kind == "writing":
+            await unsuppress_legacy_text(session, row.book_id, row.detail)
+        await session.flush()
     for message in messages:
         payload = dict(message.payload or {})
         changed = False
-        for key in ("outcome", "steps", "results"):
+        for key in ("outcome", "steps", "results", "memories"):
             values = payload.get(key)
             if not values:
                 continue

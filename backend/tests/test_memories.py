@@ -329,7 +329,8 @@ async def test_only_remembering_from_chat_does_not_trigger_even_a_first_auto_sav
     async with sessionmaker() as session:
         assert await session.scalar(sa.select(sa.func.count()).select_from(BookSave)) == 0
         row = await session.scalar(sa.select(Memory))
-        assert row.summary == row.detail == "记住：以后不要套话" and row.source == "聊天里记的"
+        assert row.summary == row.detail == ("以后不要套话" if tools else "记住：以后不要套话")
+        assert row.source == "聊天里记的"
 
 
 async def test_manual_memory_and_existing_book_writer_use_the_same_lock_order(sessionmaker):

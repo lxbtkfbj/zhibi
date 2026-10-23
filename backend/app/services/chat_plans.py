@@ -181,7 +181,7 @@ async def save_requirement(session, book_id, message_id, item):
     )
     from app.services.memories import remembered_outcome
 
-    return remembered_outcome(row)
+    return remembered_outcome(row, working=await jobs.is_busy(session, book_id))
 
 
 async def apply_item(session, redis, book_id, message_id, title, item):
@@ -194,6 +194,10 @@ async def apply_item(session, redis, book_id, message_id, title, item):
     book = await session.get(Book, book_id)
     if item["where"] != "写作要求" and await jobs.is_busy(session, book_id):
         return await suggestion(session, book_id, title, item)
+    if item["where"] == "写作要求":
+        result = await save_requirement(session, book_id, message_id, item)
+        await session.commit()
+        return result
     change = await plan_change(session, book, item)
     await session.commit()
     message = await session.get(MeetingMessage, message_id)
