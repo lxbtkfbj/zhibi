@@ -22,7 +22,7 @@ from app.graphs import book_setup, write_book
 from app.graphs.deps import GraphDeps, JobCancelled, cancel_key
 from app.llm.router import LLMError, LLMRouter
 from app.models import Book, Job
-from app.services import book_saves
+from app.services import book_saves, feedback_memory
 from app.services.jobs import LEGACY_SETUP_MESSAGE
 from app.services.meeting import Emitter, job_dict, publish
 
@@ -219,6 +219,14 @@ async def _run(
     saves_after = SAVES_AFTER.get(kind, {})
 
     try:
+        await feedback_memory.wait_for_result(
+            (resume or {}).get("feedback_memory_id"),
+            sm,
+            emitter,
+            deps.check_cancel,
+            book_id=book_id,
+            job_id=job_id,
+        )
         async with AsyncPostgresSaver.from_conn_string(dsn) as saver:
             await saver.setup()
             graph = build_graph().compile(checkpointer=saver)

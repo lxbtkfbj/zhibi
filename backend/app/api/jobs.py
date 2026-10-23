@@ -130,7 +130,7 @@ async def _queue_setup_response(
 ) -> JobOut:
     from app.services import feedback_memory
 
-    # 判断资料和 queued/作者消息一起提交，先排改稿再后台判断，不占改稿的等待。
+    # 判断资料和 queued/作者消息一起提交；改稿不等，确认/试读由 worker 限时等判断落库。
     info = await feedback_memory.context(session, job, resume) if background_tasks is not None else None
     job.status = "queued"
     message = await post_message(
@@ -145,7 +145,10 @@ async def _queue_setup_response(
     )
     await session.refresh(job)
     await publish(redis, job.book_id, "job", job_dict(job))
-    jobs.enqueue(job.id, {**resume, "requirement_saved": True})
+    queued_resume = {**resume, "requirement_saved": True}
+    if info and info["what_happens"] in (feedback_memory.CONFIRM, feedback_memory.TRIAL):
+        queued_resume["feedback_memory_id"] = message["id"]
+    jobs.enqueue(job.id, queued_resume)
     if info:
         background_tasks.add_task(feedback_memory.judge, message["id"], redis)
     return JobOut.model_validate(job)

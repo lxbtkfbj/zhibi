@@ -129,6 +129,7 @@ async def test_review_entry_uses_original_feedback_and_background_context(
         calls.append(values)
         assert queued and queued[0]["feedback"] == "眼前这一处加点打斗"
         assert role == "chief" and schema is FeedbackMemory and template == "feedback_memory"
+        assert values["purpose"] == "看稿意见要不要记"
         return FeedbackMemory(items=[], reply="这段意见只改眼前这一处。")
 
     monkeypatch.setattr(feedback_memory, "model", judge_model)
@@ -142,6 +143,10 @@ async def test_review_entry_uses_original_feedback_and_background_context(
         rows = list(await session.scalars(select(MeetingMessage).where(MeetingMessage.book_id == bid)))
         author = next(m for m in rows if m.speaker == "author")
         assert next(m for m in rows if m.speaker == "chief").content == "这段意见只改眼前这一处。"
+        if what in (feedback_memory.CONFIRM, feedback_memory.TRIAL):
+            assert queued[0]["feedback_memory_id"] == author.id
+        else:
+            assert "feedback_memory_id" not in queued[0]
     await feedback_memory.judge(author.id, client._transport.app.state.redis)
     assert len(calls) == 1
     assert (

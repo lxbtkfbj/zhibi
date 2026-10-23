@@ -101,7 +101,6 @@ async def test_segment_decisions_keep_feedback_local_and_queue_once(client, sess
     response = await client.post(f"/api/jobs/{job_id}/segment", json=payload)
     assert response.status_code == 200, response.text
     assert response.json()["status"] == "queued"
-    assert queued == [(job_id, {**payload, "requirement_saved": True})]
     assert (await client.post(f"/api/jobs/{job_id}/segment", json=payload)).status_code == 409
     async with sessionmaker() as session:
         requirements = {
@@ -110,6 +109,10 @@ async def test_segment_decisions_keep_feedback_local_and_queue_once(client, sess
         assert requirements == set()
         message = await session.scalar(select(MeetingMessage).where(MeetingMessage.job_id == job_id))
         assert message.payload["requirement_saved"]
+        expected_resume = {**payload, "requirement_saved": True}
+        if action in ("confirm", "delegate"):
+            expected_resume["feedback_memory_id"] = message.id
+        assert queued == [(job_id, expected_resume)]
         if action == "confirm":
             assert message.content == "确认第 2 篇，开拆第 3 卷。终点锁住。"
         elif action == "delegate":

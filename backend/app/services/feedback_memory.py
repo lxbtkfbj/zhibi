@@ -1,5 +1,6 @@
 """看稿意见独立判断：只记长期规矩，不阻塞或重做眼前改稿。"""
 
+import asyncio
 import logging
 import uuid
 from contextlib import suppress
@@ -21,6 +22,32 @@ log = logging.getLogger(__name__)
 REVISE = "编辑部会照这段意见改这一处，这件事不用你管。"
 CONFIRM = "作者点了确认，这一处不再改。只说这一处的，不记，回话里告诉作者：要改这一处，在聊天里跟编辑部说。"
 TRIAL = "前 3 章已经写完，不会照这段意见重写，这段意见是说给后面的章听的。只说前 3 章里某一章的，不记，回话里告诉作者：要改那一章，去「正文」那一页让编辑部重写。"
+WAIT_TIMEOUT_S = 120
+WAIT_POLL_S = 0.25
+
+
+async def wait_for_result(message_id, sm, emit, check_cancel, *, book_id, job_id):
+    """确认/试读后先等本条判断落库；到时放行，不取消独立运行的判断。"""
+    if not message_id:
+        return
+    deadline = asyncio.get_running_loop().time() + WAIT_TIMEOUT_S
+    announced = False
+    while True:
+        await check_cancel()
+        async with sm() as session:
+            message = await session.get(MeetingMessage, message_id)
+            if message is None or message.book_id != book_id or message.job_id != job_id:
+                return
+            info = (message.payload or {}).get("feedback_memory") or {}
+            if info.get("what_happens") not in (CONFIRM, TRIAL) or info.get("state") not in ("pending", "running"):
+                return
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            return
+        if not announced:
+            await emit.status("chief", "主编正在看你写的意见…")
+            announced = True
+        await asyncio.sleep(min(WAIT_POLL_S, remaining))
 
 
 async def context(session, job, resume):
@@ -131,6 +158,7 @@ async def judge(message_id, redis):
             "chief",
             schemas.FeedbackMemory,
             "feedback_memory",
+            purpose="看稿意见要不要记",
             where=info["where"],
             what_happens=info["what_happens"],
             feedback=info["feedback"],
