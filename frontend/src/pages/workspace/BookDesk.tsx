@@ -27,6 +27,7 @@ import { SavesPanel, SavesRow } from './Saves'
 import { useLiveWriting } from './liveWriting'
 import { useSettingsModal } from '../../lib/settingsModal'
 import { PendingBallTag, PendingButton, PendingList } from './Inbox'
+import { MemoryButton, MemoryPage } from './Memory'
 import { PendingContext, pendingTarget } from './pending'
 import { Workspace } from './Workspace'
 import { Icon } from './desk-v2/shared'
@@ -129,6 +130,7 @@ function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
   const [saves, setSaves] = useState<{ open: boolean; id: number | null }>({ open: false, id: null })
   // 编辑部窗口是不是换成了待处理那一页、要找到挂在哪一条上的建议
   const [inbox, setInbox] = useState<{ open: boolean; focus: string | null }>({ open: false, focus: null })
+  const [memory, setMemory] = useState<{ open: boolean; focus: number | null; visit: number }>({ open: false, focus: null, visit: 0 })
   // 本书设置：居中的弹窗，背景糊掉
   const [settings, setSettings] = useState(false)
   const [startOpen, setStartOpen] = useState(false)
@@ -166,7 +168,8 @@ function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
   const closeSaves = useCallback(() => setSaves({ open: false, id: null }), [])
   const closeInbox = useCallback(() => setInbox({ open: false, focus: null }), [])
   // 打开待处理：编辑部收着就先打开窗口
-  const openInbox = useCallback((focus: string | null) => { setInbox({ open: true, focus }); onOpen() }, [onOpen])
+  const openInbox = useCallback((focus: string | null) => { setMemory(previous => ({ ...previous, open: false })); setInbox({ open: true, focus }); onOpen() }, [onOpen])
+  const openMemory = useCallback((focus?: number) => { setSettings(false); setInbox({ open: false, focus: null }); setMemory(previous => ({ open: true, focus: focus ?? null, visit: previous.visit + 1 })); onOpen() }, [onOpen])
   const suggestions = useLibrarySuggestions(bookId)
   const { openSettings: openSystemSettings } = useSettingsModal()
   const notes = useMemo(() => {
@@ -184,7 +187,8 @@ function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
     viewing: () => viewingRef.current?.() ?? null,
     openSaves: (id?: number) => setSaves({ open: true, id: id ?? null }),
     openPending: () => { if (!teardown) openInbox(null) },
-  }), [ctx, openInbox, teardown])
+    openMemory: (id?: number) => { if (!teardown) openMemory(id) },
+  }), [ctx, openInbox, openMemory, teardown])
   // 关页面、切到别的页面时：手改了还没存的，存一档
   useEffect(() => {
     const leave = () => flushAutoSave(bookId, true)
@@ -207,22 +211,24 @@ function Desk({ bookId, detail }: { bookId: string; detail: BookDetail }) {
   const pendingCount = suggestions.data?.length ?? book.pending
   const chatTools = (
     <>
-      {!teardown && <PendingButton count={pendingCount} open={inbox.open} onClick={() => (inbox.open ? closeInbox() : setInbox({ open: true, focus: null }))} />}
-      {(teardown || !inbox.open) && <ChatConvs />}
+      {!teardown && <PendingButton count={pendingCount} open={inbox.open} onClick={() => (inbox.open ? closeInbox() : openInbox(null))} />}
+      {!teardown && <MemoryButton open={memory.open} onClick={() => memory.open ? setMemory(previous => ({ ...previous, open: false })) : openMemory()} />}
+      {(teardown || (!inbox.open && !memory.open)) && <ChatConvs />}
     </>
   )
   // 换成待处理时聊天不卸掉：回到聊天还是原来翻到的地方
   const chat = (
     <>
       {!teardown && inbox.open && <PendingList key={inbox.focus ?? ''} focus={inbox.focus} onBack={closeInbox} />}
-      <div className={!teardown && inbox.open ? 'hidden' : 'contents'}><LiveChat writing={writing} /></div>
+      {!teardown && memory.open && <MemoryPage key={memory.visit} focus={memory.focus} onBack={() => setMemory(previous => ({ ...previous, open: false }))} />}
+      <div className={!teardown && (inbox.open || memory.open) ? 'hidden' : 'contents'}><LiveChat writing={writing} /></div>
     </>
   )
   const row = 'toc-foot'
   const sideFooter = (
     <>
       <SavesRow className={row} open={saves.open} onClick={() => setSaves(saves.open ? { open: false, id: null } : { open: true, id: null })} />
-      {!teardown && <button type="button" onClick={() => setSettings(true)} aria-pressed={settings} title="这本书怎么写：人称、每章字数、写作要求……"
+      {!teardown && <button type="button" onClick={() => setSettings(true)} aria-pressed={settings} title="这本书怎么写：人称、每章字数……"
         className={`${row} ${settings ? 'bg-line/50 text-ink' : ''}`}>
         <Settings className="size-4 shrink-0" />本书设置
       </button>}

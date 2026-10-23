@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import uuid
 
 import httpx
 import pytest
@@ -15,7 +14,7 @@ from app.api import jobs as jobs_api
 from app.config import get_settings
 from app.llm import demo
 from app.main import create_app
-from app.models import AuthorRequirement, Book, MeetingMessage
+from app.models import Book, MeetingMessage, Memory
 from app.schemas import NoteIn
 from app.services import chat, group_notes
 from app.services.chat_context import dialogue
@@ -262,13 +261,21 @@ async def test_revert_is_recorded_on_the_message(client, sessionmaker, monkeypat
     note = (await client.post(f"/api/books/{bid}/notes", json={"content": "以后每章都要有一场打斗"})).json()
     outcome = (await final_message(client, bid, note["id"]))["payload"]["outcome"]
     # 改完当场的前后对照：写作要求原来没有，改成这一句
-    assert outcome["diff"][0]["after"].startswith("原话：以后每章都要有一场打斗")
+    assert outcome["memory"]["summary"] == "以后每章都要有一场打斗"
+    assert "change" not in outcome
     # 消息下面点「换回原来的」：删了这条要求，记到消息上
-    marked = await client.post(f"/api/books/{bid}/notes/{note['id']}/revert", json={})
-    assert marked.status_code == 200 and marked.json()["payload"]["outcome"]["undone"] is True
+    marked = await client.post(
+        f"/api/books/{bid}/memories/{outcome['memory']['id']}/undo", json={"version": outcome["memory"]["version"]}
+    )
+    assert marked.status_code == 200
+    assert (await final_message(client, bid, note["id"]))["payload"]["outcome"]["undone"] is True
     async with sessionmaker() as session:
-        assert await session.get(AuthorRequirement, uuid.UUID(outcome["requirement_id"])) is None
-    assert (await client.post(f"/api/books/{bid}/notes/{note['id']}/revert", json={})).status_code == 409
+        assert (await session.get(Memory, int(outcome["requirement_id"]))).deleted_at is not None
+    assert (
+        await client.post(
+            f"/api/books/{bid}/memories/{outcome['memory']['id']}/undo", json={"version": outcome["memory"]["version"]}
+        )
+    ).status_code == 409
     await client.post(f"/api/books/{bid}/notes", json={"content": "刚才那条还算数吗？"})
     assert "（编辑部照这句做了：记成了写作要求（作者后来换回了原来的））" in seen[-1]
 

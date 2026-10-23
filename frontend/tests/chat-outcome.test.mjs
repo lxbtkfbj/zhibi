@@ -6,9 +6,13 @@ import * as jsx from 'react/jsx-runtime'
 import { renderToStaticMarkup } from 'react-dom/server'
 import ts from 'typescript'
 import * as chat from '../src/lib/chat.ts'
+import * as memory from '../src/lib/memory.ts'
+import clsx from 'clsx'
+import { ArrowLeft, NotebookPen } from 'lucide-react'
 
 // 直接渲染真正的 ChatOutcome；只替换数据 hooks，React 和 JSX 照常运行。
-const row = { id: 'requirement-1', text: '快一点', label: '只管第 3 章', scope: 'chapter' }
+const row = { id: 1, version: 1, summary: '快一点', detail: '快一点', book_id: 'outcome-book', kind: 'writing', label: '只管第 3 章', scope: 'chapter' }
+let memoryRows = [row]
 const noop = () => {}
 const source = readFileSync(new URL('../src/pages/book/ChatActions.tsx', import.meta.url), 'utf8')
 const imports = {
@@ -18,17 +22,25 @@ const imports = {
   '../../api/client': { get: noop, patch: noop, post: noop },
   '../../api/library': { useLibrary: () => ({ data: { entries: [] } }), useRevertVersion: noop },
   '../../api/settings': { useAuthorRequirements: () => ({ data: [row] }), settingsKeys: { requirements: id => ['author-requirements', id] } },
-  '../../components/RequirementDialog': { RequirementDialog: () => null },
+  './MemoryNotice': null,
+  '../../api/memories': { useMemories: () => ({ data: memoryRows }), memoryKeys: { all: ['memories'] } },
+  '../../lib/memory': memory,
   '../../components/ui': { ErrorText: () => null, TypingDots: () => React.createElement('i', { 'data-typing': true }) },
   '../../lib/chat': chat,
   './context': { useBookContext: () => ({ bookId: 'outcome-book', messages: [], manualNavigate: noop }) },
 }
-const module = { exports: {} }
-const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } })
-new Function('require', 'module', 'exports', outputText)(name => {
-  assert.ok(name in imports, `未模拟的依赖 ${name}`)
-  return imports[name]
-}, module, module.exports)
+function compile(source, imports) {
+  const module = { exports: {} }
+  const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } })
+  new Function('require', 'module', 'exports', outputText)(name => {
+    assert.ok(name in imports, `未模拟的依赖 ${name}`)
+    return imports[name]
+  }, module, module.exports)
+  return module
+}
+const notice = compile(readFileSync(new URL('../src/pages/book/MemoryNotice.tsx', import.meta.url), 'utf8'), imports)
+imports['./MemoryNotice'] = notice.exports
+const module = compile(source, imports)
 const render = outcome => renderToStaticMarkup(React.createElement(module.exports.ChatOutcome, {
   message: { id: 1, speaker: 'author', content: '作者的话', created_at: new Date().toISOString(), payload: { outcome } },
 }))
@@ -46,17 +58,14 @@ test('没判断出来和等拍板逐字显示新字，不留手动加要求按�
   assert.doesNotMatch(late, /<button/u)
 })
 
-test('写作要求继续能改，有前后对照与交给编辑部时都用加要求的新字', () => {
-  const plain = render({ kind: 'requirement', requirement_id: row.id })
-  assert.match(plain, /加了一条写作要求：「快一点」（只管第 3 章）/u)
-  assert.match(plain, /<button[^>]*>改一下<\/button>/u)
-  const diff = [{ label: '写作要求', before: '', after: row.text }]
-  for (const [kind, text] of [['requirement', '加了一条写作要求'], ['to_job', '交给了编辑部：加一条写作要求']]) {
-    const html = render({ kind, requirement_id: row.id, diff, change: ['requirement-1'] })
-    assert.ok(html.includes(`<p>${text}</p>`))
-    assert.match(html, /换回原来的/u)
-    assert.match(html, /改一下/u)
-    assert.doesNotMatch(html, /记成/u)
+test('分流、make_changes 和方案卡的记忆都用同一行，没有旧对照和改一下', () => {
+  for (const kind of ['requirement', 'to_job']) {
+    const html = render({ kind, memory: { ...row, working: kind === 'to_job' }, diff: [{ label: '旧对照', before: '', after: row.detail }], change: ['legacy'] })
+    assert.match(html, /记住了：快一点/u)
+    assert.match(html, /写书时照做 · 这本书 · 只管第 3 章/u)
+    assert.match(html, /撤销/u)
+    assert.doesNotMatch(html, /改一下|换回原来的|旧对照|加了一条写作要求/u)
+    if (kind === 'to_job') assert.match(html, /正在写的从下一步起照办/u)
   }
 })
 
@@ -68,29 +77,43 @@ test('在看、在做和再改一版失败的原有状态保留', () => {
   assert.doesNotMatch(redo, /<button/u)
 })
 
-test('要求编辑框使用作者补充指定的新字，不再出现记下', () => {
-  const dialogSource = readFileSync(new URL('../src/components/RequirementDialog.tsx', import.meta.url), 'utf8')
-  const dialogImports = {
-    react: React,
-    'react/jsx-runtime': jsx,
-    '../lib/chat': chat,
-    './ui': {
-      Modal: ({ title, children, footer }) => React.createElement('section', { role: 'dialog', 'aria-label': title }, children, footer),
-      Button: ({ loading: _loading, variant: _variant, ...props }) => React.createElement('button', props),
-      ErrorText: () => null,
-      inputClass: 'input',
-    },
-  }
-  const dialogModule = { exports: {} }
-  const transpiled = ts.transpileModule(dialogSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } })
-  new Function('require', 'module', 'exports', transpiled.outputText)(name => {
-    assert.ok(name in dialogImports, `未模拟的依赖 ${name}`)
-    return dialogImports[name]
-  }, dialogModule, dialogModule.exports)
-  const html = renderToStaticMarkup(React.createElement(dialogModule.exports.RequirementDialog, { initial: row.text, onClose: noop, onSave: noop }))
-  assert.match(html, /role="dialog" aria-label="修改写作要求"/u)
-  assert.match(html, /aria-label="写作要求"/u)
+test('旧要求弹窗换成原地记忆编辑框，标签、默认值和保存取消逐字一致', () => {
+  const component = compile(readFileSync(new URL('../src/pages/workspace/Memory.tsx', import.meta.url), 'utf8'), { ...imports,
+    clsx, 'lucide-react': { ArrowLeft, NotebookPen },
+    '../book/context': imports['./context'], './styles': { smallButton: 'button' },
+    '../../components/ui': { ...imports['../../components/ui'], inputClass: 'input' },
+  }).exports.MemoryEditor
+  const html = renderToStaticMarkup(React.createElement(component, { library: 'outcome-book', bookId: 'outcome-book', onCancel: noop, onSave: noop }))
+  for (const label of ['简述', '详细内容', '种类', '放在', '管多久']) assert.ok(html.includes(`aria-label="${label}"`))
+  for (const label of ['写书时照做', '这本书', '一直有效']) assert.match(html, new RegExp(`selected="">${label}`, 'u'))
   assert.match(html, /<button[^>]*>保存<\/button>/u)
   assert.match(html, /<button[^>]*>取消<\/button>/u)
-  assert.doesNotMatch(html, /记下/u)
+  assert.doesNotMatch(html, /修改写作要求|存好|记下/u)
+})
+
+test('统一记忆行真实渲染撤销后的字和两种变灰提示', () => {
+  const renderNotice = (receipt, undone = false) => renderToStaticMarkup(React.createElement(notice.exports.MemoryNotice, { receipt, undone }))
+  assert.match(renderNotice(row, true), /没记：快一点/u)
+  assert.doesNotMatch(renderNotice(row, true), /撤销/u)
+  memoryRows = [{ ...row, version: 2 }]
+  let html = renderNotice(row)
+  assert.match(html, /这条后来又改过，去「记忆」里改/u)
+  assert.match(html, /<button[^>]*disabled=""[^>]*>撤销/u)
+  memoryRows = []
+  html = renderNotice(row)
+  assert.match(html, /这条后来删掉了/u)
+  assert.match(html, /<button[^>]*disabled=""[^>]*>撤销/u)
+  memoryRows = [row]
+})
+
+test('方案卡真实渲染记忆类别与期限，而非旧写作要求标签', () => {
+  const component = compile(readFileSync(new URL('../src/pages/book/PlanCard.tsx', import.meta.url), 'utf8'), { ...imports,
+    clsx, 'lucide-react': { ChevronDown: () => null, X: () => null },
+    './ChatActions': module.exports, '../../api/library': { ...imports['../../api/library'], useInvalidateLibrary: () => noop },
+    '../../components/ui': { ...imports['../../components/ui'], Button: ({ loading: _loading, variant: _variant, size: _size, ...props }) => React.createElement('button', props) },
+  }).exports.PlanCard
+  const html = renderToStaticMarkup(React.createElement(component, { message: { id: 23, payload: { status: 'open', plan: { title: '方案', summary: '', items: [{ where: '写作要求', scope: '只管下一卷', change: '每卷有高潮' }], open_questions: [] } } } }))
+  assert.match(html, /记忆 · 写书时照做 · 只管下一卷/u)
+  assert.doesNotMatch(html, /写作要求 ·/u)
+  assert.match(html, /按这个来/u)
 })

@@ -179,7 +179,9 @@ async def save_requirement(session, book_id, message_id, item):
     row = await add_requirement(
         session, book_id, item["change"], "plan", SCOPE_INPUTS[item.get("scope", "一直有效")], message_id=message_id
     )
-    return {"kind": "requirement", "requirement_id": str(row.id)}
+    from app.services.memories import remembered_outcome
+
+    return remembered_outcome(row)
 
 
 async def apply_item(session, redis, book_id, message_id, title, item):
@@ -247,7 +249,8 @@ async def apply_background(message_id, redis):
             deepcopy(row.payload["plan"]),
         )
         # 编辑部动书之前：作者自己改过还没存的，先存一档
-        await book_saves.before_ai(session, book_id)
+        if any(item["where"] != "写作要求" for item in plan["items"]):
+            await book_saves.before_ai(session, book_id)
         await lock_book(session, book_id)
         job = await active_note_job(session, book_id)
         opened = jobs.open_wait(job)
@@ -307,9 +310,10 @@ async def apply_background(message_id, redis):
             payload={"reply_to": [message_id], **({"thread": thread} if thread != "group" else {})},
         )
         # 方案卡照办完：一档
-        await book_saves.safe_checkpoint(
-            session, book_id, role, lead=f"{SPEAKER_NAMES.get(role, '主编')}照方案「{plan['title']}」办了："
-        )
+        if any(result.get("change") for result in results):
+            await book_saves.safe_checkpoint(
+                session, book_id, role, lead=f"{SPEAKER_NAMES.get(role, '主编')}照方案「{plan['title']}」办了："
+            )
         if opened and setup_applied and jobs.open_wait(await active_note_job(session, book_id)):
             await post_message(
                 session,

@@ -40,6 +40,7 @@ from app.services.desk import (
 from app.services.library import lock_book
 from app.services.library_context import load_context
 from app.services.meeting import SPEAKER_NAMES, message_dict, post_message, publish
+from app.services.memories import remembered_outcome
 from app.services.outline_write import new_arc_number, resolve_outline_target, write_outline_node
 from app.services.requirements import SCOPE_INPUTS, add_requirement
 from app.services.versions import target_type_of
@@ -216,11 +217,14 @@ async def receive_note(body, background_tasks, book, session, redis):
                     raise HTTPException(502, f"模型出错了：{exc}") from exc
                 session.expire_all()
                 job = await active_note_job(session, book_id)
-                if intent.kind != "提问闲聊" and waiting_feedback(job):
+                if intent.kind not in ("提问闲聊", "写作要求") and waiting_feedback(job):
                     if not await chatted_since_wait(session, book_id, job):
                         raise HTTPException(409, {"code": "use_feedback", "message": "等你拍板时请直接提意见"})
                     payload["outcome"] = {"kind": "plan_made"}
                     task = "plan"
+                elif intent.kind == "写作要求":
+                    payload["outcome"] = {"kind": "pending"}
+                    task = intent
                 elif tools:
                     # 等拍板时只是在问：照旧只查只答，要改的在拍板的地方提
                     payload.update(agent, ask_only=True)
@@ -346,7 +350,7 @@ async def apply_intent(session, redis, message, intent):
     book = await session.get(Book, book_id)
     job = await active_note_job(session, book_id)
     message = await session.get(MeetingMessage, message_id)
-    if intent.kind != "提问闲聊" and waiting_feedback(job):
+    if intent.kind not in ("提问闲聊", "写作要求") and waiting_feedback(job):
         await update_message(session, redis, message, outcome={"kind": "too_late"})
         return False
     if intent.kind == "提问闲聊":
@@ -373,9 +377,17 @@ async def apply_intent(session, redis, message, intent):
         return await create_from_chat(session, redis, book, message, intent)
     elif intent.kind == "写作要求" or working:
         row = await add_requirement(
-            session, book_id, intent.requirement or text, "note", SCOPE_INPUTS[intent.scope], message_id=message_id
+            session,
+            book_id,
+            intent.requirement or text,
+            "plan" if message.kind == "plan" else "note",
+            SCOPE_INPUTS[intent.scope],
+            message_id=message_id,
+            detail=(intent.requirement or text)
+            if message.kind == "plan" or (message.payload or {}).get("tools_mode")
+            else text,
         )
-        outcome = {"kind": "to_job" if working else "requirement", "requirement_id": str(row.id)}
+        outcome = remembered_outcome(row, working=working)
         message.job_id = job.id if working else None
         reply = intent.reply or "记下了。"
     else:
@@ -471,7 +483,12 @@ async def apply_intent(session, redis, message, intent):
 
 
 # 改完当场给作者看前后对照：这几种改了书
-SHOWN = {"edit", "fill", "created", "outline", "requirement", "to_job"}
+SHOWN = {"edit", "fill", "created", "outline"}
+
+
+def changed_book(message) -> bool:
+    payload = message.payload or {}
+    return any(outcome.get("change") for outcome in payload.get("steps") or [payload.get("outcome") or {}])
 
 
 def expected_ids(book_id, outcome) -> set[str]:
@@ -483,9 +500,13 @@ def expected_ids(book_id, outcome) -> set[str]:
     return {str(i) for i in ids if i}
 
 
-async def apply_with_change(session, redis, message, intent):
+async def apply_with_change(session, redis, message, intent, *, snapshot_before=True):
     """照判断去做，并把这一处改之前、改之后记在结果上：消息下面给前后对照，「换回原来的」「再改一版」都用它。"""
     book_id, mid = message.book_id, message.id
+    if intent.kind == "写作要求":
+        return await apply_intent(session, redis, message, intent)
+    if snapshot_before:
+        await book_saves.before_ai(session, book_id)
     before = await book_saves.read_state(session, book_id)
     await session.commit()
     needs = await apply_intent(session, redis, await session.get(MeetingMessage, mid), intent)
@@ -555,6 +576,8 @@ async def take_back(session, book_id, outcome):
     """把这一处换回改之前的样子：这几行后来又被动过（作者手改、写章、聊天里又改、回到过存档）就不换。"""
     from app.api.deps import ensure_idle
 
+    if outcome.get("kind") in ("requirement", "to_job"):
+        raise HTTPException(422, "记忆不跟着书退回，请在「记忆」里改")
     rows = outcome.get("change")
     if not rows:
         raise HTTPException(422, "这句话没让编辑部改过书")
@@ -608,7 +631,7 @@ async def redo_background(book_id, message_id, step, intent, redis):
         message = await session.get(MeetingMessage, message_id)
         keep = dict(message.payload or {})
         try:
-            await apply_with_change(session, redis, message, intent)
+            await apply_with_change(session, redis, message, intent, snapshot_before=False)
             message = await session.get(MeetingMessage, message_id)
             await session.refresh(message)
             fresh = dict((message.payload or {}).get("outcome") or {})
@@ -875,7 +898,6 @@ async def route_background(book_id, redis, known_id=None, known_intent=None):
                 needs_reply = True
                 continue
             # 编辑部动书之前：作者自己改过还没存的，先存一档
-            await book_saves.before_ai(session, book_id)
             try:
                 intent = (
                     known_intent
@@ -895,7 +917,7 @@ async def route_background(book_id, redis, known_id=None, known_intent=None):
                     await update_message(session, redis, message, outcome={"kind": "failed", "reason": reason})
             # 动完存一档：一句话一档
             message = await session.get(MeetingMessage, mid)
-            if message is not None:
+            if message is not None and changed_book(message):
                 actor = chat_actor(message)
                 await book_saves.safe_checkpoint(session, book_id, actor, lead=f"{SPEAKER_NAMES[actor]}照你的话")
     if needs_reply:

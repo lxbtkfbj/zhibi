@@ -365,6 +365,9 @@ async def run_change(session, redis, message, item: ChangeItem) -> tuple[dict, l
         if item.kind == "删除":
             outcome = await delete_change(session, message, item)
         else:
+            if item.kind == "写作要求":
+                message.payload = {**(message.payload or {}), "tools_mode": True}
+                await session.flush()
             await apply_with_change(session, redis, message, to_intent(item))
             await session.refresh(message)
             outcome = dict((message.payload or {}).get("outcome") or {})
@@ -379,7 +382,7 @@ def result_text(item: ChangeItem, outcome: dict, said: list[str]) -> str:
     head = f"「{item_doing(item).removeprefix('在')}」"
     if kind == "edit" and outcome.get("mode") == "options":
         return f"{head}：给「{outcome.get('target_label')}」出了三种写法，放在作者那句话下面等他挑；还没换上。"
-    if kind in SHOWN or kind == "deleted":
+    if kind in SHOWN or kind in ("deleted", "requirement", "to_job"):
         written = "\n".join(
             f"【{d['label']}】\n原来：{d['before'] or '（空着）'}\n现在：{d['after'] or '（删掉了）'}"
             for d in outcome.get("diff") or []

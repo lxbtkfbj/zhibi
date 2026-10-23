@@ -2,29 +2,22 @@
  *  写作要求、编辑部写得多仔细。改了就存，编辑部正在写也能改，从下一步起照新的来。
  *  写到哪停下来请你看在开写页（正文首页）定，篇幅在简介页改；书名风格、题材打法不在这里（设计说明 9.12「本书设置精简」）。 */
 
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
 import { X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { del, patch, post } from '../../api/client'
+import { patch } from '../../api/client'
 import { useUpdateBook } from '../../api/hooks'
-import { type AuthorRequirement, type SettingsResponse, type WritingSettings, settingsKeys, useAuthorRequirements, useBookSettings, useSettingsEditor } from '../../api/settings'
+import { type SettingsResponse, type WritingSettings, useBookSettings, useSettingsEditor } from '../../api/settings'
 import { ErrorText } from '../../components/ui'
-import { REQUIREMENT_SCOPES, type RequirementScope } from '../../lib/chat'
 import { CHAPTER_WORDS_HINT, EFFORT_OPTIONS, EFFORT_PRESETS, INTIMACY_HINTS, INTIMACY_OPTIONS, PERSON_OPTIONS, effortHint, parseChapterWords, unusedCustomNote } from '../../lib/writingSettings'
 import { useBookContext } from '../book/context'
 import { scheduleAutoSave } from './liveActions'
 import { smallButton } from './styles'
 
-const primarySmall = 'h-8 rounded-lg bg-ink px-4 text-[13px] text-paper-2 transition-colors hover:bg-ink-2 disabled:opacity-40'
 const field = 'rounded-lg border border-line-2 bg-card text-ink outline-none transition-colors placeholder:text-ink-3 focus:border-ink-3'
-
-/** 写作要求条数到了这么多，才出「整理一下」 */
-const TIDY_FROM = 5
-
-interface TidyItem { id: string; text: string; action: string; reason: string; rewrite: string }
 
 export function BookSettingsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   return createPortal(<AnimatePresence>{open && <Dialog onClose={onClose} />}</AnimatePresence>, document.body)
@@ -142,7 +135,7 @@ function Editor({ bookId, initial }: { bookId: string; initial: SettingsResponse
         <ChapterWords value={words} status={st.chapter_words} onSave={(chapter_words) => change({ chapter_words })} />
         <StyleReference bookId={bookId} />
       </Section>
-      <Requirements bookId={bookId} />
+      <MemoryLink />
       <Section title="编辑部写得多仔细">
         <div className="py-4">
           <div className="flex flex-wrap items-center gap-3">
@@ -289,184 +282,8 @@ function StyleReference({ bookId }: { bookId: string }) {
   )
 }
 
-/* ---------------- 写作要求 ---------------- */
 
-/** 后台记的范围 → 改的时候下拉框里选中哪一个 */
-const scopeOf = (row: AuthorRequirement): RequirementScope => (row.scope === 'chapter' ? 'next_chapter' : row.scope === 'volume' ? 'this_volume' : 'always')
-
-/** 写作要求：以后排大纲、写正文都要照着做的话（以前的「其他规矩」「作者要求清单」都在这里）。群聊里说「以后……」也记到这里。 */
-function Requirements({ bookId }: { bookId: string }) {
-  const qc = useQueryClient()
-  const query = useAuthorRequirements(bookId)
-  const [adding, setAdding] = useState(false)
-  const [editing, setEditing] = useState<string | null>(null)
-  const [expired, setExpired] = useState(false)
-  const refresh = async () => {
-    await qc.invalidateQueries({ queryKey: settingsKeys.requirements(bookId) })
-    scheduleAutoSave(bookId)
-  }
-  // 整理一下：主编看一遍哪些重复、过时、能合并，摆在清单上面，勾上的才改
-  const [tidyItems, setTidyItems] = useState<TidyItem[] | null>(null)
-  const [selected, setSelected] = useState<string[]>([])
-  const tidy = useMutation({
-    mutationFn: () => post<{ items: TidyItem[] }>(`/books/${bookId}/requirements/tidy`),
-    onSuccess: (res) => {
-      const changes = res.items.filter((item) => item.action !== '保留')
-      setTidyItems(changes)
-      setSelected(changes.map((item) => item.id))
-    },
-  })
-  const apply = useMutation({
-    mutationFn: () => post(`/books/${bookId}/requirements/apply`, {
-      delete: tidyItems?.filter((item) => selected.includes(item.id) && item.action === '删掉').map((item) => item.id),
-      rewrite: tidyItems?.filter((item) => selected.includes(item.id) && item.action === '改写').map((item) => ({ id: item.id, text: item.rewrite })),
-    }),
-    onSuccess: async () => {
-      setTidyItems(null)
-      await refresh()
-    },
-  })
-  const rows = query.data ?? []
-  const active = rows.filter((r) => r.active)
-  const old = rows.filter((r) => !r.active)
-  const row = (item: AuthorRequirement) => editing === item.id ? (
-    <RequirementEditor key={item.id} initial={item.text} scope={scopeOf(item)} onCancel={() => setEditing(null)}
-      onSave={async (text, scope) => {
-        await patch(`/requirements/${item.id}`, { text, ...(scope ? { scope } : {}) })
-        await refresh()
-        setEditing(null)
-      }}
-      onDelete={async () => {
-        await del(`/requirements/${item.id}`)
-        await refresh()
-        setEditing(null)
-      }} />
-  ) : (
-    <li key={item.id}>
-      <button type="button" onClick={() => { setEditing(item.id); setAdding(false) }} title="点了改"
-        className="-mx-2.5 flex w-[calc(100%+20px)] items-start gap-4 rounded-md px-2.5 py-3 text-left transition-colors hover:bg-line/40">
-        <span className="min-w-0 flex-1 text-[15px] leading-relaxed whitespace-pre-wrap text-ink">{item.text}</span>
-        <span className="shrink-0 pt-1 text-xs text-ink-3">{item.label}</span>
-      </button>
-    </li>
-  )
-  return (
-    <Section title="写作要求" action={
-      <div className="flex gap-2">
-        {active.length >= TIDY_FROM && (
-          <button type="button" className={smallButton} disabled={tidy.isPending} onClick={() => { tidy.mutate(); setAdding(false); setEditing(null) }}>
-            {tidy.isPending ? '主编正在看……' : '整理一下'}
-          </button>
-        )}
-        <button type="button" className={smallButton} onClick={() => { setAdding(true); setEditing(null) }}>加一条</button>
-      </div>
-    }>
-      <div>
-        {rows.length > 0 && <p className="pt-3 text-[13px] leading-relaxed text-ink-3">编辑部以后排大纲、写正文都照着做。在群聊里说「以后……」，也会记到这里。</p>}
-        {query.error && <ErrorText error={query.error} />}
-        {(tidyItems || tidy.error) && (
-          <div className="mt-3 rounded-xl border border-line bg-card px-4 py-3.5">
-            <p className="text-[14px] text-ink">主编的整理建议</p>
-            <ErrorText error={tidy.error} />
-            {tidyItems && (tidyItems.length === 0
-              ? <p className="mt-1.5 text-[14px] text-ink-2">看过了，没有要整理的。</p>
-              : (
-                <div className="mt-2.5 space-y-2">
-                  {tidyItems.map((item) => (
-                    <label key={item.id} className="flex cursor-pointer gap-3 rounded-lg border border-line bg-paper/60 p-3">
-                      <input type="checkbox" className="mt-1 size-4 shrink-0 accent-[var(--color-ink)]" checked={selected.includes(item.id)}
-                        onChange={(e) => setSelected((prev) => (e.target.checked ? [...prev, item.id] : prev.filter((id) => id !== item.id)))} />
-                      <span className="text-[14px] leading-relaxed">
-                        <span className="block text-ink">{item.text}</span>
-                        <span className="block text-seal-dark">{item.action === '删掉' ? '删掉' : `改成「${item.rewrite}」`}</span>
-                        <span className="text-[13px] text-ink-3">{item.reason}</span>
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              ))}
-            <ErrorText error={apply.error} />
-            <div className="mt-3 flex justify-end gap-2">
-              <button type="button" className={smallButton} disabled={apply.isPending} onClick={() => { setTidyItems(null); tidy.reset() }}>{tidyItems?.length ? '算了' : '好'}</button>
-              {!!tidyItems?.length && <button type="button" className={primarySmall} disabled={apply.isPending || !selected.length} onClick={() => apply.mutate()}>照勾的改</button>}
-            </div>
-          </div>
-        )}
-        <ul className="divide-y divide-line/70">
-          {adding && (
-            <RequirementEditor initial="" scope="always" onCancel={() => setAdding(false)}
-              onSave={async (text, scope) => {
-                await post(`/books/${bookId}/requirements`, { text, scope: scope ?? 'always' })
-                await refresh()
-                setAdding(false)
-              }} />
-          )}
-          {active.map(row)}
-        </ul>
-        {!rows.length && !adding && !query.isLoading && (
-          <div className="py-4 text-[14px] leading-relaxed text-ink-3">
-            <p>还没有。在群聊里说「以后……」，编辑部会记到这里；也可以自己加一条。比如：</p>
-            <p className="mt-1.5 text-ink-2">主角说话要贫、爱吐槽</p>
-            <p className="text-ink-2">别写「嘴角勾起一抹弧度」这种套话</p>
-          </div>
-        )}
-        {old.length > 0 && (
-          <div className="pt-1 pb-3">
-            <button type="button" onClick={() => setExpired(!expired)} className="text-[13px] text-ink-3 transition-colors hover:text-ink">
-              {expired ? '收起过期的' : `已经过期的 ${old.length} 条`}
-            </button>
-            {expired && <ul className="mt-1 divide-y divide-line/70 opacity-60">{old.map(row)}</ul>}
-          </div>
-        )}
-      </div>
-    </Section>
-  )
-}
-
-/** 改一条（或者新加一条）：字、管多久；改的时候范围不动就不送，免得「只管第 12 章」被挪到下一章。 */
-function RequirementEditor({ initial, scope, onSave, onCancel, onDelete }: {
-  initial: string
-  scope: RequirementScope
-  onSave: (text: string, scope: RequirementScope | null) => Promise<void>
-  onCancel: () => void
-  onDelete?: () => Promise<void>
-}) {
-  const [text, setText] = useState(initial)
-  const [picked, setPicked] = useState<RequirementScope | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<unknown>(null)
-  const run = async (task: () => Promise<void>) => {
-    setBusy(true)
-    setError(null)
-    try {
-      await task()
-    } catch (cause) {
-      setError(cause)
-      setBusy(false)
-    }
-  }
-  const save = () => { if (text.trim() && !busy) void run(() => onSave(text.trim(), picked)) }
-  return (
-    <li className="py-3">
-      <textarea autoFocus aria-label={onDelete ? '改这条写作要求' : '新的写作要求'} value={text} rows={2} placeholder="比如：主角说话要贫、爱吐槽"
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') { e.preventDefault(); onCancel() }
-          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); save() }
-        }}
-        className={clsx(field, 'block w-full resize-y px-3 py-2 text-[15px] leading-relaxed')} />
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        <select aria-label="管多久" value={picked ?? scope} onChange={(e) => setPicked(e.target.value as RequirementScope)}
-          className={clsx(field, 'h-8 px-2 text-[13px] text-ink-2')}>
-          {REQUIREMENT_SCOPES.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
-        </select>
-        {onDelete && <button type="button" disabled={busy} onClick={() => void run(onDelete)} className="h-8 px-2 text-[13px] text-seal transition-colors hover:text-seal-dark disabled:opacity-40">删掉这条</button>}
-        <span className="ml-auto flex gap-2">
-          <button type="button" className={smallButton} disabled={busy} onClick={onCancel}>算了</button>
-          <button type="button" className={primarySmall} disabled={busy || !text.trim()} onClick={save}>{onDelete ? '存好' : '记下'}</button>
-        </span>
-      </div>
-      <ErrorText error={error} />
-    </li>
-  )
+function MemoryLink() {
+  const { openMemory } = useBookContext()
+  return <p className="border-b border-line py-4 text-[13px] leading-relaxed text-ink-3">写书时照做的规矩，现在放在编辑部的「记忆」里。<button type="button" onClick={() => openMemory?.()} className="ml-2 text-chief underline underline-offset-4">去看看</button></p>
 }

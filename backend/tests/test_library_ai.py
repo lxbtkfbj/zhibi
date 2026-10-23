@@ -12,7 +12,7 @@ from app.api import library_ai
 from app.config import get_settings
 from app.llm import demo
 from app.main import create_app
-from app.models import AuthorRequirement, Book, Character, Job, MeetingMessage, SettingCandidate, WorldEntry
+from app.models import Book, Character, Job, MeetingMessage, Memory, SettingCandidate, WorldEntry
 from app.services.versions import snapshot_of
 
 
@@ -216,7 +216,7 @@ async def test_idle_chat_routes_rewrite_not_requirement_and_other_persists(clien
     response = await client.post(f"/api/books/{book_id}/notes", json={"content": "把境界名称重想一下"})
     assert response.status_code == 201, response.text
     async with sessionmaker() as session:
-        assert list(await session.scalars(select(AuthorRequirement))) == []
+        assert list(await session.scalars(select(Memory))) == []
         assert len(list(await session.scalars(select(SettingCandidate)))) == 1
         messages = list(await session.scalars(select(MeetingMessage).order_by(MeetingMessage.id)))
         # 2026-10-18：群聊里改设定，结果就挂在作者那句话下面，设定师不再另说「去设定库挑一个」
@@ -225,7 +225,7 @@ async def test_idle_chat_routes_rewrite_not_requirement_and_other_persists(clien
     response = await client.post(f"/api/books/{book_id}/notes", json={"content": "下一章节奏快一点"})
     assert response.status_code == 201, response.text
     async with sessionmaker() as session:
-        assert [row.text for row in await session.scalars(select(AuthorRequirement))] == ["下一章节奏快一点"]
+        assert [row.text for row in await session.scalars(select(Memory))] == ["下一章节奏快一点"]
 
 
 async def test_chat_target_missing_not_saved_as_requirement(client, sessionmaker, monkeypatch):
@@ -240,7 +240,7 @@ async def test_chat_target_missing_not_saved_as_requirement(client, sessionmaker
     response = await client.post(f"/api/books/{book_id}/notes", json={"content": "改一下"})
     assert response.status_code == 201, response.text
     async with sessionmaker() as session:
-        assert list(await session.scalars(select(AuthorRequirement))) == []
+        assert list(await session.scalars(select(Memory))) == []
         message = await session.scalar(select(MeetingMessage).order_by(MeetingMessage.id.desc()))
         assert (
             message.content
@@ -287,7 +287,7 @@ async def test_chat_started_during_routing_returns_to_normal_note_path(client, s
     assert response.status_code == 201, response.text
     async with sessionmaker() as session:
         assert list(await session.scalars(select(SettingCandidate))) == []
-        assert list(await session.scalars(select(AuthorRequirement))) == []
+        assert list(await session.scalars(select(Memory))) == []
         assert response.json()["payload"]["outcome"]["kind"] == "pending"
         messages = (await client.get(f"/api/books/{book_id}/meeting?limit=2000")).json()
         assert next(m for m in messages if m["id"] == response.json()["id"])["payload"]["outcome"]["kind"] == "later"

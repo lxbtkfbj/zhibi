@@ -1,5 +1,4 @@
 import type { LibraryConfig, LibraryItem } from '../api/library'
-import type { AuthorRequirement } from '../api/settings'
 import type { ChatOutcome } from '../api/types'
 
 export const REQUIREMENT_SCOPES = [['always', '一直有效'], ['next_chapter', '只管下一章'], ['this_volume', '只管这一卷'], ['next_volume', '只管下一卷']] as const
@@ -20,10 +19,9 @@ export async function sendChatFirst<T>(sendNote: () => Promise<T>, sendFeedback:
 
 export function typingVisible(value: ChatTyping, thread: string, now: number) { return value.thread === thread && value.on && now - value.at < 120000 }
 
-export function outcomeCopy(outcome: ChatOutcome, requirement?: AuthorRequirement) {
+export function outcomeCopy(outcome: ChatOutcome) {
   if (outcome.kind === 'requirement' || outcome.kind === 'to_job') {
-    if (!requirement) return { text: '这条要求已经删了', actions: [] }
-    return { text: outcome.kind === 'to_job' ? '已交给编辑部：做完手头这一步就照办' : `加了一条写作要求：「${requirement.text}」（${requirement.label}）`, actions: outcome.kind === 'to_job' ? [] : ['改一下'] }
+    return { text: outcome.memory ? `${outcome.undone ? '没记' : '记住了'}：${outcome.memory.summary}` : '', actions: [] }
   }
   if (outcome.kind === 'pending') return { text: '主编在看…', actions: [] }
   if (outcome.kind === 'working') return { text: `${outcome.text ?? '编辑部在做'}…`, actions: [] }

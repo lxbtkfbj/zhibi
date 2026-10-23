@@ -36,6 +36,7 @@ export interface BookContextValue {
   openSaves?: (saveId?: number) => void
   /** 新书页上有：打开待处理那一栏 */
   openPending?: () => void
+  openMemory?: (memoryId?: number) => void
   /** 新书页上有：群聊正在看哪一段对话；null 是最近聊的那一段 */
   chatConv?: string | null
   setChatConv?: (id: string | null) => void

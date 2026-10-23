@@ -1,15 +1,11 @@
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING
 
 from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, Timestamps, UUIDPk
-
-if TYPE_CHECKING:
-    from app.models.book import Book
 
 
 class AppSetting(Base):
@@ -31,7 +27,6 @@ class AuthorRequirement(UUIDPk, Timestamps, Base):
     chapter_index: Mapped[int | None] = mapped_column(Integer)
     volume_index: Mapped[int | None] = mapped_column(Integer)
     message_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("meeting_messages.id", ondelete="SET NULL"))
-    book: Mapped["Book"] = relationship(back_populates="author_requirements")
 
 
 class ChatThread(UUIDPk, Base):

@@ -705,6 +705,7 @@ export interface ChatOutcome {
   label?: string
   undone?: boolean
   snapshot?: Record<string, unknown>
+  memory?: import('./memories').MemoryReceipt
   requirement_id?: string
   target_type?: string
   target_id?: string

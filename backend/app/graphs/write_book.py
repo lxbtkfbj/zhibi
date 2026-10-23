@@ -554,7 +554,7 @@ async def segment_gate_node(
             if feedback:
                 await _requirement(session, d.book_id, feedback, f"segment:{number}")
             for flip in flips:
-                await _requirement(session, d.book_id, f"「{flip['topic']}」改成：{flip['choice']}", "answer")
+                await _requirement(session, d.book_id, f"「{flip['topic']}」改成：{flip['choice']}", "trial")
         if decision.get("action") == "revise":
             await session.commit()
             feedback = "\n".join(

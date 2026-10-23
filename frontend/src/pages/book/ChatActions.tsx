@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { get, patch, post } from '../../api/client'
+import { get, post } from '../../api/client'
 import { useLibrary, useRevertVersion } from '../../api/library'
-import { settingsKeys, useAuthorRequirements } from '../../api/settings'
+import { settingsKeys } from '../../api/settings'
 import type { ChangeDiff, MeetingMessage } from '../../api/types'
-import { RequirementDialog } from '../../components/RequirementDialog'
+import { MemoryNotice } from './MemoryNotice'
 import { ErrorText, TypingDots } from '../../components/ui'
-import { outcomeCopy, pendingOutcome, type RequirementScope } from '../../lib/chat'
+import { outcomeCopy, pendingOutcome } from '../../lib/chat'
 import { useBookContext } from './context'
 
 /** 聊天里每一处改动现在还能不能换回、再改（后来又被动过就不能了）：跟着整本书一起刷新 */
@@ -42,13 +42,11 @@ export function DiffBlock({ diff }: { diff: ChangeDiff }) {
 /** step：一句话拆成好几件事时，这是第几件（换回原来的、再改一版都只管那一件） */
 export function ChatOutcome({ message, result, step }: { message: MeetingMessage; result?: NonNullable<MeetingMessage["payload"]>["outcome"]; step?: number }) {
   const { bookId, manualNavigate, messages, openTarget, openSaves, openPending } = useBookContext()
-  const requirements = useAuthorRequirements(bookId)
   const library = useLibrary(bookId)
   const qc = useQueryClient()
   const rawOutcome = result ?? message.payload?.outcome
   const shown = !!rawOutcome?.diff?.length && !!rawOutcome?.change?.length
   const changes = useNoteChanges(bookId, shown)
-  const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<unknown>(null)
   const [now, setNow] = useState(() => Date.now())
@@ -59,14 +57,12 @@ export function ChatOutcome({ message, result, step }: { message: MeetingMessage
   const outcome = { ...pendingOutcome(rawOutcome, started, now) }
   if (outcome.kind === 'plan_apply') outcome.label = messages.find(m => m.id === outcome.plan_id)?.payload?.plan?.title
   if (result?.kind === 'failed') return <p className="mt-2 text-xs text-seal">没做成：{result.reason}</p>
-  const row = requirements.data?.find(item => item.id === outcome.requirement_id)
-  if ((outcome.kind === 'requirement' || outcome.kind === 'to_job') && !requirements.data && !shown) return null
-  const copy = outcomeCopy(outcome, row)
+  if ((outcome.kind === 'requirement' || outcome.kind === 'to_job') && outcome.memory) return <MemoryNotice receipt={outcome.memory} undone={outcome.undone} />
+  const copy = outcomeCopy(outcome)
   const gone = !!rawOutcome.undone
   const key = step === undefined ? String(message.id) : `${message.id}:${step}`
   // 还没问到的先当能用：真点了后台会再查一遍，后来改过就说
   const fresh = changes.data ? changes.data[key] !== false : true
-  const isRequirement = outcome.kind === 'requirement' || outcome.kind === 'to_job'
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ['workspace', bookId] })
     void qc.invalidateQueries({ queryKey: ['desk-v2-chapter', bookId] })
@@ -75,7 +71,6 @@ export function ChatOutcome({ message, result, step }: { message: MeetingMessage
   }
   const act = async (action: string) => {
     if (busy) return
-    if (action === '改一下') { setEditing(true); return }
     if (action === '去看存档') { openSaves?.(outcome.save_id); return }
     setBusy(true); setError(null)
     try {
@@ -99,24 +94,17 @@ export function ChatOutcome({ message, result, step }: { message: MeetingMessage
       void qc.invalidateQueries({ queryKey: ['workspace', bookId, 'note-changes'] })
     } finally { setBusy(false) }
   }
-  const save = async (text: string, scope: RequirementScope) => {
-    if (!row) return
-    await patch(`/requirements/${row.id}`, { text, scope })
-    await qc.invalidateQueries({ queryKey: settingsKeys.requirements(bookId) })
-  }
   const link = 'underline underline-offset-4 hover:text-chief disabled:cursor-not-allowed disabled:no-underline disabled:opacity-40'
-  const dialog = editing && row && <RequirementDialog initial={row.text} scope={row.scope === 'chapter' ? 'next_chapter' : row.scope === 'volume' ? 'this_volume' : 'always'} onClose={() => setEditing(false)} onSave={save} />
   if (shown) {
-    const what = isRequirement ? (outcome.kind === 'to_job' ? '交给了编辑部：加一条写作要求' : '加了一条写作要求') : copy.text
-    const canGo = !isRequirement && outcome.kind !== 'deleted' && !!outcome.target_type && !!outcome.target_id
+    const what = copy.text
+    const canGo = outcome.kind !== 'deleted' && !!outcome.target_type && !!outcome.target_id
     return (
       <div data-testid={`outcome-${message.id}`} className="mt-2 space-y-1.5 text-xs leading-relaxed text-ink-2">
-        <p>{gone ? `已换回原来的：${outcome.target_label ?? (isRequirement ? '这条写作要求删掉了' : '这一处')}` : what}</p>
+        <p>{gone ? `已换回原来的：${outcome.target_label ?? '这一处'}` : what}</p>
         {!gone && <div className="space-y-1.5">{(outcome.diff ?? []).map((diff, i) => <DiffBlock key={i} diff={diff} />)}</div>}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          {!gone && !isRequirement && !!rawOutcome.redo && <button type="button" disabled={busy || !fresh} onClick={() => void act('再改一版')} className={link} title="照你这句话把这一处重新改一遍">再改一版</button>}
-          {!gone && <button type="button" disabled={busy || !fresh} onClick={() => void act('换回原来的')} className={link} title={isRequirement ? '删掉这条要求' : '这一处换回改之前的样子'}>换回原来的</button>}
-          {!gone && isRequirement && row && <button type="button" disabled={busy} onClick={() => void act('改一下')} className={link}>改一下</button>}
+          {!gone && !!rawOutcome.redo && <button type="button" disabled={busy || !fresh} onClick={() => void act('再改一版')} className={link} title="照你这句话把这一处重新改一遍">再改一版</button>}
+          {!gone && <button type="button" disabled={busy || !fresh} onClick={() => void act('换回原来的')} className={link} title="这一处换回改之前的样子">换回原来的</button>}
           {canGo && <button type="button" disabled={busy} onClick={() => void act('去看看')} className={link}>去看看</button>}
           {busy && <TypingDots />}
         </div>
@@ -124,12 +112,11 @@ export function ChatOutcome({ message, result, step }: { message: MeetingMessage
           <p className="text-ink-3">这一处后来又改过；要退就去{openSaves ? <button type="button" onClick={() => openSaves()} className="mx-0.5 underline underline-offset-4 hover:text-chief">存档</button> : '存档'}</p>
         )}
         <ErrorText error={error} />
-        {dialog}
       </div>
     )
   }
   if (!copy.text && !copy.actions.length && outcome.kind !== 'pending' && outcome.kind !== 'working') return null
-  return <div data-testid={`outcome-${message.id}`} className="mt-2 space-y-1 text-xs leading-relaxed text-ink-2"><div className="flex flex-wrap items-center gap-x-2"><span>{gone ? '已换回原来的' : copy.text}</span>{(outcome.kind === 'pending' || outcome.kind === 'working') && <TypingDots />}{outcome.kind === 'working' && <span className="text-ink-3 tabular-nums">{Math.max(0, Math.round((now - Date.parse(outcome.since ?? started ?? '')) / 1000))} 秒</span>}{!gone && copy.actions.filter(action => action !== '去看存档' || openSaves).map(action => <button key={action} disabled={busy} className="underline underline-offset-4 hover:text-chief disabled:opacity-40" onClick={() => void act(action)}>{action}</button>)}</div><ErrorText error={error} />{outcome.kind === 'edit' && outcome.mode === 'options' && outcome.candidate_id && outcome.target_type && outcome.target_id && <ChatOptions bookId={bookId} candidateId={outcome.candidate_id} targetType={outcome.target_type} targetId={outcome.target_id} />}{dialog}</div>
+  return <div data-testid={`outcome-${message.id}`} className="mt-2 space-y-1 text-xs leading-relaxed text-ink-2"><div className="flex flex-wrap items-center gap-x-2"><span>{gone ? '已换回原来的' : copy.text}</span>{(outcome.kind === 'pending' || outcome.kind === 'working') && <TypingDots />}{outcome.kind === 'working' && <span className="text-ink-3 tabular-nums">{Math.max(0, Math.round((now - Date.parse(outcome.since ?? started ?? '')) / 1000))} 秒</span>}{!gone && copy.actions.filter(action => action !== '去看存档' || openSaves).map(action => <button key={action} disabled={busy} className="underline underline-offset-4 hover:text-chief disabled:opacity-40" onClick={() => void act(action)}>{action}</button>)}</div><ErrorText error={error} />{outcome.kind === 'edit' && outcome.mode === 'options' && outcome.candidate_id && outcome.target_type && outcome.target_id && <ChatOptions bookId={bookId} candidateId={outcome.candidate_id} targetType={outcome.target_type} targetId={outcome.target_id} />}</div>
 }
 
 type Candidate = { id: string; options: { label: string; text: string }[]; chosen: number | null }

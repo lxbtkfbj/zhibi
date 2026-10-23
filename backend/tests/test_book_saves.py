@@ -11,7 +11,6 @@ from app.config import get_settings
 from app.llm import demo
 from app.main import create_app
 from app.models import (
-    AuthorRequirement,
     Book,
     BookObject,
     BookSave,
@@ -20,6 +19,7 @@ from app.models import (
     Foreshadowing,
     Job,
     MeetingMessage,
+    Memory,
     NodeAnchor,
     PlotUnit,
     Relationship,
@@ -124,7 +124,7 @@ async def full_book(sessionmaker) -> uuid.UUID:
                     bible_changes={"characters": {"林凡": {"condition": ""}}},
                 ),
                 Chapter(book_id=b, volume_id=volume.id, unit_id=unit.id, index=2, title="入城", status="planned"),
-                AuthorRequirement(book_id=b, text="每章都要有打斗", source="manual"),
+                Memory(book_id=b, text="每章都要有打斗", source="manual"),
                 SettingSuggestion(
                     book_id=b, kind="chat", title="补上赵虎的身世", payload={"op": "note", "content": "x"}
                 ),
@@ -158,7 +158,7 @@ async def test_round_trip_restores_every_table(client, sessionmaker):
         ch2 = await session.scalar(select(Chapter).where(Chapter.book_id == b, Chapter.index == 2))
         ch2.content, ch2.status = "林凡进了城。" * 30, "final"
         session.add(Chapter(book_id=b, index=3, title="药铺", content="药香", status="final"))
-        req = await session.scalar(select(AuthorRequirement).where(AuthorRequirement.book_id == b))
+        req = await session.scalar(select(Memory).where(Memory.book_id == b))
         await session.delete(req)
         book = await session.get(Book, b)
         book.title, book.concept = "青阳帝尊", {"title": "青阳帝尊"}
@@ -213,10 +213,8 @@ async def test_restoring_an_old_save_moves_other_rules_into_requirements(client,
     assert res.status_code == 200, res.text
     async with sessionmaker() as session:
         assert (await session.get(Book, b)).settings["other_rules"] == ""
-        texts = await session.scalars(
-            select(AuthorRequirement.text).where(AuthorRequirement.book_id == b).order_by(AuthorRequirement.seq)
-        )
-        assert list(texts) == ["每章都要有打斗", "别写套话"]
+        texts = await session.scalars(select(Memory.text).where(Memory.book_id == b).order_by(Memory.seq))
+        assert list(texts) == ["每章都要有打斗"]
 
 
 async def test_same_state_is_not_saved_and_one_edit_adds_one_row(sessionmaker):

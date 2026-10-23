@@ -11,7 +11,7 @@ from psycopg import sql
 from sqlalchemy.dialects.postgresql import JSONB
 
 from alembic import command
-from app.models import AppSetting, AuthorRequirement, Book
+from app.models import AppSetting, Book, Memory
 from app.services.requirements import add_requirement, list_requirements
 
 
@@ -228,7 +228,7 @@ async def test_requirements_keep_insertion_order_when_wall_clock_moves_backwards
         assert [row.id for row in rows] == expected
         assert [row.text for row in rows] == ["先加的要求", "后加的要求"]
         book = await session.get(Book, book_id)
-        assert [row.id for row in book.author_requirements] == expected
+        assert [row.id for row in book.memories] == expected
         assert book.requirements == ["先加的要求", "后加的要求"]
 
 
@@ -242,17 +242,17 @@ async def test_equal_timestamps_and_deduplication_do_not_change_existing_sequenc
         first.created_at = second.created_at = datetime(2020, 1, 1, tzinfo=UTC)
         await session.commit()
         book_id = book.id
-        expected = [(first.id, first.seq, "manual"), (second.id, second.seq, "private:writer")]
+        expected = [(first.id, first.seq, "开书时答的"), (second.id, second.seq, "聊天里记的")]
         duplicate = await add_requirement(session, book.id, "  保留第一条  ", source="answer")
         await session.commit()
         assert duplicate.id == first.id
         assert duplicate.seq == first.seq
-        assert duplicate.source == "manual"
+        assert duplicate.source == "开书时答的"
 
     async with sessionmaker() as session:
         rows = await list_requirements(session, book_id)
         assert [(row.id, row.seq, row.source) for row in rows] == expected
-        assert len(list(await session.scalars(sa.select(AuthorRequirement)))) == 2
+        assert len(list(await session.scalars(sa.select(Memory)))) == 2
         book = await session.get(Book, book_id)
         assert book.requirements == ["保留第一条", "保留第二条"]
         assert await session.get(AppSetting, f"requirement_tombstones:{book_id}") is None

@@ -96,8 +96,8 @@ async def test_blank_book_moves_default_rules_into_writing_requirements(client, 
     defaults = await client.put("/api/settings/new-book-defaults", json={"other_rules": "别写套话\n\n 主角说话要贫 "})
     assert defaults.status_code == 200
     book = (await client.post("/api/books", json={"start_setup": False})).json()["book"]
-    rows = (await client.get(f"/api/books/{book['id']}/requirements")).json()
-    assert [(row["text"], row["label"]) for row in rows] == [("别写套话", "一直有效"), ("主角说话要贫", "一直有效")]
+    rows = (await client.get(f"/api/books/{book['id']}/memories")).json()
+    assert [(row["detail"], row["label"]) for row in rows] == [("别写套话", "一直有效"), ("主角说话要贫", "一直有效")]
     settings = (await client.get(f"/api/books/{book['id']}/settings")).json()
     assert settings["settings"]["other_rules"] == "" and "别写套话" not in settings["rules_text"]
 

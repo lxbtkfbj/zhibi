@@ -15,13 +15,13 @@ from app.llm import demo
 from app.llm.router import LLMRouter, ToolCall, ToolsUnsupported
 from app.main import create_app
 from app.models import (
-    AuthorRequirement,
     Book,
     BookSave,
     Chapter,
     Character,
     LlmCall,
     MeetingMessage,
+    Memory,
     SettingSuggestion,
     Volume,
 )
@@ -101,7 +101,7 @@ async def snapshot(sessionmaker, bid):
                     )
                 ).mappings()
             ]
-            for model in (Book, Volume, Chapter, Character, AuthorRequirement, SettingSuggestion, BookSave)
+            for model in (Book, Volume, Chapter, Character, Memory, SettingSuggestion, BookSave)
         }
 
 

@@ -10,7 +10,7 @@ import { useBookContext } from './context'
 
 /** 每条前面的类别小标签：落在哪里、改谁。 */
 function planItemTag(item: PlanItem) {
-  if (item.where === '写作要求') return `写作要求 · ${item.scope}`
+  if (item.where === '写作要求') return `记忆 · 写书时照做 · ${item.scope}`
   // 定调那一段话，新书页上叫「简介」
   if (item.where === '定调') return '简介'
   if (item.category) return `新建 · ${item.category}`

@@ -108,7 +108,7 @@ async def test_open_group_edit_undo_requirement_question_and_redo(flow, sessionm
     assert len(await flow("GET", f"/books/{bid}/meeting")) == before
     await flow("POST", f"/jobs/{jid}/pitches", {"action": "redo", "feedback": "都不满意，再来三个"})
     assert (await flow("GET", f"/jobs/{jid}"))["pending"]["round"] == 2
-    assert await flow("GET", f"/books/{bid}/requirements")
+    assert await flow("GET", f"/books/{bid}/memories")
 
 
 async def test_open_plan_applies_items_not_feedback_and_all_can_undo(flow, sessionmaker, redis):
@@ -140,7 +140,7 @@ async def test_open_plan_applies_items_not_feedback_and_all_can_undo(flow, sessi
     await flow("POST", f"/versions/{results[0]['revert_version_id']}/revert")
     # 第五步第三批起方案卡照办的每一条和聊天里改的一样：新建的用「换回原来的」删掉
     await flow("POST", f"/books/{bid}/notes/{card['id']}/revert", {"step": 1})
-    await flow("DELETE", f"/requirements/{results[3]['requirement_id']}")
+    await flow("DELETE", f"/books/{bid}/memories/{results[3]['requirement_id']}")
     assert not (await flow("GET", f"/books/{bid}/library"))["characters"]
     # 没有定调/设定成功落地时，不发补齐邀请。
     another = await plan_for(sessionmaker, redis, uuid.UUID(bid), [{"where": "写作要求", "change": "不要拖沓"}])
@@ -230,9 +230,10 @@ async def test_fill_validation_and_exact_story_live_state_not_auto_write(flow, s
         messages[-1]["content"]
         == f"开书稿齐了：定调、设定 {total} 条、大纲排到第一个单元的章纲。哪里不对，直接在群聊里说，或者在页面上改；满意了点「开写」。"
     )
-    requirements = await flow("GET", f"/books/{bid}/requirements")
+    requirements = await flow("GET", f"/books/{bid}/memories")
     assert any(
-        r["text"] == "开书不挑故事方向，用已经写好的定调和设定补齐。" and r["source"] == "answer" for r in requirements
+        r["detail"] == "开书不挑故事方向，用已经写好的定调和设定补齐。" and r["source"] == "开书时答的"
+        for r in requirements
     )
     assert any(m["content"] == "不挑方向了，用现在的定调和设定补齐开书稿。" for m in messages)
     async with sessionmaker() as session:

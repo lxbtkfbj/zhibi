@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 
 from app.graphs import write_book as graph
 from app.llm import demo
-from app.models import AuthorRequirement, Book, Chapter, Character, Job, LlmCall, MeetingMessage, StoryNode, Volume
+from app.models import Book, Chapter, Character, Job, LlmCall, MeetingMessage, Memory, StoryNode, Volume
 from app.services.job_runner import execute_job
 
 
@@ -191,10 +191,9 @@ async def test_revision_repeats_both_steps_with_current_version_and_flips(sessio
         assert "这一篇不要赶路" in prompt and "把「目标」改成「先救出证人」" in prompt
     async with sessionmaker() as session:
         requirements = {
-            (row.text, row.source)
-            for row in await session.scalars(select(AuthorRequirement).where(AuthorRequirement.book_id == book_id))
+            (row.text, row.source) for row in await session.scalars(select(Memory).where(Memory.book_id == book_id))
         }
-        assert requirements == {("这一篇不要赶路", "segment:2"), ("「目标」改成：先救出证人", "answer")}
+        assert requirements == {("这一篇不要赶路", "看稿时说的"), ("「目标」改成：先救出证人", "看稿时说的")}
     await execute_job(job_id, {"action": "delegate"})
     assert (await get_job(sessionmaker, job_id)).status == "succeeded"
     # 下一篇则采用新设置，自动通过且手动规划任务仍然不开始写正文。

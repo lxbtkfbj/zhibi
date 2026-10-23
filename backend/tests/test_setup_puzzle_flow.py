@@ -151,8 +151,8 @@ async def test_redo_exact_previous_latest_round_title_and_requirements(flow, mon
     await flow("POST", f"/jobs/{jid}/pitches", {"action": "pick", "index": 1, "title": "作者自己起名", "length": 300})
     concept = (await flow("GET", f"/books/{bid}"))["concept"]
     assert concept["title"] == "作者自己起名" and concept["target_length"] == 300
-    requirements = await flow("GET", f"/books/{bid}/requirements")
-    assert {"保留经营", "加入追凶"} <= {row["text"] for row in requirements}
+    requirements = await flow("GET", f"/books/{bid}/memories")
+    assert {"保留经营", "加入追凶"} <= {row["detail"] for row in requirements}
 
 
 async def test_oneshot_finishes_without_piece_waits(flow):
@@ -293,24 +293,28 @@ async def test_concept_revision_uses_live_title_and_never_revives_old_title_requ
     bid, jid = created["book"]["id"], created["job"]["id"]
     await flow("POST", f"/jobs/{jid}/pitches", {"action": "pick", "index": 1, "title": "最初选名", "length": 300})
     assert (await flow("GET", f"/books/{bid}"))["concept"]["title"] == "最初选名"
-    rows = await flow("GET", f"/books/{bid}/requirements")
-    title_row = next(row for row in rows if row["text"] == "书名用《最初选名》")
+    rows = await flow("GET", f"/books/{bid}/memories")
+    title_row = next(row for row in rows if row["detail"] == "书名用《最初选名》")
     if change == "saved_title":
         await flow("PATCH", f"/books/{bid}", {"title": "作者手改名"})
         expected = "作者手改名"
     elif change == "deleted_requirement":
-        await flow("DELETE", f"/requirements/{title_row['id']}")
+        await flow("DELETE", f"/books/{bid}/memories/{title_row['id']}")
         expected = "最初选名"
     else:
-        await flow("PATCH", f"/requirements/{title_row['id']}", {"text": "书名用《要求里新书名》"})
+        await flow(
+            "PATCH",
+            f"/books/{bid}/memories/{title_row['id']}",
+            {"summary": "书名用《要求里新书名》", "detail": "书名用《要求里新书名》"},
+        )
         model_title = "要求里新书名"
         expected = "最初选名"
     await flow("POST", f"/jobs/{jid}/piece", {"action": "revise", "feedback": "只把故事写得更紧凑"})
     book = await flow("GET", f"/books/{bid}")
     assert book["title"] == book["concept"]["title"] == expected
     assert len(blocks_seen) == 1  # 合成确认后只局部改故事，不重生成整份定调。
-    rows = await flow("GET", f"/books/{bid}/requirements")
+    rows = await flow("GET", f"/books/{bid}/memories")
     if change != "saved_title":
-        assert "书名用《最初选名》" not in {row["text"] for row in rows}
+        assert "书名用《最初选名》" not in {row["detail"] for row in rows}
     if change == "edited_requirement":
-        assert "书名用《要求里新书名》" in {row["text"] for row in rows}
+        assert "书名用《要求里新书名》" in {row["detail"] for row in rows}

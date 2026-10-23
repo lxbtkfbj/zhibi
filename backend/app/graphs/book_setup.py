@@ -289,7 +289,7 @@ async def pitches_gate_node(state: SetupState, runtime: Runtime[GraphDeps]) -> C
             raise ValueError("请写一句对故事方向的意见")
         if not decision.get("requirement_saved"):
             async with d.sessionmaker() as session:
-                await add_requirement(session, d.book_id, feedback, "note")
+                await add_requirement(session, d.book_id, feedback, "trial")
                 await session.commit()
         previous = (
             "【上一轮的故事方向】\n"
@@ -826,9 +826,9 @@ async def piece_gate_node(
     if not decision.get("requirement_saved"):
         async with d.sessionmaker() as session:
             if feedback:
-                await add_requirement(session, d.book_id, feedback, "note")
+                await add_requirement(session, d.book_id, feedback, "trial")
             for flip in flips:
-                await add_requirement(session, d.book_id, f"「{flip['topic']}」改成：{flip['choice']}", "answer")
+                await add_requirement(session, d.book_id, f"「{flip['topic']}」改成：{flip['choice']}", "trial")
             await session.commit()
     if state["piece"] == "settings":
         concept_flips = flips if decision.get("decision_piece") == "concept" else []

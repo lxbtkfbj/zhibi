@@ -3,6 +3,7 @@
  *  编辑部干活的进度压成一行：正在做的只在最底下留一行跟着变；做完的一行小字带「去看」；等拍板的一行「……等你看 · 去看」；
  *  大块产出只放在页面上。 */
 
+import { isMemoryNote } from '../../lib/memory'
 import { AlertTriangle } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { post } from '../../api/client'
@@ -80,7 +81,7 @@ function outputTarget(m: MeetingMessage, outline: Outline | undefined, go: Go | 
 }
 
 /** 这句话照办时改了书的几处（换回了的不算） */
-const CHANGED = new Set(['edit', 'fill', 'created', 'outline', 'requirement', 'deleted'])
+const CHANGED = new Set(['edit', 'fill', 'created', 'outline', 'deleted'])
 function changedPlaces(m: MeetingMessage): number {
   const list: ChatOutcome[] = m.kind === 'plan' ? m.payload?.results ?? [] : m.payload?.steps ?? (m.payload?.outcome ? [m.payload.outcome] : [])
   return list.filter((o) => CHANGED.has(o.kind) && !o.undone && !(o.kind === 'edit' && o.mode === 'options') && !(o.kind === 'fill' && !o.filled?.length)).length
@@ -100,7 +101,7 @@ function toChat(messages: MeetingMessage[], outline: Outline | undefined, go: Go
   let authorLine: { job: string; index: number } | null = null
   for (const m of messages) {
     const id = String(m.id)
-    if (m.job_id && m.kind !== 'error' && !(m.speaker === 'author' && m.kind === 'decision' && m.content.startsWith('【和作者商量定的方案'))) {
+    if (m.job_id && m.kind !== 'error' && !isMemoryNote(m) && !(m.speaker === 'author' && m.kind === 'decision' && m.content.startsWith('【和作者商量定的方案'))) {
       // 编辑部干活：进度不占聊天（最底下那一行跟着变），做完的、交代的一行小字
       if (m.kind === 'status') continue
       if (m.kind === 'artifact') {

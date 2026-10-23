@@ -22,7 +22,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.library_config import CHARACTER_CATEGORY
 from app.models import (
-    AuthorRequirement,
     Book,
     BookObject,
     BookSave,
@@ -43,7 +42,6 @@ from app.models import (
     Volume,
     WorldEntry,
 )
-from app.services.requirements import absorb_other_rules
 
 log = logging.getLogger(__name__)
 
@@ -60,7 +58,6 @@ TABLES = [
     Chapter,
     SettingCategory,
     SettingSuggestion,
-    AuthorRequirement,
     Relationship,
     NodeAnchor,
 ]
@@ -75,7 +72,7 @@ ACTOR_NAMES = {
     "reviewer": "审稿",
     "system": "编辑部",
 }
-GROUPS = ("简介", "设定", "大纲", "正文", "写作要求", "待处理", "编辑部记的")
+GROUPS = ("简介", "设定", "大纲", "正文", "待处理", "编辑部记的")
 TABLE_GROUP = {
     "books": "简介",
     "characters": "设定",
@@ -86,7 +83,6 @@ TABLE_GROUP = {
     "volumes": "大纲",
     "plot_units": "大纲",
     "chapters": "大纲",
-    "author_requirements": "写作要求",
     "setting_suggestions": "待处理",
     "foreshadowings": "编辑部记的",
     "secrets": "编辑部记的",
@@ -117,6 +113,8 @@ def digest(data: Any) -> str:
 def row_data(model, mapping) -> dict:
     skip = BOOK_SKIP if model is Book else ("updated_at",)
     # 没置顶的不记这一栏：加这一栏以前存的档，不会因为它对不上而算成每个人都改了
+    if model is Book and "settings" in mapping:
+        mapping = {**mapping, "settings": {k: v for k, v in (mapping["settings"] or {}).items() if k != "other_rules"}}
     return {
         key: plain(value)
         for key, value in mapping.items()
@@ -216,7 +214,7 @@ async def store_objects(session: AsyncSession, book_id: uuid.UUID, snap: Snapsho
 
 async def manifests(session: AsyncSession, book_id: uuid.UUID, tree: dict) -> dict[str, dict[str, str]]:
     found = await load_objects(session, book_id, tree.values())
-    return {name: dict(found.get(h) or {}) for name, h in tree.items()}
+    return {name: dict(found.get(h) or {}) for name, h in tree.items() if name == "books" or name in MODELS}
 
 
 def row_hashes_with_text(snap: Snapshot, table: str, row_hash: str) -> list[str]:
@@ -573,8 +571,8 @@ def parts(table: str, data: dict | None, texts=None) -> dict[str, str]:
     for key, value in data.items():
         if key in ("id", "book_id", "created_at"):
             continue
-        if table == "author_requirements" and key == "seq":
-            continue
+        if table == "books" and key == "settings" and isinstance(value, dict):
+            value = {name: item for name, item in value.items() if name != "other_rules"}
         if table == "characters" and key == "extra":
             for name, item in (value or {}).items():
                 out[name] = text_of(item)
@@ -814,19 +812,6 @@ async def _put_rows(session: AsyncSession, model, rows: list[dict], texts: dict)
             if row.get("parent_id"):
                 parents[row["id"]] = row["parent_id"]
             row["parent_id"] = None
-    if model is AuthorRequirement:
-        # Pre-sequence saves must keep the old visible order, not manifest order.
-        if all("seq" not in row for row in values):
-            values.sort(key=lambda row: (row["created_at"], row["id"]))
-        # 记这条要求的那句话要是不在了，就不再指着它
-        ids = {row["message_id"] for row in values if row.get("message_id")}
-        if ids:
-            from app.models import MeetingMessage
-
-            alive = set(await session.scalars(select(MeetingMessage.id).where(MeetingMessage.id.in_(ids))))
-            for row in values:
-                if row.get("message_id") and row["message_id"] not in alive:
-                    row["message_id"] = None
     for start in range(0, len(values), 200):
         await session.execute(insert(model.__table__), values[start : start + 200])
     for row_id, parent in parents.items():
@@ -877,11 +862,12 @@ async def restore(session: AsyncSession, book_id: uuid.UUID, save_id: int) -> tu
         await _put_rows(session, model, [data[h] for h in rows.get(model.__tablename__, {}).values()], texts)
     if book_data:
         values = _values(Book, {k: v for k, v in book_data.items() if k not in BOOK_SKIP}, {})
+        if "settings" in values:
+            values["settings"] = {**values["settings"], "other_rules": ""}
         await session.execute(
             update(Book.__table__).where(Book.__table__.c.id == book_id).values(**values, updated_at=func.now())
         )
-        # 2026-10-19 以前的存档，本书设置里还带着「其他规矩」：挪进写作要求，和新的一样
-        await absorb_other_rules(session, await session.get(Book, book_id, populate_existing=True))
+
     # 停在半路能「接着做」的活作废：不然接着做会照着旧进度往下写
     await session.execute(
         update(Job)
@@ -1074,6 +1060,8 @@ def readable_diff(before: Snapshot, after: Snapshot, rows: list[dict]) -> list[d
 async def rows_fresh(session: AsyncSession, rows: list[dict]) -> bool:
     """这几行现在还是改完时的样子：后来没被作者手改、写章、聊天里又改、回到存档动过。"""
     for row in rows:
+        if row["table"] != "books" and row["table"] not in MODELS:
+            continue
         if await current_row_hash(session, row["table"], row["id"]) != row["after"]:
             return False
     return True
@@ -1081,6 +1069,7 @@ async def rows_fresh(session: AsyncSession, rows: list[dict]) -> bool:
 
 async def put_back(session: AsyncSession, book_id: uuid.UUID, rows: list[dict]) -> None:
     """只把这几行换回改之前的样子（不是整本）：新建的删掉，改过的换回，删掉的加回来。"""
+    rows = [row for row in rows if row["table"] == "books" or row["table"] in MODELS]
     data = await load_objects(session, book_id, [row["before"] for row in rows if row["before"]])
     texts = await load_objects(
         session,

@@ -18,7 +18,6 @@ from app.agents import schemas as s
 from app.config import get_settings
 from app.llm import demo_setup
 from app.models import (
-    AuthorRequirement,
     Book,
     Chapter,
     Character,
@@ -26,6 +25,7 @@ from app.models import (
     LlmCall,
     LlmProfile,
     MeetingMessage,
+    Memory,
     PlotUnit,
     RoleAssignment,
     StoryNode,
@@ -164,7 +164,7 @@ async def test_pending_immediate_and_ordered_routing(sessionmaker, redis, monkey
             await session.scalars(select(MeetingMessage).where(MeetingMessage.id.in_(ids)).order_by(MeetingMessage.id))
         )
         assert all(r.job_id and r.payload["outcome"]["kind"] == "to_job" for r in rows)
-        requirements = list(await session.scalars(select(AuthorRequirement).order_by(AuthorRequirement.seq)))
+        requirements = list(await session.scalars(select(Memory).order_by(Memory.seq)))
         assert [r.message_id for r in requirements] == ids
     assert any(e[1]["event"] == "message_update" for e in await redis.xrange(f"zhibi:events:{bid}"))
 
@@ -190,9 +190,9 @@ async def test_routing_state_changed_too_late_failed_cleanup(client, sessionmake
 
     monkeypatch.setattr(group_notes, "call_model", model)
     result = await client.post(f"/api/books/{bid}/notes", json={"content": "下一章快一点"})
-    assert (await final_message(client, bid, result.json()["id"]))["payload"]["outcome"]["kind"] == "too_late"
+    assert (await final_message(client, bid, result.json()["id"]))["payload"]["outcome"]["kind"] == "requirement"
     async with sessionmaker() as session:
-        assert not list(await session.scalars(select(AuthorRequirement)))
+        assert [r.summary for r in await session.scalars(select(Memory))] == ["下一章快一点"]
         job = await session.scalar(select(Job))
         job.status = "succeeded"
         await session.commit()
@@ -233,7 +233,7 @@ async def test_plan_generation_supersede_and_accepts_without_plan(client, sessio
     cards = [m for m in rows if m["kind"] == "plan"]
     assert [m["payload"]["status"] for m in cards] == ["superseded", "open"]
     async with sessionmaker() as session:
-        assert not list(await session.scalars(select(AuthorRequirement)))
+        assert not list(await session.scalars(select(Memory)))
         assert len([m for m in await dialogue(session, bid, thread or "group") if m.kind == "plan"]) == 2
     await client.post(f"/api/books/{bid}/chat/{thread or 'group'}/reset")
     await client.post(f"/api/books/{bid}/notes", json={"content": "总结一下新想法", **body})
@@ -247,10 +247,10 @@ async def test_waiting_after_chat_makes_plan_not_feedback(client, sessionmaker):
     response = await client.post(f"/api/books/{bid}/notes", json={"content": "就用方向一"})
     assert response.status_code == 201, response.text
     final = await final_message(client, bid, response.json()["id"])
-    assert final["payload"]["outcome"]["kind"] == "plan_made"
+    assert final["payload"]["outcome"]["kind"] == "requirement"
     async with sessionmaker() as session:
         assert (await session.scalar(select(Job))).status == "waiting_author"
-        assert not list(await session.scalars(select(AuthorRequirement)))
+        assert [r.summary for r in await session.scalars(select(Memory))] == ["就用方向一"]
 
 
 @pytest.mark.parametrize(
@@ -297,8 +297,8 @@ async def test_plan_feedback_full_and_only_requirements_persist(
     result = (await final_message(client, bid, card["id"]))["payload"]
     assert result["status"] == "applied" and result["results"][0]["label"] == f"已交给编辑部：{label}"
     async with sessionmaker() as session:
-        rows = list(await session.scalars(select(AuthorRequirement)))
-        assert [(r.text, r.source, r.scope) for r in rows] == [("只影响下一章", "plan", "chapter")]
+        rows = list(await session.scalars(select(Memory)))
+        assert [(r.text, r.source, r.scope) for r in rows] == [("只影响下一章", "方案卡", "chapter")]
     assert (await client.post(f"/api/plans/{card['id']}/apply")).status_code == 409
 
 
@@ -341,9 +341,14 @@ async def test_apply_each_kind_and_undo_created_guards(client, sessionmaker, red
         "outline",
         "requirement",
     ], results
-    assert all(r["diff"] and r["change"] for r in results)
+    assert all(r["diff"] and r["change"] for r in results if r["kind"] != "requirement")
+    assert results[8]["memory"]["summary"]
+    assert "change" not in results[8]
     # 从后往前换回：结局和简介都在书那一行里，先换回后改的
-    for step in (8, 7, 6, 5, 4, 2, 1, 0):
+    memory = results[8]["memory"]
+    response = await client.post(f"/api/books/{bid}/memories/{memory['id']}/undo", json={"version": memory["version"]})
+    assert response.status_code == 200
+    for step in (7, 6, 5, 4, 2, 1, 0):
         response = await client.post(f"/api/books/{bid}/notes/{card['id']}/revert", json={"step": step})
         assert response.status_code == 200, (step, response.text)
     async with sessionmaker() as session:
@@ -484,7 +489,7 @@ async def test_legacy_prefill_start_only_here_and_chat_does_not_resume(flow, mod
     bid, jid = created["book"]["id"], created["job"]["id"]
     await flow("POST", f"/books/{bid}/notes", {"content": "下一章快一点"})
     assert (await flow("GET", f"/jobs/{jid}"))["pending"]["kind"] == "setup_prefill"
-    assert (await flow("GET", f"/books/{bid}/requirements"))[-1]["text"] == "下一章快一点"
+    assert (await flow("GET", f"/books/{bid}/memories"))[-1]["detail"] == "下一章快一点"
     await flow("POST", f"/jobs/{jid}/pitches", {"action": "start"})
     response = await flow.client.post(f"/api/jobs/{jid}/pitches", json={"action": "start"})
     assert response.status_code == 422
@@ -546,8 +551,8 @@ async def test_legacy_prefill_combined_and_existing_text(flow, sessionmaker):
     changed_library = await flow("GET", f"/books/{bid}/library")
     # 2026-10-19 起定位不给编辑部看了：「师父」只能从卡的内容里认，演示模型认不出，这一句只记成要求
     assert all("已按要求修改" not in c["background"] for c in changed_library["characters"])
-    req = await flow("GET", f"/books/{bid}/requirements")
-    assert any("大纲卷首要快" in r["text"] for r in req)
+    req = await flow("GET", f"/books/{bid}/memories")
+    assert any("大纲卷首要快" in r["detail"] for r in req)
     await flow("POST", f"/jobs/{jid}/piece", {"action": "confirm", "piece": "settings"})
     book = await flow("GET", f"/books/{bid}")
     assert book["setup_progress"]["pieces"]["concept"] == book["setup_progress"]["pieces"]["settings"] == "confirmed"

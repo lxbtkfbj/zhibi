@@ -93,6 +93,7 @@ export function useMeeting(bookId: string) {
       }
     })
     // 存了一档、回到了某一档：存档那一栏重新读
+    source.addEventListener('memories', () => { void qc.invalidateQueries({ queryKey: ['memories'] }) })
     source.addEventListener('saves', () => { void qc.invalidateQueries({ queryKey: ['saves', bookId] }) })
     source.addEventListener('teardown_saved', () => {
       if (isTeardown() && teardownGate('saved') === 'parts') refreshTeardownParts()

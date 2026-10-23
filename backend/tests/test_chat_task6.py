@@ -21,7 +21,6 @@ from app.config import get_settings
 from app.llm import demo
 from app.main import create_app
 from app.models import (
-    AuthorRequirement,
     Book,
     Chapter,
     Character,
@@ -29,6 +28,7 @@ from app.models import (
     Foreshadowing,
     Job,
     MeetingMessage,
+    Memory,
     PlotUnit,
     Secret,
     SettingSuggestion,
@@ -108,7 +108,7 @@ async def test_private_is_read_only_in_every_state(client, sessionmaker, state, 
     assert r.status_code == 201, r.text
     assert r.json()["job_id"] is None and r.json()["payload"]["outcome"] == {"kind": "chat"}
     async with sessionmaker() as session:
-        assert not list(await session.scalars(select(AuthorRequirement)))
+        assert not list(await session.scalars(select(Memory)))
         assert (await session.scalar(select(WorldEntry))).name == "境界"
         reply = await session.scalar(select(MeetingMessage).where(MeetingMessage.speaker == role))
         assert reply.payload["reply_to"] == [r.json()["id"]]
@@ -131,7 +131,7 @@ async def test_group_questions_never_become_feedback(client, sessionmaker, state
     assert r.status_code == 201, r.text
     assert r.json()["payload"]["outcome"]["kind"] == "chat" and r.json()["job_id"] is None
     async with sessionmaker() as session:
-        assert not list(await session.scalars(select(AuthorRequirement)))
+        assert not list(await session.scalars(select(Memory)))
         reply = await session.scalar(select(MeetingMessage).where(MeetingMessage.speaker == "lorekeeper"))
         assert "楚风" in reply.content
         assert not (reply.payload or {}).get("thread")
@@ -144,10 +144,17 @@ async def test_group_questions_never_become_feedback(client, sessionmaker, state
 async def test_waiting_changes_use_feedback_and_do_not_store(client, sessionmaker, text):
     bid = await seed(sessionmaker, "waiting_author")
     r = await client.post(f"/api/books/{bid}/notes", json={"content": text})
-    assert r.status_code == 409 and r.json()["detail"]["code"] == "use_feedback"
-    async with sessionmaker() as session:
-        assert not list(await session.scalars(select(MeetingMessage)))
-        assert not list(await session.scalars(select(AuthorRequirement)))
+    if text == "下一章节奏快一点":
+        assert r.status_code == 201
+        final = await final_message(client, bid, r.json()["id"])
+        assert final["payload"]["outcome"]["kind"] == "requirement"
+        async with sessionmaker() as session:
+            assert (await session.scalar(select(Memory))).source == "聊天里记的"
+    else:
+        assert r.status_code == 409 and r.json()["detail"]["code"] == "use_feedback"
+        async with sessionmaker() as session:
+            assert not list(await session.scalars(select(MeetingMessage)))
+            assert not list(await session.scalars(select(Memory)))
 
 
 @pytest.mark.parametrize(
@@ -166,7 +173,7 @@ async def test_group_requirement_saved_once(client, sessionmaker, state, kind, o
     assert r.json()["payload"]["outcome"]["kind"] == "pending"
     assert (await final_message(client, bid, r.json()["id"]))["payload"]["outcome"]["kind"] == outcome
     async with sessionmaker() as session:
-        row = await session.scalar(select(AuthorRequirement))
+        row = await session.scalar(select(Memory))
         assert row.scope == "chapter" and row.chapter_index == 1 and row.message_id == r.json()["id"]
 
 
@@ -224,29 +231,30 @@ async def test_scopes_expiry_and_no_prompt_leak(client, sessionmaker):
         await add_requirement(session, bid, "下一章", scope="next_chapter")
         await session.commit()
         assert next(r for r in await active_requirements(session, bid) if r.text == "下一章").chapter_index == 3
-    rows = (await client.get(f"/api/books/{bid}/requirements")).json()
-    assert len(rows) == 4 and any(r["label"] == "已过期 · 只管第 1 卷" for r in rows)
+    rows = (await client.get(f"/api/books/{bid}/memories")).json()
+    assert len(rows) == 4 and any(not r["active"] and r["label"] == "只管第 1 卷" for r in rows)
 
 
 async def test_promote_chat_tidy_apply_and_conclusion(client, sessionmaker):
     bid = await seed(sessionmaker)
     msg = (await client.post(f"/api/books/{bid}/notes", json={"content": "楚风现在什么境界？"})).json()
     added = await client.post(
-        f"/api/books/{bid}/requirements", json={"text": "主角是不是太弱了？", "message_id": msg["id"]}
+        f"/api/books/{bid}/memories",
+        json={"book_id": str(bid), "summary": "主角是不是太弱了？", "message_id": msg["id"]},
     )
     assert added.status_code == 201, added.text
-    await client.post(f"/api/books/{bid}/requirements", json={"text": "对主编：节奏快一点"})
-    tidy = (await client.post(f"/api/books/{bid}/requirements/tidy")).json()["items"]
+    await client.post(f"/api/books/{bid}/memories", json={"book_id": str(bid), "summary": "对主编：节奏快一点"})
+    tidy = (await client.post(f"/api/books/{bid}/memories/tidy")).json()["items"]
     assert [r["action"] for r in tidy] == ["删掉", "改写"]
-    rows = (await client.get(f"/api/books/{bid}/requirements")).json()
+    rows = (await client.get(f"/api/books/{bid}/memories")).json()
     assert len(rows) == 2
     result = await client.post(
-        f"/api/books/{bid}/requirements/apply",
+        f"/api/books/{bid}/memories/apply",
         json={"delete": [tidy[0]["id"]], "rewrite": [{"id": tidy[1]["id"], "text": tidy[1]["rewrite"]}]},
     )
-    assert [r["text"] for r in result.json()] == ["节奏快一点"]
+    assert [r["detail"] for r in result.json()] == ["节奏快一点"]
     history = (await client.get(f"/api/books/{bid}/meeting")).json()
-    assert history[0]["payload"]["outcome"]["kind"] == "requirement"
+    assert history[0]["payload"]["outcome"]["kind"] == "chat"  # 手工记忆不改作者那句话的分流结果。
     await client.post(f"/api/books/{bid}/notes", json={"content": "就用这个写法", "to": "chief"})
     result = await client.post(f"/api/books/{bid}/chat/chief/conclude", json={"mode": "requirement"})
     assert result.status_code == 404  # 补丁 1 退役旧结论入口，统一走方案卡。
@@ -316,7 +324,7 @@ async def test_classification_failure_not_feedback(client, sessionmaker, monkeyp
     assert result.status_code == 502
     async with sessionmaker() as session:
         assert not list(await session.scalars(select(MeetingMessage)))
-        assert not list(await session.scalars(select(AuthorRequirement)))
+        assert not list(await session.scalars(select(Memory)))
 
 
 async def test_reply_error_and_summary_failure_dont_write_requirements(client, sessionmaker, monkeypatch):
@@ -464,13 +472,13 @@ async def test_tidy_missing_items_keep_and_false_conclusion(client, sessionmaker
     from app.services import chat_plans
 
     bid = await seed(sessionmaker)
-    await client.post(f"/api/books/{bid}/requirements", json={"text": "不能删"})
+    await client.post(f"/api/books/{bid}/memories", json={"book_id": str(bid), "summary": "不能删"})
 
     async def missing(*args, **kwargs):
         return s.RequirementsTidy(items=[])
 
     monkeypatch.setattr(chat, "model", missing)
-    response = await client.post(f"/api/books/{bid}/requirements/tidy")
+    response = await client.post(f"/api/books/{bid}/memories/tidy")
     assert response.json()["items"][0]["action"] == "保留"
 
     async def no_plan(*args, **kwargs):
@@ -650,7 +658,7 @@ async def test_private_receipt_after_long_history_and_scope_only_patch(client, s
     response = await client.post(f"/api/books/{bid}/chat/chief/receipt", json={"content": "第一个单元换个对手"})
     assert response.status_code == 200, response.text
     row = (await final_message(client, bid, message["id"]))["payload"]["outcome"]["requirement_id"]
-    response = await client.patch(f"/api/requirements/{row}", json={"scope": "next_chapter"})
+    response = await client.patch(f"/api/books/{bid}/memories/{row}", json={"scope": "next_chapter"})
     assert response.status_code == 200 and response.json()["chapter_index"] == 1
 
 

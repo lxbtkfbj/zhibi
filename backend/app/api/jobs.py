@@ -108,7 +108,7 @@ async def decide(
             if kind == "volume_review"
             else f"unit:{(job.pending or {}).get('unit_id')}"
             if kind == "chapters_review"
-            else "note"
+            else "trial"
         )
         await add_requirement(session, job.book_id, feedback, source)
     content = APPROVE_TEXT[kind] if body.action == "approve" else feedback
@@ -175,7 +175,7 @@ async def feedback_to_job(session, redis, job, feedback, *, remember=True):
             if kind == "chapters_review"
             else f"segment:{job.pending.get('number', 2)}"
             if kind == "segment_review"
-            else "note"
+            else "trial"
         )
         await add_requirement(session, job.book_id, feedback, source)
     resume = {"action": "redo" if kind == "setup_pitches" else "revise", "feedback": feedback}
@@ -201,7 +201,7 @@ async def choose_pitch(
     if body.action == "start":
         job = await _setup_gate(session, job_id, "setup_prefill")
         if body.feedback.strip():
-            await add_requirement(session, job.book_id, body.feedback.strip(), "note")
+            await add_requirement(session, job.book_id, body.feedback.strip(), "trial")
         return await _queue_setup_response(session, redis, job, "出三个故事方向", {"action": "start"})
     job = await _setup_gate(session, job_id, "setup_pitches")
     if body.action == "redo":
@@ -223,7 +223,7 @@ async def choose_pitch(
     else:
         if not feedback:
             raise HTTPException(422, "请写下重新出故事方向的要求")
-        await add_requirement(session, job.book_id, feedback, "note")
+        await add_requirement(session, job.book_id, feedback, "trial")
         content = feedback
     if body.length is not None:
         await add_requirement(session, job.book_id, f"这本书打算写 {body.length} 万字。", "answer")
@@ -264,7 +264,7 @@ async def decide_segment(
     if feedback:
         await add_requirement(session, job.book_id, feedback, f"segment:{number}")
     for flip in body.flips:
-        await add_requirement(session, job.book_id, f"「{flip.topic}」改成：{flip.choice}", "answer")
+        await add_requirement(session, job.book_id, f"「{flip.topic}」改成：{flip.choice}", "trial")
     if body.action == "confirm":
         volumes = (pending.get("split") or {}).get("volumes") or []
         first = volumes[0].get("index", 1) if volumes else 1
@@ -300,9 +300,9 @@ async def decide_piece(
     if current == "outline" and body.action == "revise" and not body.flips:
         return await feedback_to_job(session, redis, job, feedback)
     if feedback and current != "settings":
-        await add_requirement(session, job.book_id, feedback, "note")
+        await add_requirement(session, job.book_id, feedback, "trial")
     for flip in body.flips:
-        await add_requirement(session, job.book_id, f"「{flip.topic}」改成：{flip.choice}", "answer")
+        await add_requirement(session, job.book_id, f"「{flip.topic}」改成：{flip.choice}", "trial")
     label = PIECE_NAMES[current]
     changes = "\n".join(f"「{flip.topic}」改成：{flip.choice}" for flip in body.flips)
     content = (

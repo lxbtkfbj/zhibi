@@ -18,7 +18,6 @@ from app.graphs.book_setup import restart_state, route_start
 from app.llm import demo
 from app.main import create_app
 from app.models import (
-    AuthorRequirement,
     Book,
     Character,
     DraftVersion,
@@ -26,6 +25,7 @@ from app.models import (
     Job,
     LlmCall,
     MeetingMessage,
+    Memory,
     NodeAnchor,
     PlotUnit,
     Relationship,
@@ -77,7 +77,7 @@ async def old_job(sessionmaker, *, confirmed=True, status="waiting_author", book
         await session.flush()
         session.add_all(
             [
-                AuthorRequirement(book_id=book.id, text="妹妹不能失忆", source="answer"),
+                Memory(book_id=book.id, text="妹妹不能失忆", source="answer"),
                 MeetingMessage(book_id=book.id, job_id=job.id, speaker="author", content="旧会议记录"),
                 DraftVersion(
                     book_id=book.id, job_id=job.id, note="作者旧稿", payload={"spine": {"opening": "不能删除的历史"}}
@@ -132,7 +132,7 @@ async def test_restart_is_atomic_preserves_author_history_and_other_book(client,
             assert all(row.node_id in pinned_ids for row in rows)
         for model in (Relationship, WorldEntry, PlotUnit, Volume, StoryThread):
             assert await session.scalar(select(func.count()).select_from(model).where(model.book_id == bid)) == 0
-        for model in (AuthorRequirement, DraftVersion, LlmCall):
+        for model in (Memory, DraftVersion, LlmCall):
             assert await session.scalar(select(func.count()).select_from(model).where(model.book_id == bid)) == 1
         messages = list(
             await session.scalars(
@@ -303,9 +303,7 @@ async def test_legacy_private_note_only_chats_without_resuming_old_graph(client,
     assert response.json()["payload"]["thread"] == "lorekeeper"
     async with sessionmaker() as session:
         assert (await session.get(Job, jid)).status == status
-        requirements = list(
-            (await session.scalars(select(AuthorRequirement).where(AuthorRequirement.book_id == bid))).all()
-        )
+        requirements = list((await session.scalars(select(Memory).where(Memory.book_id == bid))).all())
         assert all(row.text != "保留妹妹的记忆" for row in requirements)
         reply = await session.scalar(
             select(MeetingMessage).where(MeetingMessage.book_id == bid).order_by(MeetingMessage.id.desc())
@@ -314,7 +312,14 @@ async def test_legacy_private_note_only_chats_without_resuming_old_graph(client,
         assert reply.job_id is None and reply.payload["reply_to"] == [response.json()["id"]]
     assert queued == []
     if status == "waiting_author":
-        assert (await client.post(f"/api/books/{bid}/notes", json={"content": "下一章快一点"})).status_code == 409
+        assert (await client.post(f"/api/books/{bid}/notes", json={"content": "下一章快一点"})).status_code == 201
+        async with sessionmaker() as session:
+            assert (await session.get(Job, jid)).status == status
+            assert any(
+                row.summary == "下一章快一点"
+                for row in await session.scalars(select(Memory).where(Memory.book_id == bid))
+            )
+        assert queued == []
 
 
 async def test_new_setup_waiting_private_note_only_chats(client, sessionmaker):

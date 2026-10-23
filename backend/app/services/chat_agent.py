@@ -82,6 +82,7 @@ class Turn:
     read_only: bool
     viewing: dict | None
     allow_skills: bool = True
+    book_changed: bool = False
     # 做过的那几处（重试时跳过同一处）；算进处数的那几处
     done_keys: set[str] = field(default_factory=set)
     touched: set[str] = field(default_factory=set)
@@ -209,6 +210,7 @@ async def do_one(turn: Turn, item: chat_tools.ChangeItem, key: str) -> tuple[dic
             await session.rollback()
             log.info("聊天里动手没做成：%s", exc)
             outcome, said = {"kind": "failed", "reason": failure_reason(exc)}, []
+        turn.book_changed |= bool(outcome.get("change"))
         outcome["key"] = key
         message = await session.get(MeetingMessage, turn.message_id)
         await session.refresh(message)
@@ -483,9 +485,6 @@ async def answer_note(redis, book_id, message_id, *, reply_id=None, retry=False)
         book = await session.get(Book, book_id)
         teardown = book.source == "teardown"
         read_only = teardown or bool(payload.get("ask_only"))
-        # 拆的书里只回答，不把聊天变成书的存档或其他写入。
-        if not teardown:
-            await book_saves.before_ai(session, book_id)
         # 只带这句话所在的那一段对话和它的摘要
         state = await conversation_state(session, book_id, "group", payload.get("conv"))
         await session.commit()
@@ -555,7 +554,7 @@ async def answer_note(redis, book_id, message_id, *, reply_id=None, retry=False)
                 elif ((message.payload or {}).get("outcome") or {}).get("kind") != "agent":
                     await update_note(session, turn, outcome={"kind": "agent"})
             # 动完存一档：一句话一档
-            if turn.finished:
+            if turn.book_changed:
                 await book_saves.safe_checkpoint(session, book_id, role, lead=f"{SPEAKER_NAMES[role]}照你的话")
         if turn.finished:
             for event in ("library", "saves"):
@@ -599,7 +598,8 @@ async def fall_back(redis, book_id, message_id, reply_id, role) -> bool:
                 await group_notes.apply_steps(session, redis, message, intent, more, viewing)
             else:
                 await group_notes.apply_with_change(session, redis, message, intent)
-            await book_saves.safe_checkpoint(session, book_id, role, lead=f"{SPEAKER_NAMES[role]}照你的话")
+            if group_notes.changed_book(await session.get(MeetingMessage, message_id)):
+                await book_saves.safe_checkpoint(session, book_id, role, lead=f"{SPEAKER_NAMES[role]}照你的话")
             await finish_reply(session, redis, reply_id, "\n".join(said) or "办好了，在你那句话下面看。", "done")
     finally:
         group_notes.SAID.reset(token)

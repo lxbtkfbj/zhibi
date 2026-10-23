@@ -554,15 +554,17 @@ async def test_idle_and_non_reader_notes_are_saved_then_classified(client, sessi
 @pytest.mark.parametrize("pending_kind", jobs.DECISION_KINDS)
 @pytest.mark.parametrize("recipient", [None, "lorekeeper"])
 async def test_notes_rejected_at_every_decision_gate(client, sessionmaker, pending_kind, recipient):
-    book_id, _ = await note_book(sessionmaker, "write_book", "waiting_author", {"kind": pending_kind})
+    book_id, jid = await note_book(sessionmaker, "write_book", "waiting_author", {"kind": pending_kind})
     response = await client.post(f"/api/books/{book_id}/notes", json={"content": "改一下", "to": recipient})
-    assert response.status_code == (201 if recipient else 409)
-    if not recipient:
-        assert response.json()["detail"] == {"code": "use_feedback", "message": "等你拍板时请直接提意见"}
+    assert response.status_code == 201
     async with sessionmaker() as session:
-        assert (await session.get(Book, book_id)).requirements == ["已有的作者要求"]
+        # 分流认成要求的现在只记忆，不改书，不挪动拍板任务；私聊照旧只聊。
+        assert (await session.get(Book, book_id)).requirements == (
+            ["已有的作者要求"] if recipient else ["已有的作者要求", "改一下"]
+        )
+        assert (await session.get(Job, jid)).status == "waiting_author"
         messages = list(await session.scalars(select(MeetingMessage).where(MeetingMessage.book_id == book_id)))
-        assert len(messages) == (2 if recipient else 0)
+        assert len(messages) == 2
         assert all(m.job_id is None for m in messages)
 
 

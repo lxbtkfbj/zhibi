@@ -11,13 +11,13 @@ from app.api.deps import ensure_not_teardown
 from app.config import get_settings
 from app.main import create_app
 from app.models import (
-    AuthorRequirement,
     Book,
     BookSave,
     Chapter,
     Character,
     Job,
     MeetingMessage,
+    Memory,
     PlotUnit,
     SettingCandidate,
     SettingSuggestion,
@@ -52,7 +52,7 @@ async def seed(sessionmaker, *, source="teardown", stage="imported", status="wri
         )
         job = Job(book_id=book.id, kind="write_book", status="failed", thread_id=str(uuid.uuid4()))
         suggestion = SettingSuggestion(book_id=book.id, kind="chat", title="旧建议", payload={"content": "改正文"})
-        requirement = AuthorRequirement(book_id=book.id, text="旧要求", source="manual", scope="always")
+        requirement = Memory(book_id=book.id, text="旧要求", source="manual", scope="always")
         session.add_all([node, volume, character, message, job, suggestion, requirement])
         await session.flush()
         unit = PlotUnit(book_id=book.id, volume_id=volume.id, index=1, title="原单元", status="done", chapter_count=1)
@@ -145,9 +145,9 @@ def blocked_requests(ids):
         ("POST", f"/plans/{ids['message']}/apply", {}, "让编辑部改书"),
         ("POST", f"/suggestions/{ids['suggestion']}/run-chat", None, "让编辑部改书"),
         ("PATCH", f"/books/{b}/settings", {}, "改本书设置"),
-        ("POST", f"/books/{b}/requirements", {"text": "新要求"}, "加写作要求"),
-        ("POST", f"/books/{b}/requirements/apply", {}, "加写作要求"),
-        ("POST", f"/books/{b}/requirements/tidy", None, "加写作要求"),
+        ("POST", f"/books/{b}/memories", {"book_id": b, "summary": "新要求"}, "改记忆"),
+        ("POST", f"/books/{b}/memories/apply", {}, "改记忆"),
+        ("POST", f"/books/{b}/memories/tidy", None, "改记忆"),
     ]
     for field, value in {"locked": True, "chapter_count": 2, "target_node_id": n, "reaches_node": True}.items():
         cases.append(("PATCH", f"/volumes/{v}", {field: value}, "改大纲结构"))
@@ -158,8 +158,8 @@ def blocked_requests(ids):
         [
             ("PATCH", f"/nodes/{n}", {"volume": 2}, "改大纲结构"),
             ("PATCH", f"/nodes/{n}", {"status": "pinned"}, "改大纲结构"),
-            ("PATCH", f"/requirements/{ids['requirement']}", {"text": "改要求"}, "加写作要求"),
-            ("DELETE", f"/requirements/{ids['requirement']}", None, "加写作要求"),
+            ("PATCH", f"/books/{b}/memories/{ids['requirement']}", {"summary": "改要求"}, "改记忆"),
+            ("DELETE", f"/books/{b}/memories/{ids['requirement']}", None, "改记忆"),
             ("POST", f"/books/{b}/notes/{ids['message']}/revert", {}, "让编辑部改书"),
             ("POST", f"/books/{b}/notes/{ids['message']}/redo", {}, "让编辑部改书"),
             ("POST", f"/plans/{ids['message']}/results/0/undo", None, "让编辑部改书"),
@@ -210,7 +210,7 @@ async def test_every_write_route_is_blocked_before_any_side_effect(client, sessi
             (SettingVersion, 0),
             (SettingSuggestion, 1),
             (MeetingMessage, 1),
-            (AuthorRequirement, 1),
+            (Memory, 1),
         ]:
             assert await session.scalar(select(func.count()).select_from(model)) == count
 

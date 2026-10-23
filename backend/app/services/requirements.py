@@ -5,16 +5,16 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AppSetting, AuthorRequirement, Book, Chapter, MeetingMessage, Volume
+from app.models import AppSetting, Book, Chapter, MeetingMessage, Memory, Volume
 
 
-async def list_requirements(session: AsyncSession, book_id: uuid.UUID) -> list[AuthorRequirement]:
+async def list_requirements(session: AsyncSession, book_id: uuid.UUID) -> list[Memory]:
     return list(
-        (
-            await session.scalars(
-                select(AuthorRequirement).where(AuthorRequirement.book_id == book_id).order_by(AuthorRequirement.seq)
-            )
-        ).all()
+        await session.scalars(
+            select(Memory)
+            .where(Memory.book_id == book_id, Memory.kind == "writing", Memory.deleted_at.is_(None))
+            .order_by(Memory.id)
+        )
     )
 
 
@@ -25,34 +25,23 @@ async def add_requirement(
     source: str = "manual",
     scope: str = "always",
     message_id: int | None = None,
-) -> AuthorRequirement | None:
+    *,
+    detail: str | None = None,
+) -> Memory | None:
+    from app.services.memories import remember, summary_of
+
     text = text.strip()
     if not text:
         return None
-    # Serialize concurrent append/edit operations without a PostgreSQL B-tree limit on long text.
-    await session.execute(select(Book.id).where(Book.id == book_id).with_for_update())
-    existing = await session.scalar(
-        select(AuthorRequirement).where(AuthorRequirement.book_id == book_id, AuthorRequirement.text == text)
+    # Route summaries are deliberately not truncated; other legacy entries are.
+    summary = text if detail is not None or source == "plan" else summary_of(text)
+    return await remember(
+        session, book_id, summary, text if detail is None else detail, source=source, scope=scope, message_id=message_id
     )
-    if existing is not None:
-        await set_scope(session, existing, scope)
-        if message_id is not None:
-            existing.message_id = message_id
-        return existing
-    tombstone = await session.get(AppSetting, f"requirement_tombstones:{book_id}")
-    if tombstone and text in (tombstone.value or {}).get("texts", []):
-        tombstone.value = {"texts": [item for item in tombstone.value["texts"] if item != text]}
-    row = AuthorRequirement(book_id=book_id, text=text, source=source)
-    await set_scope(session, row, scope)
-    row.message_id = message_id
-    session.add(row)
-    await session.flush()
-    return row
 
 
 async def absorb_other_rules(session: AsyncSession, book: Book) -> None:
-    """本书设置的「其他规矩」并进了写作要求：每一行挪成一条一直有效的写作要求，设置里清空。
-    已有的书迁移 0021 挪过；新建的书（新书默认里带着的）、回到旧存档时在这里挪。书要先 flush 过、有 id。"""
+    """新书默认的「其他规矩」转成记忆；回到旧存档不调用这里。"""
     rules = (book.settings or {}).get("other_rules") or ""
     for line in dict.fromkeys(line.strip() for line in rules.splitlines() if line.strip()):
         await add_requirement(session, book.id, line)
@@ -62,7 +51,6 @@ async def absorb_other_rules(session: AsyncSession, book: Book) -> None:
 
 async def suppress_legacy_text(session: AsyncSession, book_id: uuid.UUID, text: str) -> None:
     """Remember an explicit edit/delete so an old checkpoint cannot resurrect its text."""
-    await session.execute(select(Book.id).where(Book.id == book_id).with_for_update())
     key = f"requirement_tombstones:{book_id}"
     marker = await session.get(AppSetting, key)
     values = list(dict.fromkeys([*((marker.value or {}).get("texts", []) if marker else []), text]))
@@ -70,6 +58,13 @@ async def suppress_legacy_text(session: AsyncSession, book_id: uuid.UUID, text: 
         marker.value = {"texts": values}
     else:
         session.add(AppSetting(key=key, value={"texts": values}))
+
+
+async def unsuppress_legacy_text(session: AsyncSession, book_id: uuid.UUID, text: str) -> None:
+    """An explicit re-add or undo wins over an earlier legacy tombstone."""
+    marker = await session.get(AppSetting, f"requirement_tombstones:{book_id}")
+    if marker and text in (marker.value or {}).get("texts", []):
+        marker.value = {"texts": [item for item in marker.value["texts"] if item != text]}
 
 
 async def import_legacy_checkpoint(session: AsyncSession, book_id: uuid.UUID, job_id: uuid.UUID, state: dict) -> None:
@@ -155,7 +150,10 @@ SCOPE_INPUTS = {
 }
 
 
-async def set_scope(session: AsyncSession, row: AuthorRequirement, scope: str) -> None:
+async def set_scope(session: AsyncSession, row: Memory, scope: str) -> None:
+    if row.book_id is None or row.kind == "chat":
+        row.scope, row.chapter_index, row.volume_index = "always", None, None
+        return
     chapters = list(
         await session.scalars(select(Chapter).where(Chapter.book_id == row.book_id).order_by(Chapter.index))
     )
@@ -172,7 +170,17 @@ async def set_scope(session: AsyncSession, row: AuthorRequirement, scope: str) -
         row.volume_index = current + (scope == "next_volume")
 
 
-async def requirement_states(session: AsyncSession, book_id: uuid.UUID) -> list[dict]:
+def scope_label(row: Memory) -> str:
+    return (
+        "一直有效"
+        if row.scope == "always"
+        else f"只管第 {row.chapter_index} 章"
+        if row.scope == "chapter"
+        else f"只管第 {row.volume_index} 卷"
+    )
+
+
+async def requirement_states(session: AsyncSession, book_id: uuid.UUID, *, include_global=False) -> list[dict]:
     done_chapters = set(
         await session.scalars(select(Chapter.index).where(Chapter.book_id == book_id, Chapter.status == "final"))
     )
@@ -180,27 +188,28 @@ async def requirement_states(session: AsyncSession, book_id: uuid.UUID) -> list[
         await session.scalars(select(Volume.index).where(Volume.book_id == book_id, Volume.status == "done"))
     )
     result = []
-    for row in await list_requirements(session, book_id):
+    from app.services.memories import visible_rows
+
+    rows = await visible_rows(session, book_id) if include_global else await list_requirements(session, book_id)
+    for row in rows:
         active = not (
             (row.scope == "chapter" and row.chapter_index in done_chapters)
             or (row.scope == "volume" and row.volume_index in done_volumes)
         )
-        label = (
-            "一直有效"
-            if row.scope == "always"
-            else f"只管第 {row.chapter_index} 章"
-            if row.scope == "chapter"
-            else f"只管第 {row.volume_index} 卷"
-        )
+        label = scope_label(row)
         result.append({"row": row, "active": active, "label": label if active else "已过期 · " + label})
     return sorted(result, key=lambda item: not item["active"])
 
 
-async def active_requirements(session: AsyncSession, book_id: uuid.UUID) -> list[AuthorRequirement]:
-    return [item["row"] for item in await requirement_states(session, book_id) if item["active"]]
+async def active_requirements(session: AsyncSession, book_id: uuid.UUID) -> list[Memory]:
+    return [
+        item["row"]
+        for item in await requirement_states(session, book_id, include_global=True)
+        if item["active"] and item["row"].kind == "writing"
+    ]
 
 
-def requirement_text(row: AuthorRequirement) -> str:
+def requirement_text(row: Memory) -> str:
     prefix = (
         f"（只管第 {row.chapter_index} 章）"
         if row.scope == "chapter"
@@ -208,8 +217,8 @@ def requirement_text(row: AuthorRequirement) -> str:
         if row.scope == "volume"
         else ""
     )
-    return prefix + row.text
+    return prefix + " ".join(row.detail.splitlines())
 
 
-def requirements_list(rows: list[AuthorRequirement]) -> str:
+def requirements_list(rows: list[Memory]) -> str:
     return "\n".join(f"- {requirement_text(row)}" for row in rows) or "（没有）"

@@ -10,7 +10,7 @@ from sqlalchemy import select
 
 from app.config import get_settings
 from app.main import create_app
-from app.models import AuthorRequirement, Book, Job, StoryNode
+from app.models import Book, Job, Memory, StoryNode
 from app.services import jobs
 from app.services.job_runner import BOOK_STATUS_WHILE_WAITING
 
@@ -63,8 +63,7 @@ async def gate(sessionmaker, *, kind="setup_piece", piece="outline", confirmed=(
 async def requirements(sessionmaker, book_id):
     async with sessionmaker() as session:
         return {
-            (row.text, row.source)
-            for row in await session.scalars(select(AuthorRequirement).where(AuthorRequirement.book_id == book_id))
+            (row.text, row.source) for row in await session.scalars(select(Memory).where(Memory.book_id == book_id))
         }
 
 
@@ -103,7 +102,7 @@ async def test_piece_revision_saves_feedback_and_flips_once(client, queued, sess
     assert ("把境界改成九重天", "note") not in await requirements(
         sessionmaker, bid
     )  # 在合成关分块处理，不把整段存成要求。
-    assert ("「感情线」改成：单女主", "answer") in await requirements(sessionmaker, bid)
+    assert ("「感情线」改成：单女主", "看稿时说的") in await requirements(sessionmaker, bid)
     assert queued[0][1]["requirement_saved"]
 
 
@@ -121,7 +120,7 @@ async def test_pitch_pick_uses_one_based_index_custom_title_and_300(client, queu
     )
     assert response.status_code == 200, response.text
     assert queued[0][1]["index"] == 1 and queued[0][1]["length"] == 300
-    assert ("书名用《作者自己起的书名》", "answer") in await requirements(sessionmaker, bid)
+    assert ("书名用《作者自己起的书名》", "开书时答的") in await requirements(sessionmaker, bid)
     assert BOOK_STATUS_WHILE_WAITING["setup_pitches"] == "setting_up"
 
 
@@ -146,6 +145,6 @@ async def test_redo_saves_requirement_and_old_directions_are_retired(client, que
         f"/api/jobs/{jid}/pitches", json={"action": "redo", "feedback": "保留主角，换个金手指"}
     )
     assert response.status_code == 200, response.text
-    assert ("保留主角，换个金手指", "note") in await requirements(sessionmaker, bid)
+    assert ("保留主角，换个金手指", "看稿时说的") in await requirements(sessionmaker, bid)
     old = await client.post(f"/api/jobs/{jid}/directions", json={})
     assert old.status_code == 409 and old.json()["detail"] == "这个任务用的是旧流程，请按新流程重开"

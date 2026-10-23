@@ -10,7 +10,7 @@ from app.book_settings import default_settings
 from app.models.base import Base, Timestamps, UUIDPk
 
 if TYPE_CHECKING:
-    from app.models.settings import AuthorRequirement
+    from app.models.memory import Memory
 
 
 class Book(UUIDPk, Timestamps, Base):
@@ -35,23 +35,22 @@ class Book(UUIDPk, Timestamps, Base):
     # 这本书每一类设定有哪几栏：{类别: {facts: [{key, label}], sections: [{key, label}]}}；没存的按默认
     card_layouts: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     settings: Mapped[dict] = mapped_column(JSONB, default=default_settings)
-    author_requirements: Mapped[list["AuthorRequirement"]] = relationship(
-        back_populates="book",
+    memories: Mapped[list["Memory"]] = relationship(
         cascade="all, delete-orphan",
         lazy="selectin",
-        order_by="AuthorRequirement.seq",
+        order_by="Memory.id",
     )
 
     @property
     def requirements(self) -> list[str]:
         """Compatibility view only; the table is the sole source of requirements."""
-        return [item.text for item in self.author_requirements]
+        return [item.detail for item in self.memories if item.kind == "writing" and item.deleted_at is None]
 
     @requirements.setter
     def requirements(self, values: list[str]) -> None:
-        from app.models.settings import AuthorRequirement
+        from app.models.memory import Memory
 
-        self.author_requirements = [AuthorRequirement(text=text, source="legacy") for text in dict.fromkeys(values)]
+        self.memories = [Memory(detail=text, kind="writing", source="你加的") for text in dict.fromkeys(values)]
 
     # 新书写完前 3 章后的试读是否已经做过
     trial_read_done: Mapped[bool] = mapped_column(Boolean, default=False)

@@ -27,7 +27,7 @@ from app.graphs.write_book import (
     volume_gate_node,
 )
 from app.main import create_app
-from app.models import AuthorRequirement, Book, Chapter, Job, MeetingMessage, Volume
+from app.models import Book, Chapter, Job, MeetingMessage, Memory, Volume
 from app.services import jobs
 from app.services.writing_context import chapter_words, requirements_of
 
@@ -168,22 +168,31 @@ async def test_defaults_are_copied_and_validated(client):
 
 async def test_requirements_crud_and_deleted_checkpoint_never_returns(client, sessionmaker):
     book_id, job_id = await fixture_book(sessionmaker)
-    url = f"/api/books/{book_id}/requirements"
-    first = (await client.post(url, json={"text": "不能忘记的旧要求"})).json()
-    assert first["source"] == "manual"
-    duplicate = (await client.post(url, json={"text": "不能忘记的旧要求"})).json()
+    url = f"/api/books/{book_id}/memories"
+    first = (await client.post(url, json={"book_id": str(book_id), "summary": "不能忘记的旧要求"})).json()
+    assert first["source"] == "你加的"
+    duplicate = (await client.post(url, json={"book_id": str(book_id), "summary": "不能忘记的旧要求"})).json()
     assert duplicate["id"] == first["id"]
     assert len((await client.get(url)).json()) == 1
-    assert (await client.patch(f"/api/requirements/{first['id']}", json={"text": "改后的要求"})).status_code == 200
+    assert (
+        await client.patch(
+            f"/api/books/{book_id}/memories/{first['id']}",
+            json={"book_id": str(book_id), "summary": "改后的要求", "detail": "改后的要求"},
+        )
+    ).status_code == 200
     d = runtime(sessionmaker, book_id, job_id).context
     state = {"brief": ["不能忘记的旧要求"], "notes": ["改后的要求"]}
     assert "改后的要求" in requirements(await live_state(state, d))
-    await client.delete(f"/api/requirements/{first['id']}")
+    await client.delete(f"/api/books/{book_id}/memories/{first['id']}")
     assert "要求" not in requirements(await live_state(state, d))
     async with sessionmaker() as session:
         book = await session.get(Book, book_id)
         assert "改后的要求" not in await requirements_of(book, session)
-    assert (await client.patch(f"/api/requirements/{first['id']}", json={"text": "重生"})).status_code == 404
+    assert (
+        await client.patch(
+            f"/api/books/{book_id}/memories/{first['id']}", json={"book_id": str(book_id), "summary": "重生"}
+        )
+    ).status_code == 404
 
 
 async def test_setting_change_creates_note_and_is_consumed(client, sessionmaker):
@@ -197,21 +206,18 @@ async def test_setting_change_creates_note_and_is_consumed(client, sessionmaker)
     assert out["notes_seen"] == message.id
     assert "番茄长书名" in out["notes"][0]
     # Settings notifications are transient instructions, not irrevocable ledger requirements.
-    assert (await client.get(f"/api/books/{book_id}/requirements")).json() == []
+    assert (await client.get(f"/api/books/{book_id}/memories")).json() == []
 
 
-async def test_chat_requirement_confirmation_uses_add_wording(client, sessionmaker):
+async def test_manual_memory_does_not_post_retired_chat_confirmation(client, sessionmaker):
     book_id, _ = await fixture_book(sessionmaker)
     response = await client.post(
-        f"/api/books/{book_id}/requirements",
-        json={"text": "每章都要推动主线", "source": "chat:chief", "scope": "always"},
+        f"/api/books/{book_id}/memories", json={"book_id": str(book_id), "summary": "每章都要推动主线"}
     )
     assert response.status_code == 201
+    assert response.json()["source"] == "你加的"
     async with sessionmaker() as session:
-        message = await session.scalar(sa.select(MeetingMessage).where(MeetingMessage.book_id == book_id))
-        assert message.content == "加了一条写作要求：「每章都要推动主线」（一直有效）"
-        assert message.speaker == "system"
-        assert message.payload == {"thread": "chief"}
+        assert await session.scalar(sa.select(MeetingMessage).where(MeetingMessage.book_id == book_id)) is None
 
 
 async def test_style_reference_can_change_while_editorial_works(client, sessionmaker):
@@ -239,13 +245,13 @@ async def test_writing_settings_change_is_group_system_message(client, sessionma
 async def test_note_sources_and_deleted_pending_note(client, sessionmaker, recipient):
     book_id, job_id = await fixture_book(sessionmaker)
     await client.post(f"/api/books/{book_id}/notes", json={"content": "记下：只属于当前清单", "to": recipient})
-    rows = (await client.get(f"/api/books/{book_id}/requirements")).json()
+    rows = (await client.get(f"/api/books/{book_id}/memories")).json()
     if recipient:
         assert rows == []  # 任务6：私聊永远不再自动记要求。
     else:
-        assert rows[0]["text"] == "记下：只属于当前清单"
-        assert rows[0]["source"] == "note"
-        await client.delete(f"/api/requirements/{rows[0]['id']}")
+        assert rows[0]["detail"] == "记下：只属于当前清单"
+        assert rows[0]["source"] == "聊天里记的"
+        await client.delete(f"/api/books/{book_id}/memories/{rows[0]['id']}")
     result = await intake_node({"queue": ["concept"]}, runtime(sessionmaker, book_id, job_id))
     assert not result.get("notes")
 
@@ -303,10 +309,10 @@ async def test_trial_and_volume_sources(sessionmaker, monkeypatch):
     monkeypatch.setattr(write_book, "interrupt", lambda _: {"action": "revise", "feedback": "试读的意见"})
     await trial_gate_node({}, rt)
     async with sessionmaker() as session:
-        rows = (await session.scalars(sa.select(AuthorRequirement).where(AuthorRequirement.book_id == book_id))).all()
+        rows = (await session.scalars(sa.select(Memory).where(Memory.book_id == book_id))).all()
     assert {row.text: row.source for row in rows} == {
-        "卷纲的意见": "volume:2",
-        "试读的意见": "trial",
+        "卷纲的意见": "看稿时说的",
+        "试读的意见": "看稿时说的",
     }
 
 
@@ -327,21 +333,23 @@ async def test_pre_upgrade_checkpoint_is_imported_once_then_deletion_wins(client
     old_state = {"brief": ["升级前已经回答但没落库"], "notes": ["（作者对设定师说）升级前私聊"]}
     rendered = requirements(await live_state(old_state, d))
     assert "升级前已经回答但没落库" in rendered and "升级前私聊" in rendered
-    rows = (await client.get(f"/api/books/{book_id}/requirements")).json()
-    assert {r["text"]: r["source"] for r in rows} == {
-        "升级前已经回答但没落库": "answer",
-        "升级前私聊": "private:lorekeeper",
+    rows = (await client.get(f"/api/books/{book_id}/memories")).json()
+    assert {r["detail"]: r["source"] for r in rows} == {
+        "升级前已经回答但没落库": "开书时答的",
+        "升级前私聊": "聊天里记的",
     }
     for row in rows:
-        await client.delete(f"/api/requirements/{row['id']}")
+        await client.delete(f"/api/books/{book_id}/memories/{row['id']}")
     assert "升级前" not in requirements(await live_state(old_state, d))
-    assert (await client.get(f"/api/books/{book_id}/requirements")).json() == []
+    assert (await client.get(f"/api/books/{book_id}/memories")).json() == []
 
 
 async def test_delete_before_first_legacy_resume_does_not_resurrect(client, sessionmaker):
     book_id, job_id = await fixture_book(sessionmaker)
-    row = (await client.post(f"/api/books/{book_id}/requirements", json={"text": "不要复活"})).json()
-    await client.delete(f"/api/requirements/{row['id']}")
+    row = (
+        await client.post(f"/api/books/{book_id}/memories", json={"book_id": str(book_id), "summary": "不要复活"})
+    ).json()
+    await client.delete(f"/api/books/{book_id}/memories/{row['id']}")
     current = await live_state(
         {"brief": ["不要复活"], "notes": ["不要复活"]}, runtime(sessionmaker, book_id, job_id).context
     )
@@ -354,7 +362,9 @@ async def test_deleted_legacy_pending_note_cannot_resurrect(client, sessionmaker
 
     book_id, job_id = await fixture_book(sessionmaker)
     legacy = "（作者对设定师说）旧插话" if thread else "旧插话"
-    row = (await client.post(f"/api/books/{book_id}/requirements", json={"text": legacy})).json()
+    row = (
+        await client.post(f"/api/books/{book_id}/memories", json={"book_id": str(book_id), "summary": legacy})
+    ).json()
     payload = {"thread": thread} if thread else None
     async with sessionmaker() as session:
         message = MeetingMessage(
@@ -362,7 +372,7 @@ async def test_deleted_legacy_pending_note_cannot_resurrect(client, sessionmaker
         )
         session.add(message)
         await session.commit()
-    await client.delete(f"/api/requirements/{row['id']}")
+    await client.delete(f"/api/books/{book_id}/memories/{row['id']}")
     result = await intake_node({"queue": ["concept"]}, runtime(sessionmaker, book_id, job_id))
     assert not result.get("notes")
     async with sessionmaker() as session:
@@ -370,13 +380,15 @@ async def test_deleted_legacy_pending_note_cannot_resurrect(client, sessionmaker
         await session.commit()
         message = await session.get(MeetingMessage, message.id)
         assert message.payload["requirement_saved"] is True
-    assert (await client.get(f"/api/books/{book_id}/requirements")).json() == []
+    assert (await client.get(f"/api/books/{book_id}/memories")).json() == []
 
 
 async def test_delete_invalidates_author_feedback_but_preserves_reviewer_instructions(client, sessionmaker):
     book_id, job_id = await fixture_book(sessionmaker)
-    row = (await client.post(f"/api/books/{book_id}/requirements", json={"text": "让主角永远失败"})).json()
-    await client.delete(f"/api/requirements/{row['id']}")
+    row = (
+        await client.post(f"/api/books/{book_id}/memories", json={"book_id": str(book_id), "summary": "让主角永远失败"})
+    ).json()
+    await client.delete(f"/api/books/{book_id}/memories/{row['id']}")
     current = await live_state(
         {
             "requirements_ledger_ready": True,
@@ -410,13 +422,13 @@ async def test_decision_feedback_is_saved_once_even_if_worker_replays_after_dele
         f"/api/jobs/{job_id}/decision", json={"action": "revise", "feedback": "已经删去的意见"}
     )
     assert response.status_code == 200
-    rows = (await client.get(f"/api/books/{book_id}/requirements")).json()
-    assert rows[0]["source"] == ("trial" if kind == "trial_read" else "volume:2")
-    await client.delete(f"/api/requirements/{rows[0]['id']}")
+    rows = (await client.get(f"/api/books/{book_id}/memories")).json()
+    assert rows[0]["source"] == "看稿时说的"
+    await client.delete(f"/api/books/{book_id}/memories/{rows[0]['id']}")
     monkeypatch.setattr(write_book, "interrupt", lambda _: queued[0])
     gate = trial_gate_node if kind == "trial_read" else volume_gate_node
     await gate({"volume_index": 2}, runtime(sessionmaker, book_id, job_id))
-    assert (await client.get(f"/api/books/{book_id}/requirements")).json() == []
+    assert (await client.get(f"/api/books/{book_id}/memories")).json() == []
 
 
 async def test_legacy_migration_preserves_text_time_and_drops_column(sessionmaker):

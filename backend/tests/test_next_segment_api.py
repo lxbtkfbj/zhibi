@@ -10,7 +10,7 @@ from sqlalchemy import select
 
 from app.config import get_settings
 from app.main import create_app
-from app.models import AuthorRequirement, Book, Job, MeetingMessage, StoryNode
+from app.models import Book, Job, MeetingMessage, Memory, StoryNode
 from app.services import jobs
 from app.services.job_runner import BOOK_STATUS_WHILE_WAITING
 
@@ -105,10 +105,9 @@ async def test_segment_decisions_save_requirements_and_queue_once(client, sessio
     assert (await client.post(f"/api/jobs/{job_id}/segment", json=payload)).status_code == 409
     async with sessionmaker() as session:
         requirements = {
-            (row.text, row.source)
-            for row in await session.scalars(select(AuthorRequirement).where(AuthorRequirement.book_id == book_id))
+            (row.text, row.source) for row in await session.scalars(select(Memory).where(Memory.book_id == book_id))
         }
-        assert requirements == {("这一篇不要赶路", "segment:2"), ("「对手」改成：师兄", "answer")}
+        assert requirements == {("这一篇不要赶路", "看稿时说的"), ("「对手」改成：师兄", "看稿时说的")}
         message = await session.scalar(select(MeetingMessage).where(MeetingMessage.job_id == job_id))
         assert message.payload["requirement_saved"]
         if action == "confirm":
@@ -125,7 +124,7 @@ async def test_revise_requires_feedback_or_flips_and_waiting_notes_rejected(clie
     response = await client.post(f"/api/jobs/{job_id}/segment", json={"action": "revise", "feedback": "  "})
     assert response.status_code == 422
     response = await client.post(f"/api/books/{book_id}/notes", json={"content": "把这一篇改成更多反转"})
-    assert response.status_code == 409
+    assert response.status_code == 201  # 分流认成写书时照做时，等拍板也照常记忆，不改书。
     response = await client.post(
         f"/api/jobs/{job_id}/segment", json={"action": "revise", "flips": [{"topic": "地图", "choice": "原地"}]}
     )
@@ -194,7 +193,7 @@ async def test_flow2_only_accepts_redo_without_saving_requirements(client, sessi
     assert response.status_code == 200
     assert queued == [(jid, {"action": "redo", "requirement_saved": True})]
     async with sessionmaker() as session:
-        assert not list(await session.scalars(select(AuthorRequirement).where(AuthorRequirement.book_id == bid)))
+        assert not list(await session.scalars(select(Memory).where(Memory.book_id == bid)))
         assert (
             await session.scalar(select(MeetingMessage).where(MeetingMessage.job_id == jid))
         ).content == "按新写法重出这一篇"
@@ -214,7 +213,7 @@ async def test_decision_across_tabs_is_queued_exactly_once(client, sessionmaker,
     assert sorted(response.status_code for response in responses) == [200, 409]
     assert len(queued) == 1
     async with sessionmaker() as session:
-        requirements = list(await session.scalars(select(AuthorRequirement).where(AuthorRequirement.book_id == bid)))
+        requirements = list(await session.scalars(select(Memory).where(Memory.book_id == bid)))
         assert len(requirements) == 1
-        assert requirements[0].source == ("volume:2" if kind == "volume_review" else f"unit:{unit_id}")
+        assert requirements[0].source == "看稿时说的"
         assert len(list(await session.scalars(select(MeetingMessage).where(MeetingMessage.job_id == jid)))) == 1
