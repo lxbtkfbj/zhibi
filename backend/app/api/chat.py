@@ -141,6 +141,9 @@ async def again_reply(
     # 没答上来的点的是「重试」：自己动手的那一轮接着做没做完的；答完、停下的点的是「重新回答」：只重写那段话
     again = "retry" if reply_state(m) == "failed" else "again"
     payload = {k: v for k, v in (m.payload or {}).items() if k not in ("state", "error", "doing")}
+    if payload.get("tools_mode") and (again == "again" or payload.get("again") == "again"):
+        # 重答本身断了，下一次「重试」也只重写；首次工具执行中断仍续做。
+        payload["rewrite_only"] = True
     m.content, m.payload = "", {**payload, "state": "thinking", "again": again}
     await session.commit()
     data = message_dict(m)

@@ -311,7 +311,7 @@ async def again_background(book_id, thread, reply_id, redis):
         if not unanswered:
             await finish_reply(session, redis, reply_id, "", "failed", "原来那句话找不到了")
             return
-        if payload.get("tools_mode") and payload.get("again") == "retry":
+        if payload.get("tools_mode") and payload.get("again") == "retry" and not payload.get("rewrite_only"):
             from app.services.chat_agent import answer_note
 
             await answer_note(
