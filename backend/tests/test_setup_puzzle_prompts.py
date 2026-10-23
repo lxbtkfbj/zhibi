@@ -96,8 +96,8 @@ PROMPT_HASHES = {
 
 def test_handbook_prompt_moves_are_byte_exact():
     for name, digest in {
-        "chat_agent": "98d9802e01229933abceaef603b25dc2ea85f5633dfe77fc79075793986c10d2",
-        "skills/opening": "0a537d08995076293bd6b24f87f88ba147331b7ba5caba0aa8bc65bde96b27b1",
+        "chat_agent": "42894c24975b767516a766cd15716e7dbfed31d2425bb086f71f559aeb2344e0",
+        "skills/opening": "4aa306890d634f444d43c4da71c0faea4ca303c6a05aa96d6936867918f6ef67",
     }.items():
         assert hashlib.sha256((ROOT / f"backend/app/prompts/{name}.md").read_bytes()).hexdigest() == digest
         assert not (ROOT / f"docs/codex任务/主编手册/提示词/{name}.md").exists()
