@@ -710,11 +710,15 @@ class LLMRouter:
         for attempt in range(1, TOOL_ROUND_ATTEMPTS + 1):
             started = time.monotonic()
             message = None
+            usage = (None, None)
             parts: list[str] = []
             calls: list[ToolCall] = []
             ok, error, failure = False, "", None
             try:
                 async for chunk in bound.astream(history):
+                    # 消息相加会把累计用量也相加；记账只留最后一个带用量的小块。
+                    if chunk.usage_metadata:
+                        usage = _usage(chunk)
                     message = chunk if message is None else message + chunk
                     piece = _content_text(chunk.content)
                     if piece:
@@ -736,7 +740,7 @@ class LLMRouter:
                     profile,
                     purpose,
                     started,
-                    *(_usage(message) if message is not None else (None, None)),
+                    *usage,
                     ok=ok,
                     error=error,
                     request=request,

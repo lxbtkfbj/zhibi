@@ -281,6 +281,142 @@ async def test_stream_logs_full_or_partial_response(sessionmaker, monkeypatch, d
         assert "中途断线" in call.error
 
 
+@pytest.mark.parametrize("with_usage", [True, False])
+async def test_tool_rounds_log_last_chunk_usage_per_round(sessionmaker, monkeypatch, with_usage):
+    router = LLMRouter(sessionmaker)
+    remote(router, monkeypatch)
+    tools = [module.PROBE_TOOL]
+    run_tool = AsyncMock(return_value="楚风：凝气境")
+
+    class Fake:
+        def bind_tools(self, tools, **kwargs):
+            return self
+
+        async def astream(self, history):
+            if len(history) == 2:
+                for index, args in enumerate(('{"name":', '"楚风"', "}")):
+                    yield AIMessageChunk(
+                        content="",
+                        tool_call_chunks=[
+                            {
+                                "name": "look_up" if index == 0 else None,
+                                "args": args,
+                                "id": "call_1" if index == 0 else None,
+                                "index": 0,
+                            }
+                        ],
+                        usage_metadata={
+                            "input_tokens": 1000,
+                            "output_tokens": 5 * (index + 1),
+                            "total_tokens": 1000 + 5 * (index + 1),
+                        }
+                        if with_usage
+                        else None,
+                    )
+            else:
+                assert len(history) == 4
+                assert history[-1].content == "楚风：凝气境"
+                assert history[-1].tool_call_id == "call_1"
+                for index, text in enumerate(("查", "过", "设", "定", "了")):
+                    yield AIMessageChunk(
+                        content=text,
+                        usage_metadata={
+                            "input_tokens": 1200,
+                            "output_tokens": 10 * (index + 1),
+                            "total_tokens": 1200 + 10 * (index + 1),
+                        }
+                        if with_usage
+                        else None,
+                    )
+                yield AIMessageChunk(content="", response_metadata={"finish_reason": "stop"})
+
+    monkeypatch.setattr(module, "build_chat_model", lambda *args, **kwargs: Fake())
+    try:
+        events = [
+            event
+            async for event in router.tool_rounds("chief", "系统", "查楚风的设定", tools, run_tool, purpose="工具用量")
+        ]
+    finally:
+        await router.aclose()
+    run_tool.assert_awaited_once()
+    call = run_tool.await_args.args[0]
+    assert (call.id, call.name, call.args) == ("call_1", "look_up", {"name": "楚风"})
+    assert "".join(value for kind, value in events if kind == "text") == "查过设定了"
+    calls = await rows(sessionmaker)
+    assert len(calls) == 2 and all(call.ok for call in calls)
+    assert [call.request["round"] for call in calls] == [1, 2]
+    assert calls[0].response == '【调了工具】\nlook_up：{"name": "楚风"}'
+    assert calls[1].response == "查过设定了"
+    assert [(call.prompt_tokens, call.completion_tokens) for call in calls] == (
+        [(1000, 15), (1200, 50)] if with_usage else [(None, None), (None, None)]
+    )
+
+
+@pytest.mark.parametrize("case", ["empty", "partial", "retry", "truncated"])
+async def test_tool_rounds_log_last_usage_on_failure_and_reset_on_retry(sessionmaker, monkeypatch, case):
+    router = LLMRouter(sessionmaker)
+    remote(router, monkeypatch)
+    run_tool = AsyncMock()
+
+    class Fake:
+        attempts = 0
+
+        def bind_tools(self, tools, **kwargs):
+            return self
+
+        async def astream(self, history):
+            self.attempts += 1
+            if case == "retry" and self.attempts == 2:
+                yield AIMessageChunk(content="重试没有用量")
+                return
+            if case != "empty":
+                for output in (5, 10):
+                    yield AIMessageChunk(
+                        content="" if case == "retry" else "部分回复",
+                        usage_metadata={"input_tokens": 1000, "output_tokens": output, "total_tokens": 1000 + output},
+                    )
+            if case == "truncated":
+                yield AIMessageChunk(content="", response_metadata={"finish_reason": "length"})
+            else:
+                raise TimeoutError("中途断线")
+
+    model = Fake()
+    monkeypatch.setattr(module, "build_chat_model", lambda *args, **kwargs: model)
+
+    async def consume():
+        return [
+            event
+            async for event in router.tool_rounds(
+                "chief", "系统", "用户", [module.PROBE_TOOL], run_tool, purpose="失败用量"
+            )
+        ]
+
+    try:
+        if case == "retry":
+            await consume()
+        else:
+            with pytest.raises(LLMError, match="截断" if case == "truncated" else "中途断线"):
+                await consume()
+    finally:
+        await router.aclose()
+    run_tool.assert_not_awaited()
+    calls = await rows(sessionmaker)
+    expected_usage = {
+        "empty": [(None, None)] * module.TOOL_ROUND_ATTEMPTS,
+        "partial": [(1000, 10)],
+        "retry": [(1000, 10), (None, None)],
+        "truncated": [(1000, 10)],
+    }[case]
+    assert model.attempts == len(calls) == len(expected_usage)
+    assert [(call.prompt_tokens, call.completion_tokens) for call in calls] == expected_usage
+    assert [call.ok for call in calls] == ([False, True] if case == "retry" else [False] * len(calls))
+    assert all(("截断" if case == "truncated" else "中途断线") in call.error for call in calls if not call.ok)
+    if case == "retry":
+        assert calls[-1].response == "重试没有用量"
+    elif case != "empty":
+        assert calls[0].response == "部分回复部分回复"
+
+
 async def test_retention_keeps_2000_per_book_and_usage_pagination_remains(sessionmaker, client):
     async with sessionmaker() as session:
         first, second = Book(title="第一本", idea="点子"), Book(title="第二本", idea="点子")
