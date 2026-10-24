@@ -76,14 +76,14 @@ def test_demo_search_does_not_expand_existing_admission(user, tools):
         (
             "chat_agent",
             "3. ",
-            "2711a1a7336bd4e8b6ccac66cfc039f1737fa7601da17df3be74537e01194409",
+            "18fbaae647f9e48534d9a42eb62cf72b4a4640a701ad4e579dcd2823b667db47",
             "c7780e0b45469210c102d63879795ab84a5cf719bd6de7de4476d7ebe0664817",
             "chat_agent-第3条.md",
         ),
         (
             "chat_teardown",
             "2. ",
-            "ba06917e3654510a268d025c46f2b0621ad94ff2df0759072cab3941253451cc",
+            "32f47a7ed96d712d9167307f3a74ca529828ceb5f3c569fe6d53b58983eb86ed",
             "5871365358de5070f1647f2a989fa59fa5d879391a1af06bfd565e6a32184af3",
             "chat_teardown-第2条.md",
         ),

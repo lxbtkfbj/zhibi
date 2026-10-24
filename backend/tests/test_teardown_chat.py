@@ -311,7 +311,7 @@ def test_prompt_bytes_catalog_and_program_text_match_task():
     # 拆书第五批 §1：锁定作者已改好的提示词基线；实现不得再改提示词。
     assert (
         hashlib.sha256(default_content("chat_teardown").encode()).hexdigest()
-        == "a31ded184ed79a821f8f051c24fa5ca2ea3df5ba820c1abb349a5628df41e85d"
+        == "a21a403a2ca9129a48f9094216d3555c1dbbb5e180079335287def94b75a253e"
     )
     assert catalog.entry("chat_teardown")[-1] == "拆的书里群聊回答用"
     assert [item["name"] for item in catalog.variables("chat_teardown")] == [

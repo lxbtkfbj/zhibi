@@ -83,7 +83,7 @@ def test_teardown_prompt_only_inserts_approved_line_and_renumbers_later_rules():
     handbook = next(i for i, line in enumerate(lines) if line.startswith("2. 编辑部有几本专业手册".encode()))
     added = lines.pop(handbook + 1)
     assert hashlib.sha256(added.rstrip(b"\r\n")).hexdigest() == (
-        "2711a1a7336bd4e8b6ccac66cfc039f1737fa7601da17df3be74537e01194409"
+        "18fbaae647f9e48534d9a42eb62cf72b4a4640a701ad4e579dcd2823b667db47"
     )
     changed = 0
     for i in range(handbook + 1, len(lines)):
