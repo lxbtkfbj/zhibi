@@ -48,6 +48,7 @@ test('联网搜索单独一块：没填说清不搜、怎么开；填了能测�
   assert.match(empty, /DeepSeek API Key/u)
   assert.match(empty, /没填，编辑部不上网搜。填一把 DeepSeek 开放平台的 API Key 就能搜，不用把 DeepSeek 加成模型/u)
   assert.match(empty, /type="password"/u)
+  assert.match(empty, /class="settings-input w-full !pr-9"/u, '密钥框占满一行，眼睛按钮落在框里')
   assert.match(empty, /placeholder="sk-…"/u)
   assert.doesNotMatch(empty, />清除</u)
   assert.equal((empty.match(/<button [^>]*disabled=""[^>]*>(测试|保存)<\/button>/gu) ?? []).length, 2, '没填也没存时测试、保存都点不了')
