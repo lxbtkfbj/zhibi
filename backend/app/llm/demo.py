@@ -1181,6 +1181,10 @@ def tool_turn(system: str, user: str, tools: list[str], done: list) -> tuple[lis
         return [], _teardown_reply(system, user, "\n\n".join(result for _, result in done))
     library = _tag("设定库", user)
     called = [call.name for call, _ in done]
+    if "上网搜" in note and "search_web" in tools and "search_web" not in called:
+        query = re.split(r"[。？！?!\n]", note.split("上网搜", 1)[1], maxsplit=1)[0]
+        query = re.sub(r"^[\s「」]+|[\s「」]+$", "", query)[:30] or note[:30]
+        return [("search_web", {"query": query})], ""
     if "look_up_teardown" in tools and "look_up_teardown" not in called and (book := re.search(r"《([^》]+)》", note)):
         return [("look_up_teardown", {"book": book[1], "look": "精髓", "words": []})], ""
     if "开书" in note and "read_skill" in tools and "read_skill" not in called:
@@ -1200,6 +1204,8 @@ def tool_turn(system: str, user: str, tools: list[str], done: list) -> tuple[lis
     looked = "、".join(n for call, _ in done if call.name == "look_up_settings" for n in call.args.get("names", []))
     acted = next((result for call, result in reversed(done) if call.name == "make_changes"), "")
     text = f"（演示）{role}回答：{note[:20]}。" + (f"查了{looked}。" if looked else "")
+    if searched := next((call for call, _ in done if call.name == "search_web"), None):
+        text += f"上网搜了「{searched.args['query']}」。"
     if "read_skill" in called:
         text += "翻了开书手册。"
     if teardown := next((call for call, _ in done if call.name == "look_up_teardown"), None):

@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     default_llm_base_url: str = ""
     default_llm_api_key: str = ""
     default_llm_model: str = ""
+    web_search_base_url: str = "https://api.deepseek.com"
 
     @property
     def checkpoint_dsn(self) -> str:

@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 
 from app.agents.context import format_ledger, format_secrets
 from app.agents.schemas import Lenient, LibraryIntent
+from app.llm import web_search
 from app.models import Book, Chapter, Character, NodeAnchor, Relationship, WorldEntry
 from app.prompts import handbooks
 from app.services import book_saves, outline_structure, teardown_lookup
@@ -131,6 +132,7 @@ def tool_specs(
     skills: bool = True,
     memories: bool = True,
     teardowns: list[teardown_lookup.CatalogEntry] | None = None,
+    web: web_search.WebSearchTurn | None = None,
 ) -> list[dict]:
     """给模型的工具；只读的（只问不改、拆书）只有查的那几个。"""
     tools = QUERY_TOOLS if read_only else {**QUERY_TOOLS, **ACT_TOOLS}
@@ -145,6 +147,8 @@ def tool_specs(
         specs.append(skill)
     if teardown := teardown_lookup.tool_spec(teardowns or []):
         specs.append(teardown)
+    if web is not None:
+        specs.extend(web.specs())
     return specs
 
 
@@ -160,6 +164,8 @@ def doing_of(name: str, args: BaseModel, *, teardowns=None) -> str:
         return f"在翻《{args.name}》"
     if isinstance(args, teardown_lookup.LookUpTeardown):
         return teardown_lookup.doing_of(args, teardowns or [])
+    if isinstance(args, (web_search.SearchWeb, web_search.ReadWebpage)):
+        return web_search.doing_of(args)
     if isinstance(args, LookUpSettings):
         return f"在查{'、'.join(args.names[:5])}"
     if isinstance(args, LookUpOutline):
@@ -614,6 +620,8 @@ def tool_args(name: str, raw: dict) -> BaseModel:
         **MEMORY_TOOLS,
         "read_skill": ReadSkill,
         "look_up_teardown": teardown_lookup.LookUpTeardown,
+        "search_web": web_search.SearchWeb,
+        "read_webpage": web_search.ReadWebpage,
     }
     model = models.get(name)
     if model is None:

@@ -11,15 +11,17 @@ from app.crypto import SecretError, decrypt, encrypt
 from app.db import get_sessionmaker
 from app.llm.discovery import ModelDiscoveryError, fetch_models, normalize_base_url
 from app.llm.router import LOCAL_HOSTS, LLMError, LLMRouter, ResolvedProfile, ping, tool_support
+from app.llm.web_search import load_key, select_key
 from app.models import ROLES, LlmProfile, RoleAssignment
 from app.schemas import ModelListIn, ModelListOut, ProfileIn, ProfileOut, ProfilePatch, TestResult
 
 router = APIRouter(prefix="/llm", tags=["llm"])
 
 
-def to_out(p: LlmProfile) -> ProfileOut:
+def to_out(p: LlmProfile, *, web_search_id: uuid.UUID | None = None) -> ProfileOut:
     out = ProfileOut.model_validate(p)
     out.has_key = bool(p.api_key_encrypted)
+    out.web_search = p.id == web_search_id
     return out
 
 
@@ -62,7 +64,8 @@ async def list_models(body: ModelListIn, session: AsyncSession = SessionDep) -> 
 @router.get("/profiles", response_model=list[ProfileOut])
 async def list_profiles(session: AsyncSession = SessionDep) -> list[ProfileOut]:
     rows = (await session.execute(select(LlmProfile).order_by(LlmProfile.created_at))).scalars().all()
-    return [to_out(p) for p in rows]
+    key = select_key(rows)
+    return [to_out(p, web_search_id=key.profile_id if key else None) for p in rows]
 
 
 @router.post("/profiles", response_model=ProfileOut, status_code=201)
@@ -87,7 +90,8 @@ async def create_profile(body: ProfileIn, session: AsyncSession = SessionDep) ->
     except IntegrityError as exc:
         raise HTTPException(409, "已有同名的模型配置") from exc
     await session.refresh(profile)
-    return to_out(profile)
+    key = await load_key(session)
+    return to_out(profile, web_search_id=key.profile_id if key else None)
 
 
 @router.patch("/profiles/{profile_id}", response_model=ProfileOut)
@@ -117,7 +121,8 @@ async def update_profile(profile_id: uuid.UUID, body: ProfilePatch, session: Asy
     except IntegrityError as exc:
         raise HTTPException(409, "已有同名的模型配置") from exc
     await session.refresh(profile)
-    return to_out(profile)
+    key = await load_key(session)
+    return to_out(profile, web_search_id=key.profile_id if key else None)
 
 
 @router.delete("/profiles/{profile_id}", status_code=204)

@@ -642,6 +642,7 @@ export interface LlmProfile {
   timeout_s: number
   reasoning_effort: string | null
   has_key: boolean
+  web_search: boolean
 }
 
 export interface LlmProfileInput {

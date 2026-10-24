@@ -17,6 +17,7 @@ from sqlalchemy.orm import defer
 from app.agents.editorial import persona
 from app.db import get_sessionmaker
 from app.llm import demo
+from app.llm import web_search as online_search
 from app.llm.router import LOCAL_HOSTS, LLMRouter, ToolCall, ToolsUnsupported
 from app.models import Book, Chapter, Job, MeetingMessage
 from app.prompts import render, tagged
@@ -74,6 +75,7 @@ class Turn:
     allow_memories: bool = True
     allow_teardowns: bool = True
     teardown_catalog: list[teardown_lookup.CatalogEntry] = field(default_factory=list)
+    web_search: online_search.WebSearchTurn | None = None
     memory_actions: list[dict] = field(default_factory=list)
     book_changed: bool = False
     # 做过的那几处（重试时跳过同一处）；算进处数的那几处
@@ -140,22 +142,31 @@ async def run_tool(turn: Turn, call: ToolCall) -> str:
         if turn.stopping:
             raise Stopped
         return result
+    online = isinstance(args, (online_search.SearchWeb, online_search.ReadWebpage))
+    if online:
+        if turn.web_search is None:
+            return "这句话不能联网搜索。"
+        if blocked := turn.web_search.blocked(args):
+            return blocked
     doing = chat_tools.doing_of(call.name, args, teardowns=turn.teardown_catalog)
     await set_doing(
         turn,
         doing,
         ellipsis=not isinstance(args, (chat_tools.ReadSkill, teardown_lookup.LookUpTeardown)),
     )
-    async with get_sessionmaker()() as session:
-        book = await session.get(Book, turn.book_id)
-        try:
-            label, text = await chat_tools.look_up(
-                session, book, call.name, args, turn.viewing, teardowns=turn.teardown_catalog
-            )
-        except Exception as exc:
-            log.exception("聊天里查资料出错")
-            label, text = doing.removeprefix("在"), f"没查成：{exc}"
-        await session.rollback()
+    if online:
+        label, text = await turn.web_search.execute(args)
+    else:
+        async with get_sessionmaker()() as session:
+            book = await session.get(Book, turn.book_id)
+            try:
+                label, text = await chat_tools.look_up(
+                    session, book, call.name, args, turn.viewing, teardowns=turn.teardown_catalog
+                )
+            except Exception as exc:
+                log.exception("聊天里查资料出错")
+                label, text = doing.removeprefix("在"), f"没查成：{exc}"
+            await session.rollback()
     turn.tools.append({"kind": "query", "label": label, "text": text})
     turn.touch()
     return text
@@ -309,6 +320,7 @@ async def drive(turn: Turn, system: str, user: str) -> str:
                 skills=turn.allow_skills,
                 memories=turn.allow_memories,
                 teardowns=turn.teardown_catalog if turn.allow_teardowns else [],
+                web=turn.web_search,
             ),
             lambda call: run_tool(turn, call),
             purpose=f"聊天·{SPEAKER_NAMES[turn.role]}",
@@ -329,6 +341,8 @@ async def drive(turn: Turn, system: str, user: str) -> str:
                 )
     finally:
         await llm.aclose()
+        if turn.web_search is not None:
+            await turn.web_search.aclose()
     return "".join(turn.parts)
 
 
@@ -518,6 +532,8 @@ async def answer_note(redis, book_id, message_id, *, reply_id=None, retry=False)
         book = await session.get(Book, book_id)
         teardown = book.source == "teardown"
         teardown_catalog = [] if teardown else await teardown_lookup.load_catalog(session)
+        search_key = await online_search.load_key(session)
+        web = online_search.WebSearchTurn(search_key) if search_key else None
         read_only = teardown or bool(payload.get("ask_only"))
         # 只带这句话所在的那一段对话和它的摘要
         state = await conversation_state(session, book_id, "group", payload.get("conv"))
@@ -541,6 +557,7 @@ async def answer_note(redis, book_id, message_id, *, reply_id=None, retry=False)
         allow_memories=not teardown,
         allow_teardowns=not teardown,
         teardown_catalog=teardown_catalog,
+        web_search=web,
     )
     if retry:
         async with sm() as session:
