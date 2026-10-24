@@ -21,6 +21,7 @@ import { applyTemplate, cn, emptyCategory, findEntry, findNode, splitTitle, temp
 import { PENDING } from './sampleBook'
 import { type WritingControl } from './writing'
 import { ColumnWidthContext, SideFooterContext, useColumnWidth, zoomOf } from './column'
+import { FLOAT_KEY, type FloatPosition, fitFloatPosition, parseFloatPosition } from './floatPosition'
 import { readText, smallButton } from './styles'
 
 export type Tab = '简介' | '精髓' | '设定' | '大纲' | '正文'
@@ -453,8 +454,31 @@ function ChatHeader({ dock, setDock, onDragStart, tools }: { dock: Dock; setDock
 function FloatingEditorial({ setDock, children, size, tools }: { setDock: (dock: Dock) => void; children: ReactNode; size: { width: number; height: number }; tools?: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null)
   const drag = useRef<{ dx: number; dy: number } | null>(null)
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
+  // 上次拖到哪：换页面、换书回来还放在那儿；没拖过就在右下角
+  const [pos, setPos] = useState<FloatPosition | null>(() => {
+    try { return parseFloatPosition(localStorage.getItem(FLOAT_KEY)) } catch { return null }
+  })
+  const dropped = useRef(pos)
   const [nearEdge, setNearEdge] = useState(false)
+
+  // 窗口比上次小了，记下的地方可能出了屏幕：放回来时夹在屏幕里，窗口变大小也一样
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const fit = () => {
+      const z = zoomOf(el)
+      setPos(p => {
+        if (!p) return p
+        const next = fitFloatPosition(p, { width: el.offsetWidth * z, height: el.offsetHeight * z }, { width: window.innerWidth, height: window.innerHeight }, z)
+        return next.x === p.x && next.y === p.y ? p : next
+      })
+    }
+    // 一打开就量一次（画出来之前），之后浮窗或窗口变大小再量
+    const observer = new ResizeObserver(fit)
+    observer.observe(el)
+    window.addEventListener('resize', fit)
+    return () => { observer.disconnect(); window.removeEventListener('resize', fit) }
+  }, [])
 
   const start = (e: ReactPointerEvent) => {
     if ((e.target as Element).closest('button, a, input, textarea, select, [role="listbox"]') || !ref.current) return
@@ -466,20 +490,25 @@ function FloatingEditorial({ setDock, children, size, tools }: { setDock: (dock:
     const move = (e: PointerEvent) => {
       if (!drag.current || !ref.current) return
       const z = zoomOf(ref.current)
-      const w = ref.current.offsetWidth * z
-      const h = ref.current.offsetHeight * z
-      setPos({
-        x: Math.min(Math.max(8, e.clientX - drag.current.dx), window.innerWidth - w - 8) / z,
-        y: Math.min(Math.max(64 * z, e.clientY - drag.current.dy), window.innerHeight - h - 8) / z,
-      })
+      const next = fitFloatPosition(
+        { x: (e.clientX - drag.current.dx) / z, y: (e.clientY - drag.current.dy) / z },
+        { width: ref.current.offsetWidth * z, height: ref.current.offsetHeight * z },
+        { width: window.innerWidth, height: window.innerHeight },
+        z,
+      )
+      dropped.current = next
+      setPos(next)
       setNearEdge(e.clientX > window.innerWidth - 48)
     }
     const up = (e: PointerEvent) => {
       if (!drag.current) return
       drag.current = null
       setNearEdge(false)
-      // 拖到右边缘松手，就贴成侧栏
+      // 拖到右边缘松手，就贴成侧栏；别的地方松手，记住放在哪
       if (e.clientX > window.innerWidth - 48) setDock('side')
+      else if (dropped.current) {
+        try { localStorage.setItem(FLOAT_KEY, JSON.stringify(dropped.current)) } catch { /* 存不了就只管这一次 */ }
+      }
     }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
