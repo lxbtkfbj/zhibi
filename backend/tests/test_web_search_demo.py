@@ -77,8 +77,8 @@ def test_demo_search_does_not_expand_existing_admission(system, user, tools):
         (
             "chat_agent",
             "3. ",
-            "18fbaae647f9e48534d9a42eb62cf72b4a4640a701ad4e579dcd2823b667db47",
-            "f51a4e5ab594ccab2caf9f4f5276422bed3101a7022edb5f75ddaec3d4d66ac4",
+            "978867b19c0799a4f5453b50f986177d08fcded439cc32d83e361129f9b71462",
+            "4cfe66419504bcf297a036c5651c571fa75dc755d9a049e4fdbca47df002a713",
             "chat_agent-第3条.md",
         ),
         (

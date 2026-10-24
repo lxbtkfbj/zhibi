@@ -83,7 +83,7 @@ def test_teardown_lookup_line_and_layered_prompt_baseline_are_byte_exact():
     handbook = next(i for i, line in enumerate(lines) if line.startswith("2. 编辑部有几本专业手册".encode()))
     added = lines.pop(handbook + 1)
     assert hashlib.sha256(added.rstrip(b"\r\n")).hexdigest() == (
-        "18fbaae647f9e48534d9a42eb62cf72b4a4640a701ad4e579dcd2823b667db47"
+        "978867b19c0799a4f5453b50f986177d08fcded439cc32d83e361129f9b71462"
     )
     changed = 0
     for i in range(handbook + 1, len(lines)):
@@ -93,6 +93,6 @@ def test_teardown_lookup_line_and_layered_prompt_baseline_are_byte_exact():
     assert changed == 5
     # 主编口吻和分层移走资料与聊天做法后，保留原查拆书条款并锁定其余新基线。
     assert hashlib.sha256(b"".join(lines)).hexdigest() == (
-        "26a4b82b59acace69fb1ac83d12370c719d4f466ecfb21ac4d2a336ee6737457"
+        "5c3a26005730638c9eb181a2f55242a67e31c6fd3b7c393e4f0ec0280a6bbe28"
     )
     assert not (ROOT / "docs/codex任务/主编查拆过的书/提示词/chat_agent-查拆过的书一条.md").exists()

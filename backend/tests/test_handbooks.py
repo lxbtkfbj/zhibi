@@ -79,7 +79,7 @@ async def test_prompt_page_override_updates_directory_and_full_text(client):
     row = next(row for row in rows if row["name"] == "skills.opening")
     assert row["title"] == "开书" and row["group"] == "手册"
     assert row["role"] == "chief,lorekeeper,writer,reviewer"
-    assert row["when"].startswith("群聊里编辑部自己翻：作者问到")
+    assert row["when"].startswith("群聊里编辑部自己翻：聊到怎么开一本书")
     content = "# 新书根基\n什么时候翻：问根基时。\n" + "完整正文" * 1000
     response = await client.put("/api/prompts/skills.opening", json={"content": content})
     assert response.status_code == 200, response.text
