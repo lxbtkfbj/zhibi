@@ -43,15 +43,13 @@ await context.addInitScript(() => {
   localStorage.setItem('zhibi:appearance', JSON.stringify({ theme: 'paper', reducedMotion: true }))
 })
 
-let temporaryProfile
 try {
   const roles = await json('/llm/roles')
   assert.ok(Object.values(roles).filter(Boolean).every(id => id === fixture.profile), '所有已分配角色都用演示模型')
   const initialProfiles = await json('/llm/profiles')
   assert.equal(initialProfiles.find(profile => profile.id === fixture.profile).provider, 'demo')
-  const official = initialProfiles.find(profile => profile.id === fixture.search_profile)
-  assert.equal(official.web_search, true)
-  assert.deepEqual(initialProfiles.filter(profile => profile.web_search).map(profile => profile.id), [fixture.search_profile])
+  assert.ok(initialProfiles.every(profile => !('web_search' in profile)), '模型配置不再带联网搜索标记')
+  assert.deepEqual(await json('/llm/web-search'), { has_key: true })
 
   await json(`/books/${fixture.book}/chat/conversations`, { method: 'POST' })
   const beforeId = (await json(`/llm-calls?book_id=${fixture.book}`)).items[0]?.id ?? 0
@@ -108,39 +106,17 @@ try {
   await page.goto(`${base}/settings`)
   const modal = page.getByRole('dialog', { name: '系统设置', exact: true })
   await expect(modal).toBeVisible()
-  await modal.getByRole('button', { name: '＋ 添加', exact: true }).click()
-  await modal.getByRole('textbox', { name: '模型配置名称' }).fill('较晚官方配置（验收后删除）')
-  await modal.getByRole('textbox', { name: '接口地址', exact: true }).fill('https://api.deepseek.com/v1')
-  await modal.getByLabel('API Key', { exact: true }).fill('fake-never-assigned-profile-key')
-  await modal.getByRole('combobox', { name: '模型名', exact: true }).fill('deepseek-flash')
-  const created = page.waitForResponse(response => response.url().endsWith('/api/llm/profiles') && response.request().method() === 'POST')
-  await modal.getByRole('button', { name: '保存', exact: true }).click()
-  const createResponse = await created
-  assert.equal(createResponse.status(), 201)
-  temporaryProfile = await createResponse.json()
-  assert.equal(temporaryProfile.web_search, false, '较晚官方配置的新建响应不会抢走选中标记')
+  const searchGroup = modal.locator('.settings-group').filter({ has: page.getByRole('heading', { name: '联网搜索', exact: true }) })
+  const hint = '已保存，不回显 · 群聊里编辑部拿不准时会自己上网搜；搜一次、读一页各约半分钱'
+  await expect(searchGroup.locator('.settings-row-hint')).toHaveText(hint)
+  await expect(modal.getByText('联网搜索用它的密钥')).toHaveCount(0)
+  const beforeTest = requests().length
+  await searchGroup.getByRole('button', { name: '测试', exact: true }).click()
+  const testMessage = '能搜：试搜「网络小说」，第一条是验收百科《异火榜（隔离假资料）》。'
+  await expect(searchGroup.getByText(testMessage, { exact: true })).toBeVisible()
+  assert.deepEqual(requests().slice(beforeTest).map(item => item.request), [{ query: '网络小说', count: 1 }], '测试只搜一次')
   const row = name => modal.locator('.settings-row').filter({ has: page.locator('.settings-row-label').filter({ hasText: name }) })
-  await expect(row(temporaryProfile.name).locator('.settings-row-label')).toHaveText(temporaryProfile.name)
-  await expect(row(temporaryProfile.name).locator('.settings-row-hint')).toHaveText('deepseek-flash · 已保存密钥')
-  await row(official.name).getByRole('button', { name: '修改', exact: true }).click()
-  const patched = page.waitForResponse(response => response.url().endsWith(`/api/llm/profiles/${official.id}`) && response.request().method() === 'PATCH')
-  await modal.getByRole('button', { name: '保存', exact: true }).click()
-  const patchResponse = await patched
-  assert.equal(patchResponse.status(), 200)
-  const updated = await patchResponse.json()
-  assert.equal(updated.web_search, true, '选中配置修改响应仍然带 true')
-  await json(`/llm/profiles/${temporaryProfile.id}`, { method: 'DELETE' })
-  temporaryProfile = null
-  await page.reload()
-  await page.goto(`${base}/settings`)
-  await expect(modal).toBeVisible()
-  const suffix = 'deepseek-flash · 已保存密钥 · 联网搜索用它的密钥'
-  await expect(row(official.name).locator('.settings-row-hint')).toHaveText(suffix)
-  await expect(modal.getByText(suffix, { exact: true })).toHaveCount(1)
   await expect(row(initialProfiles.find(profile => profile.id === fixture.profile).name).locator('.settings-row-hint')).toHaveText('演示模式 · 内置示例内容，不联网')
-  const finalProfiles = await json('/llm/profiles')
-  assert.deepEqual(finalProfiles.map(profile => profile.id).sort(), initialProfiles.map(profile => profile.id).sort())
-  assert.deepEqual(finalProfiles.filter(profile => profile.web_search).map(profile => profile.id), [fixture.search_profile])
   assert.deepEqual(await json('/llm/roles'), roles, '验收未改变角色分工')
   await page.evaluate(() => document.fonts.ready)
   await page.screenshot({ path: path.join(out, '任务1-系统设置联网搜索密钥.png') })
@@ -151,17 +127,15 @@ try {
     lookupLabel: label, expandedLookupText: result, replyReceipt: '上网搜了「斗破苍穹 异火」。',
     fakeSearchRequests: requests().slice(beforeRequests), rereplyRetainsLookupText: true,
     rereplyMethod: again.request.method, rereplyDoesNotSearchAgain: true,
-    createUnselectedWebSearch: false, updateSelectedWebSearch: true, settingsHint: suffix,
-    selectedProfile: fixture.search_profile, temporaryProfileRemoved: true,
+    webSearchHint: hint, webSearchTestMessage: testMessage,
     pageErrors: errors, forbiddenRequests, realModelCalls: 0, realDeepSeekCalls: 0,
     snapshots: ['任务1-群聊联网搜索原文.png', '任务1-系统设置联网搜索密钥.png'],
   }, null, 2) + '\n')
-  console.log('PASS 群聊真实 API 搜假网页、查了原文逐字正确；重新回答保留原文且不再搜；新建/修改 API 标记与设置行一致；0 页面错误、0 外网请求')
+  console.log('PASS 群聊真实 API 搜假网页、查了原文逐字正确；重新回答保留原文且不再搜；系统设置「联网搜索」显示已保存、测试只搜一次；0 页面错误、0 外网请求')
 } catch (error) {
   await page.screenshot({ path: path.join(root, 'data/web-search-task1/browser-failure.png') }).catch(() => {})
   console.error('Browser diagnostics:', JSON.stringify({ pageErrors: errors, forbiddenRequests, pageText: await page.locator('body').innerText().catch(() => '') }))
   throw error
 } finally {
-  if (temporaryProfile) await json(`/llm/profiles/${temporaryProfile.id}`, { method: 'DELETE' })
   await browser.close()
 }

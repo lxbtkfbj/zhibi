@@ -642,7 +642,6 @@ export interface LlmProfile {
   timeout_s: number
   reasoning_effort: string | null
   has_key: boolean
-  web_search: boolean
 }
 
 export interface LlmProfileInput {
@@ -656,6 +655,11 @@ export interface LlmProfileInput {
   structured_method: StructuredMethod
   timeout_s: number
   reasoning_effort: string
+}
+
+/** 联网搜索单独存的 DeepSeek 密钥：只说有没有，不回显 */
+export interface WebSearchSetting {
+  has_key: boolean
 }
 
 export type RoleKey = 'default' | 'chief' | 'lorekeeper' | 'writer' | 'reviewer' | 'teardown' | 'router'

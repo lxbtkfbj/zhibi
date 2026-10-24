@@ -10,7 +10,7 @@ from sqlalchemy import select
 from app.crypto import encrypt
 from app.llm import demo, web_search
 from app.llm.router import LLMRouter, ToolCall
-from app.models import Book, LlmCall, LlmProfile, MeetingMessage, RoleAssignment
+from app.models import AppSetting, Book, LlmCall, LlmProfile, MeetingMessage, RoleAssignment
 from app.services import chat_agent, chat_tools
 from tests import test_handbooks
 from tests.test_chat_agent import reply_of, say
@@ -33,16 +33,8 @@ async def official(sm):
         session.add(model)
         await session.flush()
         session.add(RoleAssignment(role="default", profile_id=model.id))
-        row = LlmProfile(
-            name="假官方DeepSeek",
-            provider="openai_compatible",
-            base_url="https://api.deepseek.com/v1",
-            model="never-call",
-            api_key_encrypted=encrypt("fake-key"),
-        )
-        session.add(row)
+        session.add(AppSetting(key=web_search.SETTING, value={"api_key_encrypted": encrypt("fake-key")}))
         await session.commit()
-        return row.id
 
 
 @pytest.fixture
@@ -203,7 +195,7 @@ async def test_progress_labels_limits_errors_and_cached_pages(client, sessionmak
 
 
 async def test_key_is_frozen_per_answer_and_refreshed_next_turn(client, sessionmaker, monkeypatch, fake_search):
-    pid = await official(sessionmaker)
+    await official(sessionmaker)
     bid = await seed(sessionmaker)
     original = chat_agent.run_tool
     mutated = False
@@ -213,9 +205,8 @@ async def test_key_is_frozen_per_answer_and_refreshed_next_turn(client, sessionm
         if not mutated:
             mutated = True
             async with sessionmaker() as session:
-                profile = await session.get(LlmProfile, pid)
-                profile.name = "换名后的配置"
-                profile.api_key_encrypted = encrypt("next-key")
+                row = await session.get(AppSetting, web_search.SETTING)
+                row.value = {"api_key_encrypted": encrypt("next-key")}
                 await session.commit()
         return await original(turn, call)
 
@@ -223,7 +214,7 @@ async def test_key_is_frozen_per_answer_and_refreshed_next_turn(client, sessionm
     await say(client, bid, "上网搜 斗破苍穹 异火")
     await say(client, bid, "上网搜 斗破苍穹 异火")
     assert [r.headers["Authorization"] for r in fake_search[0]] == ["Bearer fake-key", "Bearer next-key"]
-    assert [t.key.name for t in fake_search[1]] == ["假官方DeepSeek", "换名后的配置"]
+    assert [t.key.api_key for t in fake_search[1]] == ["fake-key", "next-key"]
 
 
 async def test_no_key_rejects_unadvertised_call_without_progress_or_record():

@@ -60,7 +60,14 @@ class ProfileOut(ORM):
     timeout_s: int
     reasoning_effort: str | None
     has_key: bool = False
-    web_search: bool = False
+
+
+class WebSearchOut(BaseModel):
+    has_key: bool = False
+
+
+class WebSearchIn(BaseModel):
+    api_key: str = ""
 
 
 class TestResult(BaseModel):

@@ -3,25 +3,24 @@
 import asyncio
 import logging
 import re
-import uuid
-from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
 from urllib.parse import urlparse
 
 import httpx
 from pydantic import field_validator
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.schemas import Lenient
 from app.config import get_settings
 from app.crypto import SecretError, decrypt
 from app.llm.router import LOCAL_HOSTS
-from app.models import LlmProfile
+from app.models import AppSetting
 
 log = logging.getLogger(__name__)
 
+SETTING = "web_search"
+TRY_QUERY = "网络小说"
 SEARCH_LIMIT = "这句话已经搜了 5 次，不能再搜了。用搜到的回答，还缺什么跟作者说清。"
 PAGE_LIMIT = "这句话已经读了 3 个网页，不能再读了。用读到的回答。"
 NO_RESPONSE = "网上搜索这会儿没响应。先用手头的资料回答，跟作者说一声没搜成。"
@@ -31,8 +30,6 @@ ESCAPED_MARKDOWN = re.compile(r"\\([\\`*_{}\[\]()#+\-.!|,~<>:])")
 
 @dataclass(frozen=True)
 class SearchKey:
-    profile_id: uuid.UUID
-    name: str
     api_key: str
 
 
@@ -43,29 +40,22 @@ def hostname(url: str) -> str:
         return ""
 
 
-def select_key(rows: Iterable[LlmProfile]) -> SearchKey | None:
-    """先按配置创建顺序挑一套，再解密；损坏的首选密钥不悄悄换成另一套。"""
-    candidates = [
-        row
-        for row in rows
-        if row.provider == "openai_compatible"
-        and hostname(row.base_url) == "api.deepseek.com"
-        and row.api_key_encrypted
-    ]
-    if not candidates:
+def key_of(value: dict | None) -> SearchKey | None:
+    """系统设置「联网搜索」里存的密钥；解不开就当没填，不悄悄借模型配置的。"""
+    token = (value or {}).get("api_key_encrypted")
+    if not token:
         return None
-    row = min(candidates, key=lambda p: (p.created_at, p.id))
     try:
-        key = decrypt(row.api_key_encrypted)
+        key = decrypt(token)
     except SecretError:
-        log.warning("联网搜索的 API Key 无法解密：模型配置 %s (%s)", row.name, row.id)
+        log.warning("联网搜索的 API Key 无法解密")
         return None
-    return SearchKey(row.id, row.name, key) if key else None
+    return SearchKey(key) if key else None
 
 
 async def load_key(session: AsyncSession) -> SearchKey | None:
-    rows = await session.scalars(select(LlmProfile).where(LlmProfile.provider == "openai_compatible"))
-    return select_key(rows)
+    row = await session.get(AppSetting, SETTING, populate_existing=True)
+    return key_of(row.value if row else None)
 
 
 class SearchWeb(Lenient):
@@ -295,7 +285,7 @@ class WebSearchTurn:
                     continue
                 return NO_RESPONSE
             if status == 401 or (action == "search" and status == 403):
-                return f"联网搜索用不了：DeepSeek 不认这把密钥。请作者在系统设置里检查「{self.key.name}」的 API Key。"
+                return "联网搜索用不了：DeepSeek 不认这把密钥。请作者在系统设置「联网搜索」里检查 API Key。"
             if status == 402:
                 return "联网搜索用不了：DeepSeek 账户余额不足，请作者去 DeepSeek 开放平台充值。"
             if action == "fetch" and status in (403, 404):
@@ -313,3 +303,44 @@ class WebSearchTurn:
         if self._client is not None and self._owns_client:
             await self._client.aclose()
             self._client = None
+
+
+async def try_key(
+    api_key: str, *, base_url: str | None = None, client: httpx.AsyncClient | None = None
+) -> tuple[bool, str]:
+    """系统设置里点「测试」：真搜一次（约半分钱），交回给作者看的话；不重试。"""
+    base_url = (base_url if base_url is not None else get_settings().web_search_base_url).rstrip("/")
+    owned = client is None
+    client = client or httpx.AsyncClient(trust_env=hostname(base_url) not in LOCAL_HOSTS, timeout=30)
+    try:
+        response = await client.post(
+            f"{base_url}/v1/tools/search",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={"query": TRY_QUERY, "count": 1},
+        )
+    except httpx.RequestError:
+        return False, "连不上 DeepSeek，看看网络，过一会儿再试。"
+    finally:
+        if owned:
+            await client.aclose()
+    status = response.status_code
+    if status in (401, 403):
+        return False, "DeepSeek 不认这把密钥，看看有没有填错、是不是已经删了。"
+    if status == 402:
+        return False, "DeepSeek 账户余额不足，去 DeepSeek 开放平台充值后再试。"
+    if status in (408, 429) or status >= 500:
+        return False, f"DeepSeek 这会儿忙（{status}），过一会儿再试。"
+    if not response.is_success:
+        return False, f"没搜成：DeepSeek 回了 {status}。"
+    try:
+        rows = response.json().get("results")
+    except (ValueError, AttributeError):
+        rows = None
+    first = rows[0] if isinstance(rows, list) and rows and isinstance(rows[0], dict) else None
+    if first is None:
+        return True, f"能搜：试搜「{TRY_QUERY}」，这次没搜到结果。"
+    url = _text(first.get("url"))
+    site = _text(first.get("site_name"))
+    if not site or len(site) > 20:
+        site = hostname(url)
+    return True, f"能搜：试搜「{TRY_QUERY}」，第一条是{site}《{_text(first.get('title')) or '（没有标题）'}》。"

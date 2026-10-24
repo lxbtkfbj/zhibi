@@ -9,19 +9,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import SessionDep
 from app.crypto import SecretError, decrypt, encrypt
 from app.db import get_sessionmaker
+from app.llm import web_search
 from app.llm.discovery import ModelDiscoveryError, fetch_models, normalize_base_url
 from app.llm.router import LOCAL_HOSTS, LLMError, LLMRouter, ResolvedProfile, ping, tool_support
-from app.llm.web_search import load_key, select_key
-from app.models import ROLES, LlmProfile, RoleAssignment
-from app.schemas import ModelListIn, ModelListOut, ProfileIn, ProfileOut, ProfilePatch, TestResult
+from app.models import ROLES, AppSetting, LlmProfile, RoleAssignment
+from app.schemas import (
+    ModelListIn,
+    ModelListOut,
+    ProfileIn,
+    ProfileOut,
+    ProfilePatch,
+    TestResult,
+    WebSearchIn,
+    WebSearchOut,
+)
 
 router = APIRouter(prefix="/llm", tags=["llm"])
 
 
-def to_out(p: LlmProfile, *, web_search_id: uuid.UUID | None = None) -> ProfileOut:
+def to_out(p: LlmProfile) -> ProfileOut:
     out = ProfileOut.model_validate(p)
     out.has_key = bool(p.api_key_encrypted)
-    out.web_search = p.id == web_search_id
     return out
 
 
@@ -64,8 +72,7 @@ async def list_models(body: ModelListIn, session: AsyncSession = SessionDep) -> 
 @router.get("/profiles", response_model=list[ProfileOut])
 async def list_profiles(session: AsyncSession = SessionDep) -> list[ProfileOut]:
     rows = (await session.execute(select(LlmProfile).order_by(LlmProfile.created_at))).scalars().all()
-    key = select_key(rows)
-    return [to_out(p, web_search_id=key.profile_id if key else None) for p in rows]
+    return [to_out(p) for p in rows]
 
 
 @router.post("/profiles", response_model=ProfileOut, status_code=201)
@@ -90,8 +97,7 @@ async def create_profile(body: ProfileIn, session: AsyncSession = SessionDep) ->
     except IntegrityError as exc:
         raise HTTPException(409, "已有同名的模型配置") from exc
     await session.refresh(profile)
-    key = await load_key(session)
-    return to_out(profile, web_search_id=key.profile_id if key else None)
+    return to_out(profile)
 
 
 @router.patch("/profiles/{profile_id}", response_model=ProfileOut)
@@ -121,8 +127,7 @@ async def update_profile(profile_id: uuid.UUID, body: ProfilePatch, session: Asy
     except IntegrityError as exc:
         raise HTTPException(409, "已有同名的模型配置") from exc
     await session.refresh(profile)
-    key = await load_key(session)
-    return to_out(profile, web_search_id=key.profile_id if key else None)
+    return to_out(profile)
 
 
 @router.delete("/profiles/{profile_id}", status_code=204)
@@ -172,3 +177,57 @@ async def set_roles(
             row.profile_id = profile_id
     await session.commit()
     return await get_roles(session)
+
+
+async def _web_search(session: AsyncSession) -> AppSetting | None:
+    return await session.get(AppSetting, web_search.SETTING)
+
+
+@router.get("/web-search", response_model=WebSearchOut)
+async def get_web_search(session: AsyncSession = SessionDep) -> WebSearchOut:
+    row = await _web_search(session)
+    return WebSearchOut(has_key=bool(row and row.value.get("api_key_encrypted")))
+
+
+@router.put("/web-search", response_model=WebSearchOut)
+async def set_web_search(body: WebSearchIn, session: AsyncSession = SessionDep) -> WebSearchOut:
+    api_key = body.api_key.strip()
+    if not api_key:
+        raise HTTPException(422, "请填写 API Key")
+    try:
+        value = {"api_key_encrypted": encrypt(api_key)}
+    except SecretError as exc:
+        raise HTTPException(500, str(exc)) from exc
+    row = await _web_search(session)
+    if row is None:
+        session.add(AppSetting(key=web_search.SETTING, value=value))
+    else:
+        row.value = value
+    await session.commit()
+    return WebSearchOut(has_key=True)
+
+
+@router.delete("/web-search", response_model=WebSearchOut)
+async def clear_web_search(session: AsyncSession = SessionDep) -> WebSearchOut:
+    row = await _web_search(session)
+    if row is not None:
+        await session.delete(row)
+        await session.commit()
+    return WebSearchOut(has_key=False)
+
+
+@router.post("/web-search/test", response_model=TestResult)
+async def test_web_search(body: WebSearchIn, session: AsyncSession = SessionDep) -> TestResult:
+    """填了新密钥就试新的（还没保存也行），没填就试已保存的。"""
+    api_key = body.api_key.strip()
+    if not api_key:
+        row = await _web_search(session)
+        token = row.value.get("api_key_encrypted") if row else None
+        if not token:
+            return TestResult(ok=False, message="还没填 API Key")
+        try:
+            api_key = decrypt(token)
+        except SecretError:
+            return TestResult(ok=False, message="已保存的 API Key 无法读取，请重新填写")
+    ok, message = await web_search.try_key(api_key)
+    return TestResult(ok=ok, message=message)

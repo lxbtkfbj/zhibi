@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom'
 import { Link, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { get } from '../api/client'
-import { useProfileMutations, useProfiles, useRoles } from '../api/hooks'
+import { useProfileMutations, useProfiles, useRoles, useWebSearch, useWebSearchMutations } from '../api/hooks'
 import { useNewBookDefaults, useSettingsEditor, type SettingsResponse } from '../api/settings'
 import type { LlmProfile, LlmProfileInput, RoleKey } from '../api/types'
 import { ErrorText, Spinner } from '../components/ui'
@@ -78,13 +78,33 @@ function ProfileForm({ profile, onBack }: { profile: LlmProfile | null; onBack: 
 
 function ProfileRow({ profile, onEdit }: { profile: LlmProfile; onEdit: () => void }) {
   const { remove, test } = useProfileMutations()
-  return <SettingsRow label={profile.name} hint={profile.provider === 'demo' ? '演示模式 · 内置示例内容，不联网' : `${profile.model} · ${profile.has_key ? '已保存密钥' : '未填 Key'}${profile.web_search ? ' · 联网搜索用它的密钥' : ''}`} extra={<>
+  return <SettingsRow label={profile.name} hint={profile.provider === 'demo' ? '演示模式 · 内置示例内容，不联网' : `${profile.model} · ${profile.has_key ? '已保存密钥' : '未填 Key'}`} extra={<>
     {profile.structured_method_auto && <p className="settings-note">这个接口不认强制调工具，出结构化结果已自动改用 JSON 模式；不影响群聊里调工具。</p>}
     {profile.chat_tools === false && <p className="settings-note">这个接口在群聊里调工具被拒过：编辑部不会自己查资料、翻手册、动手，先判断要做什么，再一件件做。点「测试」可以重新试。</p>}
     {test.data && <p className={`flex items-center gap-1 text-[13px] ${test.data.ok ? 'text-lore' : 'text-seal'}`}>{test.data.ok ? <CheckCircle2 className="size-3.5 shrink-0" /> : <XCircle className="size-3.5 shrink-0" />}{test.data.ok ? `连上了：${test.data.message}` : test.data.message}</p>}
     {test.data?.ok && test.data.tools_message && <p className={`settings-note ${test.data.tools ? '!text-lore' : ''}`}>{test.data.tools_message}</p>}
     <ErrorText error={remove.error || test.error} />
   </>}><SettingsButton disabled={test.isPending} onClick={() => test.mutate(profile.id)}>{test.isPending ? '测试中…' : '测试'}</SettingsButton><SettingsButton onClick={onEdit}>修改</SettingsButton><SettingsButton danger disabled={remove.isPending} onClick={() => { if (confirm(`删除「${profile.name}」？`)) remove.mutate(profile.id) }}>删除</SettingsButton></SettingsRow>
+}
+
+/** 联网搜索单独填一把 DeepSeek 的密钥，跟用哪个模型无关；填了群聊里编辑部才会上网搜，清掉就不搜 */
+function WebSearchGroup() {
+  const setting = useWebSearch()
+  const { save, clear, test } = useWebSearchMutations()
+  const keyId = useId()
+  const [apiKey, setApiKey] = useState('')
+  const [showKey, setShowKey] = useState(false)
+  const hasKey = !!setting.data?.has_key
+  const typed = apiKey.trim()
+  const busy = save.isPending || clear.isPending
+  return <SettingsGroup title="联网搜索">
+    {setting.error && <SettingsRow label={<ErrorText error={setting.error} />} />}
+    <SettingsRow label={<label htmlFor={keyId}>DeepSeek API Key</label>} hint={hasKey ? '已保存，不回显 · 群聊里编辑部拿不准时会自己上网搜；搜一次、读一页各约半分钱' : '没填，编辑部不上网搜。填一把 DeepSeek 开放平台的 API Key 就能搜，不用把 DeepSeek 加成模型；搜一次、读一页各约半分钱'} extra={<>
+      <div className="relative"><input id={keyId} type={showKey ? 'text' : 'password'} value={apiKey} onChange={event => { setApiKey(event.target.value); test.reset() }} className="settings-input !pr-9" placeholder={hasKey ? '••••••••（填新的就换掉）' : 'sk-…'} autoComplete="off" autoCapitalize="none" spellCheck={false} /><button type="button" aria-label={showKey ? '隐藏 API Key' : '显示 API Key'} aria-pressed={showKey} aria-controls={keyId} disabled={!apiKey} onClick={() => setShowKey(!showKey)} className="absolute inset-y-0 right-0 flex w-8 items-center justify-center text-ink-2 disabled:opacity-40">{showKey ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}</button></div>
+      {test.data && <p className={`flex items-center gap-1 text-[13px] ${test.data.ok ? 'text-lore' : 'text-seal'}`}>{test.data.ok ? <CheckCircle2 className="size-3.5 shrink-0" /> : <XCircle className="size-3.5 shrink-0" />}{test.data.message}{test.data.ok && typed ? '点「保存」才用上。' : ''}</p>}
+      <ErrorText error={save.error || clear.error || test.error} />
+    </>}><SettingsButton disabled={test.isPending || (!typed && !hasKey)} onClick={() => test.mutate(typed)}>{test.isPending ? '测试中…' : '测试'}</SettingsButton><SettingsButton primary disabled={!typed || busy} onClick={() => save.mutate(typed, { onSuccess: () => { setApiKey(''); setShowKey(false); test.reset() } })}>{save.isPending ? '保存中…' : '保存'}</SettingsButton>{hasKey && <SettingsButton danger disabled={busy} onClick={() => { if (confirm('清掉联网搜索的密钥？清掉以后编辑部不再上网搜。')) clear.mutate(undefined, { onSuccess: () => test.reset() }) }}>清除</SettingsButton>}</SettingsRow>
+  </SettingsGroup>
 }
 
 function ModelsPanel() {
@@ -108,6 +128,7 @@ function ModelsPanel() {
       {ROLE_KEYS.filter(role => role !== 'router' || roles.data?.router).map(role => <SettingsRow key={role} label={role === 'default' ? '默认' : ROLE_KEY_LABEL[role]} hint={ROLE_HINTS[role]}><select aria-label={`${role === 'default' ? '默认' : ROLE_KEY_LABEL[role]}使用的模型`} value={roles.data?.[role] ?? ''} disabled={!roles.data || setRoles.isPending} onChange={event => setRoles.mutate({ [role]: event.target.value || null } as Partial<Record<RoleKey, string | null>>)} className="settings-select max-w-60"><option value="">{role === 'default' ? `未设置，用第一个${profiles.data?.[0] ? `（${profiles.data[0].name}）` : ''}` : `跟随默认${defaultName ? `（${defaultName}）` : ''}`}</option>{profiles.data?.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></SettingsRow>)}
     </SettingsGroup>
     <ErrorText error={setRoles.error} />
+    <WebSearchGroup />
   </>
 }
 

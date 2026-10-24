@@ -28,6 +28,7 @@ import type {
   TeamRole,
   Usage,
   Volume,
+  WebSearchSetting,
   WorldEntry,
   World,
   WriteUntil,
@@ -50,6 +51,7 @@ export const keys = {
   usage: (id: string) => ['usage', id] as const,
   profiles: ['profiles'] as const,
   roles: ['roles'] as const,
+  webSearch: ['web-search'] as const,
   health: ['health'] as const,
   glossary: ['glossary'] as const,
 }
@@ -365,6 +367,19 @@ export function useJobActions(bookId: string) {
 
 export const useProfiles = () => useQuery({ queryKey: keys.profiles, queryFn: () => get<LlmProfile[]>('/llm/profiles') })
 export const useRoles = () => useQuery({ queryKey: keys.roles, queryFn: () => get<RoleAssignments>('/llm/roles') })
+
+export const useWebSearch = () => useQuery({ queryKey: keys.webSearch, queryFn: () => get<WebSearchSetting>('/llm/web-search') })
+
+export function useWebSearchMutations() {
+  const qc = useQueryClient()
+  const set = (data: WebSearchSetting) => qc.setQueryData(keys.webSearch, data)
+  return {
+    save: useMutation({ mutationFn: (api_key: string) => put<WebSearchSetting>('/llm/web-search', { api_key }), onSuccess: set }),
+    clear: useMutation({ mutationFn: () => del('/llm/web-search'), onSuccess: () => set({ has_key: false }) }),
+    /** 填了就试填的，没填试已保存的；真搜一次 */
+    test: useMutation({ mutationFn: (api_key: string) => post<{ ok: boolean; message: string }>('/llm/web-search/test', { api_key }) }),
+  }
+}
 
 export function useProfileMutations() {
   const qc = useQueryClient()

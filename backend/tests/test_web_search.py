@@ -2,8 +2,7 @@
 
 import json
 import logging
-import uuid
-from datetime import UTC, date, datetime
+from datetime import date
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -13,7 +12,7 @@ import pytest
 from app.config import Settings
 from app.crypto import encrypt
 from app.llm import web_search as web
-from app.models import LlmProfile
+from app.models import AppSetting, LlmProfile
 
 
 @pytest.fixture
@@ -36,7 +35,7 @@ async def fake_search(monkeypatch):
         client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
         clients.append(client)
         turn = web.WebSearchTurn(
-            web.SearchKey(uuid.uuid4(), "官方DeepSeek", "fake-key"),
+            web.SearchKey("fake-key"),
             base_url="http://127.0.0.1:9999/",
             today=date(2026, 10, 24),
             client=client,
@@ -48,61 +47,39 @@ async def fake_search(monkeypatch):
         await client.aclose()
 
 
-def profile(*, id=1, created=1, provider="openai_compatible", url="https://api.deepseek.com/v1", key="fake-key"):
-    return LlmProfile(
-        id=uuid.UUID(int=id),
-        name=f"配置 {id}",
-        created_at=datetime(2026, 1, created, tzinfo=UTC),
-        provider=provider,
-        base_url=url,
-        api_key_encrypted=encrypt(key) if key else None,
-        model="not-called",
-    )
-
-
-@pytest.mark.parametrize(
-    "url", ["https://api.deepseek.com", "https://api.deepseek.com/", "https://api.deepseek.com/v1"]
-)
-def test_key_exact_host_and_first_creation_then_id(url):
-    rows = [
-        profile(id=12, created=1, provider="demo"),
-        profile(id=11, created=1, url="https://api.deepseek.com.example.org"),
-        profile(id=10, created=1, url="https://example.org/api.deepseek.com"),
-        profile(id=9, created=1, key=""),
-        profile(id=8, created=1, url="https://[invalid"),
-        profile(id=7, created=3),
-        profile(id=6, created=2),
-        profile(id=5, created=2, url=url),
-    ]
-    selected = web.select_key(rows)
-    assert selected == web.SearchKey(uuid.UUID(int=5), "配置 5", "fake-key")
-    assert web.select_key([]) is None
-    assert web.select_key(rows[:5]) is None
-
-
-def test_unreadable_first_key_disables_tools_without_falling_back(caplog, monkeypatch):
+def test_key_comes_only_from_the_web_search_setting(caplog, monkeypatch):
     monkeypatch.setattr(web.log, "disabled", False)
     caplog.set_level(logging.WARNING, logger=web.__name__)
-    broken = profile()
-    broken.api_key_encrypted = "not-an-encrypted-secret"
-    assert web.select_key([profile(id=2), broken]) is None
+    assert web.key_of({"api_key_encrypted": encrypt("fake-key")}) == web.SearchKey("fake-key")
+    for value in (None, {}, {"api_key_encrypted": ""}, {"api_key_encrypted": None}, {"api_key_encrypted": encrypt("")}):
+        assert web.key_of(value) is None
+    assert web.key_of({"api_key_encrypted": "not-an-encrypted-secret"}) is None
     assert "无法解密" in caplog.text
     assert "not-an-encrypted-secret" not in caplog.text
-    assert "fake-key" not in caplog.text
 
 
-async def test_load_key_is_a_snapshot_and_not_the_search_service_url(sessionmaker, monkeypatch):
-    monkeypatch.setenv("ZHIBI_WEB_SEARCH_BASE_URL", "http://127.0.0.1:9999")
+async def test_load_key_is_a_snapshot_and_never_borrows_a_model_profile(sessionmaker):
     async with sessionmaker() as session:
-        first = profile()
-        session.add_all([profile(id=2, url="http://127.0.0.1:9999"), first])
+        session.add(
+            LlmProfile(
+                name="官方DeepSeek",
+                provider="openai_compatible",
+                base_url="https://api.deepseek.com/v1",
+                api_key_encrypted=encrypt("profile-key"),
+                model="deepseek-flash",
+            )
+        )
+        await session.commit()
+        assert await web.load_key(session) is None
+        row = AppSetting(key=web.SETTING, value={"api_key_encrypted": encrypt("fake-key")})
+        session.add(row)
         await session.commit()
         selected = await web.load_key(session)
-        assert selected.profile_id == first.id
-        first.api_key_encrypted = encrypt("changed-key")
-        first.name = "changed-name"
-        await session.commit()
-        assert selected.name == "配置 1"
+        assert selected == web.SearchKey("fake-key")
+    async with sessionmaker() as other:
+        (await other.get(AppSetting, web.SETTING)).value = {"api_key_encrypted": encrypt("changed-key")}
+        await other.commit()
+    async with sessionmaker() as session:
         assert selected.api_key == "fake-key"
         assert (await web.load_key(session)).api_key == "changed-key"
 
@@ -130,7 +107,7 @@ def test_tool_definitions_are_exactly_task_json_and_date_is_frozen(monkeypatch):
             return cls(2026, 10, 24)
 
     monkeypatch.setattr(web, "date", Clock)
-    turn = web.WebSearchTurn(web.SearchKey(uuid.uuid4(), "fake", "fake"))
+    turn = web.WebSearchTurn(web.SearchKey("fake"))
     monkeypatch.setattr(Clock, "today", classmethod(lambda cls: cls(2027, 1, 2)))
     assert turn.specs()[0]["function"]["description"].endswith("今天是 2026 年 10 月 24 日。")
     assert web.tool_specs()[0]["function"]["description"].endswith("今天是 2027 年 1 月 2 日。")
@@ -308,7 +285,7 @@ async def test_errors_exact_words_count_attempts_and_retry_once(fake_search, act
     args = web.SearchWeb(query="异火") if action == "search" else web.ReadWebpage(url="https://example.com")
     label, text = await turn.execute(args)
     if status == 401:
-        expected = "联网搜索用不了：DeepSeek 不认这把密钥。请作者在系统设置里检查「官方DeepSeek」的 API Key。"
+        expected = "联网搜索用不了：DeepSeek 不认这把密钥。请作者在系统设置「联网搜索」里检查 API Key。"
     elif status == 402:
         expected = "联网搜索用不了：DeepSeek 账户余额不足，请作者去 DeepSeek 开放平台充值。"
     elif retryable:
@@ -328,7 +305,7 @@ async def test_errors_exact_words_count_attempts_and_retry_once(fake_search, act
 async def test_search_403_is_key_error_not_blocked_page(fake_search):
     turn, requests = fake_search([(403, {})])
     _, text = await turn.execute(web.SearchWeb(query="异火"))
-    assert text == "联网搜索用不了：DeepSeek 不认这把密钥。请作者在系统设置里检查「官方DeepSeek」的 API Key。"
+    assert text == "联网搜索用不了：DeepSeek 不认这把密钥。请作者在系统设置「联网搜索」里检查 API Key。"
     assert len(requests) == 1
 
 
@@ -373,7 +350,7 @@ async def test_client_proxy_timeout_and_lifecycle_without_any_network(monkeypatc
         return client
 
     monkeypatch.setattr(web.httpx, "AsyncClient", factory)
-    turn = web.WebSearchTurn(web.SearchKey(uuid.uuid4(), "fake", "fake"), base_url=base_url)
+    turn = web.WebSearchTurn(web.SearchKey("fake"), base_url=base_url)
     assert not seen
     await turn.execute(web.SearchWeb(query="词"))
     await turn.execute(web.SearchWeb(query="词"))
@@ -381,3 +358,51 @@ async def test_client_proxy_timeout_and_lifecycle_without_any_network(monkeypatc
     await turn.aclose()
     await turn.aclose()
     client.aclose.assert_awaited_once()
+
+
+def mock_client(response):
+    requests = []
+
+    def handle(request):
+        requests.append(request)
+        if isinstance(response, Exception):
+            raise response
+        status, body = response
+        return httpx.Response(status, json=body)
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(handle)), requests
+
+
+@pytest.mark.parametrize(
+    "response,expected",
+    [
+        (
+            (
+                200,
+                {"results": [{"title": "网络小说", "url": "https://baike.baidu.com/item/x", "site_name": "百度百科"}]},
+            ),
+            (True, "能搜：试搜「网络小说」，第一条是百度百科《网络小说》。"),
+        ),
+        (
+            (200, {"results": [{"title": "", "url": "https://example.com/a", "site_name": "名" * 21}]}),
+            (True, "能搜：试搜「网络小说」，第一条是example.com《（没有标题）》。"),
+        ),
+        ((200, {"results": []}), (True, "能搜：试搜「网络小说」，这次没搜到结果。")),
+        ((401, {}), (False, "DeepSeek 不认这把密钥，看看有没有填错、是不是已经删了。")),
+        ((403, {}), (False, "DeepSeek 不认这把密钥，看看有没有填错、是不是已经删了。")),
+        ((402, {}), (False, "DeepSeek 账户余额不足，去 DeepSeek 开放平台充值后再试。")),
+        ((429, {}), (False, "DeepSeek 这会儿忙（429），过一会儿再试。")),
+        ((503, {}), (False, "DeepSeek 这会儿忙（503），过一会儿再试。")),
+        ((422, {}), (False, "没搜成：DeepSeek 回了 422。")),
+        (httpx.ConnectError("fake failure"), (False, "连不上 DeepSeek，看看网络，过一会儿再试。")),
+    ],
+)
+async def test_try_key_searches_once_and_explains_to_the_author(response, expected):
+    client, requests = mock_client(response)
+    async with client:
+        assert await web.try_key("typed-key", base_url="http://127.0.0.1:9999/", client=client) == expected
+    assert len(requests) == 1
+    request = requests[0]
+    assert str(request.url) == "http://127.0.0.1:9999/v1/tools/search"
+    assert request.headers["Authorization"] == "Bearer typed-key"
+    assert json.loads(request.content) == {"query": "网络小说", "count": 1}
