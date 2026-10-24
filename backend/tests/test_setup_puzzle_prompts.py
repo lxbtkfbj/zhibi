@@ -147,7 +147,7 @@ def test_chat_layer_catalog_order_metadata_and_variable_labels_match_task():
     chief = names.index("persona_chief")
     agent = names.index("chat_agent")
     assert names[chief : chief + 2] == ["persona_chief", "voice_chief"]
-    assert names[agent : agent + 4] == ["chat_agent", "chat_voice", "chat_manner", "chat_material"]
+    assert names[agent : agent + 5] == ["chat_agent", "chat_reply", "chat_voice", "chat_manner", "chat_material"]
     assert VARIABLE_LABELS["voice"] == "主编口吻"
     assert VARIABLE_LABELS["book"] == "简介或原书信息"
 

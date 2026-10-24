@@ -5,10 +5,15 @@ import path from 'node:path'
 import { chromium, expect } from '@playwright/test'
 
 const root = path.resolve(import.meta.dirname, '../..')
-const base = 'http://127.0.0.1:4377'
-const api = 'http://127.0.0.1:8077/api'
-const fixture = JSON.parse(fs.readFileSync(path.join(root, 'data/handbook-task1/fixtures.json'), 'utf8'))
-const out = path.join(root, 'docs/主编手册验收')
+const base = process.env.HANDBOOK_TEST_BASE ?? 'http://127.0.0.1:4377'
+const api = process.env.HANDBOOK_TEST_API ?? 'http://127.0.0.1:8077/api'
+const fixture = JSON.parse(fs.readFileSync(process.env.HANDBOOK_TEST_FIXTURE ?? path.join(root, 'data/handbook-task1/fixtures.json'), 'utf8'))
+const out = process.env.HANDBOOK_TEST_OUTPUT ?? path.join(root, 'docs/主编手册验收')
+const allowedOrigins = new Set([new URL(base).origin, new URL(api).origin])
+assert.ok([...allowedOrigins].every(origin => {
+  const url = new URL(origin)
+  return url.hostname === '127.0.0.1' && !['8000', '4320'].includes(url.port)
+}), '仅允许独立本机环境，不得访问日常服务')
 fs.mkdirSync(out, { recursive: true })
 const json = async (suffix, options) => {
   const response = await fetch(api + suffix, options)
@@ -26,7 +31,7 @@ const errors = [], forbiddenRequests = []
 page.on('pageerror', error => errors.push(error.message))
 await context.route('**/*', async route => {
   const url = new URL(route.request().url())
-  if (url.protocol.startsWith('http') && (url.hostname !== '127.0.0.1' || !['4377', '8077'].includes(url.port))) {
+  if (url.protocol.startsWith('http') && !allowedOrigins.has(url.origin)) {
     forbiddenRequests.push(url.origin + url.pathname)
     return route.abort()
   }
@@ -38,9 +43,9 @@ await context.addInitScript(() => {
 })
 try {
   await page.goto(`${base}/prompts?template=skills.opening`)
-  await expect(page.getByRole('heading', { name: '手册', exact: true })).toBeVisible()
+  await expect(page.locator('[data-prompt-group="手册"] .prompt-group-toggle')).toHaveAttribute('aria-expanded', 'true')
   await expect(page.locator('.template-toolbar h2')).toHaveText('开书')
-  await page.getByRole('button', { name: '自定义', exact: true }).click()
+  await page.getByRole('button', { name: '修改', exact: true }).click()
   const editor = page.locator('.cm-content[contenteditable="true"]')
   await editor.click()
   await page.keyboard.press('Control+A')
@@ -56,9 +61,17 @@ try {
   await json(`/books/${fixture.book}/chat/conversations`, { method: 'POST' })
   const beforeCalls = await json(`/llm-calls?book_id=${fixture.book}`)
   const beforeId = beforeCalls.items[0]?.id ?? 0
+  const conversationsReady = page.waitForResponse(response => new URL(response.url()).pathname === `/api/books/${fixture.book}/chat/conversations` && response.request().method() === 'GET' && response.status() === 200)
   await page.goto(`${base}/desk/${fixture.book}`)
-  await page.getByRole('textbox', { name: '给编辑部发消息' }).fill('开书先定什么')
+  await conversationsReady
+  await expect(async () => {
+    await page.getByRole('textbox', { name: '给编辑部发消息' }).fill('开书先定什么')
+    await expect(page.getByRole('textbox', { name: '给编辑部发消息' })).toHaveValue('开书先定什么')
+    await expect(page.getByRole('button', { name: '发送', exact: true })).toBeEnabled({ timeout: 1000 })
+  }).toPass({ timeout: 10000 })
+  const sent = page.waitForResponse(response => new URL(response.url()).pathname === `/api/books/${fixture.book}/notes` && response.request().method() === 'POST')
   await page.getByRole('button', { name: '发送', exact: true }).click()
+  assert.equal((await sent).status(), 201)
   await expect(page.getByRole('button', { name: '查了：手册《开书》', exact: true })).toBeVisible({ timeout: 30000 })
   await expect(page.getByText(/翻了开书手册。/)).toBeVisible()
   await page.evaluate(() => document.fonts.ready)

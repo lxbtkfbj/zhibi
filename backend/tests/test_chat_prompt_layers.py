@@ -291,6 +291,10 @@ async def test_demo_requests_have_exact_layers_and_material(
             assert "（从原文拆出来的）\n" in request["user"]
             assert "（从原文倒推的）\n" in request["user"]
         elif tools:
+            assert request["prompt_parts"] == {
+                "system": ["persona_chief", "chat_voice", "voice_chief", "chat_agent", "chat_manner", "rules"],
+                "user": ["chat_material"],
+            }
             assert set(request["prompt_names"]) == {
                 "persona_chief",
                 "voice_chief",

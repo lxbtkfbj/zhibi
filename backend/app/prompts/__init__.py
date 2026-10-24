@@ -52,6 +52,19 @@ def prompt_names_for(system: str, user: str) -> list[str]:
     return list(dict.fromkeys(name for name, content in _rendered.get() if content in system or content in user))
 
 
+def prompt_parts_for(system: str, user: str) -> dict[str, list[str]]:
+    """按模板在各段文字里第一次出现的位置排序，不受渲染嵌套和渲染先后影响。"""
+    parts = {}
+    for key, text in (("system", system), ("user", user)):
+        positions: dict[str, int] = {}
+        for name, content in _rendered.get():
+            position = text.find(content)
+            if position != -1:
+                positions[name] = min(positions.get(name, position), position)
+        parts[key] = sorted(positions, key=positions.__getitem__)
+    return parts
+
+
 def tagged(name: str, body: str) -> str:
     """聊天提示词里的一大块资料用 <名字>…</名字> 包起来，和资料里每一条开头的【名字】分开。"""
     return f"<{name}>\n{body.strip()}\n</{name}>"

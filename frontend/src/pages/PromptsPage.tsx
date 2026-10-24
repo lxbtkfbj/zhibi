@@ -1,17 +1,19 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
-import { ArrowLeft, BookOpen, CheckCircle2, FileText, History, LoaderCircle, RefreshCw, Search, Settings, XCircle } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { ArrowLeft, BookOpen, CheckCircle2, ChevronDown, ChevronRight, FileText, History, LoaderCircle, RefreshCw, Search, Settings, XCircle } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { get } from '../api/client'
 import { keys, useBooks } from '../api/hooks'
 import { promptApi, type PromptDetail, type PromptInfo } from '../api/prompts'
 import type { BookDetail } from '../api/types'
 import { PromptEditor, type PromptEditorHandle } from '../components/PromptEditor'
+import { UsedPrompts } from '../components/UsedPrompts'
 import { ErrorText } from '../components/ui'
 import { SettingsButton } from '../components/settings/SettingsList'
 import { CALL_ROLE_KEYS, normalizeCallRole, roleName } from '../lib/callRoles'
 import { readPromptDraft, writePromptDraft } from '../lib/promptDrafts'
+import { readCollapsedPromptGroups, writeCollapsedPromptGroups } from '../lib/promptDirectory'
 import { readPromptReturnContext } from '../lib/promptNavigation'
 import { resolvePromptSelection } from '../lib/promptSelection'
 import { useSettingsModal } from '../lib/settingsModal'
@@ -21,7 +23,7 @@ import './prompts.css'
 const timestamp = (date: string | null) => date ? new Date(date).toLocaleString('zh-CN', { hour12: false }) : '尚未调用'
 const number = (value: number | null) => value == null ? '—' : value.toLocaleString('zh-CN')
 
-function TemplateEditor({ prompt, viewCall }: { prompt: PromptDetail; viewCall: (id: number) => void }) {
+function TemplateEditor({ prompt, viewCall, select }: { prompt: PromptDetail; viewCall: (id: number) => void; select: (name: string) => void }) {
   const cache = useQueryClient()
   const editor = useRef<PromptEditorHandle>(null)
   const [draft, setDraft] = useState(() => readPromptDraft(prompt.name))
@@ -52,53 +54,78 @@ function TemplateEditor({ prompt, viewCall }: { prompt: PromptDetail; viewCall: 
     writePromptDraft(prompt.name, value)
     setNotice('')
   }
+  const cancel = () => {
+    if (content !== prompt.content && !window.confirm('改的还没保存，确定不要了吗？')) return
+    writePromptDraft(prompt.name, null)
+    setDraft(null); setEditable(false); setNotice('')
+    save.reset(); reset.reset()
+  }
   return <div className="template-editor">
     <div className="template-toolbar">
-      <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h2>{prompt.title}</h2><span className={clsx('prompt-version', prompt.customized && 'is-custom')}>{prompt.customized ? '已自定义' : '默认版本'}</span></div><p>{prompt.when}</p></div>
+      <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h2>{prompt.title}</h2>{prompt.customized && <span className="prompt-version is-custom">改过</span>}</div><p>{prompt.when}</p></div>
       <div className="template-actions">
-        <SettingsButton disabled={busy || (!prompt.customized && content === prompt.default_content)} onClick={() => {
+        {editable && prompt.customized && <SettingsButton disabled={busy} onClick={() => {
           if (window.confirm('恢复默认会移除这个提示词的全局自定义内容，确定继续吗？')) reset.mutate(content)
-        }}>恢复默认</SettingsButton>
-        {!editable && <SettingsButton disabled={busy} onClick={() => { setEditable(true); setNotice(''); save.reset() }}>自定义</SettingsButton>}
-        <SettingsButton primary disabled={!editable || save.isPending || reset.isPending} onClick={() => save.mutate(content)}>{save.isPending ? '保存中…' : '保存'}</SettingsButton>
+        }}>恢复默认</SettingsButton>}
+        {!editable && <SettingsButton disabled={busy} onClick={() => { setEditable(true); setNotice(''); save.reset() }}>修改</SettingsButton>}
+        {editable && <><SettingsButton disabled={busy} onClick={cancel}>取消</SettingsButton><SettingsButton primary disabled={busy} onClick={() => save.mutate(content)}>{save.isPending ? '保存中…' : '保存'}</SettingsButton></>}
       </div>
     </div>
-    <div className="template-meta">
-      <span className="template-role">{roleName(prompt.role)}</span><span>最近调用：{timestamp(prompt.last_call?.created_at ?? null)}</span>
-      {prompt.last_call && <button type="button" className="prompt-text-link" onClick={() => viewCall(prompt.last_call!.id)}>查看这次调用</button>}
+    <div className="template-companions">
+      <div className="template-companions-heading"><h3>一起发的</h3>{prompt.last_call ? <><span>最近一次：{timestamp(prompt.last_call.created_at)} · {prompt.last_call.purpose}</span><button type="button" className="prompt-text-link" onClick={() => viewCall(prompt.last_call!.id)}>查看这次调用</button></> : <span>还没用过</span>}</div>
+      {prompt.last_call?.used_prompts && <UsedPrompts used={prompt.last_call.used_prompts} current={prompt.name} onSelect={select} legacyLabel="用到的" />}
     </div>
     {prompt.default_changed && <div className="template-update-note" role="note">
       <p className="font-medium text-seal">默认模板的变量有变化，当前仍保留你的自定义内容。</p>
       {prompt.new_variables?.length ? <p className="mt-1">新增变量：{prompt.new_variables.map(variable => `${variable.label}（${variable.name}）`).join('、')}。</p> : <p className="mt-1">默认模板的变量与当前自定义版本不同。</p>}
       <p className="mt-1">可以手动合并新增变量，或点击「恢复默认」采用新模板；恢复前请先保留你需要的自定义内容。</p>
     </div>}
-    {!!prompt.variables.length && <details className="template-variables"><summary>可用变量 <span>{prompt.variables.length} 个 · 展开查看{editable ? '并插入' : ''}</span></summary><div>
-      {prompt.variables.map(variable => <button type="button" key={variable.name} disabled={!editable || busy} title={`插入 {{${variable.name}}}`} className="prompt-variable disabled:cursor-default" onClick={() => editor.current?.insert(variable.name)}>{variable.label}</button>)}
+    {editable && !!prompt.variables.length && <details className="template-variables"><summary>可用变量 <span>{prompt.variables.length} 个 · 展开查看并插入</span></summary><div>
+      {prompt.variables.map(variable => <button type="button" key={variable.name} disabled={busy} title={`插入 {{${variable.name}}}`} className="prompt-variable disabled:cursor-default" onClick={() => editor.current?.insert(variable.name)}>{variable.label}</button>)}
     </div></details>}
     <div className="template-notice" role="status"><ErrorText error={save.error || reset.error} />{notice && <p className="text-lore">{notice}</p>}</div>
     {draft !== null && <p className="template-draft-note">有未保存的本地草稿；切换提示词或分页会保留，点击「保存」才会发给编辑部。</p>}
-    <div className="template-reading-label"><span>{editable ? '编辑内容' : '提示词正文'}</span><span>{editable ? '保存后对所有书生效' : '只读 · 点「自定义」后可编辑'}</span></div>
+    <div className="template-reading-label"><span>{editable ? '正在修改' : '提示词正文'}</span>{editable && <span>保存后对所有书生效</span>}</div>
     <PromptEditor ref={editor} value={content} editable={editable && !busy} variables={prompt.variables} onChange={changeContent} />
   </div>
 }
 
-function Templates({ viewCall, requested, select }: { viewCall: (id: number) => void; requested: string | null; select: (name: string) => void }) {
+function Templates({ viewCall, requested, select, selectionRequest }: { viewCall: (id: number) => void; requested: string | null; select: (name: string) => void; selectionRequest: number }) {
   const list = useQuery({ queryKey: ['prompts'], queryFn: promptApi.list })
   const [search, setSearch] = useState('')
+  const directory = useRef<HTMLElement>(null)
   const selected = resolvePromptSelection(list.data, requested)
+  const selectedGroup = list.data?.find(prompt => prompt.name === selected)?.group
+  const [directoryState, setDirectoryState] = useState(() => ({ collapsed: readCollapsedPromptGroups(), revealed: '' }))
+  const { collapsed } = directoryState
+  const revealSelection = `${selectedGroup ?? ''}\0${selected ?? ''}\0${selectionRequest}`
+  // A new selection reveals its group once; the author can still collapse that group afterwards.
+  if (selectedGroup && directoryState.revealed !== revealSelection) {
+    setDirectoryState({ collapsed: { ...collapsed, [selectedGroup]: false }, revealed: revealSelection })
+  }
   const detail = useQuery({ queryKey: ['prompt', selected], queryFn: () => promptApi.detail(selected!), enabled: selected !== null })
   const groups = new Map<string, PromptInfo[]>()
   for (const prompt of list.data ?? []) groups.set(prompt.group, [...(groups.get(prompt.group) ?? []), prompt])
   const needle = search.trim().toLocaleLowerCase()
   const filtered = Array.from(groups, ([group, prompts]) => [group, prompts.filter(prompt => `${prompt.title} ${prompt.name} ${group} ${roleName(prompt.role)}`.toLocaleLowerCase().includes(needle))] as const).filter(([, prompts]) => prompts.length)
+  useEffect(() => { writeCollapsedPromptGroups(collapsed) }, [collapsed])
+  const selectedGroupCollapsed = selectedGroup ? collapsed[selectedGroup] : false
+  useEffect(() => {
+    const item = directory.current?.querySelector<HTMLElement>('[aria-current="page"]')
+    item?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [selected, selectedGroupCollapsed, needle, selectionRequest])
+  const selectPrompt = (name: string) => { setSearch(''); select(name) }
   return <div className="prompts-workspace">
     <aside className="prompt-directory">
       <div className="prompt-directory-heading"><span>提示词目录</span><span>{list.data?.length ?? '—'} 项</span></div>
       <label className="prompt-search"><Search className="size-4 shrink-0" /><input aria-label="搜索提示词" value={search} onChange={event => setSearch(event.target.value)} placeholder="搜索名称、角色…" /></label>
-      <nav className="prompt-nav scroll-thin" aria-label="提示词列表">
-        {filtered.map(([group, prompts]) => <section key={group}><h3>{group}</h3>{prompts.map(prompt => <button type="button" key={prompt.name} aria-current={selected === prompt.name ? 'page' : undefined} onClick={() => select(prompt.name)} className={clsx('prompt-nav-item', selected === prompt.name && 'is-selected')}>
-          <span className="min-w-0 flex-1"><span className="block break-words">{prompt.title}</span>{prompt.default_changed && <span className="prompt-nav-update">变量有更新</span>}</span>{prompt.customized && <span className="prompt-custom-dot" aria-label="已自定义" title="已自定义" />}
-        </button>)}</section>)}
+      <nav ref={directory} className="prompt-nav scroll-thin" aria-label="提示词列表">
+        {filtered.map(([group, prompts]) => {
+          const expanded = !!needle || !collapsed[group]
+          return <section key={group} data-prompt-group={group}><h3><button type="button" className="prompt-group-toggle" aria-expanded={expanded} onClick={() => { if (!needle) setDirectoryState(previous => ({ ...previous, collapsed: { ...previous.collapsed, [group]: !previous.collapsed[group] } })) }}>{expanded ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}<span>{group}</span><span className="prompt-group-count">{groups.get(group)!.length}</span></button></h3>{expanded && prompts.map(prompt => <button type="button" key={prompt.name} aria-current={selected === prompt.name ? 'page' : undefined} onClick={() => select(prompt.name)} className={clsx('prompt-nav-item', selected === prompt.name && 'is-selected')}>
+            <span className="min-w-0 flex-1"><span className="block break-words">{prompt.title}</span>{prompt.default_changed && <span className="prompt-nav-update">变量有更新</span>}</span>{prompt.customized && <span className="prompt-custom-dot" aria-label="改过" title="改过" />}
+          </button>)}</section>
+        })}
         {list.isSuccess && !!list.data.length && !filtered.length && <p className="prompt-search-empty">没有找到匹配的提示词，试试其他关键词。</p>}
       </nav>
     </aside>
@@ -109,7 +136,7 @@ function Templates({ viewCall, requested, select }: { viewCall: (id: number) => 
       {list.isSuccess && !list.data.length && <div className="prompt-state"><FileText className="size-7" /><p>暂时没有可用的提示词</p><span>目录加载成功，但还没有可展示的模板。</span></div>}
       {selected && detail.isPending && <div className="prompt-state" role="status"><LoaderCircle className="size-6 animate-spin" /><p>正在读取提示词…</p></div>}
       {selected && detail.isError && <div className="prompt-state"><p>这份提示词暂时没读出来</p><ErrorText error={detail.error} /><button type="button" className="prompt-secondary-button" onClick={() => void detail.refetch()}>重试这份提示词</button></div>}
-      {selected && detail.data && <TemplateEditor key={detail.data.name} prompt={detail.data} viewCall={viewCall} />}
+      {selected && detail.data && <TemplateEditor key={detail.data.name} prompt={detail.data} viewCall={viewCall} select={selectPrompt} />}
     </div>
   </div>
 }
@@ -158,7 +185,18 @@ export function PromptsPage() {
   const { openSettings } = useSettingsModal()
   const tab = params.get('tab') === 'calls' ? 'calls' : 'prompts'
   const [call, setCall] = useState<number | null>(null)
+  const [selectionRequest, setSelectionRequest] = useState(0)
+  const [callSelectionRequest, setCallSelectionRequest] = useState(0)
   const update = (key: string, value: string) => setParams(previous => { const next = new URLSearchParams(previous); next.set(key, value); return next }, { replace: true })
+  const selectTemplate = (name: string, fromCall = false) => {
+    setSelectionRequest(value => value + 1)
+    setParams(previous => { const next = new URLSearchParams(previous); if (fromCall) next.set('tab', 'prompts'); next.set('template', name); return next }, { replace: true })
+  }
+  const selectFromCall = (name: string) => {
+    setCall(null)
+    setCallSelectionRequest(value => value + 1)
+    selectTemplate(name, true)
+  }
   const role = normalizeCallRole(params.get('callRole'))
   return <div className="prompts-page desk-zoom">
     <header className="prompts-topbar">
@@ -169,13 +207,13 @@ export function PromptsPage() {
     </header>
     <main className="prompts-main">
       <div className="prompts-page-heading">
-        <div><h1>提示词与调用记录</h1>{tab === 'prompts' && <p>查看编辑部的工作指令。自定义内容只在点击保存后生效，适用于所有书。</p>}</div>
+        <div><h1>提示词与调用记录</h1>{tab === 'prompts' && <p>查看编辑部的工作指令。改了点「保存」才生效，所有书都用同一份。</p>}</div>
         <div className="prompts-tabs" role="tablist" aria-label="提示词与调用记录">{(['prompts', 'calls'] as const).map(value => <button key={value} type="button" id={`prompts-tab-${value}`} role="tab" aria-selected={tab === value} aria-controls="prompts-panel" tabIndex={tab === value ? 0 : -1} onKeyDown={event => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); const next = event.key === 'Home' ? 'prompts' : event.key === 'End' ? 'calls' : value === 'calls' ? 'prompts' : 'calls'; update('tab', next); document.getElementById(`prompts-tab-${next}`)?.focus() } }} onClick={() => update('tab', value)}>{value === 'prompts' ? <FileText className="size-4" /> : <History className="size-4" />}{value === 'prompts' ? '提示词' : '调用记录'}</button>)}</div>
       </div>
       <div id="prompts-panel" className="prompts-panel" role="tabpanel" aria-labelledby={`prompts-tab-${tab}`}>
-        {tab === 'prompts' ? <Templates viewCall={setCall} requested={params.get('template')} select={name => update('template', name)} /> : <Calls viewCall={setCall} book={params.get('callBook') ?? bookId ?? ''} role={role} setFilter={update} originBook={origin.data} />}
+        {tab === 'prompts' ? <Templates key={callSelectionRequest} viewCall={setCall} requested={params.get('template')} select={selectTemplate} selectionRequest={selectionRequest} /> : <Calls viewCall={setCall} book={params.get('callBook') ?? bookId ?? ''} role={role} setFilter={update} originBook={origin.data} />}
       </div>
     </main>
-    {call !== null && <PromptCallDetail id={call} onClose={() => setCall(null)} />}
+    {call !== null && <PromptCallDetail id={call} onClose={() => setCall(null)} selectPrompt={selectFromCall} />}
   </div>
 }

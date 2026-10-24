@@ -318,7 +318,7 @@ def test_prompt_bytes_catalog_and_program_text_match_task():
         hashlib.sha256(default_content("chat_teardown").encode()).hexdigest()
         == "59ad3604d01a6f5aa5df625e070c922432dcdc1c09362093c0148399b5b9f38b"
     )
-    assert catalog.entry("chat_teardown")[-1] == "拆的书里群聊回答用"
+    assert catalog.entry("chat_teardown")[-1] == "拆的书里的群聊，这一路的开场和规矩：只答不改、怎么查资料"
     assert [item["name"] for item in catalog.variables("chat_teardown")] == [
         "lookup",
         "role_focus",

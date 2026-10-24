@@ -17,7 +17,7 @@ const root = fileURLToPath(new URL('../../', import.meta.url))
 const output = path.join(root, 'data/prompts-workspace')
 const base = `http://127.0.0.1:${Number(process.env.PROMPTS_TEST_PORT || 4377)}`
 await fs.mkdir(output, { recursive: true })
-const fingerprint = async () => Object.fromEntries(await Promise.all(['frontend/src/pages/PromptsPage.tsx', 'frontend/src/pages/PromptCallDetail.tsx', 'frontend/src/pages/prompts.css', 'frontend/src/pages/SettingsPage.tsx', 'frontend/src/lib/promptNavigation.ts', 'frontend/src/lib/callRoles.ts', 'frontend/src/lib/roles.ts', 'frontend/src/pages/workspace/Workspace.tsx', 'frontend/src/main.tsx'].map(async (file) => [file, createHash('sha256').update(await fs.readFile(path.join(root, file))).digest('hex')])))
+const fingerprint = async () => Object.fromEntries(await Promise.all(['frontend/src/pages/PromptsPage.tsx', 'frontend/src/pages/PromptCallDetail.tsx', 'frontend/src/pages/prompts.css', 'frontend/src/pages/SettingsPage.tsx', 'frontend/src/api/prompts.ts', 'frontend/src/components/UsedPrompts.tsx', 'frontend/src/lib/promptDirectory.ts', 'frontend/src/lib/promptNavigation.ts', 'frontend/src/lib/callRoles.ts', 'frontend/src/lib/roles.ts', 'frontend/src/pages/workspace/Workspace.tsx', 'frontend/src/main.tsx'].map(async (file) => [file, createHash('sha256').update(await fs.readFile(path.join(root, file))).digest('hex')])))
 const evidence = { base, startedAt: new Date().toISOString(), sourceSha256: await fingerprint(), isolation: 'Real index/main router; Vite proxy disabled, private cache, server API fail-closed; every API endpoint mocked in Playwright.', checks: [], screenshots: [], requests: [], unexpectedRequests: [], pageErrors: [] }
 const check = (name, extra = {}) => { evidence.checks.push({ name, ...extra }); console.log(`PASS ${name}`) }
 const server = await createServer({
@@ -39,12 +39,27 @@ const book = { id: 'mockbook', title: '雾港来信', source: 'new', genre: '悬
 const settings = { settings: { setup_mode: 'puzzle', title_style: 'chief', title_custom: '', person: 'third', intimacy: 'fade', intimacy_custom: '', chapter_words: 2500, other_rules: '', playbook: 'auto', effort_preset: 'balanced', max_rewrites: 2, pitches: 3, review_strictness: 'standard', volume_audit: true, volume_approval: true, chapters_approval: false, segment_approval: true, trial_read: true }, rules_text: '' }
 const info = (name, title, group, role, when, variables = []) => ({ name, title, group, role, when, variables, customized: false, updated_at: null, default_changed: false, new_variables: [], last_call: null })
 const initialPrompts = [
-  { ...info('chief_chat', '主编群聊', '编辑部对话', 'chief', '主编在群聊中接话时', [{ name: 'book_title', label: '书名' }, { name: 'author_message', label: '作者的话' }]), content: '你是长篇小说的主编。\n\n当前书名：{{book_title}}\n作者的话：{{author_message}}\n\n先分清作者是在讨论还是明确要求改书。尊重作者已有设定，确认后再动笔。', default_content: '你是长篇小说的主编。\n\n当前书名：{{book_title}}\n作者的话：{{author_message}}\n\n先分清作者是在讨论还是明确要求改书。尊重作者已有设定，确认后再动笔。', last_call: { id: 300, created_at: '2026-10-19T09:20:00Z' } },
+  { ...info('chief_chat', '主编群聊', '编辑部对话', 'chief', '主编在群聊中接话时', [{ name: 'book_title', label: '书名' }, { name: 'author_message', label: '作者的话' }]), content: '你是长篇小说的主编。\n\n当前书名：{{book_title}}\n作者的话：{{author_message}}\n\n先分清作者是在讨论还是明确要求改书。尊重作者已有设定，确认后再动笔。', default_content: '你是长篇小说的主编。\n\n当前书名：{{book_title}}\n作者的话：{{author_message}}\n\n先分清作者是在讨论还是明确要求改书。尊重作者已有设定，确认后再动笔。', last_call: { id: 300, created_at: '2026-10-19T09:20:00Z', purpose: '主编群聊：讨论第一章线索', used_prompts: { parts: null, names: [{ name: 'chief_chat', title: '主编群聊' }] } } },
   { ...info('plan_chapter', '规划章节', '写作流程', 'chief', '每次准备写新一章时', [{ name: 'outline', label: '章纲' }]), content: '根据{{outline}}规划这一章的场景与情绪推进。', default_content: '根据{{outline}}规划这一章的场景与情绪推进。' },
   { ...info('review_chapter', '审阅章节', '写作流程', 'reviewer', '正文完成后'), content: '检查人物一致性、节奏与语言，不擅自改写作者的设定。', default_content: '检查人物一致性、节奏与语言，不擅自改写作者的设定。' },
 ]
 initialPrompts[0].content += '\n\n## 工作边界\n把尚在讨论的想法和已经确认的要求分开。作者只是询问时，先解释取舍，不擅自修改正文、设定和大纲。\n\n## 理解上下文\n先查看当前章节、人物关系与已有伏笔。对资料中没有的信息明确说明，不把推测写成既定事实。\n\n## 回复方式\n直接回答作者此刻的问题，使用清楚自然的中文。不复述大段背景，不用空泛的评价代替具体建议。\n\n## 提出方案\n如果需要改变故事，先列出建议改动的位置、目的和影响范围。把互相冲突的选择说清楚，让作者决定。\n\n## 尊重原稿\n保留作者已经写好的句子与锁定内容。需要动到既有内容时，解释为什么，并等待明确确认。\n\n## 完成后核对\n检查回应是否解决当前问题，是否误把讨论当作执行指令，是否遗漏作者强调的限制。'
 initialPrompts[0].default_content = initialPrompts[0].content
+const directoryStorageKey = 'zhibi:prompt-directory:collapsed'
+const directoryPrompts = [
+  ['persona_chief', '主编人设', '角色与规矩'], ['voice_chief', '主编口吻', '角色与规矩'], ['rules', '通用规则', '角色与规矩'],
+  ['chat_agent', '群聊：自己查、自己动手', '聊天'], ['chat_voice', '口吻怎么用', '聊天'], ['chat_manner', '聊天的做法', '聊天'], ['chat_material', '聊天带的资料', '聊天'],
+  ['plan_chapter', '规划章节', '规划'], ['skills.opening', '开书', '手册'],
+  ['teardown_read', '读原文', '拆书'], ['persona_essence', '精髓人设', '拆书精髓'],
+].map(([name, title, group]) => ({ ...info(name, title, group, 'chief', `${title}的使用说明`, [{ name: 'book_title', label: '书名' }]), content: `${title}的正文：{{book_title}}`, default_content: `${title}的正文：{{book_title}}` }))
+const directoryRef = (name) => {
+  const { title } = directoryPrompts.find(prompt => prompt.name === name)
+  return { name, title }
+}
+const directoryParts = { system: ['persona_chief', 'chat_voice', 'voice_chief', 'chat_agent', 'chat_manner', 'rules'].map(directoryRef), user: ['chat_material'].map(directoryRef) }
+const directoryUsed = { parts: directoryParts, names: [...directoryParts.system, ...directoryParts.user] }
+directoryPrompts.find(prompt => prompt.name === 'chat_manner').last_call = { id: 300, created_at: '2026-10-24T04:48:24Z', purpose: '聊天·主编', used_prompts: directoryUsed }
+directoryPrompts.find(prompt => prompt.name === 'teardown_read').last_call = { id: 299, created_at: '2026-10-23T04:48:24Z', purpose: '旧记录', used_prompts: { parts: null, names: ['teardown_read', 'persona_essence'].map(directoryRef) } }
 const initialCalls = [
   { id: 300, book_id: 'mockbook', book_title: '雾港来信', role: 'chief', purpose: '主编群聊：讨论第一章线索', model: 'demo-chief', profile_name: '独立测试模型', prompt_tokens: 1846, completion_tokens: 620, latency_ms: 2450, ok: true, error: null, created_at: '2026-10-19T09:20:00Z' },
   { id: 299, book_id: 'mockbook', book_title: '雾港来信', role: 'writer', purpose: '写第四章 · 灯下的回信', model: 'demo-writer', profile_name: '写手测试模型', prompt_tokens: 5000, completion_tokens: 2800, latency_ms: 12600, ok: true, error: null, created_at: '2026-10-19T09:10:00Z' },
@@ -97,7 +112,7 @@ await context.route((url) => url.pathname.startsWith('/api/'), async (route) => 
   }
   if (/^\/llm-calls\/\d+$/.test(p)) {
     const call = fixture.calls.find((value) => value.id === Number(p.split('/').at(-1))) || initialCalls[0]
-    return reply({ ...call, request: { system: '这是本次真正发出的系统提示。\n先保护作者的原稿。', user: '请讨论雾港的第一封信。', schema_name: 'ChiefChat', schema: { type: 'object', properties: { reply: { type: 'string' } } }, method: 'json_mode' }, response: '{"reply":"可以先讨论线索，不自动修改书稿。"}' })
+    return reply({ ...call, used_prompts: call.used_prompts ?? { parts: null, names: [{ name: 'chief_chat', title: '主编群聊' }] }, request: { system: '这是本次真正发出的系统提示。\n先保护作者的原稿。', user: '请讨论雾港的第一封信。', schema_name: 'ChiefChat', schema: { type: 'object', properties: { reply: { type: 'string' } } }, method: 'json_mode' }, response: '{"reply":"可以先讨论线索，不自动修改书稿。"}' })
   }
   if (method === 'GET') {
     if (p === '/books') return reply([book, { ...book, id: 'otherbook', title: '山海旧闻' }])
@@ -111,6 +126,7 @@ await context.route((url) => url.pathname.startsWith('/api/'), async (route) => 
     if (p === '/books/mockbook/settings' || p === '/settings/new-book-defaults') return reply(settings)
     if (p === '/books/mockbook/saves') return reply({ items: [], more: false })
     if (p === '/llm/profiles') return reply([])
+    if (p === '/llm/web-search') return reply({ has_key: false })
     if (p === '/llm/roles') return reply({ default: null, chief: null, lorekeeper: null, writer: null, reviewer: null, router: null })
     if (p === '/health') return reply({ status: 'ok', components: { fixture: { ok: true, detail: 'isolated fixture' } } })
     if (p === '/book-meta') return reply({ channels: [{ key: '男频', categories: ['悬疑'], tag_groups: [] }, { key: '女频', categories: ['言情'], tag_groups: [] }], chapter_words: 2500, max_tags: 5 })
@@ -215,7 +231,7 @@ try {
   await page.getByRole('textbox', { name: '搜索提示词', exact: true }).fill('')
   check('Prompt search filters catalog and renders a deliberate no-match state')
 
-  await page.getByRole('button', { name: '自定义', exact: true }).click()
+  await page.getByRole('button', { name: '修改', exact: true }).click()
   await append('\n需要保留的本地草稿')
   await expect(page.getByText(/有未保存的本地草稿/)).toBeVisible()
   await page.getByRole('button', { name: '规划章节', exact: true }).click()
@@ -233,7 +249,8 @@ try {
   fixture.saveDelay = true
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await expect(editor()).toHaveAttribute('contenteditable', 'false')
-  await expect(page.getByRole('button', { name: '恢复默认', exact: true })).toBeDisabled()
+  await expect(page.getByRole('button', { name: '恢复默认', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '取消', exact: true })).toBeDisabled()
   await expect.poll(() => fixture.releases.length).toBe(1)
   fixture.releases.shift()()
   await expect(page.getByText('已保存，从下一步调用起对所有书生效。')).toBeVisible()
@@ -241,7 +258,7 @@ try {
   await expect(editor()).toContainText('需要保留的本地草稿')
   check('Pending save locks edit/reset; success preserves submitted content and clears only its draft')
 
-  await page.getByRole('button', { name: '自定义', exact: true }).click()
+  await page.getByRole('button', { name: '修改', exact: true }).click()
   await append('\n慢请求里的旧稿')
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await expect.poll(() => fixture.releases.length).toBe(1)
@@ -384,6 +401,130 @@ try {
   assert.equal(evidence.requests.some((request) => request.path.startsWith('/prompts/setup_interview')), false)
   check('Retired template URL falls back to the real catalog without an invalid detail request')
 
+  reset({ prompts: structuredClone(directoryPrompts), calls: [{ ...initialCalls[0], used_prompts: directoryUsed }, { ...initialCalls[1], used_prompts: { parts: null, names: ['teardown_read', 'persona_essence'].map(directoryRef) } }, { ...initialCalls[2], used_prompts: { parts: null, names: [] } }] })
+  await page.evaluate(key => localStorage.removeItem(key), directoryStorageKey)
+  await page.goto(`${base}/prompts?template=persona_chief`)
+  const group = (name) => page.locator(`[data-prompt-group="${name}"]`)
+  const toggle = (name) => group(name).locator('.prompt-group-toggle')
+  const catalog = page.getByRole('navigation', { name: '提示词列表' })
+  const companions = page.locator('.template-companions')
+  const search = page.getByRole('textbox', { name: '搜索提示词', exact: true })
+  await expect(toggle('角色与规矩')).toHaveText(/角色与规矩\s*3/)
+  await expect(toggle('拆书')).toHaveAttribute('aria-expanded', 'false')
+  await expect(toggle('拆书精髓')).toHaveAttribute('aria-expanded', 'false')
+  await expect(catalog.getByRole('button', { name: '读原文', exact: true })).toHaveCount(0)
+  await expect(page.getByText('默认版本', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('可用变量', { exact: false })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '修改', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '恢复默认', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '保存', exact: true })).toHaveCount(0)
+  await expect(companions).toHaveText(/一起发的\s*还没用过/)
+  await toggle('拆书').click()
+  await expect(toggle('拆书')).toHaveAttribute('aria-expanded', 'true')
+  await page.reload()
+  await expect(toggle('拆书')).toHaveAttribute('aria-expanded', 'true')
+  await toggle('拆书').click()
+  const collapsedBeforeSearch = await page.evaluate(key => localStorage.getItem(key), directoryStorageKey)
+  await search.fill('读原文')
+  await expect(toggle('拆书')).toHaveAttribute('aria-expanded', 'true')
+  await expect(catalog.getByRole('button', { name: '读原文', exact: true })).toBeVisible()
+  assert.equal(await page.evaluate(key => localStorage.getItem(key), directoryStorageKey), collapsedBeforeSearch)
+  await search.fill('')
+  await expect(toggle('拆书')).toHaveAttribute('aria-expanded', 'false')
+  await shot('17-directory-collapse')
+  check('Directory groups expose counts and aria-expanded; teardown defaults collapse; manual state survives reload; search expands without overwriting state')
+
+  await catalog.getByRole('button', { name: '聊天的做法', exact: true }).click()
+  await expect(companions).toContainText('最近一次：')
+  await expect(companions).toContainText('聊天·主编')
+  await expect(companions.locator('.used-prompts-row').nth(0)).toHaveText('系统提示主编人设 → 口吻怎么用 → 主编口吻 → 群聊：自己查、自己动手 → 聊天的做法 → 通用规则')
+  await expect(companions.locator('.used-prompts-row').nth(1)).toHaveText('用户提示聊天带的资料')
+  await expect(companions.locator('strong').filter({ hasText: '聊天的做法' })).toBeVisible()
+  await expect(companions.getByRole('button', { name: '聊天的做法', exact: true })).toHaveCount(0)
+  await toggle('角色与规矩').click()
+  await expect(toggle('角色与规矩')).toHaveAttribute('aria-expanded', 'false')
+  await companions.getByRole('button', { name: '主编人设', exact: true }).click()
+  await expect(page.locator('.template-toolbar h2')).toHaveText('主编人设')
+  await expect(toggle('角色与规矩')).toHaveAttribute('aria-expanded', 'true')
+  await expect(catalog.getByRole('button', { name: '主编人设', exact: true })).toBeInViewport()
+  assert.equal(JSON.parse(await page.evaluate(key => localStorage.getItem(key), directoryStorageKey))['角色与规矩'], false)
+  await page.goto(`${base}/prompts?template=teardown_read`)
+  await expect(toggle('拆书')).toHaveAttribute('aria-expanded', 'true')
+  await expect(catalog.getByRole('button', { name: '读原文', exact: true })).toBeInViewport()
+  await expect(companions).toContainText('用到的')
+  await expect(companions).toContainText('读原文、精髓人设（旧记录，分不出系统提示和用户提示）')
+  await companions.getByRole('button', { name: '精髓人设', exact: true }).click()
+  await expect(page.locator('.template-toolbar h2')).toHaveText('精髓人设')
+  await expect(toggle('拆书精髓')).toHaveAttribute('aria-expanded', 'true')
+  await expect(companions).toHaveText(/一起发的\s*还没用过/)
+  check('Together block preserves ordered system/user names and a non-clickable current item; links and URL open selected groups into view; legacy and never-used text are exact')
+
+  await page.getByRole('button', { name: '修改', exact: true }).click()
+  await expect(page.getByRole('button', { name: '恢复默认', exact: true })).toHaveCount(0)
+  await expect(page.getByText('正在修改', { exact: true })).toBeVisible()
+  await expect(page.getByText(/可用变量/).first()).toBeVisible()
+  await append('\n要丢掉的本地草稿')
+  page.once('dialog', async dialog => { assert.equal(dialog.message(), '改的还没保存，确定不要了吗？'); await dialog.dismiss() })
+  await page.getByRole('button', { name: '取消', exact: true }).click()
+  await expect(editor()).toContainText('要丢掉的本地草稿')
+  page.once('dialog', async dialog => { assert.equal(dialog.message(), '改的还没保存，确定不要了吗？'); await dialog.accept() })
+  await page.getByRole('button', { name: '取消', exact: true }).click()
+  await expect(page.getByRole('button', { name: '修改', exact: true })).toBeVisible()
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('zhibi:prompt-draft:persona_essence')), null)
+  await page.reload()
+  await expect(editor()).not.toContainText('要丢掉的本地草稿')
+  await page.getByRole('button', { name: '修改', exact: true }).click()
+  let unexpectedDialog = false
+  const rejectDialog = async dialog => { unexpectedDialog = true; await dialog.dismiss() }
+  page.on('dialog', rejectDialog)
+  await page.getByRole('button', { name: '取消', exact: true }).click()
+  await expect(page.getByRole('button', { name: '修改', exact: true })).toBeVisible()
+  page.off('dialog', rejectDialog)
+  assert.equal(unexpectedDialog, false, 'unchanged content cancels without confirmation')
+  await page.getByRole('button', { name: '修改', exact: true }).click()
+  await append('\n保存的改动')
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(page.getByRole('button', { name: '修改', exact: true })).toBeVisible()
+  await expect(page.locator('.template-toolbar')).toContainText('改过')
+  await expect(page.getByText(/可用变量/)).toHaveCount(0)
+  await page.getByRole('button', { name: '修改', exact: true }).click()
+  await expect(page.locator('.template-actions').getByRole('button')).toHaveText(['恢复默认', '取消', '保存'])
+  await shot('18-customized-edit')
+  page.once('dialog', dialog => dialog.accept())
+  await page.getByRole('button', { name: '恢复默认', exact: true }).click()
+  await expect(page.getByRole('button', { name: '修改', exact: true })).toBeVisible()
+  await expect(editor()).not.toContainText('保存的改动')
+  check('Read view is quiet; edit-only variables/actions follow customization; cancel confirms only changed content and discards local draft; save/reset return to read view')
+
+  await page.goto(`${base}/prompts?template=chat_manner`)
+  await search.fill('完全不匹配的搜索')
+  await companions.getByRole('button', { name: '查看这次调用', exact: true }).click()
+  await expect(detail).toBeVisible()
+  await expect(detail.getByRole('heading', { name: '用到的提示词', exact: true })).toBeVisible()
+  await expect(detail.locator('.used-prompts-row').nth(0)).toHaveText('系统提示主编人设 → 口吻怎么用 → 主编口吻 → 群聊：自己查、自己动手 → 聊天的做法 → 通用规则')
+  await detail.getByRole('button', { name: '聊天的做法', exact: true }).click()
+  await expect(detail).toHaveCount(0)
+  await expect(search).toHaveValue('')
+  await expect(catalog.getByRole('button', { name: '聊天的做法', exact: true })).toBeInViewport()
+  await companions.getByRole('button', { name: '查看这次调用', exact: true }).click()
+  await expect(detail).toBeVisible()
+  await detail.getByRole('button', { name: '主编口吻', exact: true }).click()
+  await expect(detail).toHaveCount(0)
+  await expect(tab('提示词')).toHaveAttribute('aria-selected', 'true')
+  await expect(page.locator('.template-toolbar h2')).toHaveText('主编口吻')
+  await page.goto(`${base}/prompts?tab=calls`)
+  await page.getByRole('button', { name: /^查看(?:详情)?$/ }).nth(1).click()
+  await expect(detail.locator('.used-prompts')).toContainText('读原文、精髓人设（旧记录，分不出系统提示和用户提示）')
+  await detail.getByRole('button', { name: '精髓人设', exact: true }).click()
+  await expect(detail).toHaveCount(0)
+  await expect(page.locator('.template-toolbar h2')).toHaveText('精髓人设')
+  await page.goto(`${base}/prompts?tab=calls`)
+  await page.getByRole('button', { name: /^查看(?:详情)?$/ }).nth(2).click()
+  await expect(detail).toBeVisible()
+  await expect(detail.getByRole('heading', { name: '用到的提示词', exact: true })).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  check('Call details show ordered new/legacy prompt names; clicking names closes dialog and selects prompt tab; oldest calls with no names omit the block')
+
   reset({ promptsDelay: 1000 })
   let before = evidence.requests.length
   await page.goto(`${base}/prompts`)
@@ -485,7 +626,7 @@ try {
   assert.deepEqual(evidence.pageErrors, [])
   assert.deepEqual(evidence.unexpectedRequests, [])
   assert.deepEqual(await fingerprint(), evidence.sourceSha256, 'production source changed during this run; rerun the stable revision')
-  assert(evidence.requests.filter((request) => request.method !== 'GET').every((request) => request.method === 'PUT' && request.path.startsWith('/prompts/')))
+  assert(evidence.requests.filter((request) => request.method !== 'GET').every((request) => ['PUT', 'DELETE'].includes(request.method) && request.path.startsWith('/prompts/')))
   check('Zero page errors or unexpected APIs; only mocked prompt saves were mutated')
   evidence.ok = true
   await fs.unlink(path.join(output, 'FAILED-state.png')).catch(() => {})

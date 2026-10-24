@@ -44,6 +44,36 @@ async def _last_calls(session: AsyncSession) -> dict:
     return {row["prompt_name"]: {"id": row["id"], "created_at": row["created_at"]} for row in rows}
 
 
+async def _used_prompts(session: AsyncSession, request: dict | None) -> dict:
+    request = request or {}
+    names = request.get("prompt_names") or []
+    parts = request.get("prompt_parts")
+    contents = {row.name: row.content for row in await session.scalars(select(PromptOverride))}
+    titles = {row[0]: row[1] for row in entries(contents)}
+
+    def refs(items: list[str]) -> list[dict[str, str]]:
+        return [{"name": name, "title": titles.get(name, name)} for name in items]
+
+    return {
+        "parts": {key: refs(parts.get(key) or []) for key in ("system", "user")} if parts is not None else None,
+        "names": refs(names),
+    }
+
+
+async def _last_call(session: AsyncSession, name: str) -> dict | None:
+    call = await session.scalar(
+        select(LlmCall).where(LlmCall.request["prompt_names"].contains([name])).order_by(LlmCall.id.desc()).limit(1)
+    )
+    if call is None:
+        return None
+    return {
+        "id": call.id,
+        "created_at": call.created_at,
+        "purpose": call.purpose,
+        "used_prompts": await _used_prompts(session, call.request),
+    }
+
+
 def _meta(row: tuple, override: PromptOverride | None, last: dict | None) -> dict:
     name, title, group, role, when = row
     if name.startswith("skills.") and override is not None:
@@ -83,7 +113,7 @@ async def get_prompt(name: str, session: AsyncSession = SessionDep) -> dict:
     row = _entry(name)
     name = row[0]
     override = await session.get(PromptOverride, name)
-    result = _meta(row, override, (await _last_calls(session)).get(name))
+    result = _meta(row, override, await _last_call(session, name))
     default = default_content(name)
     return {**result, "content": override.content if override is not None else default, "default_content": default}
 
@@ -178,7 +208,7 @@ async def get_call(call_id: int, session: AsyncSession = SessionDep) -> dict:
     row = (await session.execute(_calls_query(detail=True).where(LlmCall.id == call_id))).mappings().first()
     if row is None:
         raise HTTPException(404, "调用记录不存在")
-    return dict(row)
+    return {**row, "used_prompts": await _used_prompts(session, row["request"])}
 
 
 @router.get("/usage")

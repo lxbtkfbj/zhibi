@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.crypto import decrypt
 from app.llm import demo
 from app.models import Book, LlmCall, LlmProfile, RoleAssignment
-from app.prompts import prompt_names_for
+from app.prompts import prompt_names_for, prompt_parts_for
 
 log = logging.getLogger(__name__)
 
@@ -660,6 +660,7 @@ class LLMRouter:
                 "method": "tools",
                 "round": round_no,
                 "prompt_names": prompt_names_for(system, user),
+                "prompt_parts": prompt_parts_for(system, user),
             }
             text, calls = "", []
             async for kind, value in self._tool_round(role, profile, history, tools, done, last, request, purpose):
@@ -838,6 +839,7 @@ def _request(system: str, user: str, schema: type[BaseModel] | None, method: str
         "schema": schema.model_json_schema() if schema is not None else None,
         "method": method,
         "prompt_names": prompt_names_for(system, user),
+        "prompt_parts": prompt_parts_for(system, user),
     }
 
 

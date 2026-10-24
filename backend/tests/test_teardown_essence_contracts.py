@@ -79,14 +79,19 @@ def test_twenty_prompt_bytes_and_catalog_are_exact():
     for name, digest in HASHES.items():
         assert hashlib.sha256((ROOT / f"backend/app/prompts/{name}.md").read_bytes()).hexdigest() == digest
         assert not (ROOT / f"docs/codex任务/拆书精髓/提示词/{name}.md").exists()
-        assert catalog.entry(name)[2:4] == ("拆书", "teardown")
+        group = "拆书精髓" if name == "persona_essence" or name.startswith("essence_") else "拆书"
+        assert catalog.entry(name)[2:4] == (group, "teardown")
         catalog.validate_content(name, default_content(name))
         assert [row["name"] for row in catalog.variables(name)] == list(
             dict.fromkeys(VARIABLE.findall(default_content(name)))
         )
     names = [row[0] for row in catalog.CATALOG]
-    start = names.index("teardown_waits") + 1
-    assert names[start : start + len(NEW_NAMES)] == NEW_NAMES
+    assert [name for name in names if name in NEW_NAMES] == [
+        "teardown_merge",
+        "teardown_tags",
+        "teardown_unitplot",
+        *[name for name in NEW_NAMES if name not in {"teardown_merge", "teardown_tags", "teardown_unitplot"}],
+    ]
     assert "teardown_merits" not in catalog.BY_NAME
     assert not (ROOT / "backend/app/prompts/teardown_merits.md").exists()
     assert catalog.VARIABLE_LABELS["units"] == "各单元回顾"

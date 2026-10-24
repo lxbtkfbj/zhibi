@@ -1,6 +1,11 @@
 import { del, get, put } from './client'
 
 export interface PromptVariable { name: string; label: string }
+export interface PromptReference { name: string; title: string }
+export interface UsedPrompts {
+  parts: { system: PromptReference[]; user: PromptReference[] } | null
+  names: PromptReference[]
+}
 export interface PromptInfo {
   name: string; title: string; group: string; role: string; when: string
   customized: boolean; updated_at: string | null
@@ -8,7 +13,10 @@ export interface PromptInfo {
   last_call: { id: number; created_at: string } | null
   variables: PromptVariable[]
 }
-export interface PromptDetail extends PromptInfo { content: string; default_content: string }
+export interface PromptDetail extends PromptInfo {
+  content: string; default_content: string
+  last_call: { id: number; created_at: string; purpose: string; used_prompts: UsedPrompts } | null
+}
 export interface LlmCall {
   id: number; book_id: string | null; book_title: string | null
   role: string; purpose: string; model: string; profile_name: string | null
@@ -16,6 +24,7 @@ export interface LlmCall {
   latency_ms: number | null; ok: boolean; error: string | null; created_at: string
 }
 export interface LlmCallDetail extends LlmCall {
+  used_prompts: UsedPrompts
   request: { system: string; user: string; schema_name: string | null; schema: unknown; method: string } | null
   response: string | null
 }

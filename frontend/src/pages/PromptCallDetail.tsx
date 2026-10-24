@@ -3,11 +3,12 @@ import { CheckCircle2, LoaderCircle, X, XCircle } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { promptApi } from '../api/prompts'
+import { UsedPrompts } from '../components/UsedPrompts'
 import { ErrorText } from '../components/ui'
 import { roleName } from '../lib/callRoles'
 
 /** 调用原文只读查看；与提示词工作台共用宣纸、字号及界面缩放。 */
-export function PromptCallDetail({ id, onClose }: { id: number; onClose: () => void }) {
+export function PromptCallDetail({ id, onClose, selectPrompt }: { id: number; onClose: () => void; selectPrompt: (name: string) => void }) {
   const query = useQuery({ queryKey: ['llm-call', id], queryFn: () => promptApi.call(id) })
   const call = query.data
   const dialog = useRef<HTMLDialogElement>(null)
@@ -43,6 +44,7 @@ export function PromptCallDetail({ id, onClose }: { id: number; onClose: () => v
             <p>{call.book_title || '未关联书籍'} · {new Date(call.created_at).toLocaleString('zh-CN', { hour12: false })}</p>
             <dl className="call-facts"><div><dt>角色</dt><dd>{roleName(call.role)}</dd></div><div><dt>模型</dt><dd>{call.model}<small>{call.profile_name || '未记录配置名称'}</small></dd></div><div><dt>输入 / 输出 Token</dt><dd>{call.prompt_tokens?.toLocaleString('zh-CN') ?? '—'} / {call.completion_tokens?.toLocaleString('zh-CN') ?? '—'}</dd></div><div><dt>耗时</dt><dd>{call.latency_ms == null ? '—' : `${(call.latency_ms / 1000).toFixed(2)} 秒`}</dd></div></dl>
           </section>
+          {!!call.used_prompts?.names.length && <section className="call-used-prompts"><h3>用到的提示词</h3><UsedPrompts used={call.used_prompts} onSelect={selectPrompt} /></section>}
           {!call.request && <p className="call-retention-note">这次调用的完整请求未留存。每本书只保留最近 2000 次调用的完整内容，较早记录的统计信息仍然保留。</p>}
           <section><h3>系统提示</h3><pre tabIndex={0}>{call.request?.system ?? '未留存'}</pre></section>
           <section><h3>用户提示</h3><pre tabIndex={0}>{call.request?.user ?? '未留存'}</pre></section>
