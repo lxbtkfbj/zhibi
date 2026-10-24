@@ -16,7 +16,7 @@ from app.agents import schemas as s
 from app.llm import demo, demo_setup
 from app.main import app
 from app.models import PromptOverride
-from app.prompts.catalog import BY_NAME, variables
+from app.prompts.catalog import BY_NAME, CATALOG, VARIABLE_LABELS, variables
 from tests.later_changes import with_later_changes
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -96,11 +96,60 @@ PROMPT_HASHES = {
 
 def test_handbook_prompt_moves_are_byte_exact():
     for name, digest in {
-        "chat_agent": "07bc591c13c06b279a14c86864c79e8e9445b4ecc5d8eb641a38c82a038acb92",
+        "chat_agent": "1356887042072904dbbe934055e1ed8e6bba28cc4c74bc6ddfa696dac6c87a43",
         "skills/opening": "4aa306890d634f444d43c4da71c0faea4ca303c6a05aa96d6936867918f6ef67",
     }.items():
         assert hashlib.sha256((ROOT / f"backend/app/prompts/{name}.md").read_bytes()).hexdigest() == digest
         assert not (ROOT / f"docs/codex任务/主编手册/提示词/{name}.md").exists()
+
+
+def test_chat_layer_catalog_order_metadata_and_variable_labels_match_task():
+    assert BY_NAME["persona_chief"] == (
+        "persona_chief",
+        "主编人设",
+        "角色与规矩",
+        "chief",
+        "主编的专业底子：写书、聊天都带",
+    )
+    for row in (
+        (
+            "voice_chief",
+            "主编口吻",
+            "角色与规矩",
+            "chief",
+            "主编在聊天里跟你说话时的身份、称呼和口吻；只用在聊天，写书不带",
+        ),
+        (
+            "chat_voice",
+            "口吻怎么用",
+            "聊天",
+            "chief",
+            "跟主编聊天时接在主编口吻后面：口吻只管怎么说、不改判断，写进书里和记忆里的字不带口吻",
+        ),
+        (
+            "chat_manner",
+            "聊天的做法",
+            "聊天",
+            "chief",
+            "自己的书里群聊、私聊共用：回答时想着的四件事和另外几件事；实际用接话的人的角色",
+        ),
+        (
+            "chat_material",
+            "聊天带的资料",
+            "聊天",
+            "chief",
+            "所有聊天的用户提示：书的资料、之前聊过的、最近的对话和作者这次说的；实际用接话的人的角色",
+        ),
+    ):
+        assert BY_NAME[row[0]] == row
+        assert all(item["label"] for item in variables(row[0]))
+    names = [row[0] for row in CATALOG]
+    chief = names.index("persona_chief")
+    agent = names.index("chat_agent")
+    assert names[chief : chief + 2] == ["persona_chief", "voice_chief"]
+    assert names[agent : agent + 4] == ["chat_agent", "chat_voice", "chat_manner", "chat_material"]
+    assert VARIABLE_LABELS["voice"] == "主编口吻"
+    assert VARIABLE_LABELS["book"] == "简介或原书信息"
 
 
 def test_prompt_moves_are_byte_exact_and_retired_hidden():

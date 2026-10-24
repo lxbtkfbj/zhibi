@@ -11,10 +11,9 @@ from app.services.chat_context import dialogue_text, related_of
 from app.services.library_context import load_context
 
 PROGRESS = "还没开拆：只有原文，章纲、单元、设定都还没有。"
-LOOKUP_TOOLS = "上面的设定和大纲只是目录，或者还没拆出来，原文一章都没贴。要细节、要核对，用工具查：某一章的原文和摘要、在原文里搜一个词、设定卡全文、大纲上的一段、伏笔。问「第一次出场」「在哪几章」的，先在原文里搜。能一起查的一次调几个工具；上面已经有的不要再查。"
-LOOKUP_PLAIN = "你这次查不了资料，上面「和这次的话有关的资料」是程序按作者这句话找出来的：提到的几章、设定，还有作者用引号标出的词在原文里的位置。那里没有的就说没找到，不要猜；作者要找某个词在哪几章，告诉他在正文页目录的搜索框里搜原文。"
+LOOKUP_TOOLS = "资料里的设定和大纲只是目录，或者还没拆出来，原文一章都没贴。要细节、要核对，用工具查：某一章的原文和摘要、在原文里搜一个词、设定卡全文、大纲上的一段、伏笔。问「第一次出场」「在哪几章」的，先在原文里搜。能一起查的一次调几个工具；资料里已经有的不要再查。"
+LOOKUP_PLAIN = "你这次没法用工具查。资料里的 <和这次的话有关的资料> 是程序按作者这句话找出来的：提到的几章、设定，还有作者用引号标出的词在原文里的位置。那里没有的就说没找到，不要猜；作者要找某个词在哪几章，告诉他在正文页目录的搜索框里搜原文。"
 ROLE_FOCUS = {
-    "chief": "你管剧情、节奏和结构：原书为什么这样安排，钩子和爽点是怎么做出来的，一个单元怎么起、怎么收。",
     "lorekeeper": "你管设定和前后一致：查清楚再答，说明出处（哪一条设定、第几章原文）。",
     "writer": "你管怎么写：文风、场面、对话；拿原文的句子说它好在哪。",
     "reviewer": "你管读者感受：站在付费读者的角度，说清哪里让人想追、哪里容易弃书，按影响大小排。",
@@ -127,7 +126,9 @@ def outline_of(ctx, chapters, *, full: bool, open_volume_id) -> str:
     return "\n".join(lines)
 
 
-async def values(session, book, role, message, rows, summary, *, tools: bool, retry: bool = False) -> dict:
+async def values(
+    session, book, role, message, rows, summary, *, tools: bool, retry: bool = False, related: str | None = None
+) -> dict:
     # 与 agent 共用小书全文／大书目录、当前页、重试和对话的取法，不能带写书进度或写作要求。
     from app.services.chat_agent import SMALL_BOOK, retry_note, viewing_full
     from app.services.chat_tools import search_text
@@ -154,12 +155,14 @@ async def values(session, book, role, message, rows, summary, *, tools: bool, re
     small = len(full_library) + len(full_outline) <= SMALL_BOOK
     payload = message.payload or {}
     quote = payload.get("quote")
-    related = ""
+    related_block = ""
     if not tools:
         found = await related_of(session, ctx, chapters, message.content)
         blocks = [found] if found and found != "（没有）" else []
         blocks.extend([await search_text(session, book, word) for word in quoted_words(message.content)])
-        related = tagged("和这次的话有关的资料", "\n\n".join(blocks) or "（没找到）")
+        if related is not None and related != "（没有）":
+            blocks.append(related)
+        related_block = tagged("和这次的话有关的资料", "\n\n".join(blocks) or "（没找到）")
     return dict(
         material_note="" if small else "（书比较大：设定和大纲只列了目录，要细节用工具查）",
         book_info=book_info(book, chapters, ctx.volumes, ctx.units, ctx.nodes),
@@ -170,12 +173,12 @@ async def values(session, book, role, message, rows, summary, *, tools: bool, re
         if small or not ctx.units
         else outline_of(ctx, chapters, full=False, open_volume_id=(book.teardown or {}).get("open_volume_id")),
         viewing=await viewing_full(session, book, ctx, payload.get("viewing")),
-        related=related,
+        related=related_block,
         summary=summary or "（没有）",
         recent=dialogue_text(rows[-20:]),
         quote=tagged("作者选中的原文", f"（{quote['where']}）\n{quote['text'][:2000]}") if quote else "",
         retry=retry_note(payload.get("steps") or []) if retry else "",
         note=message.content,
         lookup=LOOKUP_TOOLS if tools else LOOKUP_PLAIN,
-        role_focus=ROLE_FOCUS[role],
+        role_focus="" if role == "chief" else "照你的角色说话：" + ROLE_FOCUS[role],
     )

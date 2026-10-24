@@ -180,8 +180,8 @@ PROMPT_HASHES = {
     "teardown_units": "c01abb24b399d420f3c40da4b26d248753da65bffed086a3ecd97a095462a3ac",
     "teardown_volumes": "7c0e4199493703b8ddd3e1bc3179d62f33848abd35cf69a1953205544fd356f1",
     "teardown_volume_text": "592f1542a49ae3876f2478d0a8766f6bc414dff3d780ef95fda4ad529bb05c6d",
-    # 拆书第五批 §1：作者已改好的提示词基线，仍逐字保护，不由实现改写。
-    "chat_teardown": "a21a403a2ca9129a48f9094216d3555c1dbbb5e180079335287def94b75a253e",
+    # 主编口吻和分层 §1：作者认可的拆书聊天系统提示，逐字保护。
+    "chat_teardown": "59ad3604d01a6f5aa5df625e070c922432dcdc1c09362093c0148399b5b9f38b",
 }
 
 

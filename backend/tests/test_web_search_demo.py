@@ -56,16 +56,17 @@ def test_demo_search_precedes_lookup_and_continues_normal_tool_flow():
 
 
 @pytest.mark.parametrize(
-    "user,tools",
+    "system,user,tools",
     [
-        (_user("上网搜 斗破苍穹 异火"), []),
-        (_user("斗破苍穹 异火"), ["search_web"]),
-        (_user("主角怎么写", "上网搜 斗破苍穹 异火"), ["search_web"]),
-        ("作者导入的别人已经写好的小说\n" + _user("上网搜 斗破苍穹 异火"), ["search_web"]),
+        ("主编", _user("上网搜 斗破苍穹 异火"), []),
+        ("主编", _user("斗破苍穹 异火"), ["search_web"]),
+        ("主编", _user("主角怎么写", "上网搜 斗破苍穹 异火"), ["search_web"]),
+        ("主编\n作者导入的别人已经写好的小说", _user("上网搜 斗破苍穹 异火"), ["search_web"]),
+        ("主编", "<这本书>\n原书信息\n</这本书>\n" + _user("上网搜 斗破苍穹 异火"), ["search_web"]),
     ],
 )
-def test_demo_search_does_not_expand_existing_admission(user, tools):
-    planned, text = demo.tool_turn("主编", user, tools, [])
+def test_demo_search_does_not_expand_existing_admission(system, user, tools):
+    planned, text = demo.tool_turn(system, user, tools, [])
     assert planned == []
     assert "上网搜了「" not in text
 
@@ -77,19 +78,19 @@ def test_demo_search_does_not_expand_existing_admission(user, tools):
             "chat_agent",
             "3. ",
             "18fbaae647f9e48534d9a42eb62cf72b4a4640a701ad4e579dcd2823b667db47",
-            "c7780e0b45469210c102d63879795ab84a5cf719bd6de7de4476d7ebe0664817",
+            "f51a4e5ab594ccab2caf9f4f5276422bed3101a7022edb5f75ddaec3d4d66ac4",
             "chat_agent-第3条.md",
         ),
         (
             "chat_teardown",
             "2. ",
-            "32f47a7ed96d712d9167307f3a74ca529828ceb5f3c569fe6d53b58983eb86ed",
-            "5871365358de5070f1647f2a989fa59fa5d879391a1af06bfd565e6a32184af3",
+            "383767037ae13581d633a840c6c71ff22ba37f71fe64739dc41ed2f80a28d68d",
+            "bb8089538fcc0784a1b6294feafc7309cdd79fa2fab5ce21f32e8ceef3fca86a",
             "chat_teardown-第2条.md",
         ),
     ],
 )
-def test_prompt_replaces_only_approved_line_and_retires_draft(name, prefix, line_digest, rest_digest, draft):
+def test_web_search_rule_and_layered_prompt_baseline_are_byte_exact(name, prefix, line_digest, rest_digest, draft):
     lines = (ROOT / f"backend/app/prompts/{name}.md").read_bytes().splitlines(keepends=True)
     indices = [i for i, line in enumerate(lines) if line.startswith(prefix.encode())]
     assert len(indices) == 1

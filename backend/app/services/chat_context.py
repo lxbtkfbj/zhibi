@@ -26,7 +26,6 @@ from app.services.writing_context import best_excerpt, character_states, story_s
 
 ROLES = {"主编": "chief", "设定师": "lorekeeper", "写手": "writer", "审稿": "reviewer"}
 ROLE_FOCUS = {
-    "chief": "你管剧情、节奏和方向：为什么这样安排、后面怎么走、哪里还能更爽。",
     "lorekeeper": "你管设定和前后一致：查清楚再答，说明出处（哪一条设定、第几章）。",
     "writer": "你管怎么写：文风、场面、对话；示范的时候贴着这本书的文风。",
     "reviewer": "你管挑毛病：站在付费读者的角度，只说真正影响阅读的问题，按严重程度排。",
@@ -413,7 +412,7 @@ async def reply_values(session, book, thread, role, rows, unanswered, summary):
             "只是商量出来的想法还没生效：作者想改哪一处，直接说「把……改成……」就会改（一次要动三处以上或者要删东西，会先出方案卡，他点「按这个来」才改）；"
             "聊了一大堆想一起落实，可以让你「总结一下」出一张方案卡。没照办的别说成已经办了。"
         ),
-        role_focus=ROLE_FOCUS[role],
+        role_focus="" if role == "chief" else "照你的角色说话：" + ROLE_FOCUS[role],
     )
 
 

@@ -1053,7 +1053,7 @@ def _library_intent(user: str) -> s.LibraryIntent:
 
 
 def _chat_reply(system, user):
-    if "作者导入的别人已经写好的小说" in user:
+    if "作者导入的别人已经写好的小说" in system or "<这本书>" in user:
         return s.ChatReply(reply=_teardown_reply(system, user))
     note = _tag("作者这次说的", user)
     related = _tag("和这次的话有关的资料", user)
@@ -1169,7 +1169,7 @@ def tool_turn(system: str, user: str, tools: list[str], done: list) -> tuple[lis
     """演示模型「假装调工具」：先查话里提到的设定，再照演示分流动手，最后说一段话。
     返回 (这一来回要调的工具, 这一来回说的字)；tools 是这一来回能调的工具名，空的就是不许再调。"""
     note = _tag("作者这次说的", user)
-    if "作者导入的别人已经写好的小说" in user:
+    if "作者导入的别人已经写好的小说" in system or "<这本书>" in user:
         from app.services.teardown_chat import quoted_words
 
         if "search_text" in tools and not done:

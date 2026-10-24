@@ -69,6 +69,27 @@ CATALOG = [
         "chief",
         "作者在群聊里说话、模型支持工具调用时：接话的人自己查资料、自己动手改书，再回作者一段话；实际用接话的人的角色",
     ),
+    (
+        "chat_voice",
+        "口吻怎么用",
+        "聊天",
+        "chief",
+        "跟主编聊天时接在主编口吻后面：口吻只管怎么说、不改判断，写进书里和记忆里的字不带口吻",
+    ),
+    (
+        "chat_manner",
+        "聊天的做法",
+        "聊天",
+        "chief",
+        "自己的书里群聊、私聊共用：回答时想着的四件事和另外几件事；实际用接话的人的角色",
+    ),
+    (
+        "chat_material",
+        "聊天带的资料",
+        "聊天",
+        "chief",
+        "所有聊天的用户提示：书的资料、之前聊过的、最近的对话和作者这次说的；实际用接话的人的角色",
+    ),
     ("chat_summary", "对话摘要", "聊天", "lorekeeper", "对话太长时把更早的部分折成摘要"),
     (
         "feedback_memory",
@@ -95,7 +116,14 @@ CATALOG = [
     ("digest_chapter", "记入设定库", "审稿与入库", "lorekeeper", "章节定稿后更新设定库"),
     ("recap_unit", "单元回顾", "审稿与入库", "lorekeeper", "剧情单元完成后"),
     ("recap_volume", "卷回顾", "审稿与入库", "lorekeeper", "整卷完成后"),
-    ("persona_chief", "主编人设", "角色与规矩", "chief", "主编每次调用的系统提示"),
+    ("persona_chief", "主编人设", "角色与规矩", "chief", "主编的专业底子：写书、聊天都带"),
+    (
+        "voice_chief",
+        "主编口吻",
+        "角色与规矩",
+        "chief",
+        "主编在聊天里跟你说话时的身份、称呼和口吻；只用在聊天，写书不带",
+    ),
     ("persona_lorekeeper", "设定师人设", "角色与规矩", "lorekeeper", "设定师每次调用的系统提示"),
     ("persona_writer", "写手人设", "角色与规矩", "writer", "写手每次调用的系统提示"),
     ("persona_reviewer", "审稿人设", "角色与规矩", "reviewer", "审稿每次调用的系统提示"),
@@ -107,6 +135,8 @@ CATALOG = [
 BY_NAME = {row[0]: row for row in CATALOG}
 
 VARIABLE_LABELS = {
+    "voice": "主编口吻",
+    "book": "简介或原书信息",
     "materials": "程序数好的数字和摘出来的记录",
     "tag": "这一类爽点",
     "section_name": "这一节",

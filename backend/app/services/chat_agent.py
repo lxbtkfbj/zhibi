@@ -14,7 +14,6 @@ from urllib.parse import urlparse
 from sqlalchemy import select
 from sqlalchemy.orm import defer
 
-from app.agents.editorial import persona
 from app.db import get_sessionmaker
 from app.llm import demo
 from app.llm import web_search as online_search
@@ -34,6 +33,7 @@ from app.services.chat_context import (
     thread_of,
 )
 from app.services.chat_memories import memory_directory
+from app.services.chat_prompts import material_values, system_prompt
 from app.services.library_context import load_context
 from app.services.meeting import SPEAKER_NAMES, message_dict, post_message, publish
 from app.services.versions import target_type_of
@@ -504,7 +504,7 @@ async def agent_values(session, book, role, message, rows, summary, read_only, r
         retry=retry_note(payload.get("steps") or []) if retry else "",
         note=message.content,
         act_rule=ASK_RULE if read_only else ACT_RULE,
-        role_focus=ROLE_FOCUS[role],
+        role_focus="" if role == "chief" else "照你的角色说话：" + ROLE_FOCUS[role],
     )
 
 
@@ -571,8 +571,13 @@ async def answer_note(redis, book_id, message_id, *, reply_id=None, retry=False)
     await publish(redis, book_id, "chat_typing", {"thread": "group", "speaker": role, "on": True})
     text, state_name, error, finished = "", "failed", "", False
     try:
+        template = "chat_teardown" if teardown else "chat_agent"
         task = asyncio.create_task(
-            drive(turn, persona(role), render("chat_teardown" if teardown else "chat_agent", **values))
+            drive(
+                turn,
+                system_prompt(role, template, **values),
+                render("chat_material", **material_values(values, template=template)),
+            )
         )
         try:
             result = await watch(turn, task)

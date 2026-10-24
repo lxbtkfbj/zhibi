@@ -77,7 +77,7 @@ def test_demo_fake_tools_still_defaults_to_false():
     assert ast.literal_eval(assignments[0].value) is False
 
 
-def test_teardown_prompt_only_inserts_approved_line_and_renumbers_later_rules():
+def test_teardown_lookup_line_and_layered_prompt_baseline_are_byte_exact():
     prompt = ROOT / "backend/app/prompts/chat_agent.md"
     lines = prompt.read_bytes().splitlines(keepends=True)
     handbook = next(i for i, line in enumerate(lines) if line.startswith("2. 编辑部有几本专业手册".encode()))
@@ -91,7 +91,8 @@ def test_teardown_prompt_only_inserts_approved_line_and_renumbers_later_rules():
             lines[i] = str(int(lines[i][:1]) - 1).encode() + lines[i][1:]
             changed += 1
     assert changed == 5
+    # 主编口吻和分层移走资料与聊天做法后，保留原查拆书条款并锁定其余新基线。
     assert hashlib.sha256(b"".join(lines)).hexdigest() == (
-        "42894c24975b767516a766cd15716e7dbfed31d2425bb086f71f559aeb2344e0"
+        "26a4b82b59acace69fb1ac83d12370c719d4f466ecfb21ac4d2a336ee6737457"
     )
     assert not (ROOT / "docs/codex任务/主编查拆过的书/提示词/chat_agent-查拆过的书一条.md").exists()

@@ -15,6 +15,7 @@ from app.llm.router import LLMRouter
 from app.models import Book, MeetingMessage
 from app.prompts import render
 from app.services.chat_context import conversation_state, dialogue, dialogue_text, reply_values, thread_of
+from app.services.chat_prompts import material_values, system_prompt
 from app.services.meeting import SPEAKER_NAMES, message_dict, post_message, publish
 
 log = logging.getLogger(__name__)
@@ -78,7 +79,12 @@ def reply_state(message):
 async def stream_model(book_id, role, template, *, purpose, **values):
     llm = LLMRouter(get_sessionmaker(), book_id=book_id)
     try:
-        async for chunk in llm.stream_text(role, persona(role), render(template, **values), purpose=purpose):
+        async for chunk in llm.stream_text(
+            role,
+            system_prompt(role, template, **values),
+            render("chat_material", **material_values(values, template=template)),
+            purpose=purpose,
+        ):
             yield chunk
     finally:
         await llm.aclose()
@@ -218,9 +224,8 @@ async def answer(
                 summary,
                 tools=False,
                 retry=bool(reply and (reply.payload or {}).get("again") == "retry"),
+                related=related,
             )
-            if related is not None and related != "（没有）":
-                values["related"] += "\n\n" + related
         else:
             values = await reply_values(session, book, thread, role, rows, unanswered, summary)
         if related is not None and book.source != "teardown":

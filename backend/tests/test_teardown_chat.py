@@ -143,7 +143,8 @@ async def test_every_group_message_is_read_only(client, sessionmaker, monkeypatc
         assert "chat_teardown" in call.request["prompt_names"]
         assert "chat_agent" not in call.request["prompt_names"] and "chat_reply" not in call.request["prompt_names"]
         assert teardown_chat.PROGRESS in call.request["user"]
-        assert (teardown_chat.LOOKUP_TOOLS if tools else teardown_chat.LOOKUP_PLAIN) in call.request["user"]
+        lookup = teardown_chat.LOOKUP_TOOLS if tools else teardown_chat.LOOKUP_PLAIN
+        assert lookup in call.request["system"] and lookup not in call.request["user"]
         assert "已定稿" not in call.request["user"] and "正在写：" not in call.request["user"]
         if tools:
             assert not {"make_changes", "read_skill"} & {tool["function"]["name"] for tool in call.request["schema"]}
@@ -160,7 +161,11 @@ async def test_private_plan_and_change_requests_only_answer(client, sessionmaker
     async with sessionmaker() as session:
         call = await session.scalar(select(LlmCall).where(LlmCall.book_id == bid))
     assert "chat_teardown" in call.request["prompt_names"]
-    assert teardown_chat.ROLE_FOCUS[role] in call.request["user"]
+    if role == "chief":
+        assert "照你的角色说话：" not in call.request["system"]
+    else:
+        focus = "照你的角色说话：" + teardown_chat.ROLE_FOCUS[role]
+        assert focus in call.request["system"] and focus not in call.request["user"]
 
 
 async def test_unsupported_tools_never_fall_back_to_classification(client, sessionmaker, monkeypatch):
@@ -179,7 +184,7 @@ async def test_unsupported_tools_never_fall_back_to_classification(client, sessi
     assert await snapshot(sessionmaker, bid) == before
     async with sessionmaker() as session:
         call = await session.scalar(select(LlmCall).where(LlmCall.book_id == bid))
-    assert "chat_teardown" in call.request["prompt_names"] and teardown_chat.LOOKUP_PLAIN in call.request["user"]
+    assert "chat_teardown" in call.request["prompt_names"] and teardown_chat.LOOKUP_PLAIN in call.request["system"]
 
 
 @pytest.mark.parametrize("tools", [False, True])
@@ -308,37 +313,26 @@ async def test_context_defers_whole_book_but_explicit_chapter_reads_work(session
 
 
 def test_prompt_bytes_catalog_and_program_text_match_task():
-    # 拆书第五批 §1：锁定作者已改好的提示词基线；实现不得再改提示词。
+    # 主编口吻和分层 §1：锁定作者认可的拆书聊天系统提示。
     assert (
         hashlib.sha256(default_content("chat_teardown").encode()).hexdigest()
-        == "a21a403a2ca9129a48f9094216d3555c1dbbb5e180079335287def94b75a253e"
+        == "59ad3604d01a6f5aa5df625e070c922432dcdc1c09362093c0148399b5b9f38b"
     )
     assert catalog.entry("chat_teardown")[-1] == "拆的书里群聊回答用"
     assert [item["name"] for item in catalog.variables("chat_teardown")] == [
-        "material_note",
-        "book_info",
-        "library",
-        "outline",
-        "viewing",
-        "related",
-        "summary",
-        "recent",
-        "quote",
-        "retry",
-        "note",
         "lookup",
         "role_focus",
     ]
     task = (Path(__file__).resolve().parents[2] / "docs/codex任务/拆书第一批/1-后台-导入和只读.md").read_text(
         encoding="utf-8"
     )
-    for text in [
-        teardown_chat.PROGRESS,
-        teardown_chat.LOOKUP_TOOLS,
-        teardown_chat.LOOKUP_PLAIN,
-        *teardown_chat.ROLE_FOCUS.values(),
-    ]:
+    for text in [teardown_chat.PROGRESS, *teardown_chat.ROLE_FOCUS.values()]:
         assert text in task
+    layering_task = (
+        Path(__file__).resolve().parents[2] / "docs/codex任务/主编口吻和分层/1-主编口吻和聊天分层.md"
+    ).read_text(encoding="utf-8")
+    for text in [teardown_chat.LOOKUP_TOOLS, teardown_chat.LOOKUP_PLAIN]:
+        assert text in layering_task
     assert teardown_chat.quoted_words('「一」“二”『三』"四"') == ["一", "二", "三"]
     assert teardown_chat.quoted_words("「」“" + "长" * 31 + '”『一』"一"') == ["一"]
 
