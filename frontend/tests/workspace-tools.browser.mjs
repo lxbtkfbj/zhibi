@@ -96,11 +96,19 @@ try {
 
   if (wanted.has('again')) {
     const reply = page.locator('[data-testid^="reply-"]').last()
-    await reply.getByRole('button', { name: /重新回答|重试/ }).click()
-    await expect(reply).toHaveAttribute('data-state', /thinking|streaming/, { timeout: 30_000 })
-    await done(reply)
-    await reply.scrollIntoViewIfNeeded()
-    await shot('8-重新回答-只重写那段话')
+    const before = new Set(await page.locator('[data-testid^="reply-"]').evaluateAll(els => els.map(el => el.dataset.testid)))
+    await reply.getByRole('button', { name: '重新回答', exact: true }).click()
+    const warn = reply.getByRole('alertdialog')
+    if (await warn.isVisible().catch(() => false)) await warn.getByRole('button', { name: '重新回答', exact: true }).click()
+    let id
+    await expect(async () => {
+      id = (await page.locator('[data-testid^="reply-"]').evaluateAll(els => els.map(el => el.dataset.testid))).findLast(one => !before.has(one))
+      expect(id).toBeTruthy()
+    }).toPass({ timeout: 30_000 })
+    const resent = page.getByTestId(id)
+    await done(resent)
+    await resent.scrollIntoViewIfNeeded()
+    await shot('8-重新回答-原话重发')
   }
   if (wanted.has('retry')) {
     // 先用别的办法让一句话做到一半断掉（比如做完第一处就重启后台），这里点「重试」接着做没做完的

@@ -5,11 +5,16 @@ import path from 'node:path'
 import { chromium, expect } from '@playwright/test'
 
 const root = path.resolve(import.meta.dirname, '../..')
-const base = 'http://127.0.0.1:14374'
-const api = 'http://127.0.0.1:18074/api'
-const fixture = JSON.parse(fs.readFileSync(path.join(root, 'data/web-search-task1/fixtures.json'), 'utf8'))
-const out = path.join(root, 'docs/主编联网搜索验收')
-const requestLog = path.join(root, 'data/web-search-task1/fake-search-requests.jsonl')
+const base = process.env.WEB_SEARCH_TEST_BASE ?? 'http://127.0.0.1:14374'
+const api = process.env.WEB_SEARCH_TEST_API ?? 'http://127.0.0.1:18074/api'
+const fixture = JSON.parse(fs.readFileSync(process.env.WEB_SEARCH_TEST_FIXTURE ?? path.join(root, 'data/web-search-task1/fixtures.json'), 'utf8'))
+const out = process.env.WEB_SEARCH_TEST_OUTPUT ?? path.join(root, 'docs/主编联网搜索验收')
+const requestLog = process.env.WEB_SEARCH_TEST_REQUEST_LOG ?? path.join(root, 'data/web-search-task1/fake-search-requests.jsonl')
+const allowed = new Set([new URL(base).origin, new URL(api).origin])
+assert.ok([...allowed].every(origin => {
+  const url = new URL(origin)
+  return url.hostname === '127.0.0.1' && !['8000', '4320'].includes(url.port)
+}), '仅允许独立本机环境，不得访问日常服务')
 fs.mkdirSync(out, { recursive: true })
 const requests = () => fs.existsSync(requestLog) ? fs.readFileSync(requestLog, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : []
 const json = async (suffix, options) => {
@@ -20,9 +25,11 @@ const json = async (suffix, options) => {
 const browser = await chromium.launch({ executablePath: process.env.ZHIBI_CHROMIUM ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true })
 const context = await browser.newContext({ viewport: { width: 1600, height: 1000 }, colorScheme: 'light', serviceWorkers: 'block' })
 const page = await context.newPage()
-const errors = [], forbiddenRequests = []
+const errors = [], forbiddenRequests = [], againRequests = []
 page.on('pageerror', error => errors.push(error.message))
-const allowed = new Set([base, new URL(api).origin])
+page.on('request', request => {
+  if (request.method() === 'POST' && /\/chat\/replies\/\d+\/again$/u.test(new URL(request.url()).pathname)) againRequests.push(request.url())
+})
 await context.route('**/*', async route => {
   const url = new URL(route.request().url())
   if (url.protocol.startsWith('http') && !allowed.has(url.origin)) {
@@ -72,6 +79,9 @@ try {
   const reply = meeting.toReversed().find(row => row.payload?.tools?.some(tool => tool.label === label))
   assert.ok(reply, '真实 API 保存了联网搜索记录')
   await expect(page.getByTestId(`reply-${reply.id}`)).toHaveAttribute('data-state', 'done')
+  const note = meeting.find(row => row.id === reply.payload.reply_to[0])
+  assert.equal(reply.payload.reply_to.length, 1)
+  assert.ok(note?.payload?.conv, '这条回答对应有分段记号的作者原话')
   assert.ok(reply.content.includes('上网搜了「斗破苍穹 异火」。'))
   const result = reply.payload.tools.find(tool => tool.label === label).text
   const expected = '网上搜「斗破苍穹 异火」，前 3 条：\n\n'
@@ -87,21 +97,42 @@ try {
   const firstCalls = await json(`/llm-calls?book_id=${fixture.book}`)
   const first = await json(`/llm-calls/${firstCalls.items.filter(call => call.id > beforeId).at(-1).id}`)
   assert.deepEqual(first.request.schema.slice(-2).map(tool => tool.function.name), ['search_web', 'read_webpage'])
+  const firstDetails = await Promise.all(firstCalls.items.filter(call => call.id > beforeId).map(call => json(`/llm-calls/${call.id}`)))
+  const toolCount = details => details.filter(call => call.response?.includes('【调了工具】\nsearch_web：')).length
+  assert.equal(toolCount(firstDetails), 1, '第一轮确实联网搜索一次')
   const afterSearchRequests = requests().length
-  const rerun = page.waitForResponse(response => response.url().endsWith(`/chat/replies/${reply.id}/again`) && response.request().method() === 'POST')
+  const rerun = page.waitForResponse(response => new URL(response.url()).pathname === `/api/books/${fixture.book}/notes` && response.request().method() === 'POST')
   await page.getByRole('button', { name: '重新回答', exact: true }).click()
-  assert.equal((await rerun).status(), 202)
-  await expect.poll(async () => {
-    const calls = await json(`/llm-calls?book_id=${fixture.book}`)
-    return (await json(`/llm-calls/${calls.items[0].id}`)).request.method
-  }, { timeout: 30000 }).toBe('demo_stream')
+  const resent = await rerun
+  assert.equal(resent.status(), 201)
+  const resendBody = resent.request().postDataJSON()
+  const expectedBody = { content: note.content, conv: note.payload.conv, rewind_from: note.id }
+  for (const key of ['ask', 'quote', 'viewing']) if (note.payload[key] != null) expectedBody[key] = note.payload[key]
+  assert.deepEqual(resendBody, expectedBody, '重新回答原样保留作者原话的全部请求字段')
+  const newNote = await resent.json()
+  await expect(page.getByTestId(`note-${note.id}`)).toHaveCount(0)
+  await expect(page.getByTestId(`reply-${reply.id}`)).toHaveCount(0)
+  await expect(page.getByTestId(`note-${newNote.id}`)).toContainText(note.content)
   await expect(page.getByRole('button', { name: '重新回答', exact: true })).toBeVisible({ timeout: 30000 })
+  const afterMeeting = await json(`/books/${fixture.book}/meeting?limit=2000`)
+  const newReply = afterMeeting.find(row => row.payload?.reply_to?.includes(newNote.id))
+  assert.ok(newReply && newReply.id !== reply.id, '新的一轮产生了新回答')
+  assert.equal(afterMeeting.find(row => row.id === note.id).payload.dropped, true)
+  assert.equal(afterMeeting.find(row => row.id === reply.id).payload.dropped, true)
+  assert.deepEqual(newReply.payload.tools, reply.payload.tools, '新的一轮查了的标签和假搜索原文逐字不变')
+  const newLooked = page.getByTestId(`reply-${newReply.id}`).getByRole('button', { name: `查了：${label}`, exact: true })
+  await newLooked.click()
+  assert.equal(await page.getByTestId(`reply-${newReply.id}`).getByText(expected, { exact: true }).textContent(), expected)
   const againCalls = await json(`/llm-calls?book_id=${fixture.book}`)
   const again = await json(`/llm-calls/${againCalls.items[0].id}`)
-  assert.ok(again.request.user.includes(result), '不给工具的重新回答携带这一轮搜到的原文')
-  assert.equal(again.request.method, 'demo_stream')
-  assert.equal(requests().length, afterSearchRequests, '重新回答没有再次请求假搜索服务')
+  const details = await Promise.all(againCalls.items.filter(call => call.id > beforeId).map(call => json(`/llm-calls/${call.id}`)))
+  assert.equal(toolCount(details), toolCount(firstDetails) + 1, '原话重发后又联网搜索一次')
+  assert.ok(again.request.user.includes(result), '新的一轮工具调用携带刚搜到的全文')
+  assert.equal(again.request.method, 'tools')
+  assert.equal(requests().length, afterSearchRequests + 1, '重新回答再次请求假搜索服务一次')
+  assert.deepEqual(requests().slice(afterSearchRequests), [{ path: '/v1/tools/search', request: { query: '斗破苍穹 异火', count: 10 } }])
   assert.ok(againCalls.items.filter(call => call.id > beforeId).every(call => call.model === 'demo'), '此轮及重新回答只调用演示模型')
+  assert.deepEqual(againRequests, [], '原话重发不调用只重写的 /again')
 
   await page.goto(`${base}/settings`)
   const modal = page.getByRole('dialog', { name: '系统设置', exact: true })
@@ -126,12 +157,13 @@ try {
     base, api, book: fixture.book, realAPI: true, responseReplacement: false,
     lookupLabel: label, expandedLookupText: result, replyReceipt: '上网搜了「斗破苍穹 异火」。',
     fakeSearchRequests: requests().slice(beforeRequests), rereplyRetainsLookupText: true,
-    rereplyMethod: again.request.method, rereplyDoesNotSearchAgain: true,
+    rereplyMethod: again.request.method, rereplySearchesAgain: true, resendBody,
+    originalNote: note, newNoteId: newNote.id, newReplyId: newReply.id, searchCallsBefore: toolCount(firstDetails), searchCallsAfter: toolCount(details),
     webSearchHint: hint, webSearchTestMessage: testMessage,
     pageErrors: errors, forbiddenRequests, realModelCalls: 0, realDeepSeekCalls: 0,
     snapshots: ['任务1-群聊联网搜索原文.png', '任务1-系统设置联网搜索密钥.png'],
   }, null, 2) + '\n')
-  console.log('PASS 群聊真实 API 搜假网页、查了原文逐字正确；重新回答保留原文且不再搜；系统设置「联网搜索」显示已保存、测试只搜一次；0 页面错误、0 外网请求')
+  console.log('PASS 群聊真实 API 搜假网页、查了原文逐字正确；重新回答原话重发、假搜索多一次；系统设置「联网搜索」显示已保存、测试只搜一次；0 页面错误、0 外网请求')
 } catch (error) {
   await page.screenshot({ path: path.join(root, 'data/web-search-task1/browser-failure.png') }).catch(() => {})
   console.error('Browser diagnostics:', JSON.stringify({ pageErrors: errors, forbiddenRequests, pageText: await page.locator('body').innerText().catch(() => '') }))

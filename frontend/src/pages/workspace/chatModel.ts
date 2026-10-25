@@ -36,6 +36,8 @@ export interface ChatMessage {
   memories?: ReactNode
   /** 作者的话能「修改」；warn：这句和后面的话改过书，书不跟着退，先提醒一声 */
   rewind?: { warn?: string }
+  /** 只答一句、有分段记号的群聊回答能原话重发；改过书时先提醒。 */
+  resend?: { warn?: string }
   /** 不是一问一答的（编辑部干活的进度、方案卡）：整条换成这个 */
   custom?: ReactNode
 }
@@ -52,6 +54,8 @@ export interface ChatControl {
   stop: () => void
   /** 把这一条回答重新来一遍；没答上来的就是重试 */
   again: (id: string) => void
+  /** 把这条回答对应的作者原话重发；没有实现的原型仍走 again。 */
+  resend?: (id: string) => Promise<boolean>
   /** 原型的说明：输入框下面一行小字 */
   hint?: string
   /** 输入框左下「点名」旁边再放的按钮（总结一下） */

@@ -87,7 +87,7 @@ function AuthorBubble({ message, canRewind, onRewind, editing, chat, endRewind }
           <div data-testid="author-actions" className="mt-1.5 flex shrink-0 items-center justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
             <CopyButton text={message.text} />
             {canRewind && message.rewind && (
-              <button type="button" onClick={rewind} title="改这句话再发：这句和后面的聊天收起来，从改过的这句重新回答；书里改过的不跟着退" className={ACTION_CLASS}>
+              <button type="button" onClick={rewind} title="改这句话再发，不改直接发也行：这句和后面的聊天收起来，从这句重新回答；书里改过的不跟着退" className={ACTION_CLASS}>
                 <PencilLine className="size-3.5" />修改
               </button>
             )}
@@ -142,13 +142,29 @@ function MemoryBox({ children }: { children: ReactNode }) {
   return <div data-testid="chat-memory-box" className="mt-1.5 space-y-1.5 rounded-lg border border-line bg-card px-3 py-2 [&>div]:mt-0">{children}</div>
 }
 
-function Reply({ message, latest, answering, onAgain }: { message: ChatMessage; latest: boolean; answering: boolean; onAgain: () => void }) {
+function Reply({ message, latest, answering, busy, onAgain, onResend }: {
+  message: ChatMessage; latest: boolean; answering: boolean; busy?: boolean; onAgain: () => void; onResend?: () => void
+}) {
+  const [asking, setAsking] = useState(false)
   const role = message.who as ChatRole
   const live = message.state === 'thinking' || message.state === 'streaming'
   // 最新一条答完了、停下了：复制旁边还能重新回答。
   const canAgain = latest && !answering && !!message.replyTo
   const canCopy = !live && !!message.text
-  const showAgain = canAgain && (message.state === 'done' || message.state === 'stopped')
+  const showAgain = canAgain && !busy && (message.state === 'done' || message.state === 'stopped')
+  const canResend = !!message.resend && !!onResend
+  if (!showAgain && asking) setAsking(false)
+  const confirmAgain = () => {
+    if (!showAgain) return
+    setAsking(false)
+    if (canResend) onResend!()
+    else onAgain()
+  }
+  const answerAgain = () => {
+    if (!showAgain) return
+    if (canResend && message.resend?.warn) setAsking(true)
+    else confirmAgain()
+  }
   return (
     <div data-testid={`reply-${message.id}`} data-state={message.state ?? 'done'} className="group flex gap-2.5">
       <Avatar role={role} working={live} />
@@ -183,12 +199,21 @@ function Reply({ message, latest, answering, onAgain }: { message: ChatMessage; 
             <div className={clsx('flex shrink-0 items-center gap-2 transition-opacity', !latest && 'opacity-0 group-hover:opacity-100 focus-within:opacity-100')}>
               {canCopy && <CopyButton text={message.text} />}
               {showAgain && (
-                <button type="button" onClick={onAgain} title="把上面你那句话重新答一遍，这一条换成新的" className={ACTION_CLASS}>
+                <button type="button" onClick={answerAgain} title={canResend ? '把你那句话原样再发一遍，从头重新答（会重新查资料、翻手册）；你那句和这一条收起来' : '把上面你那句话重新答一遍，这一条换成新的'} className={ACTION_CLASS}>
                   <RotateCcw className="size-3.5" />重新回答
                 </button>
               )}
             </div>
           </ReplyFooter>
+        )}
+        {showAgain && asking && (
+          <div role="alertdialog" className="mt-1.5 rounded-lg border border-line bg-card px-3 py-2 text-[13px] leading-relaxed text-ink-2">
+            <p>{message.resend?.warn}</p>
+            <div className="mt-1.5 flex justify-end gap-2">
+              <button type="button" onClick={() => setAsking(false)} className="rounded-md px-2 py-0.5 text-ink-3 hover:bg-line/50 hover:text-ink">算了</button>
+              <button type="button" onClick={confirmAgain} className="rounded-md px-2 py-0.5 font-medium text-chief hover:bg-chief-soft">重新回答</button>
+            </div>
+          </div>
         )}
       </div>
     </div>
@@ -315,7 +340,7 @@ function InlineEdit({ message, chat, onCancel }: { message: ChatMessage; chat: C
           className="block max-h-52 min-h-[60px] w-full resize-none overflow-y-auto bg-transparent px-4 pt-3 pb-3 chat-text leading-[1.75] text-ink [field-sizing:content] focus:outline-none" />
       </div>
       <div className="mt-2 flex flex-wrap items-start justify-end gap-x-3 gap-y-2">
-        <p className="min-w-0 flex-1 basis-40 text-xs leading-relaxed text-ink-3">改好了点发送：这句和后面的聊天会收起来，从这句重新回答；书里改过的不跟着退</p>
+        <p className="min-w-0 flex-1 basis-40 text-xs leading-relaxed text-ink-3">改好了点发送，不改直接发就是原话重来：这句和后面的聊天会收起来，从这句重新回答；书里改过的不跟着退</p>
         <div className="flex shrink-0 items-center gap-2">
           <button type="button" onClick={onCancel} className="rounded-md px-2 py-1 text-[13px] text-ink-3 hover:bg-line/50 hover:text-ink">取消</button>
           <button type="button" onClick={() => void send()} disabled={!takeMention(text).text.trim() || chat.sending || chat.answering}
@@ -541,6 +566,7 @@ export function EditorialChat({ chat }: { chat: ChatControl }) {
       return true
     },
     again: (id) => { followLatest(); chat.again(id) },
+    resend: chat.resend ? (id) => { followLatest(); return chat.resend!(id) } : undefined,
   }
   const scrollLatest = () => {
     const el = box.current
@@ -589,7 +615,8 @@ export function EditorialChat({ chat }: { chat: ChatControl }) {
             : m.who === '作者'
               ? <AuthorBubble message={m} canRewind={!chat.answering && !chat.sending && !rewinding}
                 onRewind={() => setRewinding(m.id)} editing={rewinding === m.id} chat={authorChat} endRewind={() => setRewinding(null)} />
-              : <Reply message={m} latest={m === latest} answering={chat.answering} onAgain={() => authorChat.again(m.id)} />
+              : <Reply message={m} latest={m === latest} answering={chat.answering} busy={!!chat.sending || !!rewinding}
+                onAgain={() => authorChat.again(m.id)} onResend={authorChat.resend ? () => { void authorChat.resend!(m.id) } : undefined} />
           return <div key={m.id} className={clsx('transition-opacity', from >= 0 && i > from && 'opacity-35')}>{body}</div>
         })}
         {chat.footer}

@@ -1,8 +1,10 @@
-/** 聊天改进任务 1：真实独立后端 + 演示模型；产品写入只经鼠标/键盘，GET 仅核对。
+/** 聊天改进任务 1：真实独立后端 + 演示模型；主流程写入只经鼠标/键盘，拆书记忆保护含接口补充核对。
  * TEST_BASE_URL=http://127.0.0.1:4381 CHAT_FIXTURE=<fixture.json> node tests/chat-improvements.browser.mjs
- * fixture: {new_book_id, teardown_book_id, fixtures:{new:{chat_note_id, failed_note_id,
- * requirement_note_id, requirement_id, changed_note_id, too_late_note_id?},teardown:{chat_note_id}}}
- * 失败发送/剪贴板拒绝仅作明确的故障注入，不替代主路径 demo 验收。只产出任务规定的三张截图。
+ * fixture: {new_book_id, teardown_book_id, retry_book_id, failed_reply_id, failed_retry_note_id,
+ * fixtures:{new:{chat_note_id, failed_note_id, requirement_note_id, memory_id, changed_note_id,
+ * too_late_note_id?},teardown:{chat_note_id, failed_note_id, requirement_note_id, changed_note_id}}}
+ * 失败发送/剪贴板拒绝仅作明确的故障注入，不替代主路径 demo 验收。
+ * 原聊天改进三图留在 TEST_SCREENSHOT_DIR（默认隔离产物目录）；重新回答三图放 RESEND_SCREENSHOT_DIR。
  */
 import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
@@ -23,12 +25,13 @@ const books = [{ kind: 'new', id: fixture.new_book_id }, { kind: 'teardown', id:
 assert.ok(books.every(book => typeof book.id === 'string' && book.id.length))
 assert.notEqual(books[0].id, books[1].id)
 const data = resolve(process.env.TEST_ARTIFACT_DIR || dirname(fixturePath))
-const output = resolve(process.env.TEST_SCREENSHOT_DIR || resolve(root, 'docs/聊天改进验收'))
+const output = resolve(process.env.TEST_SCREENSHOT_DIR || resolve(data, 'screenshots'))
+const resendOutput = resolve(process.env.RESEND_SCREENSHOT_DIR || resolve(root, 'docs/重新回答验收'))
 const profile = resolve(data, `browser-profile-${Date.now()}`)
-await Promise.all([mkdir(data, { recursive: true }), mkdir(output, { recursive: true })])
+await Promise.all([mkdir(data, { recursive: true }), mkdir(output, { recursive: true }), mkdir(resendOutput, { recursive: true })])
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || process.env.ZHIBI_CHROMIUM || ['C:/Program Files/Google/Chrome/Application/chrome.exe'].find(existsSync)
 const expect = baseExpect.configure({ timeout: 30_000 })
-const evidence = { base, fixture: fixturePath, checks: [], screenshots: [], requests: [], errors: [], blocked: [], faults: [], demoCalls: [] }
+const evidence = { base, fixture: fixturePath, checks: [], screenshots: [], resendScreenshots: [], requests: [], errors: [], blocked: [], faults: [], demoCalls: [] }
 let context, page
 const record = (name, detail = {}) => { evidence.checks.push({ name, ...detail }); console.log(`PASS ${name}`) }
 
@@ -105,6 +108,12 @@ async function shot(file) {
   await page.screenshot({ path: resolve(output, file) })
   evidence.screenshots.push(file)
 }
+async function resendShot(file) {
+  assert.ok(!evidence.resendScreenshots.includes(file), '每张重新回答验收截图只写一次')
+  await page.evaluate(() => document.fonts.ready)
+  await page.screenshot({ path: resolve(resendOutput, file) })
+  evidence.resendScreenshots.push(file)
+}
 async function copy(locator, expected, screenshot = false) {
   await locator.scrollIntoViewIfNeeded()
   await locator.hover()
@@ -119,9 +128,12 @@ async function edit(note) {
   const bubble = page.getByTestId(`note-${note.id}`)
   await bubble.scrollIntoViewIfNeeded()
   await bubble.hover()
-  await bubble.getByRole('button', { name: '修改', exact: true }).click()
+  const modifying = bubble.getByRole('button', { name: '修改', exact: true })
+  await expect(modifying).toHaveAttribute('title', '改这句话再发，不改直接发也行：这句和后面的聊天收起来，从这句重新回答；书里改过的不跟着退')
+  await modifying.click()
   await expect(inline()).toBeVisible()
   await expect(inline().getByLabel('修改这句话')).toHaveValue(note.content)
+  await expect(inline().locator('p')).toHaveText('改好了点发送，不改直接发就是原话重来：这句和后面的聊天会收起来，从这句重新回答；书里改过的不跟着退')
   return bubble
 }
 async function bottom() {
@@ -152,33 +164,48 @@ async function outcomes(book) {
   const ids = fixture.fixtures?.[book.kind] || {}
   if (ids.chat_note_id) await expect(page.getByTestId(`outcome-${ids.chat_note_id}`)).toHaveCount(0)
   {
-    for (const key of ['failed_note_id', 'requirement_note_id', 'requirement_id', 'changed_note_id']) assert.ok(ids[key], `fixture 缺 ${key}`)
+    for (const key of ['failed_note_id', 'requirement_note_id', 'changed_note_id']) assert.ok(ids[key], `fixture 缺 ${key}`)
     const failed = page.getByTestId(`outcome-${ids.failed_note_id}`)
     await failed.scrollIntoViewIfNeeded()
     await expect(failed).toHaveText('没判断出这句话要做什么（隔离验收原因），书没改。换个说法再说一次试试。')
     await expect(failed.getByRole('button')).toHaveCount(0)
-    const requirement = page.getByTestId(`outcome-${ids.requirement_note_id}`)
-    await requirement.scrollIntoViewIfNeeded()
-    await expect(requirement).toContainText('加了一条写作要求')
-    await requirement.getByRole('button', { name: '改一下', exact: true }).click()
-    const dialog = page.getByRole('dialog')
-    const beforeRequirement = (await get(`/books/${book.id}/requirements`)).find(row => row.id === ids.requirement_id)
-    assert.ok(beforeRequirement)
     const updated = '隔离验收：人物说话简洁，语气仍须符合身份。'
-    await type(dialog.getByRole('textbox'), updated)
-    const saving = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === `/api/requirements/${ids.requirement_id}`)
-    await dialog.getByRole('button', { name: '保存', exact: true }).click()
     if (book.kind === 'teardown') {
-      // 拆书现有接口明确不允许新增/修改写作要求；这是保护用例，不假装能保存。
-      assert.equal((await saving).status(), 409)
-      await expect(dialog.getByText('拆的书里不能加写作要求：原文和大纲结构照原书来，编辑部只回答问题。', { exact: true })).toBeVisible()
-      assert.deepEqual((await get(`/books/${book.id}/requirements`)).find(row => row.id === ids.requirement_id), beforeRequirement)
-      await dialog.getByRole('button', { name: '取消', exact: true }).click()
+      // HEAD 已移除旧要求 API 和「改一下」入口。经作者确认，等价验证当前记忆接口的拆书保护和书数据不变。
+      await expect(panel().getByRole('button', { name: '记忆', exact: true })).toHaveCount(0)
+      await expect(page.getByTestId(`outcome-${ids.requirement_note_id}`)).toHaveCount(0)
+      const beforeBook = await get(`/books/${book.id}`)
+      const denied = await context.request.patch(`${base}/api/books/${book.id}/memories/${fixture.fixtures.new.memory_id}`, { data: { summary: updated } })
+      assert.equal(denied.status(), 409)
+      assert.deepEqual(await denied.json(), { detail: '拆的书里不能改记忆：原文和大纲结构照原书来，编辑部只回答问题。' })
+      const unreadable = await context.request.get(`${base}/api/books/${book.id}/memories`)
+      assert.equal(unreadable.status(), 409)
+      assert.deepEqual(await unreadable.json(), { detail: '拆的书里不能查看记忆：原文和大纲结构照原书来，编辑部只回答问题。' })
+      assert.deepEqual(await get(`/books/${book.id}`), beforeBook)
+      evidence.faults.push({ kind: 'current-memory-readonly-api', book: book.id, purpose: '经作者确认等价验证：旧要求API已删，当前记忆PATCH/GET均409且书快照原样；不是伪称测旧API' })
     } else {
+      assert.ok(ids.memory_id, 'fixture 缺当前 HEAD 的 memory_id')
+      const memory = (await get(`/books/${book.id}/memories`)).find(row => row.id === ids.memory_id)
+      assert.ok(memory)
+      const receipt = page.getByTestId(`note-${ids.requirement_note_id}`).getByTestId(`memory-notice-${ids.memory_id}`)
+      await receipt.scrollIntoViewIfNeeded()
+      await expect(receipt).toContainText(`记住了：${memory.summary}`)
+      await expect(receipt.getByRole('button', { name: '改一下', exact: true })).toHaveCount(0)
+      await receipt.getByRole('button', { name: `记住了：${memory.summary}`, exact: true }).click()
+      const memories = panel().getByRole('region', { name: '记忆', exact: true })
+      const row = memories.getByTestId(`memory-${ids.memory_id}`)
+      await expect(row).toHaveClass(/bg-chief-soft/u)
+      await row.getByRole('button', { name: '改', exact: true }).click()
+      const editor = memories.getByRole('form', { name: '编辑记忆', exact: true })
+      await type(editor.getByLabel('详细内容', { exact: true }), updated)
+      const saving = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === `/api/books/${book.id}/memories/${ids.memory_id}`)
+      await editor.getByRole('button', { name: '保存', exact: true }).click()
       assert.equal((await saving).status(), 200)
-      await expect.poll(async () => (await get(`/books/${book.id}/requirements`)).find(row => row.id === ids.requirement_id)?.text).toBe(updated)
+      await expect(editor).toHaveCount(0)
+      await expect.poll(async () => (await get(`/books/${book.id}/memories`)).find(row => row.id === ids.memory_id)?.detail).toBe(updated)
+      await memories.getByRole('button', { name: '回到聊天', exact: true }).click()
+      await expect(composer()).toBeVisible()
     }
-    await expect(dialog).toHaveCount(0)
     const warningNote = page.getByTestId(`note-${ids.changed_note_id}`)
     await warningNote.scrollIntoViewIfNeeded()
     await warningNote.hover()
@@ -193,12 +220,115 @@ async function outcomes(book) {
     await expect(inline()).toBeVisible()
     await inline().getByRole('button', { name: '取消', exact: true }).click()
     if (ids.too_late_note_id) await expect(page.getByTestId(`outcome-${ids.too_late_note_id}`)).toHaveText('编辑部在等你拍板，这句话没改书。要改，就在拍板的地方提意见，或者说「总结一下」整理成方案。')
-    record(`${book.kind}: failed无按钮、${book.kind === 'teardown' ? '要求弹框可开但保存被现有保护拒绝且原值不变' : '要求可修改'}、改过书确认可取消/接着改、等拍板新字`, { requirementSave: book.kind === 'teardown' ? 'existing-readonly-guard-409' : 'saved-200' })
+    record(`${book.kind}: failed无按钮、${book.kind === 'teardown' ? '无记忆入口且当前记忆读改接口保护拒绝、书快照不变' : '从记忆回执进入记忆页修改保存'}、改过书确认可取消/接着改、等拍板新字`, { requirementSave: book.kind === 'teardown' ? 'current-memory-readonly-api-guard-409' : 'memory-ui-saved-200' })
   }
   await expect(page.getByRole('button', { name: '其实要记下', exact: true })).toHaveCount(0)
   await expect(page.getByRole('button', { name: '记成写作要求', exact: true })).toHaveCount(0)
   assert.equal((await page.locator('body').innerText()).includes('其实要记下'), false)
   record(`${book.kind}: 普通聊天整行不渲染、手动记下按钮不存在`)
+}
+
+const resendBody = note => ({
+  content: note.content,
+  ...(note.payload.ask ? { ask: note.payload.ask } : {}),
+  ...(note.payload.quote ? { quote: note.payload.quote } : {}),
+  ...(note.payload.viewing ? { viewing: note.payload.viewing } : {}),
+  conv: note.payload.conv,
+  rewind_from: note.id,
+})
+
+async function assertResent(book, original, previousReply, response, requestStart) {
+  assert.equal(response.status(), 201, await response.text())
+  const body = response.request().postDataJSON()
+  assert.deepEqual(body, resendBody(original), '原话与全部原字段逐字保留，不取当前页面/输入框状态')
+  const note = await response.json()
+  assert.notEqual(note.id, original.id)
+  const answer = await replyFor(book.id, note)
+  assert.notEqual(answer.message.id, previousReply.message.id)
+  await expect(page.getByTestId(`note-${original.id}`)).toHaveCount(0)
+  await expect(previousReply.locator).toHaveCount(0)
+  await expect(page.getByTestId(`note-${note.id}`)).toContainText(original.content)
+  const rows = await history(book.id)
+  assert.equal(rows.find(row => row.id === original.id).payload.dropped, true)
+  assert.equal(rows.find(row => row.id === previousReply.message.id).payload.dropped, true)
+  assert.equal(rows.find(row => row.id === note.id).payload.dropped, undefined)
+  const visible = await messages().locator('[data-testid^="note-"], [data-testid^="reply-"]').evaluateAll(nodes => nodes.map(node => node.dataset.testid).filter(id => /^(note|reply)-\d+$/u.test(id)))
+  assert.deepEqual(visible.slice(-2), [`note-${note.id}`, `reply-${answer.message.id}`], '原话和新回答在最下面')
+  assert.equal(evidence.requests.slice(requestStart).some(request => new URL(request.url).pathname.endsWith('/again')), false, '原话重发不得请求 /again')
+  return { note, answer, body }
+}
+
+async function changedAnswerConfirmation(book) {
+  const id = fixture.fixtures[book.kind].changed_note_id
+  const rows = (await history(book.id)).filter(row => !row.payload?.dropped)
+  const note = rows.find(row => row.id === id)
+  assert.ok(note?.payload?.conv)
+  const original = await replyFor(book.id, note)
+  const again = original.locator.getByTestId('reply-footer').getByRole('button', { name: '重新回答', exact: true })
+  await again.scrollIntoViewIfNeeded()
+  await expect(again).toBeVisible()
+  await expect(again).toHaveAttribute('title', '把你那句话原样再发一遍，从头重新答（会重新查资料、翻手册）；你那句和这一条收起来')
+  if (book.kind === 'new') await resendShot('1-重新回答按钮.png')
+  const changes = rows.slice(rows.findIndex(row => row.id === note.id))
+    .filter(row => row.speaker === 'author' || row.kind === 'plan')
+    .flatMap(row => row.kind === 'plan' ? row.payload?.results ?? [] : row.payload?.steps ?? (row.payload?.outcome ? [row.payload.outcome] : []))
+    .filter(outcome => ['edit', 'fill', 'created', 'outline', 'deleted'].includes(outcome.kind) && !outcome.undone && !(outcome.kind === 'edit' && outcome.mode === 'options') && !(outcome.kind === 'fill' && !outcome.filled?.length)).length
+  assert.ok(changes > 0, 'fixture 必须真有计数范围内的改书，不拿写作要求冒充')
+  const expectedWarning = `这句话改过书（${changes} 处）。重新回答是把这句原样再发一遍，编辑部可能再改一遍；聊天退回这里，书不跟着退：要退书，用那几处下面的「换回原来的」，或者去「存档」。`
+  const before = evidence.requests.length
+  await again.click()
+  const warning = original.locator.getByRole('alertdialog')
+  await expect(warning.locator('p')).toHaveText(expectedWarning)
+  assert.equal(evidence.requests.length, before, '初点只出提醒，不发请求')
+  await again.click()
+  await expect(warning.locator('p')).toHaveText(expectedWarning)
+  assert.equal(evidence.requests.length, before, '再次点原 footer 仍不能绕过框里确认')
+  await warning.getByRole('button', { name: '算了', exact: true }).click()
+  await expect(warning).toHaveCount(0)
+  assert.equal(evidence.requests.length, before, '算了不发请求')
+  await expect(page.getByTestId(`note-${note.id}`)).toBeVisible()
+  await expect(original.locator).toBeVisible()
+  await again.click()
+  await expect(warning.locator('p')).toHaveText(expectedWarning)
+  await warning.scrollIntoViewIfNeeded()
+  // 浮窗边框有亚像素裁切；验收需要提醒全文和两个按钮完整可见，而不是外边框的交叉比必须恰好 1。
+  await expect(warning.locator('p')).toBeInViewport({ ratio: 1 })
+  await expect(warning.getByRole('button', { name: '算了', exact: true })).toBeInViewport({ ratio: 1 })
+  await expect(warning.getByRole('button', { name: '重新回答', exact: true })).toBeInViewport({ ratio: 1 })
+  if (book.kind === 'new') await resendShot('2-改过书先提醒.png')
+  const response = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `/api/books/${book.id}/notes`)
+  await warning.getByRole('button', { name: '重新回答', exact: true }).click()
+  const resent = await assertResent(book, note, original, await response, before)
+  await followingLatest()
+  if (book.kind === 'new') await resendShot('3-原话重发以后.png')
+  record(`${book.kind}: 改过书重新回答提醒逐字一致、取消不发、只在框里确认才原话重发`, { changedPlaces: changes, original: { id: note.id, content: note.content, payload: note.payload }, request: resent.body, oldReply: original.message.id, newNote: resent.note.id, newReply: resent.answer.message.id })
+}
+
+async function failedRetry() {
+  assert.ok(fixture.retry_book_id && fixture.failed_reply_id && fixture.failed_retry_note_id, 'fixture 缺真正 failed 回答重试用例')
+  const book = { id: fixture.retry_book_id, kind: 'retry' }
+  assert.equal((await get(`/books/${book.id}`)).source, 'new')
+  await open(book.id)
+  const rows = await history(book.id)
+  const note = rows.find(row => row.id === fixture.failed_retry_note_id)
+  const answer = rows.find(row => row.id === fixture.failed_reply_id)
+  assert.ok(note?.payload?.conv)
+  assert.deepEqual(answer.payload.reply_to, [note.id])
+  assert.equal(answer.payload.state, 'failed')
+  const locator = page.getByTestId(`reply-${answer.id}`)
+  await expect(locator).toHaveAttribute('data-state', 'failed')
+  await expect(locator.getByRole('button', { name: '重新回答', exact: true })).toHaveCount(0)
+  const requestStart = evidence.requests.length
+  const response = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `/api/books/${book.id}/chat/replies/${answer.id}/again`)
+  await locator.getByRole('button', { name: '重试', exact: true }).click()
+  assert.equal((await response).status(), 202)
+  await replyFor(book.id, note)
+  const after = await history(book.id)
+  assert.equal(after.filter(row => row.kind === 'note').length, rows.filter(row => row.kind === 'note').length, '重试不能重发原话')
+  assert.equal(after.find(row => row.id === note.id).payload.dropped, undefined)
+  assert.equal(after.find(row => row.id === answer.id).payload.dropped, undefined)
+  assert.equal(evidence.requests.slice(requestStart).some(request => new URL(request.url).pathname.endsWith('/notes')), false)
+  record('failed: 没答上来的重试仍走原回答 /again、不发 /notes、不收起原句和回答', { book: book.id, note: note.id, reply: answer.id })
 }
 
 async function conversation(book) {
@@ -229,6 +359,7 @@ async function conversation(book) {
   await expect(bottomSend).toBeDisabled()
   await expect(bottomSend).toHaveAttribute('title', '先发出或取消上面正在改的那句')
   await expect(page.getByTestId(`note-${second.id}`).getByRole('button', { name: '修改', exact: true })).toHaveCount(0)
+  await expect(secondReply.locator.getByRole('button', { name: '重新回答', exact: true })).toHaveCount(0)
   assert.equal(await bubble.locator('..').evaluate(el => Number(getComputedStyle(el).opacity)), 1)
   await expect.poll(() => secondReply.locator.locator('..').evaluate(el => Number(getComputedStyle(el).opacity))).toBe(0.35)
   if (book.kind === 'new') {
@@ -384,14 +515,13 @@ async function authorInitiatedReplies(book) {
   await wheelUp()
   const beforeAgain = await messages().evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight)
   await expect(again).toBeFocused()
-  const againResponse = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `/api/books/${book.id}/chat/replies/${revisedReply.message.id}/again`)
+  const requestStart = evidence.requests.length
+  const againResponse = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `/api/books/${book.id}/notes`)
   await page.keyboard.press('Enter')
   const immediatelyAfterAgain = await followingLatest()
-  assert.equal((await againResponse).status(), 202)
-  await expect(revisedReply.locator).toHaveAttribute('data-state', /thinking|streaming/)
-  await replyFor(book.id, revised)
+  const resent = await assertResent(book, revised, revisedReply, await againResponse, requestStart)
   const afterAgainReply = await followingLatest()
-  record(`${book.kind}: 上翻超过48px后重新回答原生click立即回底、回答继续跟到底`, { beforeAgain, immediatelyAfterAgain, afterAgainReply, activation: 'keyboard-Enter-native-click' })
+  record(`${book.kind}: 上翻超过48px后重新回答原生click立即回底、原话重发和新回答继续跟到底`, { beforeAgain, immediatelyAfterAgain, afterAgainReply, activation: 'keyboard-Enter-native-click', original: { id: revised.id, content: revised.content, payload: revised.payload }, request: resent.body, oldReply: revisedReply.message.id, newNote: resent.note.id, newReply: resent.answer.message.id })
 }
 
 async function inFlightDrafts(book) {
@@ -506,10 +636,12 @@ try {
   await launch()
   const profiles = await get('/llm/profiles')
   assert.ok(profiles.every(profile => profile.provider === 'demo'), '独立环境只允许演示模型')
+  await failedRetry()
   for (const book of books) {
     assert.equal((await get(`/books/${book.id}`)).source, book.kind)
     await open(book.id)
     await outcomes(book)
+    await changedAnswerConfirmation(book)
     await conversation(book)
     await authorInitiatedReplies(book)
     await drafts(book)
@@ -526,7 +658,7 @@ try {
     await expect(composerArea().getByText(`问${item.role}`, { exact: false })).toBeVisible()
   }
   record('两本书通过真实换书菜单往返：草稿和点名互不串')
-  for (const book of books) {
+  for (const book of [...books, { id: fixture.retry_book_id }]) {
     const calls = (await get(`/llm-calls?book_id=${book.id}&limit=100`)).items
     assert.ok(calls.length, '真实demo调用必须有记录')
     assert.ok(calls.every(call => call.model === 'demo'), '不得调用真实模型')
@@ -535,8 +667,9 @@ try {
   assert.deepEqual(evidence.errors, [])
   assert.deepEqual(evidence.blocked, [])
   assert.equal(evidence.screenshots.length, 3)
+  assert.equal(evidence.resendScreenshots.length, 3)
   evidence.complete = true
-  console.log(`PASS ${evidence.checks.length} 组；仅 demo；3 张截图；无页面异常`)
+  console.log(`PASS ${evidence.checks.length} 组；仅 demo；重新回答3张正式截图＋聊天改进3张隔离产物；无页面异常`)
 } catch (error) {
   evidence.failure = { message: error.message, page: page?.url(), body: await page?.locator('body').innerText().catch(() => '') }
   throw error

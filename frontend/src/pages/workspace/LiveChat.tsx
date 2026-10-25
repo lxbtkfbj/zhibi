@@ -10,7 +10,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { post } from '../../api/client'
 import type { ChatOutcome, Job, MeetingMessage, Outline, TeamRole } from '../../api/types'
 import { ErrorText } from '../../components/ui'
-import { sendChatFirst } from '../../lib/chat'
+import { sendChatFirst, type ChatQuote } from '../../lib/chat'
 import { pendingTarget } from '../../lib/workspace'
 import { useBookContext } from '../book/context'
 import { PlanSubmitted, StepOutcomes } from '../book/MeetingFeed'
@@ -86,6 +86,12 @@ const CHANGED = new Set(['edit', 'fill', 'created', 'outline', 'deleted'])
 function changedPlaces(m: MeetingMessage): number {
   const list: ChatOutcome[] = m.kind === 'plan' ? m.payload?.results ?? [] : m.payload?.steps ?? (m.payload?.outcome ? [m.payload.outcome] : [])
   return list.filter((o) => CHANGED.has(o.kind) && !o.undone && !(o.kind === 'edit' && o.mode === 'options') && !(o.kind === 'fill' && !o.filled?.length)).length
+}
+
+/** 只有答了一句作者聊天原话、有对话记号的回答能重发；失败重试必须接着做。 */
+function resendSource(reply: MeetingMessage | undefined, messages: MeetingMessage[]): MeetingMessage | undefined {
+  if (!reply || !isRole(reply.speaker) || reply.payload?.state === 'failed' || reply.payload?.reply_to?.length !== 1) return undefined
+  return messages.find((m) => m.id === reply.payload!.reply_to![0] && m.speaker === 'author' && m.kind === 'note' && !!m.payload?.conv)
 }
 
 const isAuthorMemory = (item: ChatOutcome | undefined) => !!item?.memory && (item.kind === 'requirement' || item.kind === 'to_job')
@@ -177,10 +183,13 @@ function toChat(messages: MeetingMessage[], outline: Outline | undefined, go: Go
       out.push({ id, who: NAME[m.speaker], text: m.content, custom: <RoleRow role={NAME[m.speaker]}><PlanCard message={m} /></RoleRow> })
     } else if (isRole(m.speaker)) {
       const asked = m.payload?.reply_to
+      const original = resendSource(m, messages)
+      const n = original ? changedFrom.get(original.id) ?? 0 : 0
       out.push({
         id, who: NAME[m.speaker], text: m.content,
         // 照作者的话答的才能重新回答；编辑部干活时说的话、改完设定报的一句不能
         replyTo: asked?.length ? String(asked[0]) : undefined,
+        resend: original ? { warn: n ? `这句话改过书（${n} 处）。重新回答是把这句原样再发一遍，编辑部可能再改一遍；聊天退回这里，书不跟着退：要退书，用那几处下面的「换回原来的」，或者去「存档」。` : undefined } : undefined,
         state: m.payload?.state ?? 'done', error: m.payload?.error,
         // 自己查、自己动手的回答：干活时那一行，答完下面「查了：……」
         doing: m.payload?.doing,
@@ -274,6 +283,17 @@ export function LiveChat({ writing }: { writing?: WritingControl }) {
   }
   const target = waiting ? pendingTarget(job?.pending, bookId) : null
   const old = conv && latest && conv !== latest ? convs?.find((c) => c.id === conv) : undefined
+  // 普通发话、修改和原话重发用同一个发送状态、错误出口与等拍板回退。
+  const sendNote = async (content: string, request: () => Promise<MeetingMessage>, sentQuote?: ChatQuote) => {
+    setSending(true)
+    try {
+      const sent = await run(() => sendChatFirst(request, () => feedback(content), false))
+      if (sent && sentQuote) setChatQuotes(current => clearSentQuote(current, sentQuote))
+      return sent
+    } finally {
+      setSending(false)
+    }
+  }
   const control: ChatControl = {
     bookId,
     messages: chatMessages,
@@ -281,27 +301,32 @@ export function LiveChat({ writing }: { writing?: WritingControl }) {
     sending,
     quote,
     clearQuote: quote ? clearQuote : undefined,
-    send: async (content, to, rewindFrom) => {
-      setSending(true)
-      try {
-        // 原地修改只重发那句话；底下尚未发送的新引用留给下一问。
-        const sentQuote = rewindFrom ? undefined : quote
-        const recipient = chatRecipient(to, undefined, sentQuote)
-        const sent = await run(() => sendChatFirst(
-          () => {
-            // 带上作者正在看的那一页：说「帮我写这一篇」就写这一页
-            const seeing = viewing?.() ?? null
-            return post<MeetingMessage>(`/books/${bookId}/notes`, {
-              content, ...(recipient ? { ask: CODE[recipient] } : {}), ...(sentQuote ? { quote: sentQuote } : {}), ...(seeing ? { viewing: seeing } : {}),
-              ...(conv ? { conv } : {}), ...(rewindFrom ? { rewind_from: Number(rewindFrom) } : {}),
-            })
-          },
-          () => feedback(content), false))
-        if (sent && sentQuote) setChatQuotes(current => clearSentQuote(current, sentQuote))
-        return sent
-      } finally {
-        setSending(false)
-      }
+    send: (content, to, rewindFrom) => {
+      // 原地修改只重发那句话；底下尚未发送的新引用留给下一问。
+      const sentQuote = rewindFrom ? undefined : quote
+      const recipient = chatRecipient(to, undefined, sentQuote)
+      return sendNote(content, () => {
+        // 带上作者正在看的那一页：说「帮我写这一篇」就写这一页
+        const seeing = viewing?.() ?? null
+        return post<MeetingMessage>(`/books/${bookId}/notes`, {
+          content, ...(recipient ? { ask: CODE[recipient] } : {}), ...(sentQuote ? { quote: sentQuote } : {}), ...(seeing ? { viewing: seeing } : {}),
+          ...(conv ? { conv } : {}), ...(rewindFrom ? { rewind_from: Number(rewindFrom) } : {}),
+        })
+      }, sentQuote)
+    },
+    resend: async (id) => {
+      const original = resendSource(shown.find((m) => String(m.id) === id), shown)
+      if (!original || current || sending) return false
+      const payload = original.payload!
+      // 不取现在的点名、引用和正在看的页面，也不清掉留给下一问的新引用。
+      return sendNote(original.content, () => post<MeetingMessage>(`/books/${bookId}/notes`, {
+        content: original.content,
+        ...(payload.ask ? { ask: payload.ask } : {}),
+        ...(payload.quote ? { quote: payload.quote } : {}),
+        ...(payload.viewing ? { viewing: payload.viewing } : {}),
+        conv: payload.conv,
+        rewind_from: original.id,
+      }))
     },
     stop: () => { if (current) void run(() => post(`/books/${bookId}/chat/replies/${current.id}/stop`)) },
     again: (id) => { void run(() => post(`/books/${bookId}/chat/replies/${id}/again`)) },

@@ -104,7 +104,7 @@ try {
     const edit = note.getByRole('textbox')
     await expect(edit).toBeVisible()
     await expect(page.getByLabel('给编辑部发消息')).toHaveValue('')
-    await expect(note.getByText('改好了点发送：这句和后面的聊天会收起来，从这句重新回答；书里改过的不跟着退', { exact: true })).toBeVisible()
+    await expect(note.getByText('改好了点发送，不改直接发就是原话重来：这句和后面的聊天会收起来，从这句重新回答；书里改过的不跟着退', { exact: true })).toBeVisible()
     await shot('8-修改-那句话在气泡里编辑')
     const before = new Set(await page.locator('[data-testid^="reply-"]').evaluateAll(els => els.map(el => el.dataset.testid)))
     await edit.fill(process.env.REWIND ?? '柳三爷的右耳是怎么回事？')

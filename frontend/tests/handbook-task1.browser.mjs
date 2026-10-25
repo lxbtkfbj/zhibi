@@ -27,8 +27,11 @@ const executablePath = process.env.ZHIBI_CHROMIUM ?? 'C:/Program Files/Google/Ch
 const browser = await chromium.launch({ executablePath, headless: true })
 const context = await browser.newContext({ viewport: { width: 1600, height: 1000 }, colorScheme: 'light' })
 const page = await context.newPage()
-const errors = [], forbiddenRequests = []
+const errors = [], forbiddenRequests = [], againRequests = []
 page.on('pageerror', error => errors.push(error.message))
+page.on('request', request => {
+  if (request.method() === 'POST' && /\/chat\/replies\/\d+\/again$/u.test(new URL(request.url()).pathname)) againRequests.push(request.url())
+})
 await context.route('**/*', async route => {
   const url = new URL(route.request().url())
   if (url.protocol.startsWith('http') && !allowedOrigins.has(url.origin)) {
@@ -42,6 +45,9 @@ await context.addInitScript(() => {
   localStorage.setItem('zhibi:appearance', JSON.stringify({ theme: 'paper', reducedMotion: true }))
 })
 try {
+  const roles = await json('/llm/roles')
+  assert.ok(Object.values(roles).filter(Boolean).every(id => id === fixture.profile), '所有已分配角色都用演示模型')
+  assert.equal((await json('/llm/profiles')).find(profile => profile.id === fixture.profile).provider, 'demo')
   await page.goto(`${base}/prompts?template=skills.opening`)
   await expect(page.locator('[data-prompt-group="手册"] .prompt-group-toggle')).toHaveAttribute('aria-expanded', 'true')
   await expect(page.locator('.template-toolbar h2')).toHaveText('开书')
@@ -78,19 +84,46 @@ try {
   await page.screenshot({ path: path.join(out, '任务1-群聊翻开书手册.png') })
   const meeting = await json(`/books/${fixture.book}/meeting?limit=2000`)
   const reply = meeting.toReversed().find(row => row.payload?.tools?.some(tool => tool.label === '手册《开书》'))
+  assert.ok(reply, '真实 API 保存了翻手册记录')
+  await expect(page.getByTestId(`reply-${reply.id}`)).toHaveAttribute('data-state', 'done')
+  const note = meeting.find(row => row.id === reply.payload.reply_to[0])
+  assert.equal(reply.payload.reply_to.length, 1)
+  assert.ok(note?.payload?.conv, '这条回答对应有分段记号的作者原话')
   assert.equal(reply.payload.tools[0].text, customized, '手册全文（含末尾标记）不截断')
-  const rerun = page.waitForResponse(response => response.url().endsWith(`/chat/replies/${reply.id}/again`) && response.request().method() === 'POST')
+  const firstCalls = await json(`/llm-calls?book_id=${fixture.book}`)
+  const firstDetails = await Promise.all(firstCalls.items.filter(call => call.id > beforeId).map(call => json(`/llm-calls/${call.id}`)))
+  const toolCount = details => details.filter(call => call.response?.includes('【调了工具】\nread_skill：')).length
+  assert.equal(toolCount(firstDetails), 1, '第一轮确实翻了一次开书手册')
+  const rerun = page.waitForResponse(response => new URL(response.url()).pathname === `/api/books/${fixture.book}/notes` && response.request().method() === 'POST')
   await page.getByRole('button', { name: '重新回答', exact: true }).click()
-  assert.equal((await rerun).status(), 202)
-  await expect.poll(async () => {
-    const rows = await json(`/llm-calls?book_id=${fixture.book}`)
-    return (await json(`/llm-calls/${rows.items[0].id}`)).request.method
-  }, { timeout: 30000 }).toBe('demo_stream')
+  const resent = await rerun
+  assert.equal(resent.status(), 201)
+  const resendBody = resent.request().postDataJSON()
+  const expectedBody = { content: note.content, conv: note.payload.conv, rewind_from: note.id }
+  for (const key of ['ask', 'quote', 'viewing']) if (note.payload[key] != null) expectedBody[key] = note.payload[key]
+  assert.deepEqual(resendBody, expectedBody, '重新回答原样保留作者原话的全部请求字段')
+  const newNote = await resent.json()
+  await expect(page.getByTestId(`note-${note.id}`)).toHaveCount(0)
+  await expect(page.getByTestId(`reply-${reply.id}`)).toHaveCount(0)
+  await expect(page.getByTestId(`note-${newNote.id}`)).toContainText(note.content)
   await expect(page.getByRole('button', { name: '重新回答', exact: true })).toBeVisible({ timeout: 30000 })
+  const afterMeeting = await json(`/books/${fixture.book}/meeting?limit=2000`)
+  const newReply = afterMeeting.find(row => row.payload?.reply_to?.includes(newNote.id))
+  assert.ok(newReply && newReply.id !== reply.id, '新的一轮产生了新回答')
+  assert.equal(afterMeeting.find(row => row.id === note.id).payload.dropped, true)
+  assert.equal(afterMeeting.find(row => row.id === reply.id).payload.dropped, true)
+  assert.deepEqual(newReply.payload.tools, reply.payload.tools, '新的一轮查了的标签和手册全文逐字不变')
+  const newLooked = page.getByTestId(`reply-${newReply.id}`).getByRole('button', { name: '查了：手册《开书》', exact: true })
+  await newLooked.click()
+  assert.equal(await page.getByTestId(`reply-${newReply.id}`).getByText(customized, { exact: true }).textContent(), customized)
   const calls = await json(`/llm-calls?book_id=${fixture.book}`)
   const again = await json(`/llm-calls/${calls.items[0].id}`)
-  assert.ok(again.request.user.includes(customized), '重新回答仍携带这轮的手册全文')
-  assert.equal(again.request.method, 'demo_stream')
+  const details = await Promise.all(calls.items.filter(call => call.id > beforeId).map(call => json(`/llm-calls/${call.id}`)))
+  assert.equal(toolCount(details), toolCount(firstDetails) + 1, '原话重发后又翻了一次开书手册')
+  assert.ok(again.request.user.includes(customized), '新的一轮工具调用携带刚翻到的手册全文')
+  assert.equal(again.request.method, 'tools')
+  assert.ok(details.every(call => call.model === 'demo'), '此轮及重新回答只调用演示模型')
+  assert.deepEqual(againRequests, [], '原话重发不调用只重写的 /again')
   const first = await json(`/llm-calls/${calls.items.filter(call => call.id > beforeId).at(-1).id}`)
   const spec = first.request.schema.find(tool => tool.function.name === 'read_skill').function
   assert.ok(spec.description.includes('独立验收目录标记'))
@@ -111,11 +144,12 @@ try {
   assert.deepEqual(forbiddenRequests, [])
   fs.writeFileSync(path.join(out, '任务1-浏览器验收.json'), JSON.stringify({
     base, api, book: fixture.book, promptPageVisibleAndEditable: true, customCatalogAndFullText: true,
-    readSkillEnum: spec.parameters.properties.name.enum, rereplyRetainsFullText: true,
+    readSkillEnum: spec.parameters.properties.name.enum, rereplyRetainsFullText: true, resendBody,
+    originalNote: note, newNoteId: newNote.id, newReplyId: newReply.id, readSkillCallsBefore: toolCount(firstDetails), readSkillCallsAfter: toolCount(details),
     jsonModeRejectedHint: true, pageErrors: errors, forbiddenRequests, realModelCalls: 0,
     snapshots: ['任务1-群聊翻开书手册.png', '任务1-JSON模式群聊工具提示.png'],
   }, null, 2) + '\n')
-  console.log('PASS 手册页可见可改；目录和全文用自定义版；新书群聊翻手册；重新回答带全文；JSON 模式独立提示；0 页面错误、0 真实模型调用')
+  console.log('PASS 手册页可见可改；目录和全文用自定义版；重新回答原话重发、又翻一次手册，标签及全文逐字不变；JSON 模式独立提示；0 页面错误、0 真实模型调用')
 } finally {
   await json('/prompts/skills.opening', original.customized
     ? { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: original.content }) }
