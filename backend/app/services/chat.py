@@ -14,6 +14,7 @@ from app.db import get_sessionmaker
 from app.llm.router import LLMRouter
 from app.models import Book, MeetingMessage
 from app.prompts import render
+from app.services import chat_context
 from app.services.chat_context import conversation_state, dialogue, dialogue_text, reply_values, thread_of
 from app.services.chat_prompts import material_values, system_prompt
 from app.services.meeting import SPEAKER_NAMES, message_dict, post_message, publish
@@ -151,11 +152,17 @@ async def finish_reply(session, redis, reply_id, text, state, error=""):
     await redis.delete(stop_key(reply_id))
 
 
-async def merge_summary(session, book_id, thread, summary, old, conv=None):
-    """最近 20 条以前、还没折进摘要的有 10 条以上了：先折进摘要。失败了照旧用旧摘要。
-    群聊的摘要存在那一段对话上（conv）。"""
-    if len(old) < 10:
-        return summary
+async def fold_history(session, book_id, thread, summary, until, rows, conv=None):
+    """回答和方案卡要看的聊天记录：摘要以后（id > until）的原话全给，不剪。
+    超过 HISTORY_LIMIT 个字，才把最早的整条整条挪进摘要，挪到剩下的不超过 HISTORY_KEEP。
+    缩失败了照旧用旧摘要、什么也不存，这一次只给剩下的原话，下一次回答再缩。
+    群聊的摘要存在那一段对话上（conv）。-> (摘要, 摘要以后的原话)"""
+    fresh = [m for m in rows if m.id > until]
+    if len(dialogue_text(fresh)) <= chat_context.HISTORY_LIMIT:
+        return summary, fresh
+    moved, fresh = chat_context.split_for_limit(fresh, chat_context.HISTORY_KEEP)
+    if not moved:
+        return summary, fresh
     try:
         merged = await model(
             book_id,
@@ -164,16 +171,20 @@ async def merge_summary(session, book_id, thread, summary, old, conv=None):
             "chat_summary",
             who=SPEAKER_NAMES.get(thread, "编辑部"),
             summary=summary or "（没有）",
-            messages=dialogue_text(old, limited=False),
+            messages=dialogue_text(moved),
         )
         row = await conversation_state(session, book_id, thread, conv)
-        row.summary, row.summarized_until = merged.summary, old[-1].id
+        row.summary, row.summarized_until = merged.summary, moved[-1].id
         await session.commit()
-        return merged.summary
+        return merged.summary, fresh
     except Exception:
+        # 回滚会让还挂在会话上的消息过期，后面读它们要重新查库：先摘出来
+        for m in fresh:
+            if m in session:
+                session.expunge(m)
         await session.rollback()
         log.exception("对话摘要失败，继续用旧摘要回答")
-        return summary
+        return summary, fresh
 
 
 def tools_text(tools, memories=None):
@@ -195,14 +206,19 @@ def tools_text(tools, memories=None):
 
 
 async def answer(
-    session, redis, book_id, thread, role, reply_id, rows, unanswered, summary, old, related=None, conv=None
+    session, redis, book_id, thread, role, reply_id, rows, unanswered, summary, until, related=None, conv=None
 ):
-    """写一条回答：要合摘要先合，再一边写一边推。出错、超时都落在这条消息上，给「重试」。
+    """写一条回答：原话太长了先缩进摘要，再一边写一边推。出错、超时都落在这条消息上，给「重试」。
+    until：摘要缩到了哪一条（summarized_until）。
     related：自己查过、做过的那一轮重新回答时，资料换成那一轮查到的、做了的。"""
     await publish(redis, book_id, "chat_typing", {"thread": thread, "speaker": role, "on": True})
     text, state, error = "", "failed", ""
     try:
-        summary = await merge_summary(session, book_id, thread, summary, old, conv)
+        # 作者这次说的另放在 <作者这次说的>，不算在最近的对话里
+        asked = {message.id for message in unanswered}
+        summary, rows = await fold_history(
+            session, book_id, thread, summary, until, [row for row in rows if row.id not in asked], conv
+        )
         book = await session.get(Book, book_id)
         if book is None:
             return
@@ -210,7 +226,6 @@ async def answer(
         if book.source == "teardown":
             from app.services.teardown_chat import values as teardown_values
 
-            asked = {message.id for message in unanswered}
             message = SimpleNamespace(
                 content="\n\n".join(message.content for message in unanswered), payload=unanswered[-1].payload
             )
@@ -220,7 +235,7 @@ async def answer(
                 book,
                 role,
                 message,
-                [row for row in rows if row.id not in asked],
+                rows,
                 summary,
                 tools=False,
                 retry=bool(reply and (reply.payload or {}).get("again") == "retry"),
@@ -267,7 +282,6 @@ async def reply_background(book_id, thread, redis):
                 conv = state.id
             role = thread if thread != "group" else (unanswered[-1].payload or {}).get("chat_role", "chief")
             summary, until = state.summary, state.summarized_until
-            old = [m for m in rows[:-20] if m.id > until]
             reply = await post_message(
                 session,
                 redis,
@@ -284,7 +298,9 @@ async def reply_background(book_id, thread, redis):
             )
             session.expunge_all()
             await session.rollback()
-            await answer(session, redis, book_id, thread, role, reply["id"], rows, unanswered, summary, old, conv=conv)
+            await answer(
+                session, redis, book_id, thread, role, reply["id"], rows, unanswered, summary, until, conv=conv
+            )
 
 
 async def again_background(book_id, thread, reply_id, redis):
@@ -309,7 +325,6 @@ async def again_background(book_id, thread, reply_id, redis):
             )
         )
         role, summary, until = reply.speaker, state.summary, state.summarized_until
-        old = [m for m in rows[:-20] if m.id > until]
         payload = dict(reply.payload or {})
         session.expunge_all()
         await session.rollback()
@@ -329,7 +344,18 @@ async def again_background(book_id, thread, reply_id, redis):
             return
         related = tools_text(payload.get("tools"), payload.get("memories")) if payload.get("tools_mode") else None
         await answer(
-            session, redis, book_id, thread, role, reply_id, rows, unanswered, summary, old, related=related, conv=conv
+            session,
+            redis,
+            book_id,
+            thread,
+            role,
+            reply_id,
+            rows,
+            unanswered,
+            summary,
+            until,
+            related=related,
+            conv=conv,
         )
 
 

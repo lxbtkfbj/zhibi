@@ -31,6 +31,8 @@ ROLE_FOCUS = {
     "reviewer": "你管挑毛病：站在付费读者的角度，只说真正影响阅读的问题，按严重程度排。",
 }
 THREADS = {"group", *ROLES.values()}
+HISTORY_LIMIT = 150_000  # 摘要以后的原话超过这么多字，才把最早的缩进摘要
+HISTORY_KEEP = 100_000  # 缩完以后，原话剩这么多字以内
 
 
 async def thread_of(session, book_id, thread):
@@ -140,16 +142,30 @@ def done_note(message):
     return f"（编辑部照这句做了：{'；'.join(parts)}）" if parts else ""
 
 
-def dialogue_text(rows, *, limited=True, limit=6000):
-    lines = [
-        f"{SPEAKER_NAMES.get(m.speaker, m.speaker)}：{m.content[:800] + ('……' if len(m.content) > 800 else '')}"
-        f"{done_note(m)}"
-        for m in rows
-    ]
-    if limited:
-        while lines and len("\n".join(lines)) > limit:
-            lines.pop(0)
-    return "\n".join(lines) or "（没有）"
+def dialogue_line(m):
+    return f"{SPEAKER_NAMES.get(m.speaker, m.speaker)}：{m.content}{done_note(m)}"
+
+
+def dialogue_text(rows):
+    """一条一行，原话一个字不剪；太长了怎么办是 chat.fold_history 的事"""
+    return "\n".join(dialogue_line(m) for m in rows) or "（没有）"
+
+
+def split_for_limit(rows, keep):
+    """从最早的一条起整条整条往前挪，挪到剩下的拼出来不超过 keep 个字；最后一条总留着。
+    -> (挪出去的, 剩下的)"""
+    lengths = [len(dialogue_line(m)) for m in rows]
+    rest = sum(lengths) + max(len(rows) - 1, 0)
+    cut = 0
+    while cut < len(rows) - 1 and rest > keep:
+        rest -= lengths[cut] + 1
+        cut += 1
+    return rows[:cut], rows[cut:]
+
+
+def route_recent(rows, until):
+    """分流看的原话：摘要以后的，每条不剪。超过 HISTORY_KEEP 就从最早的整条往后丢，只管这一次，不缩也不存"""
+    return dialogue_text(split_for_limit([m for m in rows if m.id > until], HISTORY_KEEP)[1])
 
 
 def number(value):
@@ -402,7 +418,7 @@ async def reply_values(session, book, thread, role, rows, unanswered, summary):
         extras=await extras_of(session, ctx, chapters, role, query),
         pending=pending_of(job, ctx),
         summary=summary or "（没有）",
-        recent=dialogue_text(rows[-20:]),
+        recent=dialogue_text(rows),
         quote=quote,
         note=note,
         how_to_apply=(

@@ -175,7 +175,7 @@ async def values(
         viewing=await viewing_full(session, book, ctx, payload.get("viewing")),
         related=related_block,
         summary=summary or "（没有）",
-        recent=dialogue_text(rows[-20:]),
+        recent=dialogue_text(rows),
         quote=tagged("作者选中的原文", f"（{quote['where']}）\n{quote['text'][:2000]}") if quote else "",
         retry=retry_note(payload.get("steps") or []) if retry else "",
         note=message.content,

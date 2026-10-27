@@ -929,7 +929,7 @@ class ChatReply(Lenient):
 
 class ChatSummary(Lenient):
     summary: str = Field(
-        description="之前聊过什么，300 字以内：聊过的话题；作者的想法和倾向；已经定下、记成要求或改了设定的结论；还没定的问题"
+        description="这一段之前聊过的摘要：照要求里的五个小标题分开写，哪句是谁说的、作者答应了没有要分清，3000 字以内"
     )
 
 

@@ -20,8 +20,8 @@ from app.services.chat_context import (
     accepts_plan,
     conversation_state,
     dialogue,
-    dialogue_text,
     obvious_question,
+    route_recent,
     thread_of,
     wants_new_pitches,
     wants_plan,
@@ -86,7 +86,7 @@ async def classify(session, book_id, text, viewing=None, conv=None, before=None)
     # before：这句话已经存进对话了，只看它前面的，不然这句话在提示词里出现两遍
     state = await conversation_state(session, book_id, "group", conv)
     rows = await dialogue(session, book_id, "group", conv=state.id)
-    recent = dialogue_text([m for m in rows if before is None or m.id < before][-6:])
+    recent = route_recent([m for m in rows if before is None or m.id < before], state.summarized_until)
     library, outline = ctx.library, ctx.outline
     await session.commit()
     return await asyncio.wait_for(

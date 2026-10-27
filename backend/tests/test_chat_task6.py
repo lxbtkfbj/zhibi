@@ -36,7 +36,7 @@ from app.models import (
     Volume,
     WorldEntry,
 )
-from app.services import chat, group_notes
+from app.services import chat, chat_context, group_notes
 from app.services.chat_context import (
     dialogue,
     dialogue_text,
@@ -260,14 +260,17 @@ async def test_promote_chat_tidy_apply_and_conclusion(client, sessionmaker):
     assert result.status_code == 404  # 补丁 1 退役旧结论入口，统一走方案卡。
 
 
-async def test_summary_reset_and_typing(client, sessionmaker):
+async def test_summary_reset_and_typing(client, sessionmaker, monkeypatch):
+    # 2026-10-27 聊天记性：原话超过上限才缩，测试里把上限调小
+    monkeypatch.setattr(chat_context, "HISTORY_LIMIT", 300)
+    monkeypatch.setattr(chat_context, "HISTORY_KEEP", 150)
     bid = await seed(sessionmaker)
     for i in range(17):
         r = await client.post(f"/api/books/{bid}/notes", json={"content": f"旧话题{i}", "to": "chief"})
         assert r.status_code == 201
     async with sessionmaker() as session:
         state = await session.scalar(select(ChatThread))
-        assert "之前聊了 11 条" in state.summary
+        assert "（演示）之前聊了" in state.summary and state.summarized_until
     await client.post(f"/api/books/{bid}/chat/chief/reset")
     await client.post(f"/api/books/{bid}/notes", json={"content": "新话题", "to": "chief"})
     async with sessionmaker() as session:
@@ -306,9 +309,11 @@ async def test_context_blocks_and_limits(sessionmaker):
             Job(status="waiting_author", pending={"kind": "volume_review", "volume": 1}), ctx
         )
     assert references("第十一章 第 21 章 第两百零三章 第五章", "章", 3) == [11, 21, 203]
+    # 2026-10-27 聊天记性：原话一个字不剪，不再按条数和字数丢
     rows = [SimpleNamespace(speaker="author", content=str(i) * 900) for i in range(20)]
     recent = dialogue_text(rows)
-    assert len(recent) <= 6000 and "……" in recent
+    assert "……" not in recent
+    assert recent == "\n".join(f"作者：{str(i) * 900}" for i in range(20))
 
 
 async def test_classification_failure_not_feedback(client, sessionmaker, monkeypatch):
@@ -432,6 +437,9 @@ async def test_background_batches_unanswered_with_serial_lock(client, sessionmak
 
 
 async def test_summary_failure_uses_old_summary(client, sessionmaker, monkeypatch):
+    # 2026-10-27 聊天记性：把上限调小，造出超过上限的对话，缩才会真的发生、才会失败
+    monkeypatch.setattr(chat_context, "HISTORY_LIMIT", 100)
+    monkeypatch.setattr(chat_context, "HISTORY_KEEP", 60)
     bid = await seed(sessionmaker)
     async with sessionmaker() as session:
         session.add(ChatThread(book_id=bid, thread="chief", summary="旧摘要"))
@@ -449,15 +457,17 @@ async def test_summary_failure_uses_old_summary(client, sessionmaker, monkeypatc
             )
         await session.commit()
     original = chat.model
-    seen = []
+    seen, recent, tried = [], [], []
 
     async def model(book_id, role, schema, template, **values):
         if schema is s.ChatSummary:
+            tried.append(values["messages"])
             raise ValueError("摘要失败")
         return await original(book_id, role, schema, template, **values)
 
     async def stream(book_id, role, template, **values):
         seen.append(values["summary"])
+        recent.append(values["recent"])
         yield "接着说。"
 
     monkeypatch.setattr(chat, "model", model)
@@ -465,7 +475,12 @@ async def test_summary_failure_uses_old_summary(client, sessionmaker, monkeypatc
     await client.post(f"/api/books/{bid}/notes", json={"content": "接着聊", "to": "chief"})
     messages = (await client.get(f"/api/books/{bid}/meeting")).json()
     assert messages[-1]["speaker"] == "chief" and messages[-1]["content"] == "接着说。"
-    assert seen == ["旧摘要"]
+    # 缩了一次、失败了：照旧用旧摘要，这一次给的原话不超过 HISTORY_KEEP，库里什么也没变
+    assert len(tried) == 1 and seen == ["旧摘要"]
+    assert len(recent[0]) <= chat_context.HISTORY_KEEP and "前话31" in recent[0] and "前话0" not in recent[0]
+    async with sessionmaker() as session:
+        state = await session.scalar(select(ChatThread))
+        assert (state.summary, state.summarized_until) == ("旧摘要", 0)
 
 
 async def test_tidy_missing_items_keep_and_false_conclusion(client, sessionmaker, monkeypatch):

@@ -21,7 +21,7 @@ from app.llm.router import LOCAL_HOSTS, LLMRouter, ToolCall, ToolsUnsupported
 from app.models import Book, Chapter, Job, MeetingMessage
 from app.prompts import render, tagged
 from app.services import book_saves, chat_tools, jobs, teardown_lookup
-from app.services.chat import PUSH_EVERY, answer, answered_ids, conversation_lock, finish_reply, merge_summary, stop_key
+from app.services.chat import PUSH_EVERY, answer, answered_ids, conversation_lock, finish_reply, fold_history, stop_key
 from app.services.chat_context import (
     ROLE_FOCUS,
     conversation_state,
@@ -499,7 +499,7 @@ async def agent_values(session, book, role, message, rows, summary, read_only, r
         if busy
         else "",
         summary=summary or "（没有）",
-        recent=dialogue_text(rows[-20:]),
+        recent=dialogue_text(rows),
         quote=tagged("作者选中的原文", f"（{quote['where']}）\n{quote['text'][:2000]}") if quote else "",
         retry=retry_note(payload.get("steps") or []) if retry else "",
         note=message.content,
@@ -539,8 +539,9 @@ async def answer_note(redis, book_id, message_id, *, reply_id=None, retry=False)
         state = await conversation_state(session, book_id, "group", payload.get("conv"))
         await session.commit()
         rows = [m for m in await dialogue(session, book_id, "group", conv=state.id) if m.id < message_id]
-        old = [m for m in rows[:-20] if m.id > state.summarized_until]
-        summary = await merge_summary(session, book_id, "group", state.summary, old, state.id)
+        summary, rows = await fold_history(
+            session, book_id, "group", state.summary, state.summarized_until, rows, state.id
+        )
         book = await session.get(Book, book_id)
         message = await session.get(MeetingMessage, message_id)
         values = await agent_values(session, book, role, message, rows, summary, read_only, retry)
@@ -654,13 +655,14 @@ async def fall_back(redis, book_id, message_id, reply_id, role) -> bool:
                 await session.commit()
                 conv = state.id
                 rows = [m for m in await dialogue(session, book_id, "group", conv=conv) if m.id < reply_id]
-                old = [m for m in rows[:-20] if m.id > state.summarized_until]
-                summary = state.summary
+                summary, until = state.summary, state.summarized_until
                 message = await session.get(MeetingMessage, message_id)
                 await group_notes.update_message(session, redis, message, outcome={"kind": "chat", "handled": True})
                 session.expunge_all()
                 await session.rollback()
-                await answer(session, redis, book_id, "group", role, reply_id, rows, [message], summary, old, conv=conv)
+                await answer(
+                    session, redis, book_id, "group", role, reply_id, rows, [message], summary, until, conv=conv
+                )
                 return True
             more = [step.strip() for step in intent.more or [] if step.strip()][:3]
             if more:

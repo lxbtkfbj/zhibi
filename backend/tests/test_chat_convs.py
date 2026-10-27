@@ -16,7 +16,7 @@ from app.config import get_settings
 from app.llm import demo
 from app.main import create_app
 from app.models import Character, ChatConversation, ChatThread, MeetingMessage
-from app.services import chat_convs
+from app.services import chat_context, chat_convs
 from app.services.chat_context import dialogue
 from app.services.meeting import post_message
 from tests.test_chat_agent import messages, reply_of, say
@@ -93,7 +93,10 @@ async def test_each_conversation_keeps_its_own_dialogue(client, sessionmaker, re
     assert bad.status_code == 422
 
 
-async def test_summary_belongs_to_the_conversation(client, sessionmaker):
+async def test_summary_belongs_to_the_conversation(client, sessionmaker, monkeypatch):
+    # 2026-10-27 聊天记性：原话超过上限才缩，测试里把上限调小
+    monkeypatch.setattr(chat_context, "HISTORY_LIMIT", 300)
+    monkeypatch.setattr(chat_context, "HISTORY_KEEP", 150)
     bid = await seed(sessionmaker)
     for i in range(16):
         await say(client, bid, f"旧话题第{i}个问题是什么？")
