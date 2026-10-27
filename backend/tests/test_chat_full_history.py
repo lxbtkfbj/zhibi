@@ -309,7 +309,15 @@ async def test_every_route_gives_the_whole_old_reply(client, sessionmaker, monke
         )
         assert not [c for c in await session.scalars(select(LlmCall)) if "chat_summary" in c.request["prompt_names"]]
     assert calls and LONG in calls[-1].request["user"]
-    assert "……" not in calls[-1].request["user"]
+    user = calls[-1].request["user"]
+    recent = user.split("<最近的对话>\n", 1)[1].split("\n</最近的对话>", 1)[0]
+    assert ("主编：" + LONG).encode("utf-8") in recent.encode("utf-8")
+    if route == "agent":
+        # 预设新加的固定说明自带省略号；只排除这句，原话与其余资料仍不许剪字。
+        explanation = "作者那句话后面写着「（编辑部照这句做了：……）」的，是编辑部当时真改了、真记了的。"
+        assert user.count(explanation) == 1 and explanation not in recent
+        user = user.replace(explanation, "", 1)
+    assert "……" not in user
 
 
 async def test_route_sees_only_what_comes_after_the_summary_and_never_folds(client, sessionmaker, monkeypatch):

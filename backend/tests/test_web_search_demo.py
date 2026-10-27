@@ -7,6 +7,7 @@ import pytest
 
 from app.llm import demo
 from app.llm.router import ToolCall
+from app.services import presets
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -98,3 +99,16 @@ def test_web_search_rule_and_layered_prompt_baseline_are_byte_exact(name, prefix
     assert hashlib.sha256(line.rstrip(b"\r\n")).hexdigest() == line_digest
     assert hashlib.sha256(b"".join(lines)).hexdigest() == rest_digest
     assert not (ROOT / "docs/codex任务/主编联网搜索/提示词" / draft).exists()
+
+
+def test_chief_group_preset_web_instructions_follow_actual_search_tool():
+    preset = presets.system_preset()
+    block = next(block for block in preset["blocks"] if block["id"] == "tool_web")
+    assert block["title"] == "工具：上网搜" and block["when"] == "web"
+    values = dict.fromkeys(("concept", "progress", "memory", "viewing", "note"), "")
+    tool = {"function": {"name": "search_web"}}
+    with_tool = presets.compose(preset, values, read_only=True, tools=[tool])
+    without_tool = presets.compose(preset, values, read_only=True, tools=[])
+    assert block["content"].strip() in with_tool["system"]
+    assert "search_web" in block["content"] and "read_webpage" in block["content"]
+    assert block["content"].strip() not in without_tool["system"]

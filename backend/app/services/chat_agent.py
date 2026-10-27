@@ -20,7 +20,7 @@ from app.llm import web_search as online_search
 from app.llm.router import LOCAL_HOSTS, LLMRouter, ToolCall, ToolsUnsupported
 from app.models import Book, Chapter, Job, MeetingMessage
 from app.prompts import render, tagged
-from app.services import book_saves, chat_tools, jobs, teardown_lookup
+from app.services import book_saves, chat_tools, jobs, preset_store, presets, teardown_lookup
 from app.services.chat import PUSH_EVERY, answer, answered_ids, conversation_lock, finish_reply, fold_history, stop_key
 from app.services.chat_context import (
     ROLE_FOCUS,
@@ -307,7 +307,15 @@ async def make_card(turn: Turn, args: chat_tools.MakeChanges, items: list, delet
     )
 
 
-async def drive(turn: Turn, system: str, user: str) -> str:
+async def drive(
+    turn: Turn,
+    system: str,
+    user: str,
+    *,
+    messages: list[dict[str, str]] | None = None,
+    preset: dict | None = None,
+    tools: list[dict] | None = None,
+) -> str:
     pushed = 0.0
     llm = LLMRouter(get_sessionmaker(), book_id=turn.book_id)
     try:
@@ -315,7 +323,9 @@ async def drive(turn: Turn, system: str, user: str) -> str:
             turn.role,
             system,
             user,
-            chat_tools.tool_specs(
+            tools
+            if tools is not None
+            else chat_tools.tool_specs(
                 turn.read_only,
                 skills=turn.allow_skills,
                 memories=turn.allow_memories,
@@ -325,6 +335,7 @@ async def drive(turn: Turn, system: str, user: str) -> str:
             lambda call: run_tool(turn, call),
             purpose=f"聊天·{SPEAKER_NAMES[turn.role]}",
             max_rounds=MAX_ROUNDS,
+            **({"messages": messages, "preset": preset} if messages is not None else {}),
         ):
             turn.touch()
             if kind == "tick":
@@ -545,6 +556,7 @@ async def answer_note(redis, book_id, message_id, *, reply_id=None, retry=False)
         book = await session.get(Book, book_id)
         message = await session.get(MeetingMessage, message_id)
         values = await agent_values(session, book, role, message, rows, summary, read_only, retry)
+        active_preset = await preset_store.get_active_preset(session) if not teardown and role == "chief" else None
         await session.rollback()
     turn = Turn(
         redis,
@@ -573,13 +585,35 @@ async def answer_note(redis, book_id, message_id, *, reply_id=None, retry=False)
     text, state_name, error, finished = "", "failed", "", False
     try:
         template = "chat_teardown" if teardown else "chat_agent"
-        task = asyncio.create_task(
-            drive(
+        if active_preset is not None:
+            tools = chat_tools.tool_specs(
+                turn.read_only,
+                skills=turn.allow_skills,
+                memories=turn.allow_memories,
+                teardowns=turn.teardown_catalog if turn.allow_teardowns else [],
+                web=turn.web_search,
+            )
+            composed = presets.compose(
+                active_preset,
+                values,
+                read_only=turn.read_only,
+                tools=tools,
+            )
+            driving = drive(
+                turn,
+                composed["system"],
+                composed["user"],
+                messages=composed["messages"],
+                preset=composed["preset"],
+                tools=tools,
+            )
+        else:
+            driving = drive(
                 turn,
                 system_prompt(role, template, **values),
                 render("chat_material", **material_values(values, template=template)),
             )
-        )
+        task = asyncio.create_task(driving)
         try:
             result = await watch(turn, task)
         finally:

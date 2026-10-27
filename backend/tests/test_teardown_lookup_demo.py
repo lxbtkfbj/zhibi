@@ -9,6 +9,7 @@ import pytest
 
 from app.llm import demo
 from app.llm.router import ToolCall
+from app.services import presets
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -96,3 +97,17 @@ def test_teardown_lookup_line_and_layered_prompt_baseline_are_byte_exact():
         "5c3a26005730638c9eb181a2f55242a67e31c6fd3b7c393e4f0ec0280a6bbe28"
     )
     assert not (ROOT / "docs/codex任务/主编查拆过的书/提示词/chat_agent-查拆过的书一条.md").exists()
+
+
+def test_chief_group_uses_preset_teardown_block_only_when_the_tool_is_given():
+    preset = presets.system_preset()
+    block = next(block for block in preset["blocks"] if block["id"] == "tool_teardowns")
+    assert block["title"] == "工具：查拆过的书" and block["when"] == "teardowns"
+    values = dict.fromkeys(("concept", "progress", "memory", "viewing", "note"), "")
+    tool = {"function": {"name": "look_up_teardown"}}
+    with_tool = presets.compose(preset, values, read_only=True, tools=[tool])
+    without_tool = presets.compose(preset, values, read_only=True, tools=[])
+    assert block["content"].strip() in with_tool["system"]
+    assert block["content"].strip() not in without_tool["system"]
+    assert "tool_teardowns" in [item["id"] for item in with_tool["preset"]["blocks"]]
+    assert "tool_teardowns" not in [item["id"] for item in without_tool["preset"]["blocks"]]

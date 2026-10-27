@@ -639,6 +639,8 @@ class LLMRouter:
         *,
         purpose: str,
         max_rounds: int = 6,
+        messages: list[dict[str, str]] | None = None,
+        preset: dict | None = None,
     ) -> AsyncIterator[tuple[str, str]]:
         """多来回调工具（聊天里接话的人自己查、自己动手）：模型调了工具就执行，把结果交回去再问；
         哪一来回不调工具了，那一来回的字就是回答，边写边吐 ("text", 字)。调工具的那一来回要是先说了几句，
@@ -647,7 +649,14 @@ class LLMRouter:
         只看有没有调工具，不看结束原因（中转拼出来的结束原因不可靠）。每个来回记一条调用记录。"""
         profile = await self.resolve(role)
         names = [tool["function"]["name"] for tool in tools]
-        history: list = [SystemMessage(system), HumanMessage(user)]
+        initial_messages = None
+        if messages is None:
+            history: list = [SystemMessage(system), HumanMessage(user)]
+        else:
+            initial_messages = [{"role": item["role"], "content": item["content"]} for item in messages]
+            message_types = {"system": SystemMessage, "user": HumanMessage, "assistant": AIMessage}
+            history = [message_types[item["role"]](content=item["content"]) for item in initial_messages]
+            system, user = _tool_message_text(initial_messages)
         transcript = user
         done: list[tuple[ToolCall, str]] = []
         for round_no in range(1, max_rounds + 1):
@@ -662,6 +671,10 @@ class LLMRouter:
                 "prompt_names": prompt_names_for(system, user),
                 "prompt_parts": prompt_parts_for(system, user),
             }
+            if initial_messages is not None:
+                request["messages"] = initial_messages
+            if preset is not None:
+                request["preset"] = preset
             text, calls = "", []
             async for kind, value in self._tool_round(role, profile, history, tools, done, last, request, purpose):
                 if kind in ("text", "tick"):
@@ -695,7 +708,11 @@ class LLMRouter:
         if profile.provider == "demo":
             started = time.monotonic()
             names = [] if last else [tool["function"]["name"] for tool in tools]
-            planned, text = demo.tool_turn(history[0].content, history[1].content, names, done)
+            if "messages" in request:
+                demo_system, demo_user = _tool_message_text(request["messages"])
+            else:
+                demo_system, demo_user = history[0].content, history[1].content
+            planned, text = demo.tool_turn(demo_system, demo_user, names, done)
             calls = [ToolCall(f"demo_{len(done)}_{i}", name, args) for i, (name, args) in enumerate(planned)]
             await self._record(
                 role, profile, purpose, started, 0, 0, ok=True, request=request, response=_round_response(text, calls)
@@ -829,6 +846,17 @@ class Outcome[T: BaseModel]:
     parsed: T | None = None
     error: str = ""
     response: str = ""
+
+
+def _tool_message_text(messages: list[dict[str, str]]) -> tuple[str, str]:
+    """旧调用详情的两段文字仍可读；assistant 的身份另起一行标出来。"""
+    system = "\n\n".join(item["content"] for item in messages if item["role"] == "system")
+    user = "\n\n".join(
+        ("【assistant】\n" if item["role"] == "assistant" else "") + item["content"]
+        for item in messages
+        if item["role"] != "system"
+    )
+    return system, user
 
 
 def _request(system: str, user: str, schema: type[BaseModel] | None, method: str) -> dict:

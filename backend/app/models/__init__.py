@@ -5,6 +5,7 @@ from app.models.job import Job, MeetingMessage
 from app.models.library import SettingCandidate, SettingCategory, SettingSuggestion, SettingVersion
 from app.models.llm import ROLES, LlmCall, LlmProfile, PromptOverride, RoleAssignment
 from app.models.memory import Memory
+from app.models.preset import Preset, PresetSave
 from app.models.saves import BookObject, BookSave
 from app.models.settings import AppSetting, AuthorRequirement, ChatConversation, ChatThread
 from app.models.story_map import NodeAnchor, Secret, StoryNode
@@ -32,6 +33,8 @@ __all__ = [
     "MeetingMessage",
     "NodeAnchor",
     "PlotUnit",
+    "Preset",
+    "PresetSave",
     "Relationship",
     "RoleAssignment",
     "Secret",

@@ -77,6 +77,8 @@ async def test_prompt_page_override_updates_directory_and_full_text(client):
     assert canonical_name("skills/opening") == "skills.opening"
     rows = (await client.get("/api/prompts")).json()
     row = next(row for row in rows if row["name"] == "skills.opening")
+    standards = next(row for row in rows if row["name"] == "skills.standards")
+    assert standards["title"] == "写书的标准" and standards["group"] == "手册"
     assert row["title"] == "开书" and row["group"] == "手册"
     assert row["role"] == "chief,lorekeeper,writer,reviewer"
     assert row["when"].startswith("群聊里编辑部自己翻：聊到怎么开一本书")
@@ -85,10 +87,10 @@ async def test_prompt_page_override_updates_directory_and_full_text(client):
     assert response.status_code == 200, response.text
     row = next(row for row in (await client.get("/api/prompts")).json() if row["name"] == "skills.opening")
     assert row["title"] == "新书根基" and row["when"] == "群聊里编辑部自己翻：问根基时。"
-    assert handbooks.tool_spec()["function"]["parameters"]["properties"]["name"]["enum"] == ["新书根基"]
+    assert handbooks.tool_spec()["function"]["parameters"]["properties"]["name"]["enum"] == ["新书根基", "写书的标准"]
     label, full = await chat_tools.look_up(None, None, "read_skill", chat_tools.ReadSkill(name="新书根基"), None)
     assert label == "手册《新书根基》" and full == content
-    assert handbooks.read("错名") == "没有这本手册：错名。目录里有：新书根基"
+    assert handbooks.read("错名") == "没有这本手册：错名。目录里有：新书根基、写书的标准"
     assert (await client.delete("/api/prompts/skills.opening")).status_code == 200
     assert handbooks.read("开书") == default_content("skills.opening")
 
