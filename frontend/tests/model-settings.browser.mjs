@@ -67,6 +67,9 @@ async function scenario(name, run, { profiles = [], viewport = { width: 1440, he
     if (method === 'GET' && path === '/api/llm/roles') {
       await route.fulfill({ json: { default: null, chief: null, lorekeeper: null, writer: null, reviewer: null } }); return
     }
+    if (method === 'GET' && path === '/api/llm/web-search') {
+      await route.fulfill({ json: { has_key: false } }); return
+    }
     if (method === 'GET' && path === '/api/health') {
       await route.fulfill({ json: { status: 'ok', components: {} } }); return
     }
@@ -89,11 +92,14 @@ async function scenario(name, run, { profiles = [], viewport = { width: 1440, he
   })
   try {
     await page.goto(`${baseUrl}/settings`)
+    await page.getByRole('dialog', { name: '系统设置', exact: true }).waitFor()
+    const tools = await page.locator('.settings-tools-link').evaluateAll(items => items.map(item => item.getAttribute('aria-label')))
+    assert.deepEqual(tools, ['预设管理', '提示词与调用记录'], '预设卡在提示词与调用记录上面')
     if (profiles.length) {
       await page.locator('.settings-row-label').filter({ hasText: new RegExp(`^${savedProfile.name}$`) }).waitFor()
     } else {
       await page.getByRole('button', { name: '＋ 添加', exact: true }).click()
-      await page.getByRole('dialog', { name: '设置', exact: true }).waitFor()
+      await page.getByRole('dialog', { name: '系统设置', exact: true }).waitFor()
       assert.equal(await page.getByRole('dialog').count(), 1, 'Model form stays inside the only settings dialog')
       await settleDialog(page)
     }
@@ -116,6 +122,7 @@ const fetchButton = (page) => dialog(page).getByRole('button', { name: /获取�
 const options = (page) => dialog(page).getByRole('listbox', { name: '可用模型' }).getByRole('option')
 const field = (page, name) => dialog(page).getByLabel(name)
 const keyToggle = (page, visible) => dialog(page).getByRole('button', { name: visible ? /隐藏.*API Key/ : /显示.*API Key/ })
+const advancedToggle = page => dialog(page).getByRole('button', { name: '高级：温度、最大输出、结构化输出方式、推理强度、超时（一般不用动）', exact: true })
 
 async function settleDialog(page) {
   await eventually(async () => {
@@ -174,7 +181,7 @@ if (process.env.TEST_GEOMETRY_BASELINE) {
           let release
           state.discovery = () => new Promise((resolve) => { release = resolve })
           await fillConnection(page)
-          // Advanced parameters are always visible in the unified settings list.
+          if (advanced) await advancedToggle(page).click()
           await fetchButton(page).scrollIntoViewIfNeeded()
           const before = await formGeometry(page)
           await fetchButton(page).hover()
@@ -355,7 +362,8 @@ try {
 
   for (const viewport of [{ width: 1440, height: 1100 }, { width: 686, height: 993 }, { width: 390, height: 844 }]) {
     await scenario(`advanced fields align at ${viewport.width}px`, async (page) => {
-      // No separate accordion or nested card: advanced parameters are settings rows.
+      // 开工 HEAD 已把高级参数默认收起；展开后仍逐项验证原有几何边界。
+      await advancedToggle(page).click()
       const names = [/^温度/, /^最大输出 token/, /^结构化输出方式/, /^推理强度/, /^超时/]
       const boxes = []
       for (const name of names) {
@@ -364,7 +372,7 @@ try {
         boxes.push(box)
       }
       for (let index = 0; index < boxes.length; index += 1) {
-        assert.ok(Math.abs(boxes[index].height - 28) < 2, 'All settings controls are 28px high')
+        assert.ok(Math.abs(boxes[index].height - 32) < 2, '开工 HEAD 的系统设置控件均为 32px 高')
         if (index > 0) {
           assert.ok(boxes[index].y >= boxes[index - 1].y + boxes[index - 1].height, 'Settings controls stack without overlap')
           assert.ok(Math.abs(boxes[index].x + boxes[index].width - boxes[0].x - boxes[0].width) < 2, 'Settings controls share their right edge')
@@ -450,7 +458,7 @@ try {
     for (const advanced of [false, true]) {
       await scenario(`discovery does not displace dialog or controls at ${viewport.width}px advanced=${advanced}`, async (page, state) => {
         await fillConnection(page)
-        // Advanced parameters are always visible in the unified settings list.
+        if (advanced) await advancedToggle(page).click()
         await fetchButton(page).scrollIntoViewIfNeeded()
         const initial = await formGeometry(page)
         const measurements = [{ phase: 'initial', geometry: initial }]

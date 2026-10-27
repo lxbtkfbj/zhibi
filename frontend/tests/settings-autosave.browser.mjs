@@ -26,11 +26,12 @@ await page.route('**/api/settings/new-book-defaults', async route => {
   response = { settings: { ...response.settings, ...body }, rules_text: `【这本书的写作规矩】\n- 测试预览：${body.title_custom ?? body.title_style ?? response.settings.title_style}` }
   return route.fulfill({ json: response })
 })
-const modal = page.getByRole('dialog', { name: '设置', exact: true })
+const modal = page.getByRole('dialog', { name: '系统设置', exact: true })
 const title = () => modal.getByRole('group', { name: '书名风格', exact: true })
 try {
   await page.goto(`${baseURL}/settings`)
   await expect(modal).toBeVisible()
+  assert.deepEqual(await modal.locator('.settings-tools-link').evaluateAll(items => items.map(item => item.getAttribute('aria-label'))), ['预设管理', '提示词与调用记录'])
   await expect(page).toHaveURL(`${baseURL}/`)
   await modal.getByRole('button', { name: '＋ 添加', exact: true }).click()
   await expect(page.getByRole('dialog')).toHaveCount(1)
@@ -87,15 +88,25 @@ try {
   await expect(modal.getByRole('textbox', { name: '自己写的书名规矩' })).toHaveValue('另一窗口的最新原文')
   console.log('PASS tab change flushes pending typing and clean editor accepts refreshed server state')
 
-  await modal.getByRole('group', { name: '力度', exact: true }).getByRole('button', { name: '自定义', exact: true }).click()
-  await expect(modal.getByRole('switch', { name: '卷纲专项审稿' })).toBeVisible()
+  // 用户批准：旧自定义/专项审稿开关已由 HEAD 移除，等价检查当前精品档，
+  // 保存字段和精确说明都不能放宽；后面的六视口几何边界保持完整。
+  const premium = { effort_preset: 'premium', max_rewrites: 3, pitches: 3, volume_audit: true, review_strictness: 'strict' }
+  const effort = modal.getByRole('group', { name: '编辑部写得多仔细', exact: true })
+  await effort.getByRole('button', { name: '精品', exact: true }).click()
+  await expect(effort.getByRole('button', { name: '精品', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await expect.poll(() => Object.fromEntries(Object.keys(premium).map(key => [key, response.settings[key]]))).toEqual(premium)
+  assert.deepEqual(writes.at(-1), premium, '精品档必须一次完整保存这五个字段')
+  await expect(modal.getByText('审稿更严，中等毛病也退回，最多重写 3 次；卷纲出三版挑好的，再专门查一遍。最慢，最费额度。', { exact: true })).toBeVisible()
+  console.log('PASS 当前精品档精确保存五个字段，选中态和完整白话说明同步更新')
   for (const [width, height] of [[1440, 1000], [1127, 886], [1366, 768], [1024, 600], [686, 993], [390, 844]]) {
     await page.setViewportSize({ width, height })
     await expect.poll(() => modal.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
     const box = await modal.boundingBox()
     const margin = width <= 600 ? 10 : 18
-    assert.ok(Math.abs(box.width - Math.min(1040, width - 2 * margin)) < 1)
-    assert.ok(Math.abs(box.height - Math.min(width <= 600 ? 640 : 760, height - 2 * margin)) < 1)
+    // 开工 HEAD: width 940px；desktop height 780px；mobile 640px；
+    // max-width = 100vw - 36px，max-height = 88dvh（这六种视口 desk zoom 都为 1）。
+    assert.ok(Math.abs(box.width - Math.min(940, width - 36)) < 1)
+    assert.ok(Math.abs(box.height - Math.min(width <= 600 ? 640 : 780, height * .88)) < 1)
     assert.ok(Math.abs(box.x + box.width / 2 - width / 2) < 1, 'Dialog stays horizontally centered')
     assert.ok(Math.abs(box.y + box.height / 2 - height / 2) < 1, 'Dialog stays vertically centered')
     const close = await modal.getByRole('button', { name: '关闭设置' }).boundingBox()
@@ -104,5 +115,5 @@ try {
     await page.screenshot({ path: resolve(artifacts, `settings-defaults-${width}x${height}.png`) })
   }
   assert.deepEqual(errors, [])
-  console.log('PASS enlarged 1040x760 modal stays centered and fits all six desktop, short-height, and mobile viewports')
+  console.log('PASS 开工 HEAD 的 940x780（手机高640）弹窗按88dvh上限居中，六种桌面/矮屏/手机视口均可用')
 } finally { await browser.close() }

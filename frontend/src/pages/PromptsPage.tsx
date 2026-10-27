@@ -15,6 +15,7 @@ import { CALL_ROLE_KEYS, normalizeCallRole, roleName } from '../lib/callRoles'
 import { readPromptDraft, writePromptDraft } from '../lib/promptDrafts'
 import { readCollapsedPromptGroups, writeCollapsedPromptGroups } from '../lib/promptDirectory'
 import { readPromptReturnContext } from '../lib/promptNavigation'
+import { presetsHref } from '../lib/presetNavigation'
 import { resolvePromptSelection } from '../lib/promptSelection'
 import { useSettingsModal } from '../lib/settingsModal'
 import { PromptCallDetail } from './PromptCallDetail'
@@ -207,7 +208,7 @@ export function PromptsPage() {
     </header>
     <main className="prompts-main">
       <div className="prompts-page-heading">
-        <div><h1>提示词与调用记录</h1>{tab === 'prompts' && <p>查看编辑部的工作指令。改了点「保存」才生效，所有书都用同一份。</p>}</div>
+        <div><h1>提示词与调用记录</h1>{tab === 'prompts' && <p>查看编辑部的工作指令。改了点「保存」才生效，所有书都用同一份。 <Link className="prompt-text-link" to={presetsHref(location)}>预设管理</Link></p>}</div>
         <div className="prompts-tabs" role="tablist" aria-label="提示词与调用记录">{(['prompts', 'calls'] as const).map(value => <button key={value} type="button" id={`prompts-tab-${value}`} role="tab" aria-selected={tab === value} aria-controls="prompts-panel" tabIndex={tab === value ? 0 : -1} onKeyDown={event => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); const next = event.key === 'Home' ? 'prompts' : event.key === 'End' ? 'calls' : value === 'calls' ? 'prompts' : 'calls'; update('tab', next); document.getElementById(`prompts-tab-${next}`)?.focus() } }} onClick={() => update('tab', value)}>{value === 'prompts' ? <FileText className="size-4" /> : <History className="size-4" />}{value === 'prompts' ? '提示词' : '调用记录'}</button>)}</div>
       </div>
       <div id="prompts-panel" className="prompts-panel" role="tabpanel" aria-labelledby={`prompts-tab-${tab}`}>

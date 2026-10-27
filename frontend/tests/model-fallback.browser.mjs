@@ -33,6 +33,7 @@ await page.route('**/api/**', async route => {
   if (route.request().method() !== 'GET') unexpected.push(`${route.request().method()} ${path}`)
   if (path === '/api/llm/profiles') return route.fulfill({ json: profiles })
   if (path === '/api/llm/roles') return route.fulfill({ json: { default: 'auto' } })
+  if (path === '/api/llm/web-search') return route.fulfill({ json: { has_key: false } })
   if (path === '/api/books') return route.fulfill({ json: [] })
   if (path === '/api/health') return route.fulfill({ json: { status: 'ok', components: {} } })
   unexpected.push(path)

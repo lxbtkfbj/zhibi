@@ -1,4 +1,5 @@
 import { del, get, put } from './client'
+import type { CallPreset, PresetRole } from './presets'
 
 export interface PromptVariable { name: string; label: string }
 export interface PromptReference { name: string; title: string }
@@ -25,7 +26,7 @@ export interface LlmCall {
 }
 export interface LlmCallDetail extends LlmCall {
   used_prompts: UsedPrompts
-  request: { system: string; user: string; schema_name: string | null; schema: unknown; method: string } | null
+  request: { system: string; user: string; schema_name: string | null; schema: unknown; method: string; messages?: { role: PresetRole; content: string }[]; preset?: CallPreset } | null
   response: string | null
 }
 export const promptApi = {

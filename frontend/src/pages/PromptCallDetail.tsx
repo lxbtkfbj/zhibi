@@ -2,15 +2,23 @@ import { useQuery } from '@tanstack/react-query'
 import { CheckCircle2, LoaderCircle, X, XCircle } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { promptApi } from '../api/prompts'
+import { presetApi, PresetApiError } from '../api/presets'
 import { UsedPrompts } from '../components/UsedPrompts'
 import { ErrorText } from '../components/ui'
 import { roleName } from '../lib/callRoles'
+import { presetsHref } from '../lib/presetNavigation'
 
 /** 调用原文只读查看；与提示词工作台共用宣纸、字号及界面缩放。 */
 export function PromptCallDetail({ id, onClose, selectPrompt }: { id: number; onClose: () => void; selectPrompt: (name: string) => void }) {
   const query = useQuery({ queryKey: ['llm-call', id], queryFn: () => promptApi.call(id) })
   const call = query.data
+  const location = useLocation()
+  const preset = call?.request?.preset
+  const mine = useQuery({ queryKey: ['preset-exists', preset?.id], queryFn: () => presetApi.detail(preset!.id!), enabled: preset?.source === 'mine' && !!preset.id, retry: false })
+  const deleted = mine.error instanceof PresetApiError && mine.error.status === 404
+  const canOpen = preset?.source === 'system' || mine.isSuccess
   const dialog = useRef<HTMLDialogElement>(null)
   const backdrop = useRef(false)
   useEffect(() => {
@@ -44,6 +52,11 @@ export function PromptCallDetail({ id, onClose, selectPrompt }: { id: number; on
             <p>{call.book_title || '未关联书籍'} · {new Date(call.created_at).toLocaleString('zh-CN', { hour12: false })}</p>
             <dl className="call-facts"><div><dt>角色</dt><dd>{roleName(call.role)}</dd></div><div><dt>模型</dt><dd>{call.model}<small>{call.profile_name || '未记录配置名称'}</small></dd></div><div><dt>输入 / 输出 Token</dt><dd>{call.prompt_tokens?.toLocaleString('zh-CN') ?? '—'} / {call.completion_tokens?.toLocaleString('zh-CN') ?? '—'}</dd></div><div><dt>耗时</dt><dd>{call.latency_ms == null ? '—' : `${(call.latency_ms / 1000).toFixed(2)} 秒`}</dd></div></dl>
           </section>
+          {preset && <section className="call-used-prompts" data-testid="call-used-preset"><h3>用的预设</h3>
+            <p className="text-sm text-ink-2">{preset.name}{deleted && '（已经删了）'} · {preset.source === 'system' ? `系统预设 · 第 ${preset.version} 版` : `我的 · 第 ${preset.version} 次保存`}</p>
+            <ol className="used-prompts">{preset.blocks.map(block => <li key={block.id}>{canOpen ? <Link className="prompt-text-link" to={presetsHref(location, { source: preset.source, id: preset.id, version: preset.version, block: block.id })} onClick={onClose}>{block.title}</Link> : <span>{block.title}</span>}</li>)}</ol>
+            {mine.isError && !deleted && <ErrorText error={mine.error} />}
+          </section>}
           {!!call.used_prompts?.names.length && <section className="call-used-prompts"><h3>用到的提示词</h3><UsedPrompts used={call.used_prompts} onSelect={selectPrompt} /></section>}
           {!call.request && <p className="call-retention-note">这次调用的完整请求未留存。每本书只保留最近 2000 次调用的完整内容，较早记录的统计信息仍然保留。</p>}
           <section><h3>系统提示</h3><pre tabIndex={0}>{call.request?.system ?? '未留存'}</pre></section>

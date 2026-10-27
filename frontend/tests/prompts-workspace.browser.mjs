@@ -205,6 +205,7 @@ const enterFromBook = async () => {
   await page.getByRole('button', { name: '系统设置', exact: true }).click()
   const settingsDialog = page.getByRole('dialog', { name: '系统设置', exact: true })
   await expect(settingsDialog).toBeVisible()
+  assert.deepEqual(await settingsDialog.locator('.settings-tools-link').evaluateAll(items => items.map(item => item.getAttribute('aria-label'))), ['预设管理', '提示词与调用记录'])
   await shot('01-settings-entry')
   const entry = settingsDialog.getByRole('link', { name: /提示词.*调用记录/ })
   await expect(entry).toBeVisible()
