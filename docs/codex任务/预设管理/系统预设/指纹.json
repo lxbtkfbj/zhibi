@@ -1,0 +1,23 @@
+{
+  "app/presets/chief_group/v1/act.md": "85e9715dfa41a62735a849b9a48efec5106ed15fd8727adafae1a45ab7ecb40f",
+  "app/presets/chief_group/v1/after_done.md": "7b66486b76bd858788bb83dbfadce1d69a4ca5b2334800d9b6fea51fe325c386",
+  "app/presets/chief_group/v1/ask_only.md": "05ea9a45302ea09bcf08fb5cb8ae5576949467fdb2f9e3e874414be3249799b0",
+  "app/presets/chief_group/v1/cannot.md": "e53a5b90edbaf48302ed837bdbd06308ebbf9ed3f20c94539a75fae11f363fc7",
+  "app/presets/chief_group/v1/history.md": "803a8d4960f1787484de27cfbd787b098901c42e2292fbeebd4d984a1d0d1aea",
+  "app/presets/chief_group/v1/manner.md": "bb571e19c1a4a6540c91d1e11989b19e0c5d294076f7ca13666cf43d11baae5d",
+  "app/presets/chief_group/v1/material.md": "bc3d08c66d67dd7371038f591bdacafe1e0eb2673413e2f20d1659e2a9f55b14",
+  "app/presets/chief_group/v1/memory.md": "f8a768384c9bed2e77ca81721be85c770f879177581610b6fc7204d0c358d3ea",
+  "app/presets/chief_group/v1/note.md": "b3dfabdf44d3a607a26e9351bdebbe775c436e2dbe0d1d8a69274e3a9aa90363",
+  "app/presets/chief_group/v1/preset.json": "1e631d3e8fdb706bb805a3d1c317d24696867065e8f44f712696df6d19d2e58f",
+  "app/presets/chief_group/v1/reply_style.md": "889ac50e68cb5ab177c2985977c0318def343ddca3586a24721faf5d6f9dd081",
+  "app/presets/chief_group/v1/role.md": "0e105420bd34d8a5e4f100bd088f2e72340764c876ddbc6af1230748223f342e",
+  "app/presets/chief_group/v1/task.md": "7820922bdb8bf403160d1f370f716565ec7128ef71809bafb7d945959cac58bd",
+  "app/presets/chief_group/v1/think.md": "404a261e66251a207cd6457c454c57e16b87c36168421af40b20367b5e85892e",
+  "app/presets/chief_group/v1/tool_lookup.md": "679a92dcecea0349b46c3cc47c6eedfe886263908b37c090a2ba46f84c946abb",
+  "app/presets/chief_group/v1/tool_memory.md": "7dfe4feb78faf2e63c62d89318f40e2200e67c5aba4019a77832c86c43d0f05b",
+  "app/presets/chief_group/v1/tool_skills.md": "454de5884b6a6bf6194910c53b1ad755abafd17244a56891c09b8461211d8668",
+  "app/presets/chief_group/v1/tool_teardowns.md": "43261ac8fcef0a0464c2756f48ed0871b17f2de3d970b9f03fc48116411f5e58",
+  "app/presets/chief_group/v1/tool_web.md": "de246972fc794d7f2227583a59b229c47276b32bde84763a19fda21efb1068e9",
+  "app/presets/chief_group/v1/voice.md": "8579cc1452989d2caacd53f5c6b352937dc1809a9c8eab9fdf6c1d977830a4a7",
+  "app/prompts/skills/standards.md": "4eefacd6accf7904ce45599dd8375c82f102bad730737cf5b26ce3c9019b7e4f"
+}

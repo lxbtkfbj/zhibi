@@ -1,0 +1,200 @@
+{
+  "kind": "chief_group",
+  "kind_label": "主编群聊",
+  "name": "主编群聊·系统默认",
+  "version": 1,
+  "date": "2026-10-27",
+  "note": "第一版。原来主编群聊的系统提示由五份提示词拼成（主编人设、主编口吻和口吻怎么用、群聊：自己查、自己动手、聊天的做法、通用规则），外加两段写死在程序里的话，合起来约 5300 字；这一版只留必须的，约 2300 字。「你怎么想问题」「聊天的四件事」做成两块默认关着的；「你的标准」十五条挪进手册「写书的标准」。",
+  "blocks": [
+    {
+      "id": "role",
+      "title": "角色",
+      "role": "system",
+      "enabled": true,
+      "required": true,
+      "when": "always",
+      "without": "主编不知道自己是谁、在跟谁说话。",
+      "origin": "从原来的「主编人设」第一段压成两句。原来那份 10-13 起写，写书和聊天共用，改过 10 次；职责、「你怎么想问题」「你的标准」这次都不放进聊天。"
+    },
+    {
+      "id": "voice",
+      "title": "口吻：老主编",
+      "role": "system",
+      "enabled": true,
+      "required": false,
+      "when": "always",
+      "without": "",
+      "origin": "就是原来提示词页上「主编口吻」的默认原文。要换口吻，改这一块，或者另加一块口吻、把这块关掉。"
+    },
+    {
+      "id": "task",
+      "title": "任务说明",
+      "role": "system",
+      "enabled": true,
+      "required": true,
+      "when": "always",
+      "without": "主编不知道这一回要干什么，也守不住那几条硬规矩：书里没写的不说成定了、否掉的方向不往回带、写进书里的字不带口吻。",
+      "origin": "新写的。前一段是原来「聊天的做法」第一件事压成的一句；四条硬规矩原来散在「聊天的做法」「口吻怎么用」「通用规则」里，收到这里。"
+    },
+    {
+      "id": "reply_style",
+      "title": "回话的样子",
+      "role": "system",
+      "enabled": true,
+      "required": true,
+      "when": "always",
+      "without": "回话里会冒出 Markdown 的井号、星号，聊天框原样显示出来。",
+      "origin": "来自原来「聊天的做法」最后一条，原话差不多没动，加了一句为什么不用 Markdown。"
+    },
+    {
+      "id": "tool_lookup",
+      "title": "工具：查书里的资料",
+      "role": "system",
+      "enabled": true,
+      "required": true,
+      "when": "always",
+      "without": "主编该查资料的时候不查，或者同一样翻来覆去地查。",
+      "origin": "来自原来「群聊：自己查、自己动手」第 1 条（10-19 起写，那份改过 12 次），规矩没少，压短了，括号里注了工具名。"
+    },
+    {
+      "id": "tool_skills",
+      "title": "工具：翻手册",
+      "role": "system",
+      "enabled": true,
+      "required": true,
+      "when": "skills",
+      "without": "主编不会翻手册，手册放着没用。",
+      "origin": "来自原来「群聊：自己查、自己动手」第 2 条，规矩没少，压短了。"
+    },
+    {
+      "id": "tool_teardowns",
+      "title": "工具：查拆过的书",
+      "role": "system",
+      "enabled": true,
+      "required": true,
+      "when": "teardowns",
+      "without": "主编不会去查你拆过的书，会凭印象说别人书里的情节。",
+      "origin": "来自原来「群聊：自己查、自己动手」第 3 条前半，规矩没少，压短了。"
+    },
+    {
+      "id": "tool_web",
+      "title": "工具：上网搜",
+      "role": "system",
+      "enabled": true,
+      "required": true,
+      "when": "web",
+      "without": "主编不知道什么时候该上网搜，说的时候也不讲出处。",
+      "origin": "来自原来「群聊：自己查、自己动手」第 3 条后半，规矩没少，压短了，加了 read_webpage。"
+    },
+    {
+      "id": "tool_memory",
+      "title": "工具：记忆",
+      "role": "system",
+      "enabled": true,
+      "required": true,
+      "when": "always",
+      "without": "主编不知道什么时候该记、记成哪一种，会乱记、重复记，写书时用不上。",
+      "origin": "来自原来「群聊：自己查、自己动手」第 4 条，规矩没少，压短了。"
+    },
+    {
+      "id": "act",
+      "title": "动手改书",
+      "role": "system",
+      "enabled": true,
+      "required": true,
+      "when": "can_act",
+      "without": "你让主编改书，它不知道怎么动手，也不知道什么时候不该动手。",
+      "origin": "前一段原来写死在程序里（ACT_RULE），你在提示词页上看不到；后一段来自原来「群聊：自己查、自己动手」第 6 条。规矩没少。"
+    },
+    {
+      "id": "ask_only",
+      "title": "只问不改",
+      "role": "system",
+      "enabled": true,
+      "required": true,
+      "when": "ask_only",
+      "without": "你点了「只问不改」，主编也不知道这一回不能改书。",
+      "origin": "原来写死在程序里（ASK_RULE），原话没动。"
+    },
+    {
+      "id": "cannot",
+      "title": "做不了的事",
+      "role": "system",
+      "enabled": true,
+      "required": true,
+      "when": "always",
+      "without": "主编会答应它做不了的事（比如说「帮你开写了」），也不会告诉你该去哪里点。",
+      "origin": "来自原来「群聊：自己查、自己动手」第 7 条，规矩没少，改成一条一行。"
+    },
+    {
+      "id": "after_done",
+      "title": "做完怎么说",
+      "role": "system",
+      "enabled": true,
+      "required": true,
+      "when": "always",
+      "without": "主编做完可能说假话：没做成的说成做成了。",
+      "origin": "来自原来「群聊：自己查、自己动手」第 8 条，规矩没少。"
+    },
+    {
+      "id": "think",
+      "title": "怎么想问题（以前的人设）",
+      "role": "system",
+      "enabled": false,
+      "required": false,
+      "when": "always",
+      "without": "",
+      "origin": "原来「主编人设」里「你怎么想问题」那五条，原话没动。默认关着，想比一比就打开。"
+    },
+    {
+      "id": "manner",
+      "title": "聊天的四件事（以前的做法）",
+      "role": "system",
+      "enabled": false,
+      "required": false,
+      "when": "always",
+      "without": "",
+      "origin": "原来「聊天的做法」里的四件事，原话没动（10-17 起写，改过 13 次）。默认关着，想比一比就打开。"
+    },
+    {
+      "id": "material",
+      "title": "书的资料",
+      "role": "user",
+      "enabled": true,
+      "required": true,
+      "when": "always",
+      "without": "主编看不到这本书现在是什么样：简介、设定库、大纲、写到哪了。",
+      "origin": "原来「聊天带的资料」的前半，资料由程序填，跟原来一样。"
+    },
+    {
+      "id": "memory",
+      "title": "记忆目录",
+      "role": "user",
+      "enabled": true,
+      "required": true,
+      "when": "always",
+      "without": "主编看不到记忆目录，记过的喜好、忌讳都用不上。",
+      "origin": "原来「聊天带的资料」里的记忆那一段，由程序填。"
+    },
+    {
+      "id": "history",
+      "title": "聊天记录",
+      "role": "user",
+      "enabled": true,
+      "required": true,
+      "when": "always",
+      "without": "主编不记得前面聊过什么。",
+      "origin": "原来「聊天带的资料」里的「之前聊过」和「最近的对话」，由程序填；最后一句是新加的。"
+    },
+    {
+      "id": "note",
+      "title": "作者这次说的",
+      "role": "user",
+      "enabled": true,
+      "required": true,
+      "when": "always",
+      "without": "主编看不到你这次说的话。",
+      "origin": "原来「聊天带的资料」的最后一段，由程序填；最后一句原来是「接作者这次说的话」。"
+    }
+  ]
+}
