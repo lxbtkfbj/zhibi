@@ -1,10 +1,12 @@
-"""从随程序发布的文件发现手册；目录和全文都读作者当前生效的版本。"""
+"""手册文件与已提交的作者版本；数据库内容不缓存。"""
 
 import re
 from dataclasses import dataclass
 from importlib import resources
 
-from app.prompts import default_content, load
+import psycopg
+
+from app.config import get_settings
 
 
 @dataclass(frozen=True)
@@ -12,16 +14,8 @@ class Handbook:
     key: str
     name: str
     when: str
+    body: str
     content: str
-
-    def entry(self) -> tuple[str, str, str, str, str]:
-        return (
-            f"skills.{self.key}",
-            self.name,
-            "手册",
-            "chief,lorekeeper,writer,reviewer",
-            "群聊里编辑部自己翻：" + self.when,
-        )
 
 
 def keys() -> list[str]:
@@ -35,35 +29,66 @@ def keys() -> list[str]:
     )
 
 
+def compose(name: str, when: str, body: str) -> str:
+    return f"# {name}\n\n什么时候翻：{when}\n\n{body}"
+
+
 def parse(key: str, content: str) -> Handbook:
-    lines = content.splitlines()
-    heading = re.fullmatch(r"# ([^#\s].*)", lines[0]) if lines else None
-    if heading is None or not heading[1].strip():
-        raise ValueError("第一行必须是 # 名称")
-    when = next(
-        (line.removeprefix("什么时候翻：").strip() for line in lines[1:] if line.startswith("什么时候翻：")), ""
-    )
-    if not when:
-        raise ValueError("必须有「什么时候翻：」那一行，并写清什么时候翻")
-    if "{{" in content or "}}" in content:
-        raise ValueError("手册不能有 {{变量}}")
-    return Handbook(key, heading[1].strip(), when, content)
+    """只拆标题和第一条目录说明；保留正文的原始行尾和末尾空白。"""
+    lines = content.splitlines(keepends=True)
+    name = lines.pop(0).rstrip("\r\n").removeprefix("# ").strip() if lines else ""
+    when = ""
+    for index, line in enumerate(lines):
+        if line.startswith("什么时候翻："):
+            when = line.removeprefix("什么时候翻：").strip()
+            lines.pop(index)
+            break
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    return Handbook(key, name, when, "".join(lines), content)
 
 
-def catalog(contents: dict[str, str] | None = None) -> list[Handbook]:
-    """contents 供提示词 API 使用同一次查询的已提交覆盖版本；群聊一律走 prompts.load。"""
+def system_books() -> dict[str, Handbook]:
+    folder = resources.files("app.prompts").joinpath("skills")
+    # 不经提示词覆盖，也不规范化文件行尾。
+    return {key: parse(key, folder.joinpath(f"{key}.md").read_bytes().decode("utf-8")) for key in keys()}
+
+
+def resolve(rows: list[dict], systems: dict[str, Handbook] | None = None) -> list[tuple[Handbook, dict | None]]:
+    """合并虚拟的系统手册和数据库行，文件被移除的作者版本作为自写手册保留。"""
+    systems = system_books() if systems is None else systems
+    by_key = {row["key"]: row for row in rows}
     result = []
-    for key in keys():
-        name = f"skills.{key}"
-        content = load(name) if contents is None else contents.get(name, default_content(name))
-        result.append(parse(key, content))
+    for key, system in systems.items():
+        row = by_key.get(key)
+        book = (
+            Handbook(key, row["name"], row["when"], row["body"], compose(row["name"], row["when"], row["body"]))
+            if row and row["name"] is not None
+            else system
+        )
+        result.append((book, row))
+    mine = [row for row in rows if row["key"] not in systems and row["name"] is not None]
+    for row in sorted(mine, key=lambda row: (row["created_at"], row["key"])):
+        book = Handbook(
+            row["key"], row["name"], row["when"], row["body"], compose(row["name"], row["when"], row["body"])
+        )
+        result.append((book, row))
     return result
 
 
-def validate(name: str, content: str, contents: dict[str, str] | None = None) -> None:
-    current = parse(name.split(".", 1)[1], content)
-    if any(other.key != current.key and other.name == current.name for other in catalog(contents)):
-        raise ValueError(f"手册名称不能重名：{current.name}")
+def catalog() -> list[Handbook]:
+    """一次短连接读整张表，主编只看到已打开的版本。"""
+    from psycopg.rows import dict_row
+
+    with psycopg.connect(get_settings().checkpoint_dsn, connect_timeout=10, row_factory=dict_row) as conn:
+        rows = conn.execute("SELECT * FROM handbooks").fetchall()
+    return [book for book, row in resolve(rows) if row is None or row["enabled"]]
+
+
+def description(books: list[Handbook]) -> str:
+    if not books:
+        return ""
+    return "翻编辑部的专业手册，拿到全文再答。手册目录：\n" + "\n".join(f"- {book.name}：{book.when}" for book in books)
 
 
 def tool_spec() -> dict | None:
@@ -74,8 +99,7 @@ def tool_spec() -> dict | None:
         "type": "function",
         "function": {
             "name": "read_skill",
-            "description": "翻编辑部的专业手册，拿到全文再答。手册目录：\n"
-            + "\n".join(f"- {book.name}：{book.when}" for book in books),
+            "description": description(books),
             "parameters": {
                 "type": "object",
                 "properties": {

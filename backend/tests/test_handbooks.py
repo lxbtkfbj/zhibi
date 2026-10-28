@@ -17,7 +17,7 @@ from app.llm import demo
 from app.llm import router as router_module
 from app.llm.router import DEMO_PROFILE, LLMRouter, ResolvedProfile, ToolsUnsupported
 from app.main import create_app
-from app.models import LlmCall, LlmProfile, PromptOverride
+from app.models import LlmCall, LlmProfile
 from app.prompts import canonical_name, default_content, handbooks
 from app.schemas import ProfilePatch
 from app.services import chat_agent, chat_tools
@@ -73,61 +73,38 @@ def test_directory_and_enum_follow_sorted_files(monkeypatch, tmp_path):
         default_content.cache_clear()
 
 
-async def test_prompt_page_override_updates_directory_and_full_text(client):
+async def test_management_override_updates_directory_and_full_text(client):
     assert canonical_name("skills/opening") == "skills.opening"
     rows = (await client.get("/api/prompts")).json()
-    row = next(row for row in rows if row["name"] == "skills.opening")
-    standards = next(row for row in rows if row["name"] == "skills.standards")
-    assert standards["title"] == "写书的标准" and standards["group"] == "手册"
-    assert row["title"] == "开书" and row["group"] == "手册"
-    assert row["role"] == "chief,lorekeeper,writer,reviewer"
-    assert row["when"].startswith("群聊里编辑部自己翻：聊到怎么开一本书")
-    content = "# 新书根基\n什么时候翻：问根基时。\n" + "完整正文" * 1000
-    response = await client.put("/api/prompts/skills.opening", json={"content": content})
+    assert all(not row["name"].startswith("skills.") and row["group"] != "手册" for row in rows)
+    for method in (client.get, client.delete):
+        assert (await method("/api/prompts/skills.opening")).status_code == 404
+    assert (await client.put("/api/prompts/skills.opening", json={"content": "anything"})).status_code == 404
+    body = {"name": "新书根基", "when": "问根基时。", "body": "完整正文" * 1000}
+    response = await client.put("/api/handbooks/opening", json=body)
     assert response.status_code == 200, response.text
-    row = next(row for row in (await client.get("/api/prompts")).json() if row["name"] == "skills.opening")
-    assert row["title"] == "新书根基" and row["when"] == "群聊里编辑部自己翻：问根基时。"
+    assert response.json()["saved"] == 1
     assert handbooks.tool_spec()["function"]["parameters"]["properties"]["name"]["enum"] == ["新书根基", "写书的标准"]
     label, full = await chat_tools.look_up(None, None, "read_skill", chat_tools.ReadSkill(name="新书根基"), None)
-    assert label == "手册《新书根基》" and full == content
+    assert label == "手册《新书根基》" and full == handbooks.compose(**body)
     assert handbooks.read("错名") == "没有这本手册：错名。目录里有：新书根基、写书的标准"
-    assert (await client.delete("/api/prompts/skills.opening")).status_code == 200
+    assert (await client.post("/api/handbooks/opening/use-system")).status_code == 200
     assert handbooks.read("开书") == default_content("skills.opening")
-
-
-@pytest.mark.parametrize(
-    "content,missing",
-    [
-        ("名称\n什么时候翻：问时", "第一行必须是 # 名称"),
-        ("# 名称\n正文", "什么时候翻："),
-        ("# 名称\n什么时候翻：\n正文", "什么时候翻："),
-        ("# 名称\n什么时候翻：问时\n{{变量}}", "手册不能有 {{变量}}"),
-    ],
-)
-async def test_invalid_handbook_save_is_rejected(client, sessionmaker, content, missing):
-    response = await client.put("/api/prompts/skills.opening", json={"content": content})
-    assert response.status_code == 422 and missing in response.json()["detail"]
-    async with sessionmaker() as session:
-        assert await session.get(PromptOverride, "skills.opening") is None
 
 
 async def test_duplicate_name_uses_current_other_handbook(client, monkeypatch, tmp_path):
     fake_books(monkeypatch, tmp_path)
-    try:
-        assert (
-            await client.put("/api/prompts/skills.z_last", json={"content": "# 格斗\n什么时候翻：问时"})
-        ).status_code == 200
-        response = await client.put("/api/prompts/skills.a_first", json={"content": "# 格斗\n什么时候翻：问时"})
-        assert response.status_code == 422 and "不能重名" in response.json()["detail"]
-        assert (
-            await client.put("/api/prompts/skills.a_first", json={"content": "# 改名\n什么时候翻：问时"})
-        ).status_code == 200
-        assert (
-            await client.put("/api/prompts/skills.z_last", json={"content": "# 开书\n什么时候翻：问时"})
-        ).status_code == 200
-        assert (await client.delete("/api/prompts/skills.a_first")).status_code == 422
-    finally:
-        default_content.cache_clear()
+    body = {"name": "格斗", "when": "问时", "body": "正文"}
+    assert (await client.put("/api/handbooks/z_last", json=body)).status_code == 200
+    response = await client.put("/api/handbooks/a_first", json=body)
+    assert (
+        response.status_code == 422
+        and response.json()["detail"] == "已经有一本开着的「格斗」。先关掉那本，或者给这本改个名。"
+    )
+    assert (await client.put("/api/handbooks/a_first", json={**body, "name": "改名"})).status_code == 200
+    assert (await client.put("/api/handbooks/z_last", json={**body, "name": "开书"})).status_code == 200
+    response = await client.post("/api/handbooks/a_first/use-system")
+    assert response.status_code == 422 and "已经有一本开着的「开书」" in response.json()["detail"]
 
 
 def test_tools_absent_when_no_handbooks_and_in_teardown(monkeypatch):

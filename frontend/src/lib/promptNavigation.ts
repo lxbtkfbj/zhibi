@@ -26,7 +26,7 @@ export function readPromptReturnContext(search: string | URLSearchParams): Promp
 
 /** 系统设置打开在书页时带上完整地址；在提示词页再次打开设置时沿用原来的书。 */
 export function promptsHref(location: PromptSourceLocation): string {
-  const context = location.pathname === '/prompts' || location.pathname === '/presets'
+  const context = ['/prompts', '/presets', '/handbooks'].includes(location.pathname)
     ? readPromptReturnContext(location.search ?? '')
     : safePromptReturnContext(`${location.pathname}${location.search ?? ''}${location.hash ?? ''}`)
   if (!context.bookId) return '/prompts'

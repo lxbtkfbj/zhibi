@@ -31,7 +31,7 @@ const title = () => modal.getByRole('group', { name: '书名风格', exact: true
 try {
   await page.goto(`${baseURL}/settings`)
   await expect(modal).toBeVisible()
-  assert.deepEqual(await modal.locator('.settings-tools-link').evaluateAll(items => items.map(item => item.getAttribute('aria-label'))), ['预设管理', '提示词与调用记录'])
+  assert.deepEqual(await modal.locator('.settings-tools-link').evaluateAll(items => items.map(item => item.getAttribute('aria-label'))), ['预设管理', '手册管理', '提示词与调用记录'])
   await expect(page).toHaveURL(`${baseURL}/`)
   await modal.getByRole('button', { name: '＋ 添加', exact: true }).click()
   await expect(page.getByRole('dialog')).toHaveCount(1)

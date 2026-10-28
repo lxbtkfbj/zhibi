@@ -20,9 +20,10 @@ const json = async (suffix, options) => {
   assert.ok(response.ok, `${suffix}: ${response.status}`)
   return response.json()
 }
-const original = await json('/prompts/skills.opening')
+const original = await json('/handbooks/opening')
 const marker = '手册任务1独立验收全文标记'
-const customized = original.content.replace('什么时候翻：', '什么时候翻：独立验收目录标记；') + '\n' + marker + '\n'
+const edited = { name: original.name, when: '独立验收目录标记；' + original.when, body: original.body + '\n' + marker + '\n' }
+const customized = `# ${edited.name}\n\n什么时候翻：${edited.when}\n\n${edited.body}`
 const executablePath = process.env.ZHIBI_CHROMIUM ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe'
 const browser = await chromium.launch({ executablePath, headless: true })
 const context = await browser.newContext({ viewport: { width: 1600, height: 1000 }, colorScheme: 'light' })
@@ -48,21 +49,22 @@ try {
   const roles = await json('/llm/roles')
   assert.ok(Object.values(roles).filter(Boolean).every(id => id === fixture.profile), '所有已分配角色都用演示模型')
   assert.equal((await json('/llm/profiles')).find(profile => profile.id === fixture.profile).provider, 'demo')
-  await page.goto(`${base}/prompts?template=skills.opening`)
-  await expect(page.locator('[data-prompt-group="手册"] .prompt-group-toggle')).toHaveAttribute('aria-expanded', 'true')
-  await expect(page.locator('.template-toolbar h2')).toHaveText('开书')
-  await page.getByRole('button', { name: '修改', exact: true }).click()
-  const editor = page.locator('.cm-content[contenteditable="true"]')
+  await page.goto(`${base}/handbooks?key=opening`)
+  await expect(page.getByRole('heading', { name: '手册管理', exact: true })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: '名称', exact: true })).toHaveValue('开书')
+  await page.getByRole('textbox', { name: '什么时候翻', exact: true }).fill(edited.when)
+  const editor = page.getByTestId('prompt-editor').locator('.cm-content[contenteditable="true"]')
   await editor.click()
   await page.keyboard.press('Control+A')
-  await page.keyboard.insertText(customized)
-  const saved = page.waitForResponse(response => response.url().endsWith('/api/prompts/skills.opening') && response.request().method() === 'PUT')
+  await page.keyboard.insertText(edited.body)
+  const saved = page.waitForResponse(response => new URL(response.url()).pathname === '/api/handbooks/opening' && response.request().method() === 'PUT')
   await page.getByRole('button', { name: '保存', exact: true }).click()
   assert.equal((await saved).status(), 200)
-  await expect(page.getByText('已保存，从下一步调用起对所有书生效。')).toBeVisible()
-  assert.equal((await json('/prompts/skills.opening')).content, customized)
-  const entries = await json('/prompts')
-  assert.ok(entries.find(row => row.name === 'skills.opening').when.includes('独立验收目录标记'))
+  await expect(page.getByRole('button', { name: '保存', exact: true })).toHaveCount(0)
+  assert.equal((await json('/handbooks/opening')).content, customized)
+  const entries = await json('/handbooks')
+  assert.ok(entries.items.find(row => row.key === 'opening').when.includes('独立验收目录标记'))
+
 
   await json(`/books/${fixture.book}/chat/conversations`, { method: 'POST' })
   const beforeCalls = await json(`/llm-calls?book_id=${fixture.book}`)
@@ -127,7 +129,7 @@ try {
   const first = await json(`/llm-calls/${calls.items.filter(call => call.id > beforeId).at(-1).id}`)
   const spec = first.request.schema.find(tool => tool.function.name === 'read_skill').function
   assert.ok(spec.description.includes('独立验收目录标记'))
-  assert.deepEqual(spec.parameters.properties.name.enum, ['开书'])
+  assert.deepEqual(spec.parameters.properties.name.enum, ['开书', '写书的标准'])
 
   await page.goto(`${base}/settings`)
   const modal = page.getByRole('dialog', { name: '系统设置', exact: true })
@@ -143,7 +145,7 @@ try {
   assert.deepEqual(errors, [])
   assert.deepEqual(forbiddenRequests, [])
   fs.writeFileSync(path.join(out, '任务1-浏览器验收.json'), JSON.stringify({
-    base, api, book: fixture.book, promptPageVisibleAndEditable: true, customCatalogAndFullText: true,
+    base, api, book: fixture.book, handbooksPageVisibleAndEditable: true, customCatalogAndFullText: true,
     readSkillEnum: spec.parameters.properties.name.enum, rereplyRetainsFullText: true, resendBody,
     originalNote: note, newNoteId: newNote.id, newReplyId: newReply.id, readSkillCallsBefore: toolCount(firstDetails), readSkillCallsAfter: toolCount(details),
     jsonModeRejectedHint: true, pageErrors: errors, forbiddenRequests, realModelCalls: 0,
@@ -151,8 +153,8 @@ try {
   }, null, 2) + '\n')
   console.log('PASS 手册页可见可改；目录和全文用自定义版；重新回答原话重发、又翻一次手册，标签及全文逐字不变；JSON 模式独立提示；0 页面错误、0 真实模型调用')
 } finally {
-  await json('/prompts/skills.opening', original.customized
-    ? { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: original.content }) }
-    : { method: 'DELETE' })
+  await json('/handbooks/opening' + (original.modified ? '' : '/use-system'), original.modified
+    ? { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: original.name, when: original.when, body: original.body }) }
+    : { method: 'POST' })
   await browser.close()
 }

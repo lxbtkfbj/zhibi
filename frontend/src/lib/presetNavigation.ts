@@ -4,7 +4,7 @@ export interface PresetNavigationSelection { source: 'system' | 'mine'; id?: str
 
 /** 预设与提示词共享同一份受限书页上下文，不把编辑页面本身嵌套成返回地址。 */
 export function presetsHref(location: PromptSourceLocation, selection?: PresetNavigationSelection): string {
-  const context = location.pathname === '/prompts' || location.pathname === '/presets'
+  const context = ['/prompts', '/presets', '/handbooks'].includes(location.pathname)
     ? readPromptReturnContext(location.search ?? '')
     : safePromptReturnContext(`${location.pathname}${location.search ?? ''}${location.hash ?? ''}`)
   const params = new URLSearchParams()

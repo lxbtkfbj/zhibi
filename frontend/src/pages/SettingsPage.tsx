@@ -15,6 +15,7 @@ import { ROLE_KEY_LABEL, ROLE_KEYS } from '../lib/roles'
 import { DESK_SCALES, useAppearance } from '../lib/appearance'
 import { promptsHref } from '../lib/promptNavigation'
 import { presetsHref } from '../lib/presetNavigation'
+import { handbooksHref } from '../lib/handbookNavigation'
 
 const PRESETS = [
   { name: 'DeepSeek', base_url: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
@@ -239,6 +240,11 @@ function SettingsWindow({ onClose }: { onClose: () => void }) {
         <span className="settings-tools-icon" aria-hidden="true"><FileText className="size-4" /></span>
         <ArrowRight className="settings-tools-arrow size-4" aria-hidden="true" />
         <span className="settings-tools-copy"><span className="settings-tools-title">预设管理</span><span className="settings-tools-hint">主编群聊发给模型的字，一块一块管</span></span>
+      </Link>
+      <Link to={handbooksHref(location)} onClick={onClose} className="settings-tools-link" aria-label="手册管理" data-testid="settings-handbooks-link">
+        <span className="settings-tools-icon" aria-hidden="true"><FileText className="size-4" /></span>
+        <ArrowRight className="settings-tools-arrow size-4" aria-hidden="true" />
+        <span className="settings-tools-copy"><span className="settings-tools-title">手册管理</span><span className="settings-tools-hint">编辑部在群聊里自己翻的写书手册</span></span>
       </Link>
       <Link to={promptsHref(location)} onClick={onClose} className="settings-tools-link" aria-label="提示词与调用记录" data-testid="settings-prompts-link">
         <span className="settings-tools-icon" aria-hidden="true"><FileText className="size-4" /></span>

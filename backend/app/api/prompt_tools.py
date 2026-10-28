@@ -76,10 +76,6 @@ async def _last_call(session: AsyncSession, name: str) -> dict | None:
 
 def _meta(row: tuple, override: PromptOverride | None, last: dict | None) -> dict:
     name, title, group, role, when = row
-    if name.startswith("skills.") and override is not None:
-        from app.prompts.handbooks import parse
-
-        _, title, group, role, when = parse(name.split(".", 1)[1], override.content).entry()
     default_variables = variables(name)
     current = set(VARIABLE.findall(override.content)) if override else {item["name"] for item in default_variables}
     default = {item["name"] for item in default_variables}
@@ -121,12 +117,8 @@ async def get_prompt(name: str, session: AsyncSession = SessionDep) -> dict:
 @router.put("/prompts/{name:path}")
 async def save_prompt(name: str, body: PromptIn, session: AsyncSession = SessionDep) -> dict:
     name = _entry(name)[0]
-    if name.startswith("skills."):
-        # 不同手册并发改名时也不能落下同名目录项。
-        await session.execute(text("SELECT pg_advisory_xact_lock(hashtext('zhibi:skill-names'))"))
     try:
-        contents = {row.name: row.content for row in await session.scalars(select(PromptOverride))}
-        validate_content(name, body.content, skill_contents=contents)
+        validate_content(name, body.content)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     await session.execute(
@@ -143,13 +135,6 @@ async def save_prompt(name: str, body: PromptIn, session: AsyncSession = Session
 @router.delete("/prompts/{name:path}")
 async def restore_prompt(name: str, session: AsyncSession = SessionDep) -> dict:
     name = _entry(name)[0]
-    if name.startswith("skills."):
-        await session.execute(text("SELECT pg_advisory_xact_lock(hashtext('zhibi:skill-names'))"))
-        contents = {row.name: row.content for row in await session.scalars(select(PromptOverride))}
-        try:
-            validate_content(name, default_content(name), skill_contents=contents)
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
     row = await session.get(PromptOverride, name)
     if row is not None:
         await session.delete(row)

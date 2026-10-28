@@ -11,6 +11,7 @@ from app.api import (
     book_settings,
     books,
     chat,
+    handbooks,
     health,
     jobs,
     library,
@@ -73,6 +74,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     application = FastAPI(title="执笔 API", version="0.1.0", lifespan=lifespan)
     for module in (
+        handbooks,
         health,
         llm_settings,
         books,

@@ -27,7 +27,7 @@ const entries = await json('/prompts')
 const groups = [...new Set(entries.map(prompt => prompt.group))].map(group => ({ group, count: entries.filter(prompt => prompt.group === group).length }))
 assert.deepEqual(groups, [
   { group: '角色与规矩', count: 7 }, { group: '聊天', count: 10 }, { group: '开书', count: 7 }, { group: '规划', count: 8 },
-  { group: '设定库', count: 5 }, { group: '写作', count: 4 }, { group: '审稿与入库', count: 5 }, { group: '手册', count: 2 },
+  { group: '设定库', count: 5 }, { group: '写作', count: 4 }, { group: '审稿与入库', count: 5 },
   { group: '题材打法', count: 2 }, { group: '拆书', count: 14 }, { group: '拆书精髓', count: 15 },
 ])
 const original = await json('/prompts/chat_material')
@@ -73,7 +73,7 @@ try {
   await expect(toggle('拆书')).toBeInViewport()
   await expect(toggle('拆书精髓')).toBeInViewport()
   await shot('01-目录默认收起.png')
-  check('真实目录分组、先后、79 份计数（含写书的标准）与拆书两组默认收起')
+  check('真实目录分组、先后、77 份计数（手册已移到手册管理）与拆书两组默认收起')
 
   await page.setViewportSize({ width: 1700, height: 1100 })
   const before = (await json('/prompts/chat_manner')).last_call?.id ?? 0

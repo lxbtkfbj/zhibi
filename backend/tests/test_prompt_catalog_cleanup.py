@@ -4,13 +4,13 @@ from collections import Counter
 
 from app.prompts import catalog
 
-GROUPS = ["角色与规矩", "聊天", "开书", "规划", "设定库", "写作", "审稿与入库", "手册", "题材打法", "拆书", "拆书精髓"]
+GROUPS = ["角色与规矩", "聊天", "开书", "规划", "设定库", "写作", "审稿与入库", "题材打法", "拆书", "拆书精髓"]
 
 
 def test_catalog_group_order_counts_and_future_groups(monkeypatch):
     rows = catalog.entries()
     assert list(dict.fromkeys(row[2] for row in rows)) == GROUPS
-    assert dict(Counter(row[2] for row in rows)) == dict(zip(GROUPS, [7, 10, 7, 8, 5, 4, 5, 2, 2, 14, 15], strict=True))
+    assert dict(Counter(row[2] for row in rows)) == dict(zip(GROUPS, [7, 10, 7, 8, 5, 4, 5, 2, 14, 15], strict=True))
     monkeypatch.setattr(catalog, "CATALOG", [*catalog.CATALOG, ("future", "未来", "新组", "chief", "以后")])
     assert catalog.entries()[-1][0] == "future"
 

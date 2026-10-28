@@ -49,7 +49,7 @@ const directoryStorageKey = 'zhibi:prompt-directory:collapsed'
 const directoryPrompts = [
   ['persona_chief', '主编人设', '角色与规矩'], ['voice_chief', '主编口吻', '角色与规矩'], ['rules', '通用规则', '角色与规矩'],
   ['chat_agent', '群聊：自己查、自己动手', '聊天'], ['chat_voice', '口吻怎么用', '聊天'], ['chat_manner', '聊天的做法', '聊天'], ['chat_material', '聊天带的资料', '聊天'],
-  ['plan_chapter', '规划章节', '规划'], ['skills.opening', '开书', '手册'],
+  ['plan_chapter', '规划章节', '规划'],
   ['teardown_read', '读原文', '拆书'], ['persona_essence', '精髓人设', '拆书精髓'],
 ].map(([name, title, group]) => ({ ...info(name, title, group, 'chief', `${title}的使用说明`, [{ name: 'book_title', label: '书名' }]), content: `${title}的正文：{{book_title}}`, default_content: `${title}的正文：{{book_title}}` }))
 const directoryRef = (name) => {
@@ -205,7 +205,7 @@ const enterFromBook = async () => {
   await page.getByRole('button', { name: '系统设置', exact: true }).click()
   const settingsDialog = page.getByRole('dialog', { name: '系统设置', exact: true })
   await expect(settingsDialog).toBeVisible()
-  assert.deepEqual(await settingsDialog.locator('.settings-tools-link').evaluateAll(items => items.map(item => item.getAttribute('aria-label'))), ['预设管理', '提示词与调用记录'])
+  assert.deepEqual(await settingsDialog.locator('.settings-tools-link').evaluateAll(items => items.map(item => item.getAttribute('aria-label'))), ['预设管理', '手册管理', '提示词与调用记录'])
   await shot('01-settings-entry')
   const entry = settingsDialog.getByRole('link', { name: /提示词.*调用记录/ })
   await expect(entry).toBeVisible()

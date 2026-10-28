@@ -1,0 +1,69 @@
+/* 只安排手册页的两栏与正文，颜色和控件沿用提示词、预设、设置。 */
+.handbooks-main { display: flex; flex: 1; min-height: 0; flex-direction: column; width: 100%; max-width: 1720px; margin: 0 auto; padding: 22px 28px 24px; }
+.handbooks-main > .presets-heading { margin-bottom: 20px; }
+.handbooks-workspace { display: grid; grid-template-columns: 300px minmax(0, 1fr); flex: 1; min-height: 0; border: 1px solid var(--color-line); border-radius: 13px; overflow: hidden; box-shadow: var(--shadow-paper); background: var(--color-manuscript); }
+.handbook-directory { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--color-line); background: var(--color-paper-2); }
+.handbook-directory .preset-column-heading h2 { font-size: 13px; font-weight: 500; color: var(--color-ink-2); }
+.handbook-list { overflow: auto; flex: 1; min-height: 90px; padding: 0 10px 12px; overscroll-behavior: contain; }
+.handbook-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; border-radius: 8px; border: 1px solid transparent; padding: 11px 10px; margin-bottom: 5px; }
+.handbook-row:hover { background: var(--color-manuscript); }
+.handbook-row.is-selected { background: var(--color-card); box-shadow: inset 2px 0 var(--color-seal); border-color: var(--color-line); }
+.handbook-select { min-width: 0; flex: 1; text-align: left; cursor: pointer; }
+.handbook-select:disabled { cursor: default; }
+.handbook-select > span { display: flex; align-items: center; gap: 7px; font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
+.handbook-select > small { display: block; margin-top: 4px; font-size: 11px; color: var(--color-ink-3); line-height: 1.7; }
+.handbook-row.is-off .handbook-select > span { color: var(--color-ink-3); }
+.handbook-row .settings-toggle { width: 29px; height: 17px; min-width: 29px; }
+.handbook-row .settings-toggle > span { width: 13px; height: 13px; }
+.handbook-row .settings-toggle.is-on > span { transform: translateX(12px); }
+.handbook-row .settings-toggle:disabled { opacity: .45; cursor: default; }
+.handbook-row-error { flex-basis: 100%; color: var(--color-seal); font-size: 12px; line-height: 1.8; }
+.handbook-directory-footer { padding: 12px; border-top: 1px solid var(--color-line); }
+.handbook-directory-footer .settings-button { width: 100%; }
+.handbook-catalog-details { flex-shrink: 0; border-top: 1px solid var(--color-line); padding: 14px 16px; font-size: 12px; line-height: 1.9; }
+.handbook-catalog-details summary { cursor: pointer; color: var(--color-ink-2); }
+.handbook-catalog-details p { margin-top: 10px; color: var(--color-ink-3); }
+.handbook-catalog { font-family: var(--font-sans); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 230px; overflow: auto; padding-top: 12px; color: var(--color-ink-2); user-select: text; }
+.handbook-editor { min-width: 0; min-height: 0; overflow: auto; padding: 22px 26px 28px; overscroll-behavior: contain; }
+.handbook-selected-summary { display: flex; justify-content: space-between; flex-wrap: wrap; align-items: flex-start; gap: 14px 20px; margin-bottom: 18px; }
+.handbook-selected-summary > div:first-child { min-width: 0; }
+.handbook-selected-summary h2 { font-family: var(--font-serif); font-size: 23px; line-height: 1.5; font-weight: 600; overflow-wrap: anywhere; }
+.handbook-selected-summary p { color: var(--color-ink-3); font-size: 12px; line-height: 1.8; margin-top: 5px; }
+.handbook-update { flex-wrap: wrap; }
+.handbook-error { margin: -4px 0 14px; }
+.handbook-field { display: flex; flex-direction: column; gap: 7px; color: var(--color-ink-2); font-size: 13px; margin-top: 18px; }
+.handbook-field input, .handbook-field textarea { width: 100%; border: 1px solid var(--color-line); border-radius: 8px; padding: 10px 12px; background: var(--color-card); color: var(--color-ink); font-size: 14px; line-height: 1.85; outline: none; }
+.handbook-field input:focus, .handbook-field textarea:focus { border-color: var(--color-ink-3); }
+.handbook-field textarea { resize: none; overflow: hidden; min-height: 47px; }
+.handbook-field small { font-size: 12px; color: var(--color-ink-3); line-height: 1.8; }
+.handbook-body-label { margin: 20px 0 8px; font-size: 13px; color: var(--color-ink-2); }
+.handbook-draft-note { color: var(--color-seal-dark); font-size: 12px; line-height: 1.8; margin: 0 0 10px; }
+.handbook-form .prompt-editor { padding: 8px 12px 12px; border: 1px solid var(--color-line); border-radius: 8px; min-height: 490px; }
+.handbook-form .prompt-editor .cm-editor { height: auto; min-height: 468px; }
+.handbook-form .prompt-editor .cm-scroller { overflow: visible; }
+.handbook-form .prompt-editor .cm-content { min-height: 468px; }
+.handbook-empty { padding: 20px 12px; color: var(--color-ink-3); font-size: 13px; line-height: 1.8; }
+.handbook-comparison-summary { margin-bottom: 16px; color: var(--color-ink-2); }
+.handbook-comparison-head, .handbook-comparison-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; }
+.handbook-comparison-head { position: sticky; top: -20px; padding: 8px 0 10px; background: var(--color-paper); border-bottom: 1px solid var(--color-line); z-index: 1; }
+.handbook-comparison-head h3 { font-weight: 500; }
+.handbook-comparison-row { margin-top: 12px; }
+.handbook-comparison-row section { min-width: 0; }
+.handbook-comparison-row small { display: block; font-size: 12px; color: var(--color-writer); margin-bottom: 5px; }
+.handbook-comparison-row pre, .handbook-snapshot pre { padding: 13px 15px; border: 1px solid var(--color-line); border-radius: 8px; background: var(--color-manuscript); white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-sans); font-size: 14px; line-height: 1.95; user-select: text; }
+.handbook-comparison-row pre:empty { visibility: hidden; }
+.handbook-field-comparison { padding-bottom: 14px; border-bottom: 1px solid var(--color-line); }
+.handbook-field-comparison h4 { color: var(--color-ink-3); font-size: 12px; margin-bottom: 5px; }
+.handbook-field-comparison p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.handbook-comparison > details { margin-top: 14px; padding: 12px 0; border-bottom: 1px solid var(--color-line); }
+.handbook-comparison summary { color: var(--color-ink-3); cursor: pointer; }
+.handbook-saves-list > article { align-items: flex-start; flex-wrap: wrap; }
+.handbook-snapshot { border-top: 1px solid var(--color-line); padding-top: 18px; margin-top: 20px; }
+.handbook-snapshot h3 { font-family: var(--font-serif); font-size: 19px; margin-bottom: 16px; }
+.handbook-snapshot h4 { color: var(--color-ink-3); font-size: 12px; margin: 14px 0 7px; }
+.handbook-snapshot p { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+@media (max-width: 1279px) {
+  .handbooks-main { padding: 18px 24px 22px; }
+  .handbooks-workspace { grid-template-columns: 240px minmax(0, 1fr); }
+  .handbook-editor { padding-inline: 20px; }
+}

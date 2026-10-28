@@ -91,7 +91,7 @@ try {
   await scenario('模型分工拆书常显、审稿后、精确说明与跟随默认，能独立更换', async (page, calls) => {
     await page.goto(`${base}/settings`)
     await expect(page.getByRole('dialog', { name: '系统设置', exact: true })).toBeVisible()
-    assert.deepEqual(await page.locator('.settings-tools-link').evaluateAll(items => items.map(item => item.getAttribute('aria-label'))), ['预设管理', '提示词与调用记录'])
+    assert.deepEqual(await page.locator('.settings-tools-link').evaluateAll(items => items.map(item => item.getAttribute('aria-label'))), ['预设管理', '手册管理', '提示词与调用记录'])
     const row = page.getByLabel('拆书使用的模型', { exact: true })
     await expect(row).toBeVisible()
     await expect(row).toHaveValue('')

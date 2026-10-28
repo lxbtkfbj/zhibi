@@ -153,7 +153,6 @@ GROUP_ORDER = (
     "设定库",
     "写作",
     "审稿与入库",
-    "手册",
     "题材打法",
     "拆书",
     "拆书精髓",
@@ -316,20 +315,12 @@ VARIABLE_LABELS = {
 
 
 def entries(contents: dict[str, str] | None = None) -> list[tuple]:
-    from app.prompts.handbooks import catalog
-
-    rows = [*CATALOG, *(book.entry() for book in catalog(contents))]
     rank = {group: index for index, group in enumerate(GROUP_ORDER)}
-    return sorted(rows, key=lambda row: rank.get(row[2], len(rank)))
+    return sorted(CATALOG, key=lambda row: rank.get(row[2], len(rank)))
 
 
 def entry(name: str) -> tuple:
     name = canonical_name(name)
-    if name.startswith("skills."):
-        from app.prompts.handbooks import keys, parse
-
-        if name.split(".", 1)[1] in keys():
-            return parse(name.split(".", 1)[1], default_content(name)).entry()
     if name not in BY_NAME:
         raise ValueError("提示词不存在")
     return BY_NAME[name]
@@ -346,13 +337,8 @@ def variables(name: str) -> list[dict[str, str]]:
     return [{"name": key, "label": labels[key]} for key in dict.fromkeys(VARIABLE.findall(text))]
 
 
-def validate_content(name: str, content: str, *, skill_contents: dict[str, str] | None = None) -> None:
+def validate_content(name: str, content: str) -> None:
     name = entry(name)[0]
-    if name.startswith("skills."):
-        from app.prompts.handbooks import validate
-
-        validate(name, content, skill_contents)
-        return
     expected, provided = set(VARIABLE.findall(default_content(name))), set(VARIABLE.findall(content))
     errors = []
     if expected - provided:

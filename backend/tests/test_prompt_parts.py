@@ -10,7 +10,7 @@ from app.llm import demo
 from app.llm.router import LLMRouter
 from app.main import app
 from app.models import LlmCall
-from app.prompts import default_content, prompt_names_for, prompt_parts_for, track_rendered
+from app.prompts import prompt_names_for, prompt_parts_for, track_rendered
 from app.prompts.catalog import variables
 from app.services import chat_prompts
 
@@ -137,10 +137,12 @@ async def test_demo_tool_rounds_record_seven_layers_in_send_order_and_expose_det
 
 
 @pytest.mark.parametrize("parts", [None, {"system": ["chat_manner", "removed_prompt"], "user": ["skills.opening"]}])
-async def test_new_and_old_record_titles_use_current_catalog_and_renamed_handbook(sessionmaker, client, parts):
-    original = default_content("skills.opening")
-    custom = original.replace(original.splitlines()[0], "# 作者改过的开书手册", 1)
-    response = await client.put("/api/prompts/skills.opening", json={"content": custom})
+async def test_new_and_old_record_titles_keep_removed_handbook_name(sessionmaker, client, parts):
+    original = (await client.get("/api/handbooks/opening")).json()
+    response = await client.put(
+        "/api/handbooks/opening",
+        json={"name": "作者改过的开书手册", "when": original["when"], "body": original["body"]},
+    )
     assert response.status_code == 200, response.text
     names = ["skills.opening", "chat_manner", "removed_prompt"]
     request = {"prompt_names": names}
@@ -153,7 +155,7 @@ async def test_new_and_old_record_titles_use_current_catalog_and_renamed_handboo
         await session.commit()
         call_id = latest.id
     expected_refs = [
-        {"name": "skills.opening", "title": "作者改过的开书手册"},
+        {"name": "skills.opening", "title": "skills.opening"},
         {"name": "chat_manner", "title": "聊天的做法"},
         {"name": "removed_prompt", "title": "removed_prompt"},
     ]
@@ -168,9 +170,8 @@ async def test_new_and_old_record_titles_use_current_catalog_and_renamed_handboo
     assert prompt["last_call"]["id"] == call_id
     assert prompt["last_call"]["purpose"] == "最近的用途"
     assert prompt["last_call"]["used_prompts"] == used
-    handbook = (await client.get("/api/prompts/skills.opening")).json()
-    assert handbook["title"] == "作者改过的开书手册"
-    assert handbook["last_call"]["used_prompts"] == used
+    assert (await client.get("/api/prompts/skills.opening")).status_code == 404
+    assert (await client.get("/api/handbooks/opening")).json()["name"] == "作者改过的开书手册"
     # 不补写历史行，也不根据当前提示词正文推断旧记录的两段。
     async with sessionmaker() as session:
         assert (await session.get(LlmCall, call_id)).request == request

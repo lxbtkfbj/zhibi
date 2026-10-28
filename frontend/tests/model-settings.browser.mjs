@@ -94,7 +94,7 @@ async function scenario(name, run, { profiles = [], viewport = { width: 1440, he
     await page.goto(`${baseUrl}/settings`)
     await page.getByRole('dialog', { name: '系统设置', exact: true }).waitFor()
     const tools = await page.locator('.settings-tools-link').evaluateAll(items => items.map(item => item.getAttribute('aria-label')))
-    assert.deepEqual(tools, ['预设管理', '提示词与调用记录'], '预设卡在提示词与调用记录上面')
+    assert.deepEqual(tools, ['预设管理', '手册管理', '提示词与调用记录'], '预设管理、手册管理、提示词与调用记录依次排列')
     if (profiles.length) {
       await page.locator('.settings-row-label').filter({ hasText: new RegExp(`^${savedProfile.name}$`) }).waitFor()
     } else {
